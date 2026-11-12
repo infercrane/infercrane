@@ -313,12 +313,20 @@ Canceling a campaign queues durable cleanup even when its execution operation al
 Closing the CLI does not stop the control-plane operation; reattach with `infercrane operation
 watch`. A qualified candidate keeps that parent operation in a bounded waiting state. If explicit
 activation or promotion does not happen before authority expires, InferCrane marks the candidate
-failed and cleans its resources rather than allowing an unbounded GPU bill.
+failed and cleans its resources rather than allowing an unbounded GPU bill. The same applies to a
+candidate that is still provisioning or measuring at expiry: it is marked failed with
+`approval_expired` and cleaned, and evidence that arrives after expiry is not recorded. Approval
+cannot be extended, so a campaign whose measurement outlives its approval must be created and
+approved again with a longer `--expires-in`.
 
 Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
-revision-bound quality validation before ranking begins. Inference Lab then compares only the exact
-same workload shape and the exact deployed model artifact (`repository@revision`), even when the
-campaign was created from a catalog name. Candidates that serve different artifacts cannot share
+revision-bound quality validation before ranking begins. Candidates are provisioned and measured
+one at a time, control first. A candidate that reaches the barrier waits there while the next one
+is provisioned, so a deployment that converges between execution attempts is recorded on the next
+attempt. A winner stays in the ranking after it becomes `qualified` (or `guarding` for an
+evolution), so ranking the candidates after it reproduces the same evaluation. Inference Lab then
+compares only the exact same workload shape and the exact deployed model artifact
+(`repository@revision`), even when the campaign was created from a catalog name. Candidates that serve different artifacts cannot share
 one ranking and fail closed. Proposal order cannot choose the winner. Missing sourced cost, mismatched
 workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
 `rejected`. For evolution campaigns, the selected candidate still has to pass

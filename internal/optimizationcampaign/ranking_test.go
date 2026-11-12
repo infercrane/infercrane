@@ -97,6 +97,22 @@ func TestRankMeasuredCampaignIgnoresProposalOrder(t *testing.T) {
 	}
 }
 
+func TestRankMeasuredCampaignBarrierWaitsForPeersButNotForAnEarlierWinner(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	campaign.Candidates[0].State = CandidateProvisioning
+	if _, err := RankMeasuredCampaign(campaign, benchmarks); err == nil || !strings.Contains(err.Error(), "candidate-a has not reached the measured ranking barrier") {
+		t.Fatalf("ranking did not wait for an unmeasured peer: %v", err)
+	}
+	campaign.Candidates[0].State = CandidateRanked
+	for _, state := range []string{CandidateQualified, CandidatePromoted, CandidateObserved, CandidateGuarding, CandidateGuardPassed} {
+		campaign.Candidates[1].State, campaign.Candidates[1].LabEvaluationID = state, "optlab-earlier"
+		result, err := RankMeasuredCampaign(campaign, benchmarks)
+		if err != nil || result.Decisions["candidate-b"] != RankSelect || result.Decisions["candidate-a"] != RankSupersede {
+			t.Fatalf("%s winner changed or blocked its peer's ranking: decisions=%v err=%v", state, result.Decisions, err)
+		}
+	}
+}
+
 func TestRankMeasuredCampaignFailsClosedForUnlikeWorkload(t *testing.T) {
 	campaign, benchmarks := rankingFixture(t, "interactive", nil)
 	benchmarks[1].WorkloadJSON = measuredWorkload(t, `{"profile":"interactive","request_count":32,"random_seed":17}`, MeasuredEvidence{Method: MeasurementMethod}, nil)

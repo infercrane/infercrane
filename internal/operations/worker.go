@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"log/slog"
 	"math/big"
 	"time"
 
@@ -43,6 +44,7 @@ type Worker struct {
 	Now                                          func() time.Time
 	Telemetry                                    *Telemetry
 	Jitter                                       func(time.Duration) time.Duration
+	Logger                                       *slog.Logger
 }
 
 func (w Worker) Run(ctx context.Context) error {
@@ -57,6 +59,9 @@ func (w Worker) Run(ctx context.Context) error {
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if w.Logger != nil {
+				w.Logger.Error("durable operation worker iteration failed", "error", err)
 			}
 			worked = false
 		}
