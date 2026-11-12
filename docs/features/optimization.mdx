@@ -212,6 +212,13 @@ infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
 infercrane operation watch ACTIVATION_OPERATION_ID
 ```
 
+To follow a campaign live, run `infercrane optimize watch CAMPAIGN_ID`. It shows, in plain words,
+where each setup is (starting a server, measuring against your current setup, checking answer
+quality), what was measured (throughput, p95 time to first token, p95 latency, and cost per million
+tokens when the price is sourced), how each setup compared with the current one including the
+measurement noise floor, and the decision with the exact `activate` command when a setup qualifies.
+It only reads the control API; `--once` prints one plain snapshot for scripts and logs.
+
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:
 

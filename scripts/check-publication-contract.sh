@@ -66,7 +66,7 @@ fi
 
 jq -e '.publishConfig.access == "public" and .publishConfig.registry == "https://registry.npmjs.org/"' \
   "$root/sdk/typescript/package.json" >/dev/null
-grep -Fq 'requires = ["hatchling==1.27.0"]' "$root/sdk/python/pyproject.toml"
+grep -Fq 'requires = ["hatchling==1.33.0"]' "$root/sdk/python/pyproject.toml"
 grep -Fq 'Development Status :: 5 - Production/Stable' "$root/sdk/python/pyproject.toml"
 
 grep -Fq 'fetch-depth: 0' "$root/.github/workflows/security.yml"
