@@ -1,0 +1,120 @@
+---
+title: Sign in the CLI
+description: Connect the infercrane CLI to your dashboard account with one browser approval, keep its key in the OS keychain, and open any result in the dashboard.
+---
+
+`infercrane login` signs the CLI in through the dashboard. You approve it once in the browser,
+with the account you already use there, and no key is pasted or copied.
+
+```bash
+infercrane login
+```
+
+```text
+! Your one-time code: WXZB-KLMN
+  Check that the dashboard shows the same code before you approve.
+Opened https://console.infercrane.com/cli/authorize?code=WXZB-KLMN
+Waiting for approval (expires in 10 minutes). Press Ctrl-C to cancel.
+✓ Signed in to https://api.infercrane.com as Ada Operator (operator, tenant acme)
+  Context    default
+  Key        saved in macOS Keychain
+  Expires    2027-02-11
+View in dashboard → https://console.infercrane.com/settings/cli-sessions
+```
+
+## How it works
+
+1. The CLI asks the control plane for a sign-in. It gets a short code to show you and a secret
+   device code that only the CLI keeps.
+2. The CLI opens `/cli/authorize?code=…` in the dashboard. The page shows the same code and the
+   device asking (host name, operating system, CLI version). Approve only if the codes match and you
+   started the sign-in.
+3. On approval, the control plane issues a new key for your organization with your role and
+   scopes, never more. The CLI receives it once, on its next check, and the sign-in cannot be used
+   again.
+
+The sign-in expires after 10 minutes. Deny, an expired code, or Ctrl-C ends it without saving
+anything.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--no-browser` | off | Print the URL and code instead of opening a browser. Use it over SSH, then open the URL on any device where you are signed in to the dashboard. |
+| `--url` | context URL | Control plane to sign in to |
+| `--console-url` | see below | Dashboard that approves the sign-in |
+| `--context` | current context | Context to store the key in |
+| `--output` | `human` | `human` or `json`. JSON never contains the key. |
+
+## Where the key is kept
+
+| Platform | Storage |
+|---|---|
+| macOS | Login Keychain, item `infercrane-cli` |
+| Linux with a desktop session | Secret Service keyring through `secret-tool` |
+| Other systems, or no keychain available | `~/.config/infercrane/config.json`, mode `0600` |
+
+The key is written to the keychain on standard input, never as a command-line argument. Set
+`INFERCRANE_CREDENTIAL_STORE=file` to always use the config file, or `keychain` to fail instead of
+falling back. `INFERCRANE_API_KEY` still overrides a stored key, which suits CI.
+
+## Keys are scoped, expiring, and revocable
+
+- Each key belongs to one organization and carries the approving person's role and scopes.
+- It expires after 90 days. Run `infercrane login` again after that.
+- `infercrane logout` revokes the key on the control plane and removes it from this machine. A key
+  pasted with `infercrane init` stays active, because a service account may be shared; revoke it
+  with `infercrane principal revoke ID`.
+- **Settings → CLI sessions** in the dashboard lists your CLI sessions with their device, last use,
+  and expiry, and revokes any of them. Administrators see every member's sessions.
+- Removing a member from the organization does not revoke their CLI sessions. Revoke them in
+  **Settings → CLI sessions** first.
+
+Only dashboard sign-ins approve. A CLI key cannot approve another sign-in.
+
+## Dashboard links
+
+Commands that create or change something end with a link to the same page in the dashboard:
+
+```text
+View in dashboard → https://console.infercrane.com/endpoints/support-bot
+```
+
+`deploy`, `apply`, `endpoint create`, `rollout`, `optimize create`, `optimize approve`,
+`optimize report`, `auth status`, and `login` print one. JSON output is unchanged.
+
+Open a page directly:
+
+```bash
+infercrane open                       # dashboard home
+infercrane open endpoint support-bot
+infercrane open deployment qwen-prod
+infercrane open run CAMPAIGN_ID
+infercrane open model Qwen/Qwen3-8B
+infercrane open operation OPERATION_ID
+```
+
+The CLI finds the dashboard in this order:
+
+1. `--console-url` on `login`, or the `INFERCRANE_CONSOLE_URL` environment variable;
+2. the dashboard the control plane advertises (`INFERCRANE_CONSOLE_URL` on the server);
+3. the dashboard saved in the context by the last `login`;
+4. `https://console.infercrane.com` when the control plane is a hosted `infercrane.com` address.
+
+Local and self-hosted control planes have no dashboard until you configure one, so they print no
+links. For a local dashboard:
+
+```bash
+infercrane login --url http://127.0.0.1:8080 --console-url http://127.0.0.1:3200
+```
+
+## Run a control plane that supports CLI sign-in
+
+The feature needs no setup beyond the database migration. To have the control plane tell the CLI
+which dashboard approves sign-ins, set:
+
+```bash
+export INFERCRANE_CONSOLE_URL="https://console.infercrane.com"
+```
+
+It must be an absolute URL, and HTTPS in production. Without it, the CLI uses the order above.
+
+Next: [CLI reference](/cli) for every command, or the [operations console](/features/dashboard).

@@ -20,14 +20,64 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
 - `infercrane --context NAME COMMAND` selects a context for one invocation.
 - `infercrane --no-color COMMAND` and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
+- When a dashboard is configured, human output from `deploy`, `apply`, `endpoint create`, `rollout`, `optimize create|approve|report`, and `auth status` ends with `View in dashboard → URL`. See [Sign in the CLI](/features/cli-login#dashboard-links).
 
 <SafeRetry />
 
 ## Configure and diagnose
 
+### `login`
+
+Sign the CLI in through the dashboard. The terminal and the browser show the same one-time code;
+approving it issues a key with your role and scopes, stored in the OS keychain when available and
+otherwise in the `0600` config file. The key is never printed.
+
+```bash
+infercrane login
+infercrane login --no-browser
+infercrane login --url http://127.0.0.1:8080 --console-url http://127.0.0.1:3200
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--url` | context URL | Control-plane base URL |
+| `--console-url` | `INFERCRANE_CONSOLE_URL`, the control plane's advertised dashboard, or the hosted dashboard | Dashboard that approves the sign-in |
+| `--context` | current context | Context to store the key in |
+| `--no-browser` | off | Print the URL and code instead of opening a browser |
+| `--output` | `human` | `human` or `json`; JSON never contains the key |
+
+`auth login` is the same command. Details, storage, and revocation are in
+[Sign in the CLI](/features/cli-login).
+
+### `logout`
+
+Revoke this CLI's key on the control plane and remove it from the keychain and config file. The
+context keeps its URLs. A key pasted with `init` is removed locally but stays active on the control
+plane; revoke it with `principal revoke`. `auth logout` is the same command.
+
+```bash
+infercrane logout
+infercrane --context staging logout --output json
+```
+
+### `open`
+
+Open a dashboard page for a resource, or print its URL with `--no-browser`.
+
+```bash
+infercrane open
+infercrane open endpoint support-bot
+infercrane open deployment qwen-prod
+infercrane open run CAMPAIGN_ID
+infercrane open model Qwen/Qwen3-8B
+infercrane open operation OPERATION_ID --no-browser
+```
+
 ### `init`
 
-Validate and store a control-plane URL and an already-issued credential in a named private client context.
+Validate and store a control-plane URL and an already-issued credential in a named private client
+context. Prefer `login` on a workstation; use `init` or `INFERCRANE_API_KEY` for service accounts
+and CI.
 
 ```bash
 INFERCRANE_API_KEY='ISSUED_CREDENTIAL' \
@@ -52,10 +102,14 @@ infercrane context use production
 infercrane --context staging status qwen-prod
 infercrane auth status
 infercrane auth status --output json
+infercrane whoami
 ```
 
 JSON output uses stable lowercase fields (`id`, `tenant_id`, `name`, `role`, `kind`, and `scopes`)
-so authentication checks can be consumed directly by scripts without depending on Go field names.
+under `principal`, plus `context`, `control_url`, `console_url`, and `credential_source` (where the
+key was found: the keychain, the config file, or `INFERCRANE_API_KEY`), so authentication checks can
+be consumed directly by scripts without depending on Go field names. `whoami` is the same as
+`auth status`.
 
 Legacy single-context configuration is migrated on the next `init`. Context listing and display
 never print stored credentials.

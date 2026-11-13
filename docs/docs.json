@@ -144,6 +144,7 @@
               "features/serverless",
               "features/semantic-quality",
               "features/terminal-ui",
+              "features/cli-login",
               "features/dashboard",
               "showcase/safe-rollouts",
               "showcase/capacity-evidence"
