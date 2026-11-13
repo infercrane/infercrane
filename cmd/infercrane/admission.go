@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,7 +17,7 @@ func admissionCommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("usage: infercrane admission get|set ENDPOINT [flags]")
 	}
 	action, endpoint := args[0], args[1]
-	fs := flag.NewFlagSet("admission "+action, flag.ContinueOnError)
+	fs := newFlagSet("admission " + action)
 	maxConcurrency := fs.Int("max-concurrency", 32, "maximum concurrently executing requests")
 	maxQueue := fs.Int("max-queue", 64, "maximum queued requests")
 	queueTimeout := fs.Int("queue-timeout-ms", 5000, "maximum queue wait in milliseconds")

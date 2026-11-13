@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,8 +27,7 @@ func optimizeReportCommand(ctx context.Context, args []string) error {
 		return errors.New(optimizeReportUsage)
 	}
 	id := args[0]
-	fs := flag.NewFlagSet("optimize report", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("optimize report")
 	output := fs.String("output", "text", "text or json")
 	htmlPath := fs.String("html", "", "also write a self-contained HTML page to FILE")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 || (*output != "text" && *output != "json") {

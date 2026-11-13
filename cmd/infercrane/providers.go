@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -38,7 +37,7 @@ func providerCommand(ctx context.Context, cfg config.Config, args []string) erro
 		return errors.New("provider requires connect, list, or delete")
 	}
 	action := args[0]
-	fs := flag.NewFlagSet("provider "+action, flag.ContinueOnError)
+	fs := newFlagSet("provider " + action)
 	adapter := fs.String("adapter", "openrouter", providerAdapterHelp)
 	providerURL := fs.String("url", "", "provider OpenAI-compatible base URL")
 	model := fs.String("model", "", "provider model identifier")

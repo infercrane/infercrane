@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -20,7 +19,7 @@ func discoverCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 || args[0] != "local" {
 		return errors.New("usage: infercrane discover local [--output human|json]")
 	}
-	fs := flag.NewFlagSet("discover local", flag.ContinueOnError)
+	fs := newFlagSet("discover local")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

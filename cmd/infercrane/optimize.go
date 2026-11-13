@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -63,7 +62,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	}
 	action := args[0]
 	model := args[1]
-	fs := flag.NewFlagSet("optimize "+action, flag.ContinueOnError)
+	fs := newFlagSet("optimize " + action)
 	modelRevision := fs.String("model-revision", "", "immutable 40 to 64 character model commit (required for uncataloged models)")
 	provider := fs.String("provider", "", "provider cloud or exact adapter")
 	region := fs.String("region", "", "exact provider region")
@@ -208,7 +207,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 }
 
 func optimizeWorkloadProfileCommand(args []string) error {
-	fs := flag.NewFlagSet("optimize workload-profile", flag.ContinueOnError)
+	fs := newFlagSet("optimize workload-profile")
 	filePath := fs.String("file", "", "content-free public workload profile JSON")
 	profileName := fs.String("profile", "", "optional exact derived benchmark profile")
 	output := fs.String("output", "human", "human or json")
@@ -275,7 +274,7 @@ func optimizeWorkloadProfileCommand(args []string) error {
 }
 
 func optimizeKernelPlanCommand(args []string) error {
-	fs := flag.NewFlagSet("optimize kernel-plan", flag.ContinueOnError)
+	fs := newFlagSet("optimize kernel-plan")
 	filePath := fs.String("file", "", "profile-backed kernel opportunity request JSON")
 	requireMeasured := fs.Bool("require-measured", false, "reject fixture or simulated profiler evidence")
 	output := fs.String("output", "human", "human or json")
@@ -340,7 +339,7 @@ func optimizeEvidenceCommand(args []string) error {
 		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE [--output human|json]")
 	}
 	action := args[0]
-	fs := flag.NewFlagSet("optimize evidence "+action, flag.ContinueOnError)
+	fs := newFlagSet("optimize evidence " + action)
 	filePath := fs.String("file", "", "immutable optimization evidence JSON, or a golden suite manifest for golden")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -515,7 +514,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		id = args[1]
 		flagArgs = args[2:]
 	}
-	fs := flag.NewFlagSet("optimize "+action, flag.ContinueOnError)
+	fs := newFlagSet("optimize " + action)
 	limit := fs.Int("limit", 20, "maximum campaigns")
 	maxCost := fs.Float64("max-cost-usd", 0, "hard maximum campaign spend")
 	expiresIn := fs.Duration("expires-in", time.Hour, "approval expiry, from 1m through 24h")
@@ -730,7 +729,7 @@ func fetchPublicModelConfig(ctx context.Context, model, revision string) ([]byte
 // optimizeKernelRunCommand queues one profile-gated Accelerator Lab run. The
 // request carries its own spend cap and expiry, and the run never promotes.
 func optimizeKernelRunCommand(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("optimize kernel-run", flag.ContinueOnError)
+	fs := newFlagSet("optimize kernel-run")
 	file := fs.String("file", "", "Accelerator Lab request JSON")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
@@ -775,7 +774,7 @@ func optimizeKernelRunCommand(ctx context.Context, args []string) error {
 }
 
 func optimizeDoctorCommand(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("optimize doctor", flag.ContinueOnError)
+	fs := newFlagSet("optimize doctor")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {

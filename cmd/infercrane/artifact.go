@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -22,7 +21,7 @@ func artifactCommand(ctx context.Context, cfg config.Config, args []string) erro
 		return errors.New("usage: infercrane artifact inspect|observe|prefetch ARTIFACT_ID [flags] | artifact optimize plan|list|inspect|start|attest|qualify")
 	}
 	action, artifactID := args[0], args[1]
-	fs := flag.NewFlagSet("artifact "+action, flag.ContinueOnError)
+	fs := newFlagSet("artifact " + action)
 	provider := fs.String("provider", "", "provider adapter")
 	region := fs.String("region", "", "provider region")
 	location := fs.String("location", "", "provider-native cache location")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -33,7 +32,7 @@ func modelAPICommand(ctx context.Context, cfg config.Config, args []string) erro
 		return fmt.Errorf("unsupported Model API contract type %q", contractType)
 	}
 
-	fs := flag.NewFlagSet("model-api publish "+contractType, flag.ContinueOnError)
+	fs := newFlagSet("model-api publish " + contractType)
 	filePath := fs.String("file", "", "JSON manifest containing one immutable Model API contract")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {

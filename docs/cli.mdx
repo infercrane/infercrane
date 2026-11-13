@@ -7,19 +7,22 @@ import SafeRetry from "/snippets/safe-retry.mdx";
 
 # CLI reference
 
-The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell completion. It talks to the authenticated control-plane API and never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version.
+The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell completion. It talks to the authenticated control-plane API and never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version. `infercrane version --output json` returns `version` plus a `build` object with the Go version, platform, and, when the binary embeds them, the source `commit`, `commit_time`, and `modified` flag. Build fields that were not embedded are omitted, never guessed.
 
 ## Global conventions
 
-- Commands that return data accept `--output human|json`.
+- Commands that return data accept `--output human|json`. It can follow the command's arguments or come before the command: `infercrane --output json status qwen-prod`.
+- With `--output json`, a successful command writes JSON to stdout and every failure, including a usage error, writes one JSON error object to stderr. The CLI never prints Go's flag usage text.
+- A resource argument such as `DEPLOYMENT` or `ID` comes right after the command or action, before flags. If it is missing, or a flag stands in its place, the command fails with a usage error before contacting the control plane. An extra positional argument is also a usage error, so a later `--output` is never silently ignored.
 - `status --watch --output json` emits one JSON document per state refresh.
+- `logs --output json` emits JSON Lines: one event object per line, including while `--follow` streams new events. Parse it line by line, not as one document.
 - Mutation commands accept `--idempotency-key`; generated keys are printed in human and JSON output and attached to uncertain-request errors. Reuse the same key after an uncertain result.
 - `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the operation ID and exact `infercrane operation watch ID` resume command are printed before waiting begins.
 - `--wait-timeout 20m` bounds the local watcher without cancelling the durable operation. Resume with `infercrane operation watch ID`; cancel only with `infercrane operation cancel ID`.
 - JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
 - `infercrane --context NAME COMMAND` selects a context for one invocation.
-- `infercrane --no-color COMMAND` and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
+- `--no-color`, before or after the command, and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
 
 <SafeRetry />
 
@@ -145,6 +148,8 @@ infercrane observe coder-production --diagnose
 The default snapshot is read-only. Endpoint snapshots combine logical identity, serving plans,
 Guard, admission, and alerts; deployment snapshots combine lifecycle, traffic, active operation,
 Guard, and events. `--diagnose` explicitly persists a fresh deterministic Doctor evaluation.
+A field the control plane has not recorded prints as `none` (for example, no staged candidate plan)
+or `unknown`. JSON keeps the raw values and reports an unstaged candidate as `"candidate_plan": null`.
 
 ### `telemetry collect dcgm`
 
@@ -437,12 +442,12 @@ wait prints the command for the first inference request.
 
 ```bash
 infercrane integrations
-infercrane integrations --output json
+infercrane integrations list --output json
 ```
 
 Displays registered provider, runtime, and external composition capabilities, evidence state, and
 the exact qualified runtime/provider/compute-mode combinations. Registration alone never implies
-production support.
+production support. `integrations list` is the same command as `integrations`.
 
 ### `sandbox`
 
@@ -609,7 +614,11 @@ infercrane target add gpu-a \
 
 infercrane target list --output json
 infercrane route qwen-prod --strategy cache-aware
+infercrane route qwen-prod --strategy cache-aware --output json
 ```
+
+`route` changes one deployment's strategy. `infercrane deployments` lists the current strategy of
+every deployment.
 
 Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `cache-aware`, delegated to the pinned vLLM Router.
 
@@ -626,7 +635,8 @@ Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `
 | `logs DEPLOYMENT [--follow]` | Stream a filtered durable operational timeline |
 | `request ENDPOINT` | Send a capability-qualified OpenAI-compatible inference request |
 | `inspect DEPLOYMENT` | Show raw targets, replicas, artifacts, request statistics, and infrastructure metadata |
-| `operation ID` | Inspect durable progress and result once |
+| `operation list [--limit N]` | List recent durable operations, newest first, to find an operation ID |
+| `operation [inspect] ID` | Inspect durable progress and result once |
 | `operation watch ID` | Resume following a durable operation after disconnect or from another terminal |
 | `operation cancel ID` | Request cooperative cancellation |
 | `orphans` | List unmanaged provisioned resources visible to the control plane |
@@ -640,10 +650,14 @@ infercrane logs qwen-prod --follow
 infercrane logs qwen-prod --type runtime --since 15m
 infercrane events qwen-prod --output json
 infercrane inspect qwen-prod
+infercrane operation list --output json
 infercrane operation watch OPERATION_ID
 infercrane integrations
 infercrane integrations --output json
 ```
+
+`operation list` shows the newest 20 operations for your organization; `--limit` accepts 1 to 500.
+When a page is full, it prints the `--before` command for the next older page.
 
 Long operations belong to the control plane, not the terminal. `deploy`, `apply`, rollout, scale,
 and deletion continue after the CLI disconnects. Pressing Ctrl-C stops only the local watcher. Run

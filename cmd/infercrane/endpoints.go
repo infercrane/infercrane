@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -34,7 +33,7 @@ func environmentCommand(ctx context.Context, cfg config.Config, args []string) e
 	if args[0] == "promote" {
 		return environmentPromoteCommand(ctx, cfg, args[1:])
 	}
-	fs := flag.NewFlagSet("environment "+args[0], flag.ContinueOnError)
+	fs := newFlagSet("environment " + args[0])
 	policy := fs.String("policy", "{}", "bounded environment policy JSON")
 	output := fs.String("output", "human", "human or json")
 	resource := ""
@@ -76,7 +75,7 @@ func environmentPromoteCommand(ctx context.Context, cfg config.Config, args []st
 		return errors.New("usage: infercrane environment promote SOURCE_ENDPOINT --to DESTINATION_ENDPOINT [--yes]")
 	}
 	source := args[0]
-	fs := flag.NewFlagSet("environment promote", flag.ContinueOnError)
+	fs := newFlagSet("environment promote")
 	destination := fs.String("to", "", "destination endpoint")
 	confirm := fs.Bool("yes", false, "stage the destination candidate")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key")
@@ -142,7 +141,7 @@ func logicalModelCommand(ctx context.Context, cfg config.Config, args []string) 
 	if len(args) == 0 {
 		return errors.New("logical-model requires list or create")
 	}
-	fs := flag.NewFlagSet("logical-model "+args[0], flag.ContinueOnError)
+	fs := newFlagSet("logical-model " + args[0])
 	description := fs.String("description", "", "logical model description")
 	output := fs.String("output", "human", "human or json")
 	resource := ""
@@ -184,7 +183,7 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 		return errors.New("endpoint requires list, inspect, create, bind, plan, stage, or promote")
 	}
 	action := args[0]
-	fs := flag.NewFlagSet("endpoint "+action, flag.ContinueOnError)
+	fs := newFlagSet("endpoint " + action)
 	model := fs.String("model", "", "logical model name")
 	environment := fs.String("environment", "production", "environment name")
 	bindingName := fs.String("name", "primary", "binding name")
