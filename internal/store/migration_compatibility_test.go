@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/domain"
 )
 
 func isolatedMigrationDatabase(t *testing.T) (context.Context, string, *sql.DB) {
@@ -232,5 +234,94 @@ func TestModelAPISupplyEvidenceTablesHaveImmutableTriggers(t *testing.T) {
 	}
 	if !reflect.DeepEqual(found, want) {
 		t.Fatalf("immutable supply triggers=%v want=%v", found, want)
+	}
+}
+
+func TestDeploymentLogicalModelDescriptionOmitsInternalWording(t *testing.T) {
+	const internalDescription = "Created for legacy deployment API compatibility"
+	const customerDescription = internalDescription + " for the coding team"
+	ctx, databaseURL, _ := isolatedMigrationDatabase(t)
+	previous, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer previous.Close()
+	if _, err = previous.ExecContext(ctx, `CREATE TABLE schema_migrations(version TEXT PRIMARY KEY, checksum TEXT, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, migration := range embeddedMigrations(t) {
+		if migration.name >= "079_" {
+			break
+		}
+		tx, beginErr := previous.BeginTx(ctx, nil)
+		if beginErr != nil {
+			t.Fatal(beginErr)
+		}
+		if _, err = tx.ExecContext(ctx, string(migration.body)); err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version,checksum) VALUES($1,$2)`, migration.name, migration.checksum)
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("apply migration %s: %v", migration.name, err)
+		}
+		if err = tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = previous.ExecContext(ctx, `INSERT INTO deployments(id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,tenant_id,created_at,updated_at) VALUES('existing','existing','org/model','vllm','round-robin','running','pending',1,1,false,'global',NOW(),NOW())`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = previous.ExecContext(ctx, `INSERT INTO logical_models(id,tenant_id,name,description,created_at,updated_at) VALUES('custom','global','custom',$1,NOW(),NOW())`, customerDescription); err != nil {
+		t.Fatal(err)
+	}
+	var description, previousSource string
+	if err = previous.QueryRowContext(ctx, `SELECT description FROM logical_models WHERE id='existing-logical-model'`).Scan(&description); err != nil || description != internalDescription {
+		t.Fatalf("description before upgrade=%q err=%v", description, err)
+	}
+	if err = previous.QueryRowContext(ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure('infercrane_create_legacy_endpoint()')`).Scan(&previousSource); err != nil {
+		t.Fatal(err)
+	}
+	if err = previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(ctx, databaseURL, Options{MaxOpenConns: 2, MaxIdleConns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	var source string
+	if err = upgraded.QueryRowContext(ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure('infercrane_create_legacy_endpoint()')`).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(previousSource, "'"+internalDescription+"'", "''", 1); want == previousSource || source != want {
+		t.Fatalf("trigger function changed beyond its description:\n%s", source)
+	}
+	existing, err := upgraded.ResolveEndpointForTenant(ctx, "global", "existing")
+	if err != nil || existing.LogicalModel.Description != "" {
+		t.Fatalf("existing logical model=%#v err=%v", existing.LogicalModel, err)
+	}
+	custom, err := upgraded.LogicalModelForTenant(ctx, "global", "custom")
+	if err != nil || custom.Description != customerDescription {
+		t.Fatalf("customer description=%q err=%v", custom.Description, err)
+	}
+	target, err := upgraded.AddTarget(ctx, domain.Target{Name: "fresh-target", URL: "http://fresh-target", Provider: "existing", Runtime: "vllm", UpstreamModel: "upstream"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := upgraded.CreateDeployment(ctx, domain.Deployment{Name: "fresh", Model: "org/model"}, []string{target.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := upgraded.ResolveEndpointForTenant(ctx, "global", deployment.Name)
+	if err != nil || created.LogicalModel.Name != deployment.Name || created.LogicalModel.Description != "" {
+		t.Fatalf("new logical model=%#v err=%v", created.LogicalModel, err)
+	}
+	if len(created.Bindings) != 1 || created.Bindings[0].DeploymentID != deployment.ID || created.ActivePlan.ID != deployment.ID+"-plan-1" {
+		t.Fatalf("new endpoint bindings=%#v plan=%#v", created.Bindings, created.ActivePlan)
+	}
+	var remaining int
+	if err = upgraded.QueryRowContext(ctx, `SELECT COUNT(*) FROM logical_models WHERE description=?`, internalDescription).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("internal descriptions remaining=%d err=%v", remaining, err)
 	}
 }
