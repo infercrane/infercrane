@@ -130,6 +130,7 @@ var Routes = []Route{
 	{"GET", "/optimization/campaigns", "listOptimizationCampaigns", "Inference optimization", "List durable evidence-gated optimization campaigns", "", "ObjectList", 200, false},
 	{"POST", "/optimization/campaigns", "createOptimizationCampaign", "Inference optimization", "Persist a bounded immutable proposal without mutating provider infrastructure", "OptimizationCampaignCreate", "Object", 201, true},
 	{"GET", "/optimization/campaigns/{id}", "getOptimizationCampaign", "Inference optimization", "Inspect predicted and measured campaign evidence", "", "OptimizationCampaignEnvelope", 200, false},
+	{"GET", "/optimization/campaigns/{id}/report", "getOptimizationCampaignReport", "Inference optimization", "Compare the baseline and the winning setup of one campaign on cost, speed, and answer quality", "", "OptimizationCampaignReportEnvelope", 200, false},
 	{"POST", "/optimization/campaigns/{id}/approve", "approveOptimizationCampaign", "Inference optimization", "Validate bounded cost authority and queue durable optimization execution", "OptimizationCampaignApproval", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/activate", "activateOptimizationCampaign", "Inference optimization", "Queue explicit activation or guarded promotion for a qualified candidate", "OptimizationCampaignActivation", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/cancel", "cancelOptimizationCampaign", "Inference optimization", "Cancel future campaign work and require cleanup", "Object", "Object", 202, false},
@@ -488,6 +489,10 @@ func schemas() map[string]any {
 		"QualitySubject":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"revision_id", "model"}, "properties": map[string]any{"revision_id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string", "description": "Resolved immutable model identity, else the model the revision requested; empty when neither is recorded."}}},
 		"OptimizationCampaignCandidate":  optimizationCampaignCandidateSchema(),
 		"OptimizationCampaignEnvelope":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
+
+		"OptimizationCampaignReportEnvelope": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"report"}, "properties": map[string]any{"report": ref("OptimizationCampaignReport")}},
+		"OptimizationCampaignReport":         optimizationCampaignReportSchema(),
+
 		"KernelOpportunityRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "model", "runtime", "hardware", "workload", "profile", "policy"}, "properties": map[string]any{
 			"schema_version": map[string]any{"type": "string", "const": "infercrane.kernel-opportunity-request/v1"},
 			"model":          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"repository", "revision"}, "properties": map[string]any{"repository": map[string]any{"type": "string", "minLength": 1}, "revision": map[string]any{"type": "string", "pattern": "^[a-fA-F0-9]{40,64}$"}}},
@@ -696,6 +701,89 @@ func optimizationCampaignSchema() map[string]any {
 		"created_at": timestamp, "updated_at": timestamp, "candidates": map[string]any{"type": "array", "items": ref("OptimizationCampaignCandidate")}, "proof_boundary": text,
 		"warnings": map[string]any{"type": "array", "items": text, "description": "Warnings recorded on the immutable proposal, such as skipped experiments or unmeasured arms. Empty when the proposal recorded none; absent when the stored proposal cannot be read. Warnings are not performance evidence."},
 	}}
+}
+
+// optimizationCampaignReportSchema documents the customer outcome report. Every
+// nullable number is null when its input is missing or incomparable; the
+// report never substitutes zero or an estimate, and unknown lists those
+// fields by path.
+func optimizationCampaignReportSchema() map[string]any {
+	text, boolean, integer, number := map[string]any{"type": "string"}, map[string]any{"type": "boolean"}, map[string]any{"type": "integer"}, map[string]any{"type": "number"}
+	nullable, nullableInteger := nullableNumberSchema(), map[string]any{"type": []string{"integer", "null"}}
+	texts := map[string]any{"type": "array", "items": text}
+	decision := map[string]any{"type": "string", "enum": []string{"improved", "regressed", "no_measurable_difference", "unchanged", "unknown"}}
+	verdict := map[string]any{"type": "string", "enum": []string{"PASS", "WATCH", "BLOCK", "UNKNOWN"}}
+	object := func(required []string, properties map[string]any) map[string]any {
+		return map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": properties}
+	}
+	metric := object([]string{"key", "label", "unit", "higher_is_better", "baseline", "winner", "change_percent", "noise_floor_percent", "decision", "basis"}, map[string]any{
+		"key":   map[string]any{"type": "string", "enum": []string{"cost_per_million_output_tokens", "ttft_p95_ms", "output_tokens_per_second_per_user", "output_tokens_per_second_per_accelerator", "requests_per_second"}},
+		"label": text, "unit": text, "higher_is_better": boolean,
+		"baseline": nullable, "winner": nullable,
+		"change_percent":      map[string]any{"type": []string{"number", "null"}, "description": "Winner relative to baseline, in percent."},
+		"noise_floor_percent": map[string]any{"type": []string{"number", "null"}, "description": "Noise floor from the interleaved control runs; null without them."},
+		"decision":            decision,
+		"basis":               map[string]any{"type": "string", "enum": []string{"interleaved_control", "separate_runs", "baseline_kept", "unknown"}},
+		"reason":              text,
+	})
+	qualityEval := object([]string{"suite", "evaluator", "verdict", "baseline_score", "winner_score", "delta", "regression_percent", "message"}, map[string]any{
+		"suite": text, "evaluator": text, "verdict": verdict, "baseline_score": nullable, "winner_score": number, "delta": nullable, "regression_percent": nullable, "message": text, "follow_up": text,
+	})
+	setup := object([]string{"candidate_id", "label", "model", "engine", "engine_version", "args", "accelerator", "accelerator_count", "accelerator_class", "provider", "min_replicas", "max_replicas", "hourly_usd_per_replica"}, map[string]any{
+		"candidate_id": text, "label": text, "model": text, "engine": text, "engine_version": text, "args": texts, "image": text,
+		"accelerator": text, "accelerator_count": nullableInteger,
+		"accelerator_class": map[string]any{"type": "string", "enum": []string{"gpu", "simulated_cpu", "unknown"}, "description": "simulated_cpu numbers are never GPU results."},
+		"provider":          text, "region": text, "compute_mode": text, "min_replicas": integer, "max_replicas": integer,
+		"deployment_name": text, "revision_id": text,
+		"hourly_usd_per_replica": map[string]any{"type": []string{"number", "null"}, "description": "Sourced hourly price divided by the quoted maximum replica count; null without a sourced price."},
+		"price_source":           text,
+	})
+	nullableSetup := map[string]any{"oneOf": []any{setup, map[string]any{"type": "null"}}}
+	comparison := object([]string{"metric", "change_percent", "noise_floor_percent", "decision"}, map[string]any{"metric": text, "change_percent": number, "noise_floor_percent": number, "decision": decision})
+	return object([]string{"schema_version", "algorithm_version", "campaign_id", "model_identity", "objective", "intent", "campaign_state", "finished", "simulated_accelerator", "outcome", "metrics", "quality", "noise", "monthly", "workload", "candidates", "bottleneck", "appendix", "unknown", "report_digest"}, map[string]any{
+		"schema_version": map[string]any{"type": "string", "const": "infercrane.optimization-report/v1"}, "algorithm_version": text,
+		"campaign_id": text, "model_identity": text, "objective": text, "intent": text, "campaign_state": text, "finished": boolean,
+		"simulated_accelerator": map[string]any{"type": "boolean", "description": "True when any setup ran on a simulated accelerator or a CPU. Its numbers prove the pipeline, not GPU speed."},
+		"banner":                map[string]any{"type": "string", "description": "Fixed text every renderer must show: present only for simulated or CPU runs."},
+		"outcome": object([]string{"kind", "headline", "baseline_candidate_id", "baseline_label", "winner_candidate_id", "winner_label", "activated"}, map[string]any{
+			"kind":     map[string]any{"type": "string", "enum": []string{"winner_selected", "baseline_kept", "no_winner", "in_progress", "cancelled"}},
+			"headline": text, "baseline_candidate_id": text, "baseline_label": text, "winner_candidate_id": text, "winner_label": text, "activated": boolean,
+		}),
+		"metrics": map[string]any{"type": "array", "items": metric},
+		"quality": object([]string{"verdict", "basis", "baseline_score", "winner_score", "delta", "regression_percent", "watch_threshold_percent", "block_threshold_percent", "evals"}, map[string]any{
+			"verdict": verdict, "basis": map[string]any{"type": "string", "enum": []string{"release_guard", "campaign_quality_gate", "baseline_kept", "unknown"}},
+			"eval": text, "baseline_score": nullable, "winner_score": nullable, "delta": nullable, "regression_percent": nullable,
+			"watch_threshold_percent": nullable, "block_threshold_percent": nullable, "release_guard_evaluation_id": text, "reason": text,
+			"evals": map[string]any{"type": "array", "items": qualityEval},
+		}),
+		"noise": object([]string{"basis", "control_runs", "candidate_runs", "control_drift_percent", "drift_limit_percent", "objective_change_percent", "objective_noise_floor_percent", "objective_decision"}, map[string]any{
+			"basis": map[string]any{"type": "string", "enum": []string{"interleaved_control", "unknown"}}, "candidate_id": text,
+			"control_runs": integer, "candidate_runs": integer, "control_drift_percent": nullable, "drift_limit_percent": nullable,
+			"objective_metric": text, "objective_change_percent": nullable, "objective_noise_floor_percent": nullable, "objective_decision": decision, "reason": text,
+		}),
+		"monthly": object([]string{"basis", "window_seconds", "requests_in_window", "output_tokens_in_window", "monthly_output_tokens", "hours_per_month", "baseline_usd", "winner_usd", "change_usd", "change_percent", "decision"}, map[string]any{
+			"basis": map[string]any{"type": "string", "enum": []string{"replayed_traffic", "unknown"}}, "trace_digest": text,
+			"window_seconds": nullable, "requests_in_window": nullableInteger, "output_tokens_in_window": nullableInteger, "monthly_output_tokens": nullable,
+			"hours_per_month": number, "baseline_usd": nullable, "winner_usd": nullable, "change_usd": nullable, "change_percent": nullable,
+			"decision": decision, "assumption": text, "reason": text,
+		}),
+		"workload": object([]string{"source", "concurrency", "requests_per_run"}, map[string]any{"source": text, "profile": text, "concurrency": nullableInteger, "requests_per_run": nullableInteger, "method": text}),
+		"candidates": map[string]any{"type": "array", "items": object([]string{"id", "label", "role", "state", "output_tokens_per_second", "requests_per_second", "ttft_p95_ms", "tpot_p95_ms", "latency_p95_ms", "cost_per_million_output_tokens", "versus_baseline"}, map[string]any{
+			"id": text, "label": text, "role": map[string]any{"type": "string", "enum": []string{"baseline", "baseline_kept", "winner", "candidate"}}, "state": text, "failure_code": text,
+			"output_tokens_per_second": nullable, "requests_per_second": nullable, "ttft_p95_ms": nullable, "tpot_p95_ms": nullable, "latency_p95_ms": nullable, "cost_per_million_output_tokens": nullable,
+			"versus_baseline": map[string]any{"oneOf": []any{comparison, map[string]any{"type": "null"}}}, "reason": text,
+		})},
+		"bottleneck": object([]string{"state", "source", "gpu_telemetry", "signals"}, map[string]any{
+			"state": map[string]any{"type": "string", "enum": []string{"measured", "unknown"}}, "source": text, "gpu_telemetry": text, "reason": text,
+			"signals": map[string]any{"type": "array", "items": object([]string{"name", "stat", "baseline", "winner"}, map[string]any{"name": text, "stat": text, "unit": text, "baseline": nullable, "winner": nullable})},
+		}),
+		"appendix": object([]string{"winner", "baseline", "evidence"}, map[string]any{
+			"winner": nullableSetup, "baseline": nullableSetup,
+			"evidence": map[string]any{"type": "array", "items": object([]string{"kind", "digest"}, map[string]any{"kind": text, "id": text, "digest": text, "subject": text})},
+		}),
+		"unknown":       map[string]any{"type": "array", "items": text, "description": "Paths of report fields whose input is missing or incomparable."},
+		"report_digest": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+	})
 }
 
 func optimizationCampaignCandidateSchema() map[string]any {

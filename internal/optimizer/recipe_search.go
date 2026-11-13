@@ -203,7 +203,7 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 	request := proposal.Input
 	model, revision, resolved := s.ResolveModel(request.ModelIdentity, request.ModelRevision)
 	if !resolved {
-		proposal.Warnings = append(proposal.Warnings, "Recipe search requires an immutable model revision; no experiments were generated.")
+		proposal.Warnings = append(proposal.Warnings, "Finding the best setup needs the model pinned to an immutable commit; no setups were added to measure.")
 		return proposal, nil
 	}
 	var experiments []Candidate
@@ -226,24 +226,24 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 		proposal.Candidates[index].Rank = index + 1
 	}
 	for _, missing := range proposal.Missing {
-		proposal.Warnings = append(proposal.Warnings, "The reviewed planner reported "+missing+"; only recipe experiments are available for that boundary.")
+		proposal.Warnings = append(proposal.Warnings, "The reviewed planner reported "+missing+"; only the added setups can be measured for that boundary.")
 	}
 	proposal.Missing = nil
 	attachStartingPoint(&proposal)
-	proposal.Warnings = append(proposal.Warnings, "Recipe experiments are ordered by exploration priority, not predicted performance. Every arm remains unmeasured until the campaign proves it against the search control.")
+	proposal.Warnings = append(proposal.Warnings, "Added setups are listed in planning order, not by predicted performance. Each stays unmeasured until the campaign measures it against the untuned starting setup on the same image.")
 	return proposal, nil
 }
 
 func buildRecipeExperiments(template recipeTemplate, model, revision string, compatibility []integration.RuntimeCompatibility, request Request) ([]Candidate, []string, error) {
 	if !recipeAcceleratorSupported(template, request.GPU) {
-		return nil, []string{fmt.Sprintf("Recipe search has no reviewed %s template for accelerator %s.", template.id, request.GPU)}, nil
+		return nil, []string{fmt.Sprintf("No reviewed %s setups exist for accelerator %s; none were added.", template.id, request.GPU)}, nil
 	}
 	if len(request.Runtimes) > 0 && !contains(request.Runtimes, template.engine) && !contains(request.Runtimes, recipeRuntime) {
-		return nil, []string{fmt.Sprintf("Recipe search template %s was excluded by the runtime allowlist.", template.id)}, nil
+		return nil, []string{fmt.Sprintf("The runtime allowlist excludes the %s setups; none were added.", template.id)}, nil
 	}
 	compatible, found := bestRecipeCompatibility(compatibility, request)
 	if !found {
-		return nil, []string{"Recipe search requires a qualified pinned-image runtime path for this provider; no experiments were generated."}, nil
+		return nil, []string{"Adding setups needs a qualified pinned-image runtime on this provider; none were added."}, nil
 	}
 	shape, err := performanceprofile.Get(request.WorkloadProfile)
 	if err != nil {
@@ -289,7 +289,7 @@ func buildRecipeExperiments(template recipeTemplate, model, revision string, com
 	}
 	var warnings []string
 	if skippedForFeatures {
-		warnings = append(warnings, "Speculative-decoding arms were skipped because the pinned model config did not declare a native prediction head or was not supplied.")
+		warnings = append(warnings, "Speculative-decoding setups were skipped because the pinned model config did not declare a native prediction head or was not supplied.")
 	}
 	return candidates, warnings, nil
 }
@@ -368,7 +368,7 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 120,
 	}
 	if err := workload.Validate(); err != nil {
-		return Candidate{}, fmt.Errorf("recipe arm %s: %w", arm.id, err)
+		return Candidate{}, fmt.Errorf("setup %s: %w", arm.id, err)
 	}
 
 	draft := DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment"}
@@ -399,9 +399,9 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		features = append(features, Feature{Name: "model_config", State: "declared", Source: request.ModelConfigDigest})
 	}
 
-	required := []string{"runtime readiness and exact served-model identity", "model architecture and accelerator memory fit", "license and access review", "AIPerf " + request.WorkloadProfile + " workload against the search control on the same image"}
+	required := []string{"runtime readiness and exact served-model identity", "model architecture and accelerator memory fit", "license and access review", "AIPerf " + request.WorkloadProfile + " workload against the untuned starting setup on the same image"}
 	if arm.changesPrecision {
-		required = append(required, "semantic quality evidence because this arm changes runtime precision")
+		required = append(required, "semantic quality evidence because this setup changes runtime precision")
 	}
 	if contains(arm.layers, layerSpeculative) {
 		required = append(required, "output parity and speculative acceptance evidence")
@@ -413,7 +413,7 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		required = append(required, "measured SLO metrics")
 	}
 	limitations := []string{
-		"This arm is an experiment on a pinned runtime image; its flags were exercised on another model and carry no performance claim for this one.",
+		"This setup is an experiment on a pinned runtime image; its flags were exercised on another model and carry no performance claim for this one.",
 		"Reasoning and tool-call parsers are not configured, so model-specific API behavior must be added and verified before production use.",
 		"GPU memory fit and model license/access were supplied by the operator and have not been inferred.",
 	}

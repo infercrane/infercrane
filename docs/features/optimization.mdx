@@ -105,11 +105,11 @@ AIConfigurator adapter may reduce this generic candidate space, but its output r
 unqualified. A mutable branch such as `main` is rejected; the revision must be a 40–64 character
 hexadecimal commit.
 
-### Search runtime recipes for a pinned model
+### Find the best setup for a pinned model
 
-Add `--search recipes` to generate bounded experiments on a pinned runtime image. InferCrane reads
-the model's pinned `config.json` to detect preconditions, so the search does not depend on the model
-name:
+To find the best setup for any model pinned to a commit, add `--search recipes`. InferCrane adds
+setups to measure and reads the model's pinned `config.json` to decide which apply, so this does
+not depend on the model name:
 
 ```bash
 infercrane optimize propose acme/novel-open-model \
@@ -119,28 +119,30 @@ infercrane optimize propose acme/novel-open-model \
   --search recipes --allow-model-metadata-network
 ```
 
-Pass `--model-config config.json` instead to stay offline. Without either, speculative arms are
-skipped and the proposal says why. API clients send `search`, `model_features`, and
-`model_config_digest` on `POST /api/v1/optimization/proposals`.
+Pass `--model-config config.json` instead to stay offline. Without either, setups that need a
+declared model feature, such as speculative decoding, are skipped and the proposal says why. API
+clients send `search`, `model_features`, and `model_config_digest` on
+`POST /api/v1/optimization/proposals`.
 
-Each proposal starts with an untuned control on the same image, so every arm has a like-for-like
-comparison even under a small `--max-candidates`. Arms then isolate one mechanism or combine two:
+Each proposal starts with an untuned starting setup on the same image, so every added setup has a
+like-for-like comparison even under a small `--max-candidates`. Each added setup applies one
+optimization technique or combines two:
 
-| Mechanism | Generated when |
+| Technique | Added when |
 |---|---|
 | Speculative decoding (NEXTN) | The pinned config declares a native prediction head |
 | Bounded CUDA graph capture | Always, on a supported accelerator |
-| Chunked prefill | The workload's input tokens reach the arm's chunk size |
+| Chunked prefill | The workload's input tokens reach the setup's chunk size |
 | FP8 KV cache | Always; requires semantic quality evidence |
 
-The first search space covers SGLang 0.5.20 on H100, H200, and B200 through RunPod Pods. Anywhere
-else the proposal keeps its existing candidates and explains why no experiments were generated.
+This currently covers SGLang 0.5.20 on H100, H200, and B200 through RunPod Pods. Anywhere else the
+proposal keeps its existing candidates and explains why no setups were added.
 
 <Warning>
-  Arm order is exploration priority, not predicted performance. Each arm's flags ran on this image
-  with another model, which proves only that the flags exist. Every arm is `proposed-unmeasured`
-  until a campaign measures it against the control; a wrong or missing config feature costs at most
-  one failed experiment inside the approved spend limit.
+  Added setups are listed in planning order, not by predicted performance. Each setup's flags ran on
+  this image with another model, which proves only that the flags exist. Every added setup is
+  `proposed-unmeasured` until a campaign measures it against the starting setup; a wrong or missing
+  config feature costs at most one failed experiment inside the approved spend limit.
 </Warning>
 
 The command refuses to overwrite a non-empty candidate directory. Use `--output json` to archive the
@@ -187,8 +189,8 @@ The authenticated console exposes the same boundaries under **Optimize**:
 Cancellation is durable too: it persists the decision and links to the cleanup operation. The
 console never treats a proposed endpoint name as published until activation completes.
 
-A campaign keeps the warnings its proposal recorded, such as skipped speculative-decoding arms or
-the reminder that every recipe arm is unmeasured. Campaign responses, including
+A campaign keeps the warnings its proposal recorded, such as skipped speculative-decoding setups
+or the reminder that every added setup is unmeasured. Campaign responses, including
 `GET /api/v1/optimization/campaigns/{id}`, return them as `warnings` so the campaign page shows the
 same boundary as the review step. An empty list means the proposal recorded none; the field is absent
 only when the stored proposal cannot be read. `infercrane optimize inspect`, `results`, `approve`,
@@ -218,6 +220,53 @@ quality), what was measured (throughput, p95 time to first token, p95 latency, a
 tokens when the price is sourced), how each setup compared with the current one including the
 measurement noise floor, and the decision with the exact `activate` command when a setup qualifies.
 It only reads the control API; `--once` prints one plain snapshot for scripts and logs.
+
+### Read the outcome of a campaign
+
+When a campaign finishes, `infercrane optimize report CAMPAIGN_ID` shows what it changed. It compares
+your current setup, the campaign control, with the winning setup on:
+
+| Outcome | How it is computed |
+|---|---|
+| Cost per 1M output tokens | Sourced hourly price, divided by the quoted maximum replica count, over measured output tokens per second |
+| p95 time to first token | Measured |
+| Output tokens/s per user | 1000 divided by the measured p95 time per output token |
+| Output tokens/s per GPU | Measured output throughput of one replica divided by its GPU count |
+| Requests/s | Measured |
+| Answer quality | PASS, WATCH, BLOCK, or UNKNOWN, with the score change between the two setups |
+| Monthly cost at your traffic | Cost per output token times your replayed output-token volume, scaled to a 730-hour month |
+
+When the winner was measured in turns with your current setup, both values come from that same
+window, and each change is checked against that window's noise floor: the report says `better`,
+`worse`, or `no real difference`. When it was not, the report shows each setup's own measurement and
+leaves the decision `unknown`. Cost and per-GPU throughput are rescaled by price and GPU count the same
+way the campaign ranking rescales them. The answer-quality verdict comes from the Release Guard
+evaluation when one exists. Otherwise it is the campaign's own gate, which requires the winner's signed
+eval to pass and has no WATCH band. The monthly projection assumes servers stay busy, so idle capacity
+is not included. It is only made for a campaign that replayed your traffic, and only when every
+replayed request recorded its output tokens.
+
+Anything missing or not comparable is `unknown`: never zero and never estimated. The report lists
+those fields under `unknown` and says why for each. If any setup ran on a simulated accelerator or a
+CPU, such as the laptop proof of concept, the report sets `simulated_accelerator` and every output
+shows the fixed banner **CPU run: proves the pipeline, not GPU speed**. Per-GPU throughput is then
+labelled per simulated accelerator.
+
+```bash
+infercrane optimize report CAMPAIGN_ID                       # plain text
+infercrane optimize report CAMPAIGN_ID --output json         # the API report, unchanged
+infercrane optimize report CAMPAIGN_ID --html result.html    # one self-contained page to share
+```
+
+The HTML page has no scripts or external resources. It shows outcome cards first, then how the
+setups were measured and every setup's result. Next come the engine's cache, queue, and preemption
+signals when the runtime reported any, and an appendix. The appendix has the winning setup (engine,
+version, args, hardware, price) and the evidence digests: campaign input, proposal, benchmarks, signed
+quality evidence, ranking, Release Guard evaluation, replayed traffic, and the report itself. Automation
+clients read the same report from `GET /api/v1/optimization/campaigns/{id}/report`, which requires read
+access and only returns campaigns of the caller's organization. The report reads evidence rows
+referenced by the campaign from the newest 100 per candidate deployment; an older row leaves its
+field `unknown`.
 
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:

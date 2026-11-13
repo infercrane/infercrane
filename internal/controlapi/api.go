@@ -45,6 +45,7 @@ import (
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
+	"github.com/infercrane/infercrane/internal/optimizationreport"
 	"github.com/infercrane/infercrane/internal/optimizedartifact"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
@@ -532,6 +533,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
+	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}/report", a.auth(authz.Read, a.optimizationCampaignReport))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
@@ -1492,6 +1494,28 @@ func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign)})
+}
+
+// optimizationCampaignReport serves the customer outcome of one campaign: the
+// baseline against the winning setup on cost, speed, and quality. It only
+// reads tenant-scoped persisted evidence; missing inputs stay unknown.
+func (a API) optimizationCampaignReport(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationreport.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign reports are not configured")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	report, err := optimizationreport.Load(r.Context(), store, actor.TenantID, r.PathValue("id"))
+	if errors.Is(err, domain.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign report could not be assembled")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"report": report})
 }
 
 func (a API) acceleratorLabCapabilities(w http.ResponseWriter, _ *http.Request) {
@@ -4735,7 +4759,7 @@ func (a API) recipes(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	rows, err := store.ModelRecipes(r.Context(), principal.TenantID, r.URL.Query().Get("query"), limit)
 	if err != nil {
-		writeError(w, 500, "internal", "recipe search failed")
+		writeError(w, 500, "internal", "could not list recipes")
 		return
 	}
 	data := make([]map[string]any, 0, len(rows))

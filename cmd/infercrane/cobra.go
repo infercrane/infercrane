@@ -63,7 +63,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME [flags]", short: "Explore reviewed model starting points", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -108,11 +108,14 @@ var commandExamples = map[string]string{
 	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
-  # Search runtime recipes for any pinned model; detection reads its config.json
+  # Find the best setup for any model pinned to a commit; reads its public config.json
   infercrane optimize propose acme/model --model-revision COMMIT --provider runpod-pods --gpu H200 --objective throughput --search recipes --allow-model-metadata-network
 
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
+
+  # Show what a finished campaign changed in cost, speed, and quality, and save a shareable page
+  infercrane optimize report CAMPAIGN_ID --html result.html
 
   # Inspect a remote-derived, content-free public workload profile
   infercrane optimize workload-profile --file chutes-profile.json
@@ -478,9 +481,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("max-candidates", 10, "maximum candidates")
 		intFlag("limit", 20, "maximum campaigns to list")
 		boolFlag("include-simulated", "include simulated compatibility")
-		boolFlag("allow-model-metadata-network", "allow public model metadata lookup")
-		stringFlag("search", "", "add bounded experiments; supported value: recipes")
-		stringFlag("model-config", "", "pinned model config.json used to detect recipe search preconditions")
+		boolFlag("allow-model-metadata-network", "allow reading public model metadata from Hugging Face for estimates and --search recipes")
+		stringFlag("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
+		stringFlag("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
 	case "passport":
 		stringFlag("revision", "", "revision ID; defaults to active")
 		stringFlag("file", "", "write the issued passport JSON to a file")
@@ -572,7 +575,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output", "--once"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

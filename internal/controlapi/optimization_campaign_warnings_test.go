@@ -46,7 +46,7 @@ func TestCampaignReturnsPersistedProposalWarnings(t *testing.T) {
 		t.Fatal(err)
 	}
 	joined := strings.Join(proposed.Proposal.Warnings, " ")
-	if !strings.Contains(joined, "Speculative-decoding arms were skipped") || !strings.Contains(joined, "Every arm remains unmeasured") {
+	if !strings.Contains(joined, "Speculative-decoding setups were skipped") || !strings.Contains(joined, "Each stays unmeasured") {
 		t.Fatalf("recipe search proposal lost its warnings: %q", proposed.Proposal.Warnings)
 	}
 	encoded, err := json.Marshal(map[string]any{"proposal": proposed.Proposal})

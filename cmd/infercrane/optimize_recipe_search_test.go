@@ -2,16 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/spf13/cobra"
 )
 
 func recipeSearchCatalog(t *testing.T) optimizer.CatalogSource {
@@ -85,7 +90,51 @@ func TestRecipeSearchRequiresSearchForConfigAndRejectsEstimator(t *testing.T) {
 		t.Fatal("--model-config without search was accepted")
 	}
 	request.Search = optimizer.SearchRecipes
-	if _, err := optimizationProposal(context.Background(), request, recipeSearchCatalog(t), "aiconfigurator", "python3", false); err == nil {
+	_, err := optimizationProposal(context.Background(), request, recipeSearchCatalog(t), "aiconfigurator", "python3", false)
+	if err == nil {
 		t.Fatal("recipe search was combined with the estimator source")
+	}
+	if !strings.Contains(err.Error(), "--search recipes") || internalMethodWording.MatchString(err.Error()) {
+		t.Fatalf("error must name the flags in customer wording: %v", err)
+	}
+}
+
+var internalMethodWording = regexp.MustCompile(`(?i)recipe search|search control|\barms?\b`)
+
+// Help and usage text is customer-facing. Flag names stay stable for scripts;
+// descriptions say what the customer gets, not the internal method name.
+func TestCLIHelpOmitsInternalMethodNames(t *testing.T) {
+	var walk func(*cobra.Command)
+	walk = func(command *cobra.Command) {
+		text := command.Short + "\n" + command.Long + "\n" + command.UsageString()
+		if match := internalMethodWording.FindString(text); match != "" {
+			t.Errorf("%s help shows %q", command.CommandPath(), match)
+		}
+		for _, child := range command.Commands() {
+			walk(child)
+		}
+	}
+	walk(newRootCommand(context.Background()))
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stderr
+	os.Stderr = writer
+	runErr := optimizeCommand(context.Background(), []string{"propose", "acme/model", "-h"})
+	os.Stderr = original
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	usage, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(string(usage), "-model-config") {
+		t.Fatalf("optimize usage err=%v output=%q", runErr, usage)
+	}
+	if match := internalMethodWording.FindString(string(usage)); match != "" {
+		t.Fatalf("optimize usage shows %q:\n%s", match, usage)
 	}
 }
