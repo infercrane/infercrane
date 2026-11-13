@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InferCrane recommendation journey</title>
+<style>
+:root{--bg:#0b0d0c;--card:#121614;--line:#1f2622;--text:#e9ede9;--muted:#8a948e;--green:#2fd99b;--amber:#e6a23c;--red:#ef5f57;--violet:#a08cf0;--blue:#5aa9f0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Inter",sans-serif}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,monospace}
+.wrap{padding:22px 26px}
+.eyebrow{display:inline-block;font:11px "SF Mono",ui-monospace,Menlo,monospace;letter-spacing:.18em;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 12px}
+.eyebrow b{color:var(--green);font-weight:400}
+h1{font-size:26px;font-weight:600;margin:10px 0 4px;letter-spacing:-.01em}h1 em{font-style:normal;color:var(--green)}
+.lede{color:var(--muted);margin:0 0 16px}
+.strip{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px}
+.lane{display:grid;grid-template-columns:70px 1fr 170px 110px;gap:10px;align-items:center;font:13px "SF Mono",ui-monospace,monospace;margin:4px 0}
+.cells{display:flex;gap:3px;height:16px;align-items:flex-end}.cells i{flex:1;border-radius:2px}
+.grid{display:grid;grid-template-columns:minmax(220px,0.9fr) minmax(0,1.6fr);gap:14px}
+.steps{display:flex;flex-direction:column;gap:8px}
+.step{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;gap:10px;opacity:.55}
+.step.done{opacity:.85}.step.now{opacity:1;border-color:#1f6f52;background:#0f1d18}
+.num{font:11px "SF Mono",monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px;height:20px}
+.step.now .num{color:var(--green);border-color:#1f6f52}
+.step b{display:block;font-weight:500}.step span{color:var(--muted);font-size:12.5px}
+.cards{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.tag{font:11px "SF Mono",monospace;letter-spacing:.08em;padding:2px 8px;border-radius:6px;border:1px solid}
+.t-high{color:var(--amber);border-color:#5a4218}.t-base{color:var(--muted);border-color:var(--line)}
+.v{float:right;font:11px "SF Mono",monospace;letter-spacing:.08em;padding:2px 8px;border-radius:6px}
+.v-ok{background:#0f3326;color:var(--green)}.v-no{background:#2a1a19;color:var(--red)}.v-wait{background:#1e2420;color:var(--muted)}.v-same{background:#1e2420;color:#c9cfc9}
+.card h3{margin:8px 0 4px;font-size:16px;font-weight:600}
+.why{color:#c3cbc5;margin:0 0 8px;font-size:13.5px}
+.code{background:#0c100e;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:12.5px "SF Mono",monospace;color:#bfe9d5}
+.code .n{color:var(--muted);margin-right:10px}
+.meas{font:12.5px "SF Mono",monospace;color:var(--muted);margin-top:8px}.meas b{color:var(--text);font-weight:400}
+.foot{font-size:12px;color:var(--muted);margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<span class="eyebrow"><b>●</b> RECOMMEND · MEASURE · PROVE</span>
+<h1>Every recommendation is <em>proven on your traffic</em></h1>
+<p class="lede">Diagnosed from the engine, measured in turns against your current setup (A/B, interleaved), gated on quality and noise, then rolled out.</p>
+<div class="strip" id="strip"></div>
+<div class="grid">
+<div class="steps" id="steps"></div>
+<div class="cards" id="cards"></div>
+</div>
+<div class="foot">Qwen3-0.6B · Mooncake (Kimi) production trace replayed, inputs scaled 1/32 · laptop CPU run: real measurements, not GPU speed.</div>
+</div>
+<script>
+const STEPS=[["Capture","traffic shape, no content"],["Diagnose","prefill vs decode, queue, cache"],["Recommend","setups chosen from the diagnosis"],["Measure A/B","C X C X C X C, same traffic"],["Gate","quality, SLO, noise floor"],["Roll out","winner only, with rollback"]];
+const STATE_WORDS={proposed:"queued",provisioning:"starting server",ready:"server ready",measuring:"measuring A/B",validating:"checking answers",ranked:"ranked",qualified:"winner",rejected:"rejected",inconclusive:"inconclusive",failed:"failed",cancelled:"cancelled",cleaned:"server removed"};
+function stepIndex(d){if(d.result)return 6;const st=(d.setups||[]).map(s=>s.state);if(!d.diagnosis)return d.live&&d.live.busy?0:0;if(!d.campaign)return 2;if(st.some(s=>["measuring","provisioning","ready","proposed"].includes(s)))return 3;if(st.some(s=>s==="validating"))return 4;if(["qualified","rejected","inconclusive"].includes(d.campaign_state))return 5;return 3}
+function cells(n,color,heights){return heights.map(h=>`<i style="height:${Math.max(3,h)}px;background:${color}"></i>`).join("")}
+const hist={prefill:[],decode:[]};
+function render(d){
+ const L=d.live||{};const pf=L.prefill_share;
+ if(pf!=null){hist.prefill.push(pf*16);hist.decode.push((1-pf)*16);hist.prefill=hist.prefill.slice(-24);hist.decode=hist.decode.slice(-24)}
+ const decodeBound=pf!=null&&pf<0.4,prefillBound=pf!=null&&pf>0.6;
+ document.getElementById("strip").innerHTML=`<div class="lane"><span style="color:var(--violet)">prefill</span><div class="cells">${cells(0,"#6f5fc4",hist.prefill)}</div><span>prompt ${L.prompt_tps!=null?L.prompt_tps.toFixed(0):"–"} tok/s</span><span style="color:${pf==null?"var(--muted)":(prefillBound?"var(--amber)":"var(--green)")}">${pf==null?"idle":(prefillBound?"bottleneck":"healthy")}</span></div><div class="lane"><span style="color:var(--green)">decode</span><div class="cells">${cells(0,"#1f9e6f",hist.decode)}</div><span>output ${L.output_tps!=null?L.output_tps.toFixed(1):"–"} tok/s</span><span style="color:${pf==null?"var(--muted)":(decodeBound?"var(--amber)":"var(--green)")}">${pf==null?"idle":(decodeBound?"bottleneck":"healthy")}</span></div><div class="lane"><span style="color:var(--amber)">queue</span><div class="mono" style="color:${(L.waiting||0)>0?"var(--red)":"var(--muted)"}">${L.waiting!=null?L.waiting.toFixed(0)+" waiting · "+(L.running||0).toFixed(0)+" running":"–"}</div><span></span><span></span></div>`;
+ const k=stepIndex(d);
+ document.getElementById("steps").innerHTML=STEPS.map((s,i)=>`<div class="step ${i<k?"done":(i===k?"now":"")}"><span class="num">0${i+1}</span><div><b>${s[0]}${i<k?' <span style="color:var(--green)">✓</span>':""}</b><span>${s[1]}</span></div></div>`).join("");
+ const D=d.diagnosis,plan=d.plan||[],setups=d.setups||[];
+ const why={"More parallel request slots":D?`Requests waited in line (avg ${D.waiting_mean.toFixed(1)}, peak ${D.waiting_peak.toFixed(0)}) while the server spent ${(D.decode_share*100).toFixed(0)}% of busy time in decode. More slots batch more requests per decode step.`:"",
+  "Faster attention + compact KV cache":D?`Decode takes ${(D.decode_share*100).toFixed(0)}% of busy time and is memory-bandwidth bound. An 8-bit KV cache halves the bytes read per token.`:"",
+  "4-bit model, generated by InferCrane":D?`Decode takes ${(D.decode_share*100).toFixed(0)}% of busy time. A 4-bit model reads about half the weight bytes per token; answers are re-checked before it can win.`:"",
+  "Bigger prompt batches":D?`Prefill takes ${(D.prefill_share*100).toFixed(0)}% of busy time. Bigger prompt batches use the hardware better on long prompts.`:""};
+ const cards=(plan.length?plan:[]).map((p,i)=>{const s=setups.find(x=>x.label===p.label)||{};let v='<span class="v v-wait">PENDING</span>';
+  if(i===0)v='<span class="v v-same">BASELINE</span>';
+  else if(s.decision==="improved")v='<span class="v v-ok">VERIFIED</span>';
+  else if(s.decision==="regressed")v='<span class="v v-no">REJECTED · WORSE</span>';
+  else if(s.decision==="no_measurable_difference")v='<span class="v v-same">REJECTED · NO REAL DIFFERENCE</span>';
+  else if(s.state&&["rejected","failed","inconclusive"].includes(s.state))v=`<span class="v v-no">${(s.failure_code||s.state).replace(/_/g," ").toUpperCase()}</span>`;
+  else if(s.state)v=`<span class="v v-wait">${(STATE_WORDS[s.state]||s.state).toUpperCase()}</span>`;
+  const tag=i===0?'<span class="tag t-base">CURRENT SETUP</span>':`<span class="tag t-high">RECOMMENDATION ${i} OF ${plan.length-1}</span>`;
+  const change=(p.args&&p.args.length)?p.args.join(" "):(p.label.startsWith("4-bit")?"model: Q8_0 → Q4_K_M (generated, sha256 "+(d.generated_sha||"").slice(0,12)+"…)":"defaults");
+  const meas=s.mean_cost!=null?`<div class="meas">measured: <b>$${s.mean_cost.toFixed(3)}</b> per 1M tokens${s.decision&&s.decision!=="current"?" · decision: <b>"+s.decision.replace(/_/g," ")+"</b>":""}</div>`:"";
+  return `<div class="card">${tag}${v}<h3>${p.label}</h3>${i===0?'<p class="why">Your live configuration. Every recommendation is measured against it, in turns, on the same replayed traffic.</p>':`<p class="why">${why[p.label]||""}</p>`}<div class="code"><span class="n">1</span>${i===0?"llama-server (defaults)":"llama-server … "+change}</div>${meas}</div>`}).join("");
+ document.getElementById("cards").innerHTML=cards||'<div class="card"><h3>Diagnosing your traffic…</h3><p class="why">Recommendations appear once the engine has been observed under the replayed traffic.</p></div>';
+}
+async function tick(){try{render(await (await fetch("/journey-data",{cache:"no-store"})).json())}catch(e){}}
+setInterval(tick,2000);tick();
+</script>
+</body>
+</html>

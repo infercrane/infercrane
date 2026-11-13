@@ -1,0 +1,130 @@
+# Development-only control plane for the local PoC: Postgres, an in-cluster
+# kubeconfig with a named context (the Kubernetes provider always passes
+# --context), and `infercrane serve` configured for the Kubernetes provider.
+# tools/poc-local/poc.py fills the @@PLACEHOLDERS@@. Never use this in production:
+# Postgres has a fixed password and no TLS.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: poc-postgres
+  namespace: infercrane-system
+stringData:
+  password: infercrane-poc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: infercrane-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: poc-postgres}
+  template:
+    metadata:
+      labels: {app: poc-postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: @@POSTGRES_IMAGE@@
+          env:
+            - {name: POSTGRES_DB, value: infercrane}
+            - {name: POSTGRES_USER, value: infercrane}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: poc-postgres, key: password}}
+          ports: [{containerPort: 5432}]
+          # A CPU request gives the database scheduling weight over the model servers,
+          # which run without requests and can saturate a laptop during measurement.
+          resources: {requests: {cpu: 250m, memory: 256Mi}}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "infercrane", "-d", "infercrane"]}
+            periodSeconds: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: infercrane-system
+spec:
+  selector: {app: poc-postgres}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: poc-kubeconfig
+  namespace: infercrane-system
+data:
+  config: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: in-cluster
+        cluster:
+          server: https://kubernetes.default.svc
+          certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    users:
+      - name: control-plane
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    contexts:
+      - name: in-cluster
+        context: {cluster: in-cluster, user: control-plane, namespace: infercrane-system}
+    current-context: in-cluster
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infercrane
+  namespace: infercrane-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: poc-infercrane}
+  template:
+    metadata:
+      labels: {app: poc-infercrane}
+    spec:
+      serviceAccountName: infercrane-control-plane
+      # Service links would inject INFERCRANE_PORT=tcp://... from the Service
+      # named infercrane and collide with the control plane's own setting.
+      enableServiceLinks: false
+      containers:
+        - name: infercrane
+          image: @@CONTROL_PLANE_IMAGE@@
+          imagePullPolicy: Never
+          ports: [{containerPort: 8080}]
+          # Keeps the control plane answering while model servers are being measured.
+          resources: {requests: {cpu: 500m, memory: 256Mi}}
+          env:
+            - {name: INFERCRANE_DATABASE_URL, value: "postgres://infercrane:infercrane-poc@postgres:5432/infercrane?sslmode=disable"}
+            - name: INFERCRANE_API_KEY
+              valueFrom: {secretKeyRef: {name: infercrane-worker, key: api-key}}
+            - {name: KUBECONFIG, value: /etc/kube/config}
+            - {name: INFERCRANE_KUBERNETES_CONTEXT, value: in-cluster}
+            - {name: INFERCRANE_KUBERNETES_NAMESPACE, value: infercrane-system}
+            - {name: INFERCRANE_KUBERNETES_WORKLOAD_API, value: deployment}
+            - {name: INFERCRANE_KUBERNETES_SERVICE_ACCOUNT, value: infercrane-runtime}
+            - {name: INFERCRANE_KUBERNETES_WORKER_SECRET_NAME, value: infercrane-worker}
+            - {name: INFERCRANE_KUBERNETES_WORKER_SECRET_KEY, value: api-key}
+            - {name: INFERCRANE_KUBERNETES_IMAGE_DIGEST, value: "@@MODEL_IMAGE@@"}
+            - {name: INFERCRANE_KUBERNETES_GPU_RESOURCE, value: "@@ACCELERATOR_RESOURCE@@"}
+            - {name: INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL, value: "@@ACCELERATOR_LABEL@@"}
+            - {name: INFERCRANE_OPTIMIZATION_PRICES_JSON, value: '@@PRICES_JSON@@'}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8080}
+            periodSeconds: 3
+          volumeMounts:
+            - {name: kubeconfig, mountPath: /etc/kube, readOnly: true}
+      volumes:
+        - name: kubeconfig
+          configMap: {name: poc-kubeconfig}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infercrane
+  namespace: infercrane-system
+spec:
+  selector: {app: poc-infercrane}
+  ports: [{port: 8080, targetPort: 8080}]
