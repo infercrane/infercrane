@@ -5,7 +5,9 @@ description: Authenticated v1 endpoints, roles, idempotency, and stable errors i
 
 # HTTP control API
 
-Base path: `/api/v1`. All requests require `Authorization: Bearer TOKEN`. Mutations require operator
+Base path: `/api/v1`. All requests require `Authorization: Bearer TOKEN`, except the public catalog,
+the verified billing webhook, and the two CLI sign-in calls `POST /cli/logins` and
+`POST /cli/logins/token`, which the CLI makes before it has a key. Mutations require operator
 or admin role; tenant/principal/audit administration requires admin. Cross-tenant resources return
 `404` to avoid existence disclosure.
 
@@ -26,6 +28,14 @@ Errors are stable JSON objects:
 |---|---|---|
 | `GET /doctor` | viewer | Run control-plane dependency diagnostics; optional `cloud`, `serverless`, and `aws` booleans add read-only provider checks. |
 | `GET /whoami` | viewer | Return the authenticated principal, role, and tenant without exposing credential material. |
+| `POST /cli/logins` | none | Start a CLI sign-in. Returns a one-time user code, a device code returned only once, the expiry, the poll interval, and the dashboard approval URL when `INFERCRANE_CONSOLE_URL` is set. At most 500 sign-ins wait at once (`429` beyond that). |
+| `POST /cli/logins/token` | none (device code) | Poll a sign-in: `pending`, `slow_down`, `denied`, `expired`, `consumed`, or `approved` with the key, returned once. |
+| `GET /cli/logins/{code}` | viewer, dashboard principals | Show the device and status of a sign-in before approving it. |
+| `POST /cli/logins/{code}/approve` | viewer, dashboard principals | Approve with the caller's own tenant, role, and scopes. CLI keys and endpoint tokens get `403`. |
+| `POST /cli/logins/{code}/deny` | viewer, dashboard principals | Deny a sign-in. |
+| `GET /cli/sessions` | viewer | List the caller's active CLI keys with device and last use; admins see every member's. |
+| `DELETE /cli/sessions/{id}` | owner or admin | Revoke a CLI key. |
+| `DELETE /cli/sessions/current` | CLI key | Revoke the calling CLI key (`infercrane logout`); other credentials get `409 not_cli_session`. |
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
 | `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |

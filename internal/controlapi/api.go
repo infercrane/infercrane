@@ -27,6 +27,7 @@ import (
 	"github.com/infercrane/infercrane/internal/authz"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/burstguard"
+	"github.com/infercrane/infercrane/internal/clilogin"
 	"github.com/infercrane/infercrane/internal/computeconnection"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/continualoptimizer"
@@ -394,6 +395,14 @@ type API struct {
 		List(context.Context, string) ([]domain.ComputeConnection, error)
 		Delete(context.Context, string, string) error
 	}
+	// ConsoleURL is the dashboard origin advertised to `infercrane login` and
+	// returned with an approved CLI sign-in. Empty means not advertised.
+	ConsoleURL string
+	// CLISessionUsage records when keys issued by `infercrane login` were
+	// last used on this API. Nil disables the record.
+	CLISessionUsage *CLISessionUsage
+	// Now overrides the clock for CLI sign-in expiry in tests.
+	Now func() time.Time
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -455,6 +464,14 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/operations", a.auth(authz.Read, a.operations))
 	mux.HandleFunc("GET /api/v1/doctor", a.auth(authz.Read, a.diagnostics))
 	mux.HandleFunc("GET /api/v1/whoami", a.auth(authz.Read, a.whoami))
+	mux.HandleFunc("POST /api/v1/cli/logins", a.startCLILogin)
+	mux.HandleFunc("POST /api/v1/cli/logins/token", a.exchangeCLILogin)
+	mux.HandleFunc("GET /api/v1/cli/logins/{code}", a.auth(authz.Read, a.cliLogin))
+	mux.HandleFunc("POST /api/v1/cli/logins/{code}/approve", a.auth(authz.Read, a.approveCLILogin))
+	mux.HandleFunc("POST /api/v1/cli/logins/{code}/deny", a.auth(authz.Read, a.denyCLILogin))
+	mux.HandleFunc("GET /api/v1/cli/sessions", a.auth(authz.Read, a.cliSessions))
+	mux.HandleFunc("DELETE /api/v1/cli/sessions/current", a.auth(authz.Read, a.revokeCurrentCLISession))
+	mux.HandleFunc("DELETE /api/v1/cli/sessions/{id}", a.auth(authz.Read, a.revokeCLISession))
 	mux.HandleFunc("GET /api/v1/console/session", a.auth(authz.Read, a.consoleSession))
 	mux.HandleFunc("PUT /api/v1/console/access", a.auth(authz.ManageTenant, a.configureConsoleAccess))
 	mux.HandleFunc("GET /api/v1/console/access", a.auth(authz.ManageTenant, a.consoleAccess))
@@ -6810,6 +6827,9 @@ func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusForbidden, "forbidden", "endpoint-scoped inference credentials cannot access the control-plane API")
 			return
 		}
+		if principal.Kind == clilogin.PrincipalKind {
+			a.CLISessionUsage.Touch(r.Context(), principal.ID)
+		}
 		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, action) {
 			writeError(w, http.StatusForbidden, "forbidden", "principal is not allowed to perform this action")
 			return
@@ -6954,7 +6974,7 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 func classifyError(status int, code string) (category string, retryable bool, remediation string) {
 	switch {
 	case code == "unauthenticated":
-		return "authentication", false, "Configure a valid control-plane credential with infercrane init or INFERCRANE_API_KEY."
+		return "authentication", false, "Run infercrane login, or configure a valid control-plane credential with infercrane init or INFERCRANE_API_KEY."
 	case code == "forbidden":
 		return "authorization", false, "Use a principal whose role permits this operation."
 	case status == http.StatusNotFound:

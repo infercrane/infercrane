@@ -28,6 +28,46 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  startCLILogin(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/cli/logins';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  exchangeCLILogin(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/cli/logins/token';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getCLILogin(code: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/cli/logins/${encodeURIComponent(code)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  approveCLILogin(code: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/cli/logins/${encodeURIComponent(code)}/approve`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  denyCLILogin(code: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/cli/logins/${encodeURIComponent(code)}/deny`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listCLISessions(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/cli/sessions';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  revokeCurrentCLISession(): Promise<void> {
+    const requestPath = '/cli/sessions/current';
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
+  }
+
+  revokeCLISession(id: string): Promise<void> {
+    const requestPath = `/cli/sessions/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
+  }
+
   getConsoleSession(): Promise<Record<string, JsonValue>> {
     const requestPath = '/console/session';
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;

@@ -32,6 +32,14 @@ var Routes = []Route{
 	{"GET", "/operations", "listOperations", "Operations", "List durable operations for the authenticated organization", "", "ObjectList", 200, false},
 	{"GET", "/doctor", "getDoctor", "System", "Run control-plane diagnostics", "", "Object", 200, false},
 	{"GET", "/whoami", "getCurrentPrincipal", "Identity", "Inspect the authenticated principal", "", "Object", 200, false},
+	{"POST", "/cli/logins", "startCLILogin", "Identity", "Start a CLI sign-in that a person approves in the dashboard; unauthenticated", "CLILoginStart", "CLILoginStartResponse", 201, false},
+	{"POST", "/cli/logins/token", "exchangeCLILogin", "Identity", "Poll a CLI sign-in with its device code and receive the key once it is approved; unauthenticated", "CLILoginExchangeRequest", "CLILoginExchangeResponse", 200, false},
+	{"GET", "/cli/logins/{code}", "getCLILogin", "Identity", "Show the device and status of a CLI sign-in before approving it", "", "CLILoginEnvelope", 200, false},
+	{"POST", "/cli/logins/{code}/approve", "approveCLILogin", "Identity", "Approve a CLI sign-in with the caller's own tenant, role, and scopes", "", "CLILoginEnvelope", 200, false},
+	{"POST", "/cli/logins/{code}/deny", "denyCLILogin", "Identity", "Deny a CLI sign-in", "", "CLILoginEnvelope", 200, false},
+	{"GET", "/cli/sessions", "listCLISessions", "Identity", "List active CLI keys; administrators see every member's keys", "", "CLISessionList", 200, false},
+	{"DELETE", "/cli/sessions/current", "revokeCurrentCLISession", "Identity", "Revoke the CLI key making this request", "", "Empty", 204, false},
+	{"DELETE", "/cli/sessions/{id}", "revokeCLISession", "Identity", "Revoke a CLI key", "", "Empty", 204, false},
 	{"GET", "/console/session", "getConsoleSession", "Identity", "Resolve the authenticated console organization and entitlements", "", "Object", 200, false},
 	{"PUT", "/console/access", "configureConsoleAccess", "Identity", "Map a hosted identity and grant or revoke private-console access", "ConsoleIdentityProvisioning", "Object", 200, false},
 	{"GET", "/console/access", "listConsoleAccess", "Identity", "List private-console members for the authenticated organization", "", "ObjectList", 200, false},
@@ -243,7 +251,7 @@ func Document() (map[string]any, error) {
 			"security":    []map[string][]string{{"bearerAuth": {}}},
 			"responses":   responses(route),
 		}
-		if route.Path == "/billing/webhooks/stripe" || strings.HasPrefix(route.Path, "/public/") {
+		if route.Path == "/billing/webhooks/stripe" || strings.HasPrefix(route.Path, "/public/") || route.Path == "/cli/logins" || route.Path == "/cli/logins/token" {
 			operation["security"] = []any{}
 		}
 		parameters := pathParameters(route.Path)
@@ -490,6 +498,14 @@ func schemas() map[string]any {
 		"OptimizationCampaignCandidate":  optimizationCampaignCandidateSchema(),
 		"OptimizationCampaignEnvelope":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
 
+		"CLILoginStart":                      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_name", "client_os", "client_version"}, "properties": map[string]any{"device_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}, "client_os": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}, "client_version": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}},
+		"CLILoginStartResponse":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code", "user_code", "expires_at", "expires_in", "interval"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "description": "Secret the CLI polls with. Returned once; only its hash is stored."}, "user_code": map[string]any{"type": "string", "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "expires_in": map[string]any{"type": "integer", "minimum": 1}, "interval": map[string]any{"type": "integer", "minimum": 1}, "verification_uri": map[string]any{"type": "string", "format": "uri"}, "verification_uri_complete": map[string]any{"type": "string", "format": "uri"}}},
+		"CLILoginExchangeRequest":            map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "minLength": 68, "maxLength": 68}}},
+		"CLILoginExchangeResponse":           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"pending", "slow_down", "approved", "denied", "expired", "consumed"}}, "interval": map[string]any{"type": "integer", "minimum": 1}, "credential": map[string]any{"type": "string", "description": "Returned once, on the poll that consumes an approved sign-in."}, "principal": ref("Object"), "credential_cache_synchronized": map[string]any{"type": "boolean"}, "owner_name": map[string]any{"type": "string"}, "console_url": map[string]any{"type": "string", "format": "uri"}}},
+		"CLILogin":                           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"user_code", "device_name", "client_os", "client_version", "status", "created_at", "expires_at"}, "properties": map[string]any{"user_code": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"pending", "approved", "denied", "consumed", "expired"}}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "decided_at": map[string]any{"type": "string", "format": "date-time"}, "decided_by": map[string]any{"type": "string"}}},
+		"CLILoginEnvelope":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"login"}, "properties": map[string]any{"login": ref("CLILogin")}},
+		"CLISession":                         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "device_name", "client_os", "client_version", "owner_name", "created_at", "last_used_at", "expires_at", "current"}, "properties": map[string]any{"id": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "owner_name": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "last_used_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "expires_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "current": map[string]any{"type": "boolean"}}},
+		"CLISessionList":                     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": ref("CLISession")}}},
 		"OptimizationCampaignReportEnvelope": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"report"}, "properties": map[string]any{"report": ref("OptimizationCampaignReport")}},
 		"OptimizationCampaignReport":         optimizationCampaignReportSchema(),
 
