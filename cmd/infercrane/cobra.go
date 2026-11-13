@@ -34,7 +34,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
-	{use: "version", short: "Print the InferCrane version", group: "start"},
+	{use: "version [flags]", short: "Print the InferCrane version", group: "start"},
 	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
 	{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
 	{use: "endpoints [flags]", short: "List stable application endpoints", group: "operate"},
@@ -45,7 +45,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "logs DEPLOYMENT [flags]", short: "Stream the durable operational timeline", group: "operate"},
 	{use: "events DEPLOYMENT [flags]", short: "Show durable deployment events", group: "operate"},
 	{use: "rollout ACTION [arguments]", short: "Inspect and control immutable revisions", group: "operate"},
-	{use: "route DEPLOYMENT --strategy STRATEGY", short: "Change replica routing policy", group: "operate"},
+	{use: "route DEPLOYMENT --strategy STRATEGY [flags]", short: "Change replica routing policy", group: "operate"},
 	{use: "delete DEPLOYMENT [flags]", short: "Preview or execute safe deletion", group: "operate"},
 	{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
 	{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
@@ -67,9 +67,9 @@ var publicCommandSpecs = []commandSpec{
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
-	{use: "operation ID | operation watch ID | operation cancel ID", short: "Inspect, resume, or cancel a durable operation", group: "understand"},
+	{use: "operation list | operation [inspect] ID | operation watch ID | operation cancel ID", short: "List, inspect, resume, or cancel durable operations", group: "understand"},
 	{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
-	{use: "integrations [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
+	{use: "integrations [list] [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
 	{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
 	{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
 	{use: "provider ACTION [arguments]", short: "Connect and manage external inference APIs", group: "admin"},
@@ -84,6 +84,16 @@ var publicCommandSpecs = []commandSpec{
 }
 
 var commandExamples = map[string]string{
+	"logs": `  # Follow the timeline in a terminal
+  infercrane logs qwen-prod --follow
+
+  # Machine-readable: JSON Lines, one event object per line
+  infercrane logs qwen-prod --since 15m --output json`,
+	"operation": `  # Find recent operations, newest first
+  infercrane operation list
+
+  # Resume following one after a disconnect
+  infercrane operation watch OPERATION_ID`,
 	"plan": `  # Common path: preview safe defaults
   infercrane plan meta-llama/Llama-3.1-8B-Instruct
 
@@ -199,7 +209,7 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 
 func containsHelpArgument(args []string) bool {
 	for _, arg := range args {
-		if arg == "help" || arg == "-h" || arg == "--help" {
+		if arg == "help" || arg == "-h" || arg == "-help" || arg == "--help" {
 			return true
 		}
 	}
@@ -211,8 +221,10 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "route", "version":
 		stringFlag("output", "human", "output format: human or json")
+	case "logs":
+		stringFlag("output", "human", "output format: human, or json for JSON Lines (one event object per line)")
 	}
 	switch name {
 	case "telemetry":
@@ -518,6 +530,10 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("from-env", "", "control-plane environment variable containing the provider credential")
 	case "operation":
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
+		intFlag("limit", 20, "operation list: maximum operations, newest first (1-500)")
+		stringFlag("before", "", "operation list: only operations created before this RFC3339 time")
+	case "route":
+		stringFlag("strategy", "", "round-robin, consistent-hash, power-of-two, or cache-aware")
 	case "model-api":
 		stringFlag("file", "", "JSON manifest containing one immutable Model API contract")
 	case "rollout":
@@ -581,7 +597,9 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
 		"external":    {"--target", "--adapter", "--secret-reference", "--request-limit", "--cost-limit-usd", "--max-request-cost-usd", "--mode", "--queue-threshold", "--breach-intervals", "--recovery-intervals", "--cooldown-seconds", "--signal-max-age-seconds", "--acknowledge-external-data", "--enable", "--output"},
 		"doctor":      {"--cloud", "--gpu", "--serverless", "--aws", "--gcp", "--kubernetes", "--output"},
-		"operation":   {"--wait-timeout", "--output"},
+		"operation":   {"--wait-timeout", "--limit", "--before", "--output"},
+		"route":       {"--strategy", "--output"},
+		"version":     {"--output"},
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
 		"inbox":       {"--limit", "--output"},
 		"rollout":     {"--file", "--model", "--model-revision", "--runtime", "--runtime-version", "--runtime-args", "--cloud", "--provider-adapter", "--gpu", "--region", "--routing", "--min", "--max", "--reason", "--requests", "--concurrency", "--acknowledge-validation-cost", "--enabled", "--require-compatibility", "--require-synthetic", "--require-quality", "--auto-rollback", "--minimum-requests", "--max-cost-regression", "--minimum-quality-score", "--max-quality-regression", "--auto-rollback-window", "--validation-max-requests", "--validation-max-concurrency", "--idempotency-key", "--wait", "--wait-timeout", "--output"},

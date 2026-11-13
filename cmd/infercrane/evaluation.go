@@ -49,7 +49,7 @@ func evaluationIngestCommand(ctx context.Context, args []string) error {
 		return errors.New("usage: infercrane evaluation ingest DEPLOYMENT REVISION --result RESULT.json --key KEY --file EVIDENCE.json [--attach]")
 	}
 	deployment, revision := args[0], args[1]
-	fs := flag.NewFlagSet("evaluation ingest", flag.ContinueOnError)
+	fs := newFlagSet("evaluation ingest")
 	resultPath := fs.String("result", "", "content-free evaluator result JSON")
 	keyPath := fs.String("key", "", "Ed25519 evaluator private key")
 	filePath := fs.String("file", "", "signed evidence destination")
@@ -101,7 +101,7 @@ func evaluationIngestCommand(ctx context.Context, args []string) error {
 }
 
 func evaluationKeygenCommand(args []string) error {
-	fs := flag.NewFlagSet("evaluation keygen", flag.ContinueOnError)
+	fs := newFlagSet("evaluation keygen")
 	path := fs.String("file", "quality-evidence.key", "private-key destination")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -139,7 +139,7 @@ func evaluationSignCommand(args []string) error {
 		return errors.New("usage: infercrane evaluation sign DEPLOYMENT REVISION [flags]")
 	}
 	deployment, revision := args[0], args[1]
-	fs := flag.NewFlagSet("evaluation sign", flag.ContinueOnError)
+	fs := newFlagSet("evaluation sign")
 	suite := fs.String("suite", "", "evaluation suite name")
 	suiteVersion := fs.String("suite-version", "", "immutable suite version")
 	evaluator := fs.String("evaluator", "", "evaluator name")
@@ -225,7 +225,7 @@ func evaluationAPICommand(ctx context.Context, cfg config.Config, args []string)
 		return errors.New("usage: infercrane evaluation attach|list DEPLOYMENT [flags]")
 	}
 	action, deployment := args[0], args[1]
-	fs := flag.NewFlagSet("evaluation "+action, flag.ContinueOnError)
+	fs := newFlagSet("evaluation " + action)
 	filePath := fs.String("file", "", "signed evidence file")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {

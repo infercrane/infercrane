@@ -224,7 +224,7 @@ func main() {
 func writeCLIError(w io.Writer, args []string, err error) {
 	jsonOutput := false
 	for index, arg := range args {
-		if arg == "--output=json" || (arg == "--output" && index+1 < len(args) && args[index+1] == "json") {
+		if arg == "--output=json" || arg == "-output=json" || ((arg == "--output" || arg == "-output") && index+1 < len(args) && args[index+1] == "json") {
 			jsonOutput = true
 			break
 		}
@@ -252,26 +252,10 @@ func writeCLIError(w io.Writer, args []string, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": detail})
 }
 func run(ctx context.Context, args []string) error {
-	for len(args) > 0 {
-		switch args[0] {
-		case "--no-color":
-			if err := os.Setenv("NO_COLOR", "1"); err != nil {
-				return err
-			}
-			args = args[1:]
-		case "--context":
-			if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-				return errors.New("--context requires a context name")
-			}
-			if err := os.Setenv("INFERCRANE_CONTEXT", args[1]); err != nil {
-				return err
-			}
-			args = args[2:]
-		default:
-			goto execute
-		}
+	args, err := applyGlobalFlags(args)
+	if err != nil {
+		return err
 	}
-execute:
 	root := newRootCommand(ctx)
 	root.SetArgs(args)
 	return root.Execute()
@@ -283,8 +267,7 @@ func runLegacy(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "version", "--version":
-		fmt.Println(version)
-		return nil
+		return versionCommand(args[1:])
 	case "init":
 		return initCommand(args[1:])
 	case "context":
@@ -444,7 +427,7 @@ func runLegacy(ctx context.Context, args []string) error {
 	return fmt.Errorf("command %q is unavailable in this build", args[0])
 }
 func initCommand(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs := newFlagSet("init")
 	controlURL := fs.String("url", "http://127.0.0.1:8080", "control-plane URL")
 	apiKey := fs.String("api-key", "", "existing control-plane credential (prefer INFERCRANE_API_KEY to avoid shell history)")
 	contextName := fs.String("context", "default", "context name")
@@ -487,11 +470,12 @@ func initCommand(args []string) error {
 }
 
 func planCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane plan MODEL [--name NAME] [--targets TARGETS | --cloud CLOUD --gpu GPU]")
+	const usage = "usage: infercrane plan MODEL [--name NAME] [--targets TARGETS | --cloud CLOUD --gpu GPU] [--output human|json]"
+	model, err := commandSubject(args, 0, usage)
+	if err != nil {
+		return err
 	}
-	model := args[0]
-	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+	fs := newFlagSet("plan")
 	name := fs.String("name", "", "deployment name")
 	targets := fs.String("targets", "", "comma-separated existing targets")
 	cloud := fs.String("cloud", "", "provider cloud")
@@ -505,7 +489,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := parseFlagsOnly(fs, args[1:], usage); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -661,7 +645,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		return endpointDoctorCommand(ctx, cfg, args)
 	}
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs := newFlagSet("doctor")
 	output := fs.String("output", "human", "human or json")
 	cloud := fs.Bool("cloud", false, "also validate SkyPilot cloud credentials")
 	gpu := fs.String("gpu", "", "GPU type used by the optional cloud capacity probe")
@@ -719,7 +703,7 @@ func doctorCommand(ctx context.Context, cfg config.Config, args []string) error 
 
 func endpointDoctorCommand(ctx context.Context, cfg config.Config, args []string) error {
 	name := args[0]
-	fs := flag.NewFlagSet("doctor endpoint", flag.ContinueOnError)
+	fs := newFlagSet("doctor endpoint")
 	window := fs.Duration("window", time.Hour, "persisted evidence window")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -776,7 +760,7 @@ func benchmarkCommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("usage: infercrane benchmark DEPLOYMENT [flags]")
 	}
 	deployment := args[0]
-	fs := flag.NewFlagSet("benchmark", flag.ContinueOnError)
+	fs := newFlagSet("benchmark")
 	requests := fs.Int("requests", 100, "request count")
 	concurrency := fs.Int("concurrency", 10, "concurrent clients")
 	inputTokens := fs.Int("input-tokens", 128, "mean input token count")
@@ -865,7 +849,7 @@ func replayCommand(ctx context.Context, cfg config.Config, args []string) error 
 		return errors.New("usage: infercrane replay DEPLOYMENT [flags]")
 	}
 	deployment := args[0]
-	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+	fs := newFlagSet("replay")
 	windowText := fs.String("window", "24h", "production-shape capture window")
 	maxRequests := fs.Int("max-requests", 1000, "maximum observations")
 	execute := fs.Bool("execute", false, "run an explicit AIPerf approximation")
@@ -947,7 +931,7 @@ func replayCommand(ctx context.Context, cfg config.Config, args []string) error 
 }
 
 func capacityCommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("capacity", flag.ContinueOnError)
+	fs := newFlagSet("capacity")
 	windowText := fs.String("window", "720h", "observation window")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
@@ -998,7 +982,7 @@ func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error 
 		return errors.New("usage: infercrane finops DEPLOYMENT [--window DURATION] | infercrane finops collect opencost DEPLOYMENT [flags]")
 	}
 	name := args[0]
-	fs := flag.NewFlagSet("finops", flag.ContinueOnError)
+	fs := newFlagSet("finops")
 	windowText := fs.String("window", "720h", "cost evidence window")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -1025,11 +1009,12 @@ func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error 
 }
 
 func autopilotCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: infercrane autopilot plan DEPLOYMENT | autopilot inspect PLAN_ID | autopilot approve PLAN_ID")
+	subject, err := commandSubject(args, 1, "usage: infercrane autopilot plan DEPLOYMENT | autopilot inspect PLAN_ID | autopilot approve PLAN_ID")
+	if err != nil {
+		return err
 	}
-	action, subject := args[0], args[1]
-	fs := flag.NewFlagSet("autopilot", flag.ContinueOnError)
+	action := args[0]
+	fs := newFlagSet("autopilot")
 	objective := fs.String("objective", "minimize_cost", "advisory objective")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
@@ -1072,11 +1057,12 @@ func autopilotCommand(ctx context.Context, cfg config.Config, args []string) err
 }
 
 func sessionCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: infercrane session create DEPLOYMENT | session inspect ID")
+	subject, err := commandSubject(args, 1, "usage: infercrane session create DEPLOYMENT | session inspect ID")
+	if err != nil {
+		return err
 	}
-	action, subject := args[0], args[1]
-	fs := flag.NewFlagSet("session", flag.ContinueOnError)
+	action := args[0]
+	fs := newFlagSet("session")
 	ttl := fs.String("ttl", "1h", "logical session expiry")
 	preferredBinding := fs.String("preferred-binding", "", "best-effort binding hint")
 	preferredTarget := fs.String("preferred-target", "", "best-effort target hint")
@@ -1113,11 +1099,11 @@ func sessionCommand(ctx context.Context, cfg config.Config, args []string) error
 }
 
 func burstCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: infercrane burst DEPLOYMENT [flags]")
+	name, err := commandSubject(args, 0, "usage: infercrane burst DEPLOYMENT [flags]")
+	if err != nil {
+		return err
 	}
-	name := args[0]
-	fs := flag.NewFlagSet("burst", flag.ContinueOnError)
+	fs := newFlagSet("burst")
 	queue := fs.Int("queue-depth", 0, "observed queue depth")
 	breaches := fs.Int("breaches", 1, "consecutive breach intervals")
 	cost := fs.Int64("incremental-cost-microusd-hour", 0, "sourced incremental hourly cost")
@@ -1159,11 +1145,11 @@ type cliPassport struct {
 }
 
 func recipeCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 || args[0] != "create" {
+	deployment, err := commandSubject(args, 1, "usage: infercrane recipe create DEPLOYMENT --name NAME --version VERSION [--benchmark ID]")
+	if err != nil || args[0] != "create" {
 		return errors.New("usage: infercrane recipe create DEPLOYMENT --name NAME --version VERSION [--benchmark ID]")
 	}
-	deployment := args[1]
-	fs := flag.NewFlagSet("recipe create", flag.ContinueOnError)
+	fs := newFlagSet("recipe create")
 	name := fs.String("name", "", "stable recipe name")
 	recipeVersion := fs.String("version", "", "immutable recipe version")
 	benchmarkID := fs.String("benchmark", "", "specific measured benchmark ID")
@@ -1200,7 +1186,7 @@ func recipesCommand(ctx context.Context, cfg config.Config, args []string) error
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		query, args = args[0], args[1:]
 	}
-	fs := flag.NewFlagSet("recipes", flag.ContinueOnError)
+	fs := newFlagSet("recipes")
 	limit := fs.Int("limit", 20, "maximum results")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
@@ -1244,7 +1230,7 @@ func curatedRecipesCommand(args []string) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		query, args = args[0], args[1:]
 	}
-	fs := flag.NewFlagSet("recipes curated", flag.ContinueOnError)
+	fs := newFlagSet("recipes curated")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1286,7 +1272,7 @@ func modelsCommand(args []string) error {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		query, args = args[0], args[1:]
 	}
-	fs := flag.NewFlagSet("models", flag.ContinueOnError)
+	fs := newFlagSet("models")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1352,11 +1338,11 @@ func modelsCommand(args []string) error {
 }
 
 func labCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: infercrane lab MODEL_IDENTITY [flags]")
+	model, err := commandSubject(args, 0, "usage: infercrane lab MODEL_IDENTITY [flags]")
+	if err != nil {
+		return err
 	}
-	model := args[0]
-	fs := flag.NewFlagSet("lab", flag.ContinueOnError)
+	fs := newFlagSet("lab")
 	objective := fs.String("objective", "latency", "interactive, latency, throughput, or cost-efficiency")
 	workloadProfile := fs.String("profile", "", "optional benchmark workload profile")
 	ttft := fs.String("max-ttft-p95-ms", "", "optional p95 TTFT constraint in milliseconds or duration form")
@@ -1480,13 +1466,15 @@ func nestedValue(row map[string]any, object, key string) string {
 	return benchmarkValue(nested[key])
 }
 
+const passportUsage = "usage: infercrane passport keygen [--file PATH] | passport issue|list DEPLOYMENT [flags] | passport verify FILE"
+
 func passportCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 1 {
-		return errors.New("usage: infercrane passport keygen [--file PATH] | passport issue|list DEPLOYMENT [flags] | passport verify FILE")
+		return errors.New(passportUsage)
 	}
 	action := args[0]
 	if action == "keygen" {
-		fs := flag.NewFlagSet("passport keygen", flag.ContinueOnError)
+		fs := newFlagSet("passport keygen")
 		path := fs.String("file", "", "private-key destination")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -1560,15 +1548,19 @@ func passportCommand(ctx context.Context, cfg config.Config, args []string) erro
 		}
 		return nil
 	}
-	if len(args) < 2 {
-		return errors.New("deployment name is required")
+	usage := passportUsage
+	switch action {
+	case "issue":
+		usage = "usage: infercrane passport issue DEPLOYMENT [--revision ID] [--file PATH] [--output human|json]"
+	case "list":
+		usage = "usage: infercrane passport list DEPLOYMENT [--output human|json]"
 	}
-	name := args[1]
-	fs := flag.NewFlagSet("passport "+action, flag.ContinueOnError)
+	fs := newFlagSet("passport " + action)
 	revisionID := fs.String("revision", "", "revision ID; defaults to active")
 	output := fs.String("output", "human", "human or json")
 	file := fs.String("file", "", "write passport JSON to file")
-	if err := fs.Parse(args[2:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 1, usage)
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -1651,7 +1643,7 @@ func recommendCommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("usage: infercrane recommend DEPLOYMENT [--history] [--output human|json]")
 	}
 	deployment := args[0]
-	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
+	fs := newFlagSet("recommend")
 	history := fs.Bool("history", false, "list persisted history")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -1696,11 +1688,13 @@ func recommendCommand(ctx context.Context, cfg config.Config, args []string) err
 }
 
 func sloCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 || (args[0] != "get" && args[0] != "set" && args[0] != "delete") {
-		return errors.New("usage: infercrane slo get DEPLOYMENT | infercrane slo set DEPLOYMENT [threshold flags] | infercrane slo delete DEPLOYMENT")
+	const usage = "usage: infercrane slo get DEPLOYMENT | infercrane slo set DEPLOYMENT [threshold flags] | infercrane slo delete DEPLOYMENT"
+	deployment, err := commandSubject(args, 1, usage)
+	if err != nil || (args[0] != "get" && args[0] != "set" && args[0] != "delete") {
+		return errors.New(usage)
 	}
-	action, deployment := args[0], args[1]
-	fs := flag.NewFlagSet("slo "+action, flag.ContinueOnError)
+	action := args[0]
+	fs := newFlagSet("slo " + action)
 	ttft := fs.String("ttft-p95", "", "maximum p95 TTFT milliseconds")
 	latency := fs.String("latency-p95", "", "maximum p95 latency milliseconds")
 	errorRate := fs.String("error-rate", "", "maximum error ratio")
@@ -1764,7 +1758,7 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("target requires add or list")
 	}
 	if args[0] == "list" {
-		fs := flag.NewFlagSet("target list", flag.ContinueOnError)
+		fs := newFlagSet("target list")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -1794,7 +1788,7 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if args[0] != "add" || len(args) < 2 {
 		return errors.New("usage: infercrane target add NAME --url URL")
 	}
-	fs := flag.NewFlagSet("target add", flag.ContinueOnError)
+	fs := newFlagSet("target add")
 	targetURL := fs.String("url", "", "target URL")
 	provider := fs.String("provider", "existing", "existing, "+providerAdapterHelp)
 	runtimeName := fs.String("runtime", "", "runtime identity; defaults to vllm for existing targets and openai-compatible-api for external targets")
@@ -1824,11 +1818,11 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	return nil
 }
 func deployAPICommand(ctx context.Context, cfg config.Config, operationKind string, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane deploy MODEL [--cloud CLOUD --gpu GPU | --targets TARGETS]")
+	model, err := commandSubject(args, 0, "usage: infercrane "+operationKind+" MODEL [--cloud CLOUD --gpu GPU | --targets TARGETS] [--output human|json]")
+	if err != nil {
+		return err
 	}
-	model := args[0]
-	fs := flag.NewFlagSet("deploy", flag.ContinueOnError)
+	fs := newFlagSet("deploy")
 	name := fs.String("name", "", "deployment name")
 	endpointName := fs.String("endpoint", "", "stable application endpoint name (defaults to deployment name)")
 	targets := fs.String("targets", "", "comma-separated targets")
@@ -2096,9 +2090,9 @@ type releaseGuardView struct {
 }
 
 func listDeployments(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("deployments", flag.ContinueOnError)
+	fs := newFlagSet("deployments")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlagsOnly(fs, args, "usage: infercrane deployments [--output human|json]"); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2126,32 +2120,36 @@ func listDeployments(ctx context.Context, cfg config.Config, args []string) erro
 	return w.Flush()
 }
 func routeAPICommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane route DEPLOYMENT --strategy STRATEGY")
-	}
-	fs := flag.NewFlagSet("route", flag.ContinueOnError)
+	const usage = "usage: infercrane route DEPLOYMENT --strategy STRATEGY [--output human|json]; infercrane deployments shows current routing"
+	fs := newFlagSet("route")
 	strategy := fs.String("strategy", "", "routing strategy")
-	if err := fs.Parse(args[1:]); err != nil {
+	output := fs.String("output", "human", "human or json")
+	name, err := parseSubjectFlags(fs, args, 0, usage)
+	if err != nil {
+		return err
+	}
+	if err = validateOutput(*output); err != nil {
 		return err
 	}
 	if *strategy == "" {
-		return errors.New("--strategy is required")
+		return errors.New(usage)
 	}
-	if err := controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(args[0])+"/route", "", map[string]string{"strategy": *strategy}, nil); err != nil {
+	var response map[string]any
+	if err = controlJSON(ctx, cfg, http.MethodPut, "/api/v1/deployments/"+url.PathEscape(name)+"/route", "", map[string]string{"strategy": *strategy}, &response); err != nil {
 		return err
 	}
-	fmt.Printf("%s routing set to %s\n", args[0], *strategy)
+	if *output == "json" {
+		return printJSON(response)
+	}
+	fmt.Printf("%s routing set to %s\n", name, *strategy)
 	return nil
 }
 func statusCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane status DEPLOYMENT [--watch] [--output human|json]")
-	}
-	name := args[0]
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs := newFlagSet("status")
 	watch := fs.Bool("watch", false, "refresh until interrupted")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane status DEPLOYMENT [--watch] [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2188,7 +2186,7 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 				lifecycle.ServingState, lifecycle.ConvergenceState = d.ObservedState, "unknown"
 				lifecycle.ReadyReplicas, lifecycle.DesiredReplicas = healthy, d.MinReplicas
 			}
-			fmt.Printf("%s  %s · %s\nModel        %s\nRuntime      %s\nServing      %s\nConvergence  %s\nReady        %d/%d\nCapacity     %d\nProvisioning %d\nDraining     %d\nCandidate    %s\nRouting      %s\nRevision     %s\nRequests/s   %.2f\nError rate   %.1f%%\n", d.Name, terminalStatus(lifecycle.ServingState), terminalStatus(lifecycle.ConvergenceState), d.Model, d.Runtime, lifecycle.ServingState, lifecycle.ConvergenceState, lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, capacity, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, lifecycle.CandidateState, d.RoutingStrategy, d.ActiveRevisionID, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+			fmt.Printf("%s  %s · %s\nModel        %s\nRuntime      %s\nServing      %s\nConvergence  %s\nReady        %d/%d\nCapacity     %d\nProvisioning %d\nDraining     %d\nCandidate    %s\nRouting      %s\nRevision     %s\nRequests/s   %.2f\nError rate   %.1f%%\n", emptyAs(d.Name, name), terminalStatus(emptyAs(lifecycle.ServingState, "unknown")), terminalStatus(emptyAs(lifecycle.ConvergenceState, "unknown")), emptyAs(d.Model, "unknown"), emptyAs(d.Runtime, "unknown"), emptyAs(lifecycle.ServingState, "unknown"), emptyAs(lifecycle.ConvergenceState, "unknown"), lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, capacity, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, emptyAs(lifecycle.CandidateState, "none"), emptyAs(d.RoutingStrategy, "unknown"), emptyAs(d.ActiveRevisionID, "none"), view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
 			if lifecycle.BlockingOperationID != "" {
 				fmt.Printf("Operation    %s (%s)\n", lifecycle.BlockingOperationID, lifecycle.BlockingOperationKind)
 			}
@@ -2212,17 +2210,15 @@ func fetchDeployment(ctx context.Context, cfg config.Config, name string) (deplo
 	return view, err
 }
 func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane delete DEPLOYMENT [--keep-resources]")
-	}
-	fs := flag.NewFlagSet("delete", flag.ContinueOnError)
+	fs := newFlagSet("delete")
 	planOnly := fs.Bool("plan", false, "show deletion actions without mutating")
 	yes := fs.Bool("yes", false, "confirm destructive deletion")
 	wait := fs.Bool("wait", false, "wait for provider cleanup")
 	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; provider cleanup continues")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane delete DEPLOYMENT [--plan | --yes] [--wait] [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if *output != "human" && *output != "json" {
@@ -2234,10 +2230,10 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if *planOnly {
 		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence"}
 		if *output == "json" {
-			encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "actions": actions}, "", "  ")
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "actions": actions}, "", "  ")
 			fmt.Println(string(encoded))
 		} else {
-			fmt.Printf("Deletion plan: %s\n", args[0])
+			fmt.Printf("Deletion plan: %s\n", name)
 			for _, action := range actions {
 				fmt.Printf("- %s\n", action)
 			}
@@ -2248,17 +2244,17 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("deletion requires --yes; run with --plan first")
 	}
 	if *idempotencyKey == "" {
-		*idempotencyKey = fmt.Sprintf("cli-delete-%s-%d", args[0], time.Now().UnixNano())
+		*idempotencyKey = fmt.Sprintf("cli-delete-%s-%d", name, time.Now().UnixNano())
 	}
 	var response struct {
 		Operation domain.Operation `json:"operation"`
 	}
-	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(args[0]), *idempotencyKey, nil, &response); err != nil {
+	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(name), *idempotencyKey, nil, &response); err != nil {
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
 	}
 	if *wait {
 		if *output == "human" {
-			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", args[0], response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
+			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", name, response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
 		}
 		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, true)
 		if err != nil {
@@ -2267,10 +2263,10 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		response.Operation = operation
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[0], "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", args[0], response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", name, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
 	}
 	return nil
 }
@@ -2425,32 +2421,34 @@ func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg c
 }
 
 func operationCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane operation ID | operation watch ID | operation cancel ID")
+	if len(args) > 0 && args[0] == "list" {
+		return operationListCommand(ctx, cfg, args[1:])
 	}
-	if args[0] == "cancel" {
-		if len(args) != 2 {
+	if len(args) > 0 && args[0] == "cancel" {
+		operationID, err := commandSubject(args, 1, "usage: infercrane operation cancel ID")
+		if err != nil || len(args) != 2 {
 			return errors.New("usage: infercrane operation cancel ID")
 		}
-		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/operations/"+url.PathEscape(args[1])+"/cancel", "", nil, nil); err != nil {
+		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/operations/"+url.PathEscape(operationID)+"/cancel", "", nil, nil); err != nil {
 			return err
 		}
-		fmt.Printf("cancellation requested for operation %s\n", args[1])
+		fmt.Printf("cancellation requested for operation %s\n", operationID)
 		return nil
 	}
-	watch := false
-	operationID := args[0]
-	flagArgs := args[1:]
-	if args[0] == "watch" {
-		if len(args) < 2 {
-			return errors.New("usage: infercrane operation watch ID [--output human|json] [--wait-timeout DURATION]")
-		}
-		watch, operationID, flagArgs = true, args[1], args[2:]
+	watch, subjectIndex := false, 0
+	usage := "usage: infercrane operation [inspect] ID [--output human|json] | operation list | operation watch ID | operation cancel ID"
+	switch {
+	case len(args) > 0 && args[0] == "inspect":
+		subjectIndex = 1
+	case len(args) > 0 && args[0] == "watch":
+		watch, subjectIndex = true, 1
+		usage = "usage: infercrane operation watch ID [--output human|json] [--wait-timeout DURATION]"
 	}
-	fs := flag.NewFlagSet("operation", flag.ContinueOnError)
+	fs := newFlagSet("operation")
 	output := fs.String("output", "human", "human or json")
 	waitTimeout := fs.Duration("wait-timeout", 0, "stop watching locally after this duration without cancelling the operation")
-	if err := fs.Parse(flagArgs); err != nil {
+	operationID, err := parseSubjectFlags(fs, args, subjectIndex, usage)
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2461,7 +2459,6 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	var op domain.Operation
 	if watch {
-		var err error
 		op, err = waitForOperationWithin(ctx, *waitTimeout, cfg, operationID, true)
 		if err != nil {
 			return err
@@ -2491,6 +2488,70 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 		next = op.NextAttemptAt.Format(time.RFC3339)
 	}
 	fmt.Printf("%s  %s\nPhase      %s\nKind       %s\nResource   %s/%s\nProgress   %d%%\nChecks     %d/%d\nElapsed    %s\nUpdated    %s\nNext check %s\nMessage    %s\nRetryable  %t\nCancel     %t\n", op.ID, strings.ToUpper(op.Status), operationPhase(op), op.Kind, op.ResourceType, op.ResourceName, op.Progress, op.Attempt, op.MaxAttempts, elapsed, updated, next, op.Message, op.Retryable, op.CancelRequested)
+	return nil
+}
+
+// operationListCommand shows recent durable operations, newest first, so an
+// operation can be found without already knowing its ID.
+func operationListCommand(ctx context.Context, cfg config.Config, args []string) error {
+	const usage = "usage: infercrane operation list [--limit N] [--before RFC3339_TIME] [--output human|json]"
+	fs := newFlagSet("operation list")
+	limit := fs.Int("limit", 20, "maximum operations to list, newest first (1-500)")
+	before := fs.String("before", "", "list only operations created before this RFC3339 time")
+	output := fs.String("output", "human", "human or json")
+	if err := parseFlagsOnly(fs, args, usage); err != nil {
+		return err
+	}
+	if err := validateOutput(*output); err != nil {
+		return err
+	}
+	if *limit < 1 || *limit > 500 {
+		return errors.New("--limit must be between 1 and 500")
+	}
+	query := url.Values{"limit": {strconv.Itoa(*limit)}}
+	if *before != "" {
+		cursor, err := time.Parse(time.RFC3339Nano, *before)
+		if err != nil {
+			return errors.New("--before must be an RFC3339 time")
+		}
+		query.Set("before", cursor.UTC().Format(time.RFC3339Nano))
+	}
+	response := struct {
+		Data []domain.Operation `json:"data"`
+	}{}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations?"+query.Encode(), "", nil, &response); err != nil {
+		return err
+	}
+	if response.Data == nil {
+		response.Data = []domain.Operation{}
+	}
+	if *output == "json" {
+		return printJSON(response)
+	}
+	if len(response.Data) == 0 {
+		fmt.Println("No durable operations found.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tKIND\tRESOURCE\tSTATUS\tPROGRESS\tCREATED")
+	for _, op := range response.Data {
+		resource := "unknown"
+		if op.ResourceType != "" || op.ResourceName != "" {
+			resource = emptyAs(op.ResourceType, "unknown") + "/" + emptyAs(op.ResourceName, "unknown")
+		}
+		created := "unknown"
+		if !op.CreatedAt.IsZero() {
+			created = op.CreatedAt.Format(time.RFC3339)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d%%\t%s\n", op.ID, emptyAs(op.Kind, "unknown"), resource, emptyAs(op.Status, "unknown"), op.Progress, created)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if last := response.Data[len(response.Data)-1]; len(response.Data) == *limit && !last.CreatedAt.IsZero() {
+		fmt.Printf("\nOlder operations: infercrane operation list --before %s\n", last.CreatedAt.UTC().Format(time.RFC3339Nano))
+	}
+	fmt.Println("Inspect one: infercrane operation ID")
 	return nil
 }
 
@@ -2546,7 +2607,7 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 || args[0] != "status" {
 		return errors.New("usage: infercrane auth status [--output human|json]")
 	}
-	fs := flag.NewFlagSet("auth status", flag.ContinueOnError)
+	fs := newFlagSet("auth status")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -2577,9 +2638,9 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 }
 
 func orphanAPICommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("orphans", flag.ContinueOnError)
+	fs := newFlagSet("orphans")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlagsOnly(fs, args, "usage: infercrane orphans [--output human|json]"); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2613,9 +2674,12 @@ func orphanAPICommand(ctx context.Context, cfg config.Config, args []string) err
 }
 
 func integrationsCommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("integrations", flag.ContinueOnError)
+	if len(args) > 0 && args[0] == "list" {
+		args = args[1:]
+	}
+	fs := newFlagSet("integrations")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlagsOnly(fs, args, "usage: infercrane integrations [list] [--output human|json]"); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2668,9 +2732,9 @@ func systemCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if len(args) == 0 || args[0] != "instances" {
 		return errors.New("usage: infercrane system instances [--output human|json]")
 	}
-	fs := flag.NewFlagSet("system instances", flag.ContinueOnError)
+	fs := newFlagSet("system instances")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := parseFlagsOnly(fs, args[1:], "usage: infercrane system instances [--output human|json]"); err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -2704,7 +2768,7 @@ func tenantAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if len(args) < 2 || args[0] != "create" {
 		return errors.New("usage: infercrane tenant create ID [--name NAME]")
 	}
-	fs := flag.NewFlagSet("tenant create", flag.ContinueOnError)
+	fs := newFlagSet("tenant create")
 	name := fs.String("name", args[1], "tenant display name")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -2726,7 +2790,7 @@ func principalAPICommand(ctx context.Context, cfg config.Config, args []string) 
 		if len(args) < 2 {
 			return errors.New("usage: infercrane principal create NAME --role ROLE")
 		}
-		fs := flag.NewFlagSet("principal create", flag.ContinueOnError)
+		fs := newFlagSet("principal create")
 		role := fs.String("role", "", "principal role")
 		scopes := fs.String("scopes", "", "comma-separated scopes (defaults to the role ceiling)")
 		if err := fs.Parse(args[2:]); err != nil {
@@ -2790,7 +2854,7 @@ func secretAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		if len(args) < 2 {
 			return errors.New("usage: infercrane secret create NAME --from-env VARIABLE")
 		}
-		fs := flag.NewFlagSet("secret create", flag.ContinueOnError)
+		fs := newFlagSet("secret create")
 		fromEnv := fs.String("from-env", "", "environment variable containing the secret")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
@@ -2815,7 +2879,7 @@ func secretAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		fmt.Printf("secret reference %s created\nResolver  env:%s\n", response.Secret.ID, response.Secret.Reference)
 		return nil
 	case "list":
-		fs := flag.NewFlagSet("secret list", flag.ContinueOnError)
+		fs := newFlagSet("secret list")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -2842,7 +2906,7 @@ func secretAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		if len(args) < 2 {
 			return errors.New("usage: infercrane secret delete ID --yes")
 		}
-		fs := flag.NewFlagSet("secret delete", flag.ContinueOnError)
+		fs := newFlagSet("secret delete")
 		yes := fs.Bool("yes", false, "confirm deletion")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
@@ -2861,13 +2925,13 @@ func secretAPICommand(ctx context.Context, cfg config.Config, args []string) err
 }
 
 func externalAPICommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: infercrane external configure DEPLOYMENT [flags] | external inspect DEPLOYMENT [--output human|json]")
+	deployment, err := commandSubject(args, 1, "usage: infercrane external configure DEPLOYMENT [flags] | external inspect DEPLOYMENT [--output human|json]")
+	if err != nil {
+		return err
 	}
-	deployment := args[1]
 	switch args[0] {
 	case "configure":
-		fs := flag.NewFlagSet("external configure", flag.ContinueOnError)
+		fs := newFlagSet("external configure")
 		target := fs.String("target", "", "attached external target name")
 		adapter := fs.String("adapter", "openrouter", providerAdapterHelp)
 		secretReference := fs.String("secret-reference", "", "secret reference ID")
@@ -2930,7 +2994,7 @@ func externalAPICommand(ctx context.Context, cfg config.Config, args []string) e
 		fmt.Printf("External fallback %s\nDeployment       %s\nAdapter          %s\nMode             %s\nRequests         %d hard limit\nCost reservation $%s hard limit\nPrivacy          acknowledged\n", state, deployment, response.Policy.Adapter, response.Policy.OverflowMode, response.Policy.RequestLimit, formatMicrousd(response.Policy.CostLimitMicrousd))
 		return nil
 	case "inspect":
-		fs := flag.NewFlagSet("external inspect", flag.ContinueOnError)
+		fs := newFlagSet("external inspect")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
@@ -2989,18 +3053,16 @@ func formatMicrousd(value int64) string {
 }
 
 func inspectCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane inspect DEPLOYMENT [--output human|json]")
-	}
-	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	fs := newFlagSet("inspect")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane inspect DEPLOYMENT [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	view, err := fetchDeployment(ctx, cfg, args[0])
+	view, err := fetchDeployment(ctx, cfg, name)
 	if err != nil {
 		return err
 	}
@@ -3012,7 +3074,7 @@ func inspectCommand(ctx context.Context, cfg config.Config, args []string) error
 	if *output != "human" {
 		return errors.New("--output must be human or json")
 	}
-	fmt.Printf("%s\nModel      %s\nRuntime    %s\nActive     %s\nCandidate  %s\n", view.Deployment.Name, view.Deployment.Model, view.Deployment.Runtime, view.Deployment.ActiveRevisionID, emptyAs(view.Deployment.CandidateRevisionID, "none"))
+	fmt.Printf("%s\nModel      %s\nRuntime    %s\nActive     %s\nCandidate  %s\n", emptyAs(view.Deployment.Name, name), emptyAs(view.Deployment.Model, "unknown"), emptyAs(view.Deployment.Runtime, "unknown"), emptyAs(view.Deployment.ActiveRevisionID, "none"), emptyAs(view.Deployment.CandidateRevisionID, "none"))
 	for _, modelArtifact := range view.ModelArtifacts {
 		if modelArtifact.RevisionID == view.Deployment.ActiveRevisionID {
 			fmt.Printf("Artifact   %s\nCache      %s\n", modelArtifact.ModelIdentity, modelArtifact.CacheState)
@@ -3121,18 +3183,16 @@ func deploymentEvents(ctx context.Context, cfg config.Config, name string) ([]cl
 }
 
 func eventsCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane events DEPLOYMENT [--output human|json]")
-	}
-	fs := flag.NewFlagSet("events", flag.ContinueOnError)
+	fs := newFlagSet("events")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane events DEPLOYMENT [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	events, err := deploymentEvents(ctx, cfg, args[0])
+	events, err := deploymentEvents(ctx, cfg, name)
 	if err != nil {
 		return err
 	}
@@ -3151,16 +3211,13 @@ func eventsCommand(ctx context.Context, cfg config.Config, args []string) error 
 }
 
 func logsCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane logs DEPLOYMENT [--follow] [--since DURATION] [--type TYPE] [--output human|json]")
-	}
-	name := args[0]
-	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	fs := newFlagSet("logs")
 	follow := fs.Bool("follow", false, "continue streaming new events")
 	since := fs.Duration("since", 0, "show events newer than this duration")
 	eventType := fs.String("type", "", "filter by event type or type prefix")
-	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	output := fs.String("output", "human", "human, or json for JSON Lines: one event object per line")
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane logs DEPLOYMENT [--follow] [--since DURATION] [--type TYPE] [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -3189,7 +3246,10 @@ func logsCommand(ctx context.Context, cfg config.Config, args []string) error {
 			}
 			seen[identity] = struct{}{}
 			if *output == "json" {
-				encoded, _ := json.Marshal(event)
+				encoded, err := json.Marshal(event)
+				if err != nil {
+					return err
+				}
 				fmt.Println(string(encoded))
 			} else {
 				fmt.Printf("%s  %-24s %s\n", event.CreatedAt.Format("15:04:05"), event.Type, event.Summary)
@@ -3210,16 +3270,13 @@ func requestCommand(ctx context.Context, cfg config.Config, args []string) error
 	if len(args) > 0 && args[0] == "inspect" {
 		return requestInspectCommand(ctx, cfg, args[1:])
 	}
-	if len(args) == 0 {
-		return errors.New("usage: infercrane request ENDPOINT [--protocol chat|responses|embeddings|completions|batch] [--message TEXT] [--stream] [--output human|json]")
-	}
-	name := args[0]
-	fs := flag.NewFlagSet("request", flag.ContinueOnError)
+	fs := newFlagSet("request")
 	message := fs.String("message", "Say hello in one sentence.", "user message")
 	protocol := fs.String("protocol", "chat", "chat, responses, embeddings, completions, or batch")
 	stream := fs.Bool("stream", false, "stream response text as it arrives")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane request ENDPOINT [--protocol chat|responses|embeddings|completions|batch] [--message TEXT] [--stream] [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -3349,17 +3406,11 @@ func decodedInferenceBody(body io.Reader) (io.Reader, error) {
 }
 
 func requestInspectCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane request inspect REQUEST_ID [--output human|json]")
-	}
-	requestID := args[0]
-	fs := flag.NewFlagSet("request inspect", flag.ContinueOnError)
+	fs := newFlagSet("request inspect")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	requestID, err := parseSubjectFlags(fs, args, 0, "usage: infercrane request inspect REQUEST_ID [--output human|json]")
+	if err != nil {
 		return err
-	}
-	if fs.NArg() != 0 || requestID == "" {
-		return errors.New("usage: infercrane request inspect REQUEST_ID [--output human|json]")
 	}
 	var response map[string]any
 	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/requests/"+url.PathEscape(requestID), "", nil, &response); err != nil {
@@ -3420,38 +3471,33 @@ func printStream(body io.Reader) error {
 }
 
 func explainCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane explain DEPLOYMENT [--output human|json]")
-	}
-	if args[0] == "scaling" {
+	if len(args) > 0 && args[0] == "scaling" {
 		return explainScalingCommand(ctx, cfg, args[1:])
 	}
-	if args[0] == "cold-start" {
-		if len(args) < 2 {
-			return errors.New("usage: infercrane explain cold-start DEPLOYMENT [--output human|json]")
-		}
-		fs := flag.NewFlagSet("explain cold-start", flag.ContinueOnError)
+	if len(args) > 0 && args[0] == "cold-start" {
+		fs := newFlagSet("explain cold-start")
 		output := fs.String("output", "human", "human or json")
-		if err := fs.Parse(args[2:]); err != nil {
+		name, err := parseSubjectFlags(fs, args, 1, "usage: infercrane explain cold-start DEPLOYMENT [--output human|json]")
+		if err != nil {
 			return err
 		}
 		if err := validateOutput(*output); err != nil {
 			return err
 		}
-		view, err := fetchDeployment(ctx, cfg, args[1])
+		view, err := fetchDeployment(ctx, cfg, name)
 		if err != nil {
 			return err
 		}
 		stats := view.ColdStartStats
 		if *output == "json" {
-			encoded, _ := json.MarshalIndent(map[string]any{"deployment": args[1], "cold_start": stats}, "", "  ")
+			encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "cold_start": stats}, "", "  ")
 			fmt.Println(string(encoded))
 			return nil
 		}
 		if *output != "human" {
 			return errors.New("--output must be human or json")
 		}
-		fmt.Printf("%s cold-start evidence\nClassified requests  %d\nCold starts          %d\nWarm requests        %d\n", args[1], stats.ClassifiedRequests, stats.ColdStarts, stats.WarmRequests)
+		fmt.Printf("%s cold-start evidence\nClassified requests  %d\nCold starts          %d\nWarm requests        %d\n", name, stats.ClassifiedRequests, stats.ColdStarts, stats.WarmRequests)
 		if stats.ColdTTFTP50MS != nil {
 			fmt.Printf("Cold TTFT p50        %.1fms\n", *stats.ColdTTFTP50MS)
 		}
@@ -3482,18 +3528,19 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 		fmt.Printf("Evidence             %s\n", stats.Evidence)
 		return nil
 	}
-	if args[0] == "rollout" {
+	if len(args) > 0 && args[0] == "rollout" {
 		return explainRolloutCommand(ctx, cfg, args[1:])
 	}
-	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
+	fs := newFlagSet("explain")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane explain [scaling|rollout|cold-start] DEPLOYMENT [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	view, err := fetchDeployment(ctx, cfg, args[0])
+	view, err := fetchDeployment(ctx, cfg, name)
 	if err != nil {
 		return err
 	}
@@ -3533,18 +3580,16 @@ func explainCommand(ctx context.Context, cfg config.Config, args []string) error
 }
 
 func explainRolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane explain rollout DEPLOYMENT [--output human|json]")
-	}
-	fs := flag.NewFlagSet("explain rollout", flag.ContinueOnError)
+	fs := newFlagSet("explain rollout")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane explain rollout DEPLOYMENT [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	view, err := fetchDeployment(ctx, cfg, args[0])
+	view, err := fetchDeployment(ctx, cfg, name)
 	if err != nil {
 		return err
 	}
@@ -3600,12 +3645,10 @@ func explainRolloutCommand(ctx context.Context, cfg config.Config, args []string
 }
 
 func explainScalingCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane explain scaling DEPLOYMENT [--output human|json]")
-	}
-	fs := flag.NewFlagSet("explain scaling", flag.ContinueOnError)
+	fs := newFlagSet("explain scaling")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane explain scaling DEPLOYMENT [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
@@ -3622,7 +3665,7 @@ func explainScalingCommand(ctx context.Context, cfg config.Config, args []string
 			CreatedAt   time.Time       `json:"created_at"`
 		} `json:"data"`
 	}
-	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(args[0])+"/scaling-decisions?limit=20", "", nil, &response); err != nil {
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name)+"/scaling-decisions?limit=20", "", nil, &response); err != nil {
 		return err
 	}
 	if *output == "json" {
@@ -3634,11 +3677,11 @@ func explainScalingCommand(ctx context.Context, cfg config.Config, args []string
 		return errors.New("--output must be human or json")
 	}
 	if len(response.Data) == 0 {
-		fmt.Printf("%s has no persisted scaling evaluation yet\n", args[0])
+		fmt.Printf("%s has no persisted scaling evaluation yet\n", name)
 		return nil
 	}
 	latest := response.Data[0]
-	fmt.Printf("%s scaling: %s\nReplicas    %d -> %d\nReason      %s\nSignals     %s\nEvaluated   %s\n", args[0], latest.Action, latest.OldReplicas, latest.NewReplicas, latest.Reason, latest.Signals, latest.CreatedAt.Format(time.RFC3339))
+	fmt.Printf("%s scaling: %s\nReplicas    %d -> %d\nReason      %s\nSignals     %s\nEvaluated   %s\n", name, latest.Action, latest.OldReplicas, latest.NewReplicas, latest.Reason, latest.Signals, latest.CreatedAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -3650,19 +3693,19 @@ func emptyAs(value, fallback string) string {
 }
 
 func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 2 {
-		return errors.New("usage: infercrane rollout inspect|policy|create|provision|validate|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]")
+	if _, err := commandSubject(args, 1, "usage: infercrane rollout inspect|policy|create|provision|validate|evaluate|promote|reject|rollback DEPLOYMENT [REVISION] [flags]"); err != nil {
+		return err
 	}
 	if args[0] == "policy" && args[1] == "set" {
-		if len(args) < 3 {
-			return errors.New("usage: infercrane rollout policy set DEPLOYMENT [policy flags]")
+		name, err := commandSubject(args, 2, "usage: infercrane rollout policy set DEPLOYMENT [policy flags]")
+		if err != nil {
+			return err
 		}
-		name := args[2]
 		var policy domain.ReleaseGuardPolicy
 		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/deployments/"+url.PathEscape(name)+"/release-guard/policy", "", nil, &policy); err != nil {
 			return err
 		}
-		fs := flag.NewFlagSet("rollout policy set", flag.ContinueOnError)
+		fs := newFlagSet("rollout policy set")
 		enabled := fs.Bool("enabled", policy.Enabled, "enable Release Guard")
 		compatibility := fs.Bool("require-compatibility", policy.RequireCompatibilityEvidence, "require comparable model/runtime evidence")
 		synthetic := fs.Bool("require-synthetic", policy.RequireSyntheticEvidence, "require bounded AIPerf validation")
@@ -3734,7 +3777,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	}
 	action, name := args[0], args[1]
 	if action == "inspect" || action == "policy" {
-		fs := flag.NewFlagSet("rollout inspect", flag.ContinueOnError)
+		fs := newFlagSet("rollout inspect")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
@@ -3810,7 +3853,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		return nil
 	}
 
-	fs := flag.NewFlagSet("rollout "+action, flag.ContinueOnError)
+	fs := newFlagSet("rollout " + action)
 	output := fs.String("output", "human", "human or json")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
 	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")

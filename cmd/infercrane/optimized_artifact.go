@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,7 +44,7 @@ func optimizedArtifactCommand(ctx context.Context, cfg config.Config, args []str
 	if action == "plan" {
 		return optimizedArtifactPlanCommand(ctx, cfg, args[1:])
 	}
-	fs := flag.NewFlagSet("artifact optimize "+action, flag.ContinueOnError)
+	fs := newFlagSet("artifact optimize " + action)
 	limit := fs.Int("limit", 20, "maximum optimized artifacts")
 	state := fs.String("state", "ready", "ready or failed")
 	outputRepository := fs.String("output-repository", "", "immutable optimized output repository")
@@ -131,7 +130,7 @@ func optimizedArtifactPlanCommand(ctx context.Context, cfg config.Config, args [
 		return errors.New("usage: infercrane artifact optimize plan BASE_ARTIFACT --preset fp8|awq|gptq|nvfp4|eagle3|mtp|dflash --tool-version VERSION --builder-image-digest sha256:... --license-spdx SPDX")
 	}
 	baseArtifactID := args[0]
-	fs := flag.NewFlagSet("artifact optimize plan", flag.ContinueOnError)
+	fs := newFlagSet("artifact optimize plan")
 	preset := fs.String("preset", "", "fp8, awq, gptq, nvfp4, eagle3, mtp, or dflash")
 	planFile := fs.String("plan-file", "", "advanced complete optimized-artifact plan JSON")
 	toolVersion := fs.String("tool-version", "", "exact external builder version")

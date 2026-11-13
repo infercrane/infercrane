@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -48,7 +47,7 @@ type inboxEndpoint struct {
 }
 
 func inboxCommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
+	fs := newFlagSet("inbox")
 	limit := fs.Int("limit", 50, "maximum attention items")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {

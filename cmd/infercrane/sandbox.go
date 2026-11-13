@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -32,7 +31,7 @@ func sandboxCommand(ctx context.Context, cfg config.Config, args []string) error
 }
 
 func sandboxConnect(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("sandbox connect", flag.ContinueOnError)
+	fs := newFlagSet("sandbox connect")
 	provider := fs.String("provider", "", "external sandbox provider or adapter name")
 	externalID := fs.String("external-id", "", "externally owned sandbox identity")
 	externalRevision := fs.String("external-revision", "", "optional immutable sandbox template or revision")
@@ -71,7 +70,7 @@ func sandboxConnect(ctx context.Context, cfg config.Config, args []string) error
 }
 
 func sandboxList(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("sandbox list", flag.ContinueOnError)
+	fs := newFlagSet("sandbox list")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -103,7 +102,7 @@ func sandboxRotate(ctx context.Context, cfg config.Config, args []string) error 
 	if len(args) < 1 {
 		return errors.New("usage: infercrane sandbox rotate REFERENCE_ID [--output human|json]")
 	}
-	fs := flag.NewFlagSet("sandbox rotate", flag.ContinueOnError)
+	fs := newFlagSet("sandbox rotate")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -133,7 +132,7 @@ func sandboxRevoke(ctx context.Context, cfg config.Config, args []string) error 
 	if len(args) < 1 {
 		return errors.New("usage: infercrane sandbox revoke REFERENCE_ID --yes")
 	}
-	fs := flag.NewFlagSet("sandbox revoke", flag.ContinueOnError)
+	fs := newFlagSet("sandbox revoke")
 	yes := fs.Bool("yes", false, "confirm InferCrane credential revocation")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
