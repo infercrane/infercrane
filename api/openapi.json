@@ -4439,6 +4439,984 @@
         ],
         "type": "object"
       },
+      "OptimizationCampaignReport": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm_version": {
+            "type": "string"
+          },
+          "appendix": {
+            "additionalProperties": false,
+            "properties": {
+              "baseline": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "accelerator": {
+                        "type": "string"
+                      },
+                      "accelerator_class": {
+                        "description": "simulated_cpu numbers are never GPU results.",
+                        "enum": [
+                          "gpu",
+                          "simulated_cpu",
+                          "unknown"
+                        ],
+                        "type": "string"
+                      },
+                      "accelerator_count": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "args": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "candidate_id": {
+                        "type": "string"
+                      },
+                      "compute_mode": {
+                        "type": "string"
+                      },
+                      "deployment_name": {
+                        "type": "string"
+                      },
+                      "engine": {
+                        "type": "string"
+                      },
+                      "engine_version": {
+                        "type": "string"
+                      },
+                      "hourly_usd_per_replica": {
+                        "description": "Sourced hourly price divided by the quoted maximum replica count; null without a sourced price.",
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "max_replicas": {
+                        "type": "integer"
+                      },
+                      "min_replicas": {
+                        "type": "integer"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "price_source": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string"
+                      },
+                      "revision_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id",
+                      "label",
+                      "model",
+                      "engine",
+                      "engine_version",
+                      "args",
+                      "accelerator",
+                      "accelerator_count",
+                      "accelerator_class",
+                      "provider",
+                      "min_replicas",
+                      "max_replicas",
+                      "hourly_usd_per_replica"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "evidence": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "digest": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "digest"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "winner": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "accelerator": {
+                        "type": "string"
+                      },
+                      "accelerator_class": {
+                        "description": "simulated_cpu numbers are never GPU results.",
+                        "enum": [
+                          "gpu",
+                          "simulated_cpu",
+                          "unknown"
+                        ],
+                        "type": "string"
+                      },
+                      "accelerator_count": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "args": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "candidate_id": {
+                        "type": "string"
+                      },
+                      "compute_mode": {
+                        "type": "string"
+                      },
+                      "deployment_name": {
+                        "type": "string"
+                      },
+                      "engine": {
+                        "type": "string"
+                      },
+                      "engine_version": {
+                        "type": "string"
+                      },
+                      "hourly_usd_per_replica": {
+                        "description": "Sourced hourly price divided by the quoted maximum replica count; null without a sourced price.",
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "image": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "max_replicas": {
+                        "type": "integer"
+                      },
+                      "min_replicas": {
+                        "type": "integer"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "price_source": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string"
+                      },
+                      "revision_id": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidate_id",
+                      "label",
+                      "model",
+                      "engine",
+                      "engine_version",
+                      "args",
+                      "accelerator",
+                      "accelerator_count",
+                      "accelerator_class",
+                      "provider",
+                      "min_replicas",
+                      "max_replicas",
+                      "hourly_usd_per_replica"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "winner",
+              "baseline",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          "banner": {
+            "description": "Fixed text every renderer must show: present only for simulated or CPU runs.",
+            "type": "string"
+          },
+          "bottleneck": {
+            "additionalProperties": false,
+            "properties": {
+              "gpu_telemetry": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "signals": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "baseline": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "stat": {
+                      "type": "string"
+                    },
+                    "unit": {
+                      "type": "string"
+                    },
+                    "winner": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "stat",
+                    "baseline",
+                    "winner"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "source": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "measured",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "source",
+              "gpu_telemetry",
+              "signals"
+            ],
+            "type": "object"
+          },
+          "campaign_id": {
+            "type": "string"
+          },
+          "campaign_state": {
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cost_per_million_output_tokens": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "failure_code": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "latency_p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "output_tokens_per_second": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "requests_per_second": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "role": {
+                  "enum": [
+                    "baseline",
+                    "baseline_kept",
+                    "winner",
+                    "candidate"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "tpot_p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "ttft_p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "versus_baseline": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "change_percent": {
+                          "type": "number"
+                        },
+                        "decision": {
+                          "enum": [
+                            "improved",
+                            "regressed",
+                            "no_measurable_difference",
+                            "unchanged",
+                            "unknown"
+                          ],
+                          "type": "string"
+                        },
+                        "metric": {
+                          "type": "string"
+                        },
+                        "noise_floor_percent": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "metric",
+                        "change_percent",
+                        "noise_floor_percent",
+                        "decision"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "role",
+                "state",
+                "output_tokens_per_second",
+                "requests_per_second",
+                "ttft_p95_ms",
+                "tpot_p95_ms",
+                "latency_p95_ms",
+                "cost_per_million_output_tokens",
+                "versus_baseline"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "finished": {
+            "type": "boolean"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "baseline": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "basis": {
+                  "enum": [
+                    "interleaved_control",
+                    "separate_runs",
+                    "baseline_kept",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "change_percent": {
+                  "description": "Winner relative to baseline, in percent.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "decision": {
+                  "enum": [
+                    "improved",
+                    "regressed",
+                    "no_measurable_difference",
+                    "unchanged",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "higher_is_better": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "enum": [
+                    "cost_per_million_output_tokens",
+                    "ttft_p95_ms",
+                    "output_tokens_per_second_per_user",
+                    "output_tokens_per_second_per_accelerator",
+                    "requests_per_second"
+                  ],
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "noise_floor_percent": {
+                  "description": "Noise floor from the interleaved control runs; null without them.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "winner": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "label",
+                "unit",
+                "higher_is_better",
+                "baseline",
+                "winner",
+                "change_percent",
+                "noise_floor_percent",
+                "decision",
+                "basis"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "model_identity": {
+            "type": "string"
+          },
+          "monthly": {
+            "additionalProperties": false,
+            "properties": {
+              "assumption": {
+                "type": "string"
+              },
+              "baseline_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "basis": {
+                "enum": [
+                  "replayed_traffic",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "change_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "change_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "decision": {
+                "enum": [
+                  "improved",
+                  "regressed",
+                  "no_measurable_difference",
+                  "unchanged",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "hours_per_month": {
+                "type": "number"
+              },
+              "monthly_output_tokens": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "output_tokens_in_window": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requests_in_window": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "trace_digest": {
+                "type": "string"
+              },
+              "window_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "winner_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "basis",
+              "window_seconds",
+              "requests_in_window",
+              "output_tokens_in_window",
+              "monthly_output_tokens",
+              "hours_per_month",
+              "baseline_usd",
+              "winner_usd",
+              "change_usd",
+              "change_percent",
+              "decision"
+            ],
+            "type": "object"
+          },
+          "noise": {
+            "additionalProperties": false,
+            "properties": {
+              "basis": {
+                "enum": [
+                  "interleaved_control",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "candidate_id": {
+                "type": "string"
+              },
+              "candidate_runs": {
+                "type": "integer"
+              },
+              "control_drift_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "control_runs": {
+                "type": "integer"
+              },
+              "drift_limit_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "objective_change_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "objective_decision": {
+                "enum": [
+                  "improved",
+                  "regressed",
+                  "no_measurable_difference",
+                  "unchanged",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "objective_metric": {
+                "type": "string"
+              },
+              "objective_noise_floor_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "basis",
+              "control_runs",
+              "candidate_runs",
+              "control_drift_percent",
+              "drift_limit_percent",
+              "objective_change_percent",
+              "objective_noise_floor_percent",
+              "objective_decision"
+            ],
+            "type": "object"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "outcome": {
+            "additionalProperties": false,
+            "properties": {
+              "activated": {
+                "type": "boolean"
+              },
+              "baseline_candidate_id": {
+                "type": "string"
+              },
+              "baseline_label": {
+                "type": "string"
+              },
+              "headline": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "winner_selected",
+                  "baseline_kept",
+                  "no_winner",
+                  "in_progress",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "winner_candidate_id": {
+                "type": "string"
+              },
+              "winner_label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "headline",
+              "baseline_candidate_id",
+              "baseline_label",
+              "winner_candidate_id",
+              "winner_label",
+              "activated"
+            ],
+            "type": "object"
+          },
+          "quality": {
+            "additionalProperties": false,
+            "properties": {
+              "baseline_score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "basis": {
+                "enum": [
+                  "release_guard",
+                  "campaign_quality_gate",
+                  "baseline_kept",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "block_threshold_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "delta": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "eval": {
+                "type": "string"
+              },
+              "evals": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "baseline_score": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "delta": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "evaluator": {
+                      "type": "string"
+                    },
+                    "follow_up": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "regression_percent": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "suite": {
+                      "type": "string"
+                    },
+                    "verdict": {
+                      "enum": [
+                        "PASS",
+                        "WATCH",
+                        "BLOCK",
+                        "UNKNOWN"
+                      ],
+                      "type": "string"
+                    },
+                    "winner_score": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "suite",
+                    "evaluator",
+                    "verdict",
+                    "baseline_score",
+                    "winner_score",
+                    "delta",
+                    "regression_percent",
+                    "message"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "regression_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "release_guard_evaluation_id": {
+                "type": "string"
+              },
+              "verdict": {
+                "enum": [
+                  "PASS",
+                  "WATCH",
+                  "BLOCK",
+                  "UNKNOWN"
+                ],
+                "type": "string"
+              },
+              "watch_threshold_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "winner_score": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "verdict",
+              "basis",
+              "baseline_score",
+              "winner_score",
+              "delta",
+              "regression_percent",
+              "watch_threshold_percent",
+              "block_threshold_percent",
+              "evals"
+            ],
+            "type": "object"
+          },
+          "report_digest": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "infercrane.optimization-report/v1",
+            "type": "string"
+          },
+          "simulated_accelerator": {
+            "description": "True when any setup ran on a simulated accelerator or a CPU. Its numbers prove the pipeline, not GPU speed.",
+            "type": "boolean"
+          },
+          "unknown": {
+            "description": "Paths of report fields whose input is missing or incomparable.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "concurrency": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "profile": {
+                "type": "string"
+              },
+              "requests_per_run": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "concurrency",
+              "requests_per_run"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "algorithm_version",
+          "campaign_id",
+          "model_identity",
+          "objective",
+          "intent",
+          "campaign_state",
+          "finished",
+          "simulated_accelerator",
+          "outcome",
+          "metrics",
+          "quality",
+          "noise",
+          "monthly",
+          "workload",
+          "candidates",
+          "bottleneck",
+          "appendix",
+          "unknown",
+          "report_digest"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignReportEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "$ref": "#/components/schemas/OptimizationCampaignReport"
+          }
+        },
+        "required": [
+          "report"
+        ],
+        "type": "object"
+      },
       "OptimizationProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12654,6 +13632,53 @@
           }
         ],
         "summary": "Cancel future campaign work and require cleanup",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}/report": {
+      "get": {
+        "operationId": "getOptimizationCampaignReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationCampaignReportEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compare the baseline and the winning setup of one campaign on cost, speed, and answer quality",
         "tags": [
           "Inference optimization"
         ]

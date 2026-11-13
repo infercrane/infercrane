@@ -183,7 +183,7 @@ func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.Op
 // store failure is returned instead, so a transient error is retried rather
 // than persisted as a weaker measurement that adoption would then reuse.
 func (e BenchmarkExecutor) controlTarget(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) (*armTarget, ControlEvidence, error) {
-	control, found := campaignControl(campaign)
+	control, found := CampaignControl(campaign)
 	if !found {
 		return nil, ControlEvidence{Role: ControlRoleUnavailable, Reason: "the campaign has no control candidate"}, nil
 	}

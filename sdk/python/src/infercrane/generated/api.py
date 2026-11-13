@@ -423,6 +423,10 @@ class ControlAPI:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def get_optimization_campaign_report(self, id: str) -> dict[str, Any]:
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/report"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def approve_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/approve"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))

@@ -56,7 +56,7 @@ type rankingCost struct {
 func applyControlGate(campaign domain.OptimizationCampaign, objective string, rows []lab.Candidate, evidenceToCandidate map[string]string, benchmarks map[string]domain.BenchmarkResult, labSelected string) controlGate {
 	gate := controlGate{selected: labSelected, reasons: map[string]string{}, codes: map[string]string{}, assessments: map[string]ControlAssessment{}}
 	metric, higherBetter, costScaled := objectiveMetric(objective)
-	control, hasControl := campaignControl(campaign)
+	control, hasControl := CampaignControl(campaign)
 	byCandidate := map[string]lab.Candidate{}
 	for _, row := range rows {
 		byCandidate[evidenceToCandidate[row.EvidenceID]] = row
