@@ -278,7 +278,7 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 // candidate in its submitted order. Order affects measurement scheduling only;
 // ranking is computed over the complete measured set.
 func controlFirst(campaign domain.OptimizationCampaign, candidates []string) []string {
-	control, found := campaignControl(campaign)
+	control, found := CampaignControl(campaign)
 	if !found {
 		return candidates
 	}

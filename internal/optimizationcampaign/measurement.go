@@ -417,10 +417,11 @@ func boundedReason(err error) string {
 	return message
 }
 
-// campaignControl is the candidate every other candidate must measurably
+// CampaignControl is the candidate every other candidate must measurably
 // beat: the proposal's starting point, which recipe search pins to its control
 // arm. Its role comes from the immutable proposal, never from measurements.
-func campaignControl(campaign domain.OptimizationCampaign) (domain.OptimizationCandidateRun, bool) {
+// Outcome reports use it as the baseline.
+func CampaignControl(campaign domain.OptimizationCampaign) (domain.OptimizationCandidateRun, bool) {
 	var proposal optimizer.Proposal
 	if json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) != nil || proposal.StartingPoint == nil || proposal.StartingPoint.CandidateID == "" {
 		return domain.OptimizationCandidateRun{}, false
