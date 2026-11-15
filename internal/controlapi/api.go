@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -387,7 +388,12 @@ type API struct {
 	// InferCrane Cloud. Browser input can select the mode, never the margin or
 	// provider account.
 	ManagedDeployments managedbilling.DeploymentPolicy
-	ComputeConnections interface {
+	// OperatorComputeTenants grants named workspaces, or every workspace with
+	// "*", use of the operator's own BYOC providers without a tenant compute
+	// connection. Empty keeps that process-wide inventory bootstrap-only, which
+	// is what a hosted multi-customer control plane needs.
+	OperatorComputeTenants []string
+	ComputeConnections     interface {
 		Create(context.Context, string, computeconnection.CreateRequest) (domain.ComputeConnection, error)
 		Get(context.Context, string, string) (domain.ComputeConnection, error)
 		Resolve(context.Context, string, string, string) (domain.ComputeConnection, string, error)
@@ -407,6 +413,10 @@ type ComputeProvider struct {
 	State        string   `json:"state"`
 	Reason       string   `json:"reason,omitempty"`
 	BillingModes []string `json:"billing_modes"`
+	// WorkspaceOwned is computed per caller. It is true only when the calling
+	// workspace may deploy and optimize on this provider with provider-account
+	// billing and no tenant compute connection.
+	WorkspaceOwned bool `json:"workspace_owned"`
 }
 
 // GPUPriceObservation is sourced price evidence, not an availability claim.
@@ -5199,9 +5209,10 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	if request.BillingMode == "" {
 		request.BillingMode = "provider_account"
 	}
-	if request.BillingMode == "provider_account" && principal.ID != "bootstrap" {
+	ownedCompute := request.BillingMode == "provider_account" && request.ComputeConnectionID == "" && a.workspaceOwnsProvider(principal, request.Cloud)
+	if request.BillingMode == "provider_account" && principal.ID != "bootstrap" && !ownedCompute {
 		if request.ComputeConnectionID == "" || a.ComputeConnections == nil {
-			writeError(w, http.StatusConflict, "compute_connection_required", "provider-account deployments require a verified tenant compute connection")
+			writeError(w, http.StatusConflict, "compute_connection_required", "provider-account deployments require a verified tenant compute connection or an operator compute grant for this workspace")
 			return
 		}
 		connection, connectionErr := a.ComputeConnections.Get(r.Context(), principal.TenantID, request.ComputeConnectionID)
@@ -5324,10 +5335,12 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, response)
 }
 
-func (a API) computeProviders(w http.ResponseWriter, _ *http.Request) {
+func (a API) computeProviders(w http.ResponseWriter, r *http.Request) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	providers := append([]ComputeProvider(nil), a.ComputeProviders...)
 	for index := range providers {
 		providers[index].BillingModes = a.computeProviderBillingModes(providers[index])
+		providers[index].WorkspaceOwned = a.providerWorkspaceOwned(actor, providers[index])
 	}
 	sort.SliceStable(providers, func(i, j int) bool { return providers[i].Label < providers[j].Label })
 	writeJSON(w, http.StatusOK, map[string]any{"data": providers})
@@ -5437,15 +5450,44 @@ func (a API) computeProviderSupports(providerID, billingMode string) bool {
 	return false
 }
 
+// providerWorkspaceOwned reports whether the caller may use a ready provider
+// with provider-account billing and no tenant compute connection. The
+// bootstrap operator owns its own inventory; any other workspace needs an
+// explicit operator grant. InferCrane-managed capacity and the operator's
+// control-plane supply account are never workspace-owned.
+func (a API) providerWorkspaceOwned(actor domain.Principal, provider ComputeProvider) bool {
+	if provider.State != "ready" || provider.Mode == "control-plane" || !slices.Contains(a.computeProviderBillingModes(provider), "provider_account") {
+		return false
+	}
+	if actor.ID == "bootstrap" {
+		return true
+	}
+	for _, tenant := range a.OperatorComputeTenants {
+		if tenant == "*" || (actor.TenantID != "" && tenant == actor.TenantID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a API) workspaceOwnsProvider(actor domain.Principal, providerID string) bool {
+	for _, provider := range a.ComputeProviders {
+		if provider.ID == providerID {
+			return a.providerWorkspaceOwned(actor, provider)
+		}
+	}
+	return false
+}
+
 func (a API) validateOptimizationCompute(ctx context.Context, actor domain.Principal, draft optimizer.DeploymentDraft) error {
 	if actor.ID == "bootstrap" {
 		return nil
 	}
 	if draft.ComputeConnectionID == "" {
-		if a.computeProviderSupports(draft.Provider.Cloud, "customer_wallet") {
+		if a.computeProviderSupports(draft.Provider.Cloud, "customer_wallet") || a.workspaceOwnsProvider(actor, draft.Provider.Cloud) {
 			return nil
 		}
-		return errors.New("optimization execution requires InferCrane-managed compute or a verified tenant compute connection")
+		return errors.New("optimization execution requires InferCrane-managed compute, compute the operator granted this workspace, or a verified tenant compute connection")
 	}
 	if a.ComputeConnections == nil {
 		return errors.New("optimization compute connection storage is unavailable")

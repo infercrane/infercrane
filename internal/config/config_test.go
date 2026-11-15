@@ -107,6 +107,49 @@ func TestManagedDeploymentsRequireExplicitEnablementAndRunPodCredential(t *testi
 	}
 }
 
+func TestOperatorComputeTenantsAreExplicitAndWildcardIsSingleCustomerOnly(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	config, err := Load()
+	if err != nil || len(config.OperatorComputeTenants) != 0 {
+		t.Fatalf("operator compute must not be granted by default: cfg=%#v err=%v", config.OperatorComputeTenants, err)
+	}
+
+	t.Setenv("INFERCRANE_OPERATOR_COMPUTE_TENANTS", " acme , research ")
+	config, err = Load()
+	if err != nil || strings.Join(config.OperatorComputeTenants, "|") != "acme|research" {
+		t.Fatalf("named workspaces were not loaded: cfg=%#v err=%v", config.OperatorComputeTenants, err)
+	}
+
+	for _, invalid := range []string{"*,acme", "acme*", "team one"} {
+		t.Setenv("INFERCRANE_OPERATOR_COMPUTE_TENANTS", invalid)
+		if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_OPERATOR_COMPUTE_TENANTS") {
+			t.Fatalf("invalid grant %q accepted: %v", invalid, err)
+		}
+	}
+
+	t.Setenv("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "*")
+	config, err = Load()
+	if err != nil || len(config.OperatorComputeTenants) != 1 || config.OperatorComputeTenants[0] != "*" {
+		t.Fatalf("single-customer wildcard was not loaded: cfg=%#v err=%v", config.OperatorComputeTenants, err)
+	}
+
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", "true")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "single-customer") {
+		t.Fatalf("wildcard accepted with self-service sign-up: %v", err)
+	}
+	t.Setenv("INFERCRANE_HOSTED_AUTH_AUTO_PROVISION", "false")
+
+	t.Setenv("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", "true")
+	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "single-customer") {
+		t.Fatalf("wildcard accepted on a control plane that sells managed capacity: %v", err)
+	}
+	t.Setenv("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "acme")
+	if _, err = Load(); err != nil {
+		t.Fatalf("named grant rejected beside managed capacity: %v", err)
+	}
+}
+
 func TestTenantComputeCredentialEncryptionRequiresStrongKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY", "too-short")

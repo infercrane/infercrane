@@ -62,6 +62,11 @@ type Config struct {
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                               int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                              time.Duration
 	OptimizationPrices                                                                                                    []OptimizationPrice
+
+	// OperatorComputeTenants names the workspaces that may use the operator's
+	// own BYOC providers without a tenant compute connection. "*" grants every
+	// workspace on a single-customer control plane. Empty grants nobody.
+	OperatorComputeTenants []string
 }
 
 type OptimizationPrice struct {
@@ -493,6 +498,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
+		OperatorComputeTenants:              splitCSV(env("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "")),
 		ManagedSandbox:                      managedSandboxPolicy,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
@@ -598,6 +604,9 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.ManagedDeploymentsEnabled && config.RunPodAPIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
+	}
+	if err := validateOperatorComputeTenants(config); err != nil {
+		return Config{}, err
 	}
 	if config.CredentialEncryptionKey != "" && len(config.CredentialEncryptionKey) < 32 {
 		return Config{}, fmt.Errorf("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY must contain at least 32 bytes")
@@ -1230,6 +1239,30 @@ func validDNSLabel(value string) bool {
 		}
 	}
 	return true
+}
+
+// validateOperatorComputeTenants keeps the operator compute grant explicit.
+// A wildcard is for a control plane that serves one customer. It is refused
+// where the control plane sells capacity or admits self-service sign-ups,
+// because there every new workspace would inherit the operator's accounts.
+func validateOperatorComputeTenants(config Config) error {
+	wildcard := false
+	for _, tenant := range config.OperatorComputeTenants {
+		if tenant == "*" {
+			wildcard = true
+			continue
+		}
+		if len(tenant) > 128 || strings.ContainsAny(tenant, " \t*") {
+			return fmt.Errorf("INFERCRANE_OPERATOR_COMPUTE_TENANTS entries must be workspace IDs or a single *")
+		}
+	}
+	if wildcard && len(config.OperatorComputeTenants) != 1 {
+		return fmt.Errorf("INFERCRANE_OPERATOR_COMPUTE_TENANTS must be either * or a list of workspace IDs")
+	}
+	if wildcard && (config.ManagedDeploymentsEnabled || config.ManagedSandbox.Enabled || config.HostedAuthAutoProvision) {
+		return fmt.Errorf("INFERCRANE_OPERATOR_COMPUTE_TENANTS=* is only allowed on a single-customer control plane; list workspace IDs when managed capacity or hosted sign-up is enabled")
+	}
+	return nil
 }
 
 func splitCSV(raw string) []string {

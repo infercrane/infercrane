@@ -54,6 +54,31 @@ qualified by the first guarded deployment and remain specific to the exact provi
 combination.
 </Note>
 
+## Let workspaces use operator compute
+
+Providers configured on the control plane itself (AWS, Google Cloud, Kubernetes, or a SkyPilot
+manifest) belong to whoever runs that control plane. By default only the bootstrap operator key may
+deploy or optimize on them without a compute connection. Every other workspace must bring its own
+verified connection, so a control plane that serves many customers never lends one account to
+another.
+
+On a control plane you run for your own organization, grant that compute to your workspaces:
+
+```bash
+INFERCRANE_OPERATOR_COMPUTE_TENANTS=acme,research   # named workspace (tenant) IDs
+INFERCRANE_OPERATOR_COMPUTE_TENANTS='*'             # every workspace; single-customer control planes only
+```
+
+`GET /api/v1/compute/providers` then reports `"workspace_owned": true` on each ready provider the
+calling workspace may use, and the dashboard offers it for deployments and optimization runs. Those
+deployments use `provider_account` billing on the account configured for the control plane.
+
+- The grant never covers InferCrane-managed prepaid capacity or the operator's RunPod supply key
+  (`control-plane` mode). Use a [RunPod compute connection](#runpod) for tenant RunPod access.
+- `*` is refused at startup when managed deployments, managed sandboxes, or hosted sign-up
+  auto-provisioning is enabled. Name the workspaces there instead.
+- A provider that is not `ready` stays unavailable whatever the grant says.
+
 ## Data residency and production qualification
 
 A region flag is placement intent, not a residency guarantee. InferCrane cannot prove where a
