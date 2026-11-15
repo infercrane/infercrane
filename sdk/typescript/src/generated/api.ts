@@ -183,9 +183,9 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
-  listComputeProviders(): Promise<ObjectList> {
+  listComputeProviders(): Promise<Record<string, JsonValue>> {
     const requestPath = '/compute/providers';
-    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   listComputeConnections(): Promise<Record<string, JsonValue>> {

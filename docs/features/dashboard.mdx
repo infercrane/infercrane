@@ -63,6 +63,13 @@ starting points, not benchmark, price, compatibility, or performance claims. The
 chooses hardware or displays a cost estimate without grounded evidence. Deployment operations are
 durable and remain reattachable after the browser closes.
 
+The console offers a provider as a deployment or optimization destination only when it is
+InferCrane-managed capacity, the workspace has a verified compute connection for it, or the control
+plane reports it as `workspace_owned`. On your own control plane, set
+`INFERCRANE_OPERATOR_COMPUTE_TENANTS` so the console can use the cluster or cloud account already
+configured there; see
+[Let workspaces use operator compute](/provider-setup#let-workspaces-use-operator-compute).
+
 The console navigation keeps stable application identities under **Endpoints**, lifecycle-managed
 capacity under **Deployments**, live evidence under **Monitoring**, and provider/runtime setup under
 **Settings → Connections**. Existing monitoring systems enter through **Settings → Observability**;

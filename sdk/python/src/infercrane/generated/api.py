@@ -155,9 +155,9 @@ class ControlAPI:
         request_path = "/admin/marketplace/billing/requests"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
-    def list_compute_providers(self) -> ObjectList:
+    def list_compute_providers(self) -> dict[str, Any]:
         request_path = "/compute/providers"
-        return cast(ObjectList, self._transport.request("GET", request_path))
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def list_compute_connections(self) -> dict[str, Any]:
         request_path = "/compute/connections"
