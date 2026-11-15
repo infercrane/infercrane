@@ -169,6 +169,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		}
 		fmt.Println()
 		fmt.Printf("Next: infercrane optimize approve %s --max-cost-usd AMOUNT --expires-in 1h\n", response.Campaign.ID)
+		printResourceLink(cfg, "run", response.Campaign.ID)
 		return nil
 	}
 	if *output == "json" {
@@ -623,6 +624,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 			fmt.Println()
 		}
 	}
+	printResourceLink(cfg, "run", view.ID)
 	return nil
 }
 

@@ -43,7 +43,13 @@ func optimizeReportCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return writeOptimizationReport(os.Stdout, os.Stderr, raw, report, *output, *htmlPath)
+	if err = writeOptimizationReport(os.Stdout, os.Stderr, raw, report, *output, *htmlPath); err != nil {
+		return err
+	}
+	if *output == "text" {
+		printResourceLink(cfg, "run", id)
+	}
+	return nil
 }
 
 // loadOptimizationReport returns the report exactly as the control plane sent

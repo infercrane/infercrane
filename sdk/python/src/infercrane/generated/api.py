@@ -31,6 +31,38 @@ class ControlAPI:
         request_path = "/whoami"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def start_c_l_i_login(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/cli/logins"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def exchange_c_l_i_login(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/cli/logins/token"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_c_l_i_login(self, code: str) -> dict[str, Any]:
+        request_path = f"/cli/logins/{quote(code, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def approve_c_l_i_login(self, code: str) -> dict[str, Any]:
+        request_path = f"/cli/logins/{quote(code, safe='')}/approve"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
+
+    def deny_c_l_i_login(self, code: str) -> dict[str, Any]:
+        request_path = f"/cli/logins/{quote(code, safe='')}/deny"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
+
+    def list_c_l_i_sessions(self) -> dict[str, Any]:
+        request_path = "/cli/sessions"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def revoke_current_c_l_i_session(self) -> None:
+        request_path = "/cli/sessions/current"
+        return cast(None, self._transport.request("DELETE", request_path))
+
+    def revoke_c_l_i_session(self, id: str) -> None:
+        request_path = f"/cli/sessions/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
+
     def get_console_session(self) -> dict[str, Any]:
         request_path = "/console/session"
         return cast(dict[str, Any], self._transport.request("GET", request_path))

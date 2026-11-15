@@ -19,6 +19,22 @@ shown once, stored only as SHA-256 digests, and support rotation and revocation.
 Existing legacy principals are migrated to their previous explicit action set; new secret and
 external-capacity permissions are never granted implicitly during upgrade.
 
+`infercrane login` issues a CLI key only after a person approves the sign-in in the dashboard
+([Sign in the CLI](/features/cli-login)). The two sign-in endpoints that the CLI calls before it
+has a key are unauthenticated and bounded: at most 500 sign-ins wait for approval at once, each
+expires after 10 minutes, polling faster than every 2 seconds is told to slow down, and finished
+requests are pruned after 24 hours. The CLI's device code is a 256-bit secret stored only as a
+SHA-256 digest. Approval records the approver's tenant, role, and scopes; the key is minted on the
+CLI's next poll in the same transaction that consumes the request, so one approval yields at most one
+key. The key is an ordinary principal of kind `cli_session` with the approver's role and scopes,
+never more, and expires after 90 days. Only dashboard principals (people, service accounts, and the
+bootstrap key) can approve; CLI keys and endpoint tokens cannot. Keys are revoked by
+`infercrane logout` or in **Settings → CLI sessions**. Last use is recorded on the control API at most
+once a minute per key and never on the inference path. Removing an organization member does not
+revoke their CLI keys; revoke them in **Settings → CLI sessions**. The CLI keeps the key in the OS
+keychain, written on standard input rather than the command line, and falls back to its `0600`
+config file.
+
 Gateway authentication uses an in-memory last-known-good credential snapshot so an established data
 plane does not add PostgreSQL latency or fail immediately during a database outage. Rotation and
 revocation take effect on the next successful snapshot refresh. If immediate revocation is required

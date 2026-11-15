@@ -16,7 +16,9 @@ type commandSpec struct {
 }
 
 var publicCommandSpecs = []commandSpec{
-	{use: "init [flags]", short: "Connect this CLI to a control plane", group: "start"},
+	{use: "login [flags]", short: "Sign in through the dashboard in your browser", group: "start"},
+	{use: "logout [flags]", short: "Sign out and revoke this CLI's key", group: "start"},
+	{use: "init [flags]", short: "Connect this CLI to a control plane with an existing key", group: "start"},
 	{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
 	{use: "discover local [flags]", short: "Inspect local GPUs without changing the host", group: "start"},
 	{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
@@ -75,7 +77,9 @@ var publicCommandSpecs = []commandSpec{
 	{use: "provider ACTION [arguments]", short: "Connect and manage external inference APIs", group: "admin"},
 	{use: "model-api publish TYPE --file PATH [flags]", short: "Publish immutable shared Model API contracts", group: "admin"},
 	{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
-	{use: "auth status [flags]", short: "Show the authenticated control-plane identity", group: "admin"},
+	{use: "auth status|login|logout [flags]", short: "Show the authenticated control-plane identity, or sign in and out", group: "admin"},
+	{use: "whoami [flags]", short: "Show who this CLI is signed in as", group: "admin"},
+	{use: "open [endpoint|deployment|run|model|operation NAME] [flags]", short: "Open a dashboard page in the browser", group: "operate"},
 	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
 	{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
 	{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
@@ -100,6 +104,18 @@ var commandExamples = map[string]string{
 
   # Full reviewable configuration
   infercrane deploy infercrane.yaml --idempotency-key production-r1`,
+	"login": `  # Sign in through the dashboard; the terminal and the browser show the same code
+  infercrane login
+
+  # Over SSH: print the URL and code instead of opening a browser
+  infercrane login --no-browser
+
+  # A local or self-hosted control plane with its own dashboard
+  infercrane login --url http://127.0.0.1:8080 --console-url http://127.0.0.1:3200`,
+	"open": `  # Open the dashboard home, an endpoint, or an optimization run
+  infercrane open
+  infercrane open endpoint support-bot
+  infercrane open run 4f1c2d9e`,
 	"rollout": `  # Create a candidate from a complete DeploymentSpec
   infercrane rollout create production --file candidate.yaml --idempotency-key production-r2
 
@@ -211,10 +227,16 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "logs", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "login", "logout", "whoami":
 		stringFlag("output", "human", "output format: human or json")
 	}
 	switch name {
+	case "login":
+		stringFlag("url", "", "control-plane URL (default: the context's URL)")
+		stringFlag("console-url", "", "dashboard URL that approves the sign-in")
+		boolFlag("no-browser", "print the URL and code instead of opening a browser")
+	case "open":
+		boolFlag("no-browser", "print the URL instead of opening a browser")
 	case "telemetry":
 		stringFlag("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
 		stringFlag("file", "", "read a saved DCGM Prometheus snapshot instead of a URL")

@@ -479,6 +479,260 @@
         ],
         "type": "object"
       },
+      "CLILogin": {
+        "additionalProperties": false,
+        "properties": {
+          "client_os": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied",
+              "consumed",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "user_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code",
+          "device_name",
+          "client_os",
+          "client_version",
+          "status",
+          "created_at",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "CLILoginEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "login": {
+            "$ref": "#/components/schemas/CLILogin"
+          }
+        },
+        "required": [
+          "login"
+        ],
+        "type": "object"
+      },
+      "CLILoginExchangeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "device_code": {
+            "maxLength": 68,
+            "minLength": 68,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code"
+        ],
+        "type": "object"
+      },
+      "CLILoginExchangeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "console_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "credential": {
+            "description": "Returned once, on the poll that consumes an approved sign-in.",
+            "type": "string"
+          },
+          "credential_cache_synchronized": {
+            "type": "boolean"
+          },
+          "interval": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Object"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "slow_down",
+              "approved",
+              "denied",
+              "expired",
+              "consumed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "CLILoginStart": {
+        "additionalProperties": false,
+        "properties": {
+          "client_os": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "client_version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "device_name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_name",
+          "client_os",
+          "client_version"
+        ],
+        "type": "object"
+      },
+      "CLILoginStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device_code": {
+            "description": "Secret the CLI polls with. Returned once; only its hash is stored.",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_in": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "interval": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "user_code": {
+            "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$",
+            "type": "string"
+          },
+          "verification_uri": {
+            "format": "uri",
+            "type": "string"
+          },
+          "verification_uri_complete": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_code",
+          "user_code",
+          "expires_at",
+          "expires_in",
+          "interval"
+        ],
+        "type": "object"
+      },
+      "CLISession": {
+        "additionalProperties": false,
+        "properties": {
+          "client_os": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "device_name",
+          "client_os",
+          "client_version",
+          "owner_name",
+          "created_at",
+          "last_used_at",
+          "expires_at",
+          "current"
+        ],
+        "type": "object"
+      },
+      "CLISessionList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CLISession"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "CatalogLaunchQuote": {
         "additionalProperties": false,
         "properties": {
@@ -8506,6 +8760,336 @@
         "summary": "Inspect one reviewed model and its serving profiles",
         "tags": [
           "Model catalog"
+        ]
+      }
+    },
+    "/api/v1/cli/logins": {
+      "post": {
+        "operationId": "startCLILogin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CLILoginStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLILoginStartResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [],
+        "summary": "Start a CLI sign-in that a person approves in the dashboard; unauthenticated",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/logins/token": {
+      "post": {
+        "operationId": "exchangeCLILogin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CLILoginExchangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLILoginExchangeResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [],
+        "summary": "Poll a CLI sign-in with its device code and receive the key once it is approved; unauthenticated",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/logins/{code}": {
+      "get": {
+        "operationId": "getCLILogin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLILoginEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Show the device and status of a CLI sign-in before approving it",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/logins/{code}/approve": {
+      "post": {
+        "operationId": "approveCLILogin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLILoginEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Approve a CLI sign-in with the caller's own tenant, role, and scopes",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/logins/{code}/deny": {
+      "post": {
+        "operationId": "denyCLILogin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLILoginEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Deny a CLI sign-in",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/sessions": {
+      "get": {
+        "operationId": "listCLISessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CLISessionList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List active CLI keys; administrators see every member's keys",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/sessions/current": {
+      "delete": {
+        "operationId": "revokeCurrentCLISession",
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke the CLI key making this request",
+        "tags": [
+          "Identity"
+        ]
+      }
+    },
+    "/api/v1/cli/sessions/{id}": {
+      "delete": {
+        "operationId": "revokeCLISession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a CLI key",
+        "tags": [
+          "Identity"
         ]
       }
     },

@@ -62,6 +62,13 @@ type Config struct {
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                               int
 	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                              time.Duration
 	OptimizationPrices                                                                                                    []OptimizationPrice
+
+	// ConsoleURL is the dashboard origin. On the server it is advertised to
+	// `infercrane login`; in the CLI it builds dashboard links.
+	ConsoleURL string
+	// ClientContextName and CredentialSource describe where the CLI found its
+	// target and key. They never contain the key itself.
+	ClientContextName, CredentialSource string
 }
 
 type OptimizationPrice struct {
@@ -90,6 +97,12 @@ type SkyPilotProvider struct {
 type ClientContext struct {
 	URL    string `json:"url"`
 	APIKey string `json:"api_key,omitempty"`
+	// ConsoleURL is the dashboard used for links and `infercrane open`.
+	ConsoleURL string `json:"console_url,omitempty"`
+	// CredentialStore is "keychain" when the key lives in the OS keychain
+	// under KeychainAccount instead of in this file.
+	CredentialStore string `json:"credential_store,omitempty"`
+	KeychainAccount string `json:"keychain_account,omitempty"`
 }
 
 type ClientSettings struct {
@@ -114,6 +127,16 @@ func LoadClient() (Config, error) {
 }
 
 func LoadClientContext(contextName string) (Config, error) {
+	return loadClientContext(contextName, true)
+}
+
+// LoadClientTarget resolves the control plane, dashboard, and TLS settings of
+// a context without requiring a credential. login, logout, and open use it.
+func LoadClientTarget(contextName string) (Config, error) {
+	return loadClientContext(contextName, false)
+}
+
+func loadClientContext(contextName string, requireCredential bool) (Config, error) {
 	stored, err := readClientFile()
 	if err != nil {
 		return Config{}, err
@@ -125,9 +148,11 @@ func LoadClientContext(contextName string) (Config, error) {
 	if contextName != "" {
 		var ok bool
 		selected, ok = stored.Contexts[contextName]
-		if !ok {
+		if !ok && requireCredential {
 			return Config{}, fmt.Errorf("InferCrane context %q was not found", contextName)
 		}
+	} else {
+		contextName = "default"
 	}
 	controlURL := selected.URL
 	if value := os.Getenv("INFERCRANE_URL"); value != "" {
@@ -136,22 +161,39 @@ func LoadClientContext(contextName string) (Config, error) {
 	if controlURL == "" {
 		controlURL = "http://127.0.0.1:8080"
 	}
-	apiKey := selected.APIKey
-	if value := os.Getenv("INFERCRANE_API_KEY"); value != "" {
-		apiKey = value
-	}
-	if apiKey == "" {
-		return Config{}, fmt.Errorf("INFERCRANE_API_KEY is required; run infercrane init or set the environment variable")
-	}
 	parsed, parseErr := url.Parse(controlURL)
 	if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return Config{}, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
+	}
+	consoleURL, err := ResolveConsoleURL(controlURL, selected.ConsoleURL)
+	if err != nil {
+		return Config{}, err
+	}
+	apiKey, source := selected.APIKey, CredentialFromConfigFile
+	if value := os.Getenv("INFERCRANE_API_KEY"); value != "" {
+		apiKey, source = value, CredentialFromEnvironment
+	} else if selected.CredentialStore == CredentialStoreKeychain {
+		secrets := secretStore()
+		apiKey, err = secrets.Get(selected.KeychainAccount)
+		if err != nil {
+			if requireCredential {
+				return Config{}, fmt.Errorf("read the InferCrane credential from the %s: %w; run infercrane login again or set INFERCRANE_API_KEY", secrets.Name(), err)
+			}
+			apiKey = ""
+		}
+		source = secrets.Name()
+	}
+	if apiKey == "" {
+		source = ""
+		if requireCredential {
+			return Config{}, fmt.Errorf("not signed in; run infercrane login, or set INFERCRANE_API_KEY")
+		}
 	}
 	clientCert, clientKey := env("INFERCRANE_CLIENT_TLS_CERT_FILE", ""), env("INFERCRANE_CLIENT_TLS_KEY_FILE", "")
 	if (clientCert == "") != (clientKey == "") {
 		return Config{}, errors.New("INFERCRANE_CLIENT_TLS_CERT_FILE and INFERCRANE_CLIENT_TLS_KEY_FILE must be configured together")
 	}
-	return Config{ControlURL: controlURL, APIKey: apiKey, ClientTLSCertFile: clientCert, ClientTLSKeyFile: clientKey, ClientTLSCAFile: env("INFERCRANE_CLIENT_TLS_CA_FILE", "")}, nil
+	return Config{ControlURL: controlURL, APIKey: apiKey, ConsoleURL: consoleURL, ClientContextName: contextName, CredentialSource: source, ClientTLSCertFile: clientCert, ClientTLSKeyFile: clientKey, ClientTLSCAFile: env("INFERCRANE_CLIENT_TLS_CA_FILE", "")}, nil
 }
 
 func InitializeClient(controlURL, apiKey string) (string, error) {
@@ -190,7 +232,17 @@ func InitializeClientContext(name, controlURL, apiKey string, selectContext bool
 			contexts["default"] = ClientContext{URL: stored.URL, APIKey: stored.APIKey}
 		}
 	}
-	contexts[name] = ClientContext{URL: controlURL, APIKey: apiKey}
+	previous := contexts[name]
+	if previous.CredentialStore == CredentialStoreKeychain && previous.KeychainAccount != "" {
+		// The pasted key replaces a keychain credential; do not leave the old
+		// secret behind.
+		_ = secretStore().Delete(previous.KeychainAccount)
+	}
+	next := ClientContext{URL: controlURL, APIKey: apiKey}
+	if previous.URL == controlURL {
+		next.ConsoleURL = previous.ConsoleURL
+	}
+	contexts[name] = next
 	current := stored.Current
 	if current == "" || selectContext {
 		current = name
@@ -482,6 +534,7 @@ func load(requireAPIKey bool) (Config, error) {
 		CredentialEncryptionKeyReference:    env("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY_REFERENCE", "environment:INFERCRANE_CREDENTIAL_ENCRYPTION_KEY"),
 		WorkerCredentialKey:                 env("INFERCRANE_WORKER_CREDENTIAL_KEY", ""),
 		HostedAuthIssuer:                    env("INFERCRANE_HOSTED_AUTH_ISSUER", ""),
+		ConsoleURL:                          env("INFERCRANE_CONSOLE_URL", ""),
 		HostedAuthAudience:                  env("INFERCRANE_HOSTED_AUTH_AUDIENCE", ""),
 		HostedAuthJWTKey:                    env("INFERCRANE_HOSTED_AUTH_JWT_KEY", ""),
 		HostedAuthJWTKeyFile:                env("INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE", ""),
@@ -592,6 +645,16 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if requireAPIKey && config.APIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_API_KEY is required")
+	}
+	if config.ConsoleURL != "" {
+		normalized, consoleErr := NormalizeConsoleURL(config.ConsoleURL)
+		if consoleErr != nil {
+			return Config{}, consoleErr
+		}
+		if config.Environment == "production" && !strings.HasPrefix(normalized, "https://") {
+			return Config{}, fmt.Errorf("INFERCRANE_CONSOLE_URL must use HTTPS in production")
+		}
+		config.ConsoleURL = normalized
 	}
 	if config.Environment != "development" && config.Environment != "test" && config.Environment != "production" {
 		return Config{}, fmt.Errorf("INFERCRANE_ENV must be development, test, or production")

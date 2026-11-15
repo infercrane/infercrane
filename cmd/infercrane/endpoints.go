@@ -261,6 +261,7 @@ func endpointCommand(ctx context.Context, cfg config.Config, args []string) erro
 			return printJSON(response)
 		}
 		fmt.Printf("endpoint %s created · add a binding, then create its first plan\n", resource)
+		printResourceLink(cfg, "endpoint", resource)
 		return nil
 	case "bind":
 		sources := 0

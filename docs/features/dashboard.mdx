@@ -26,6 +26,7 @@ reads PostgreSQL or provider credentials directly.
 - private/gated model-access references and authenticated existing-endpoint discovery;
 - content-free telemetry imports and workload replay history;
 - scoped API-key lifecycle, organization roles, hosted SSO entry, and approval boundaries;
+- CLI sign-in approval at `/cli/authorize` and **Settings → CLI sessions** to review and revoke CLI keys ([Sign in the CLI](/features/cli-login));
 - a curated Model API shelf with InferCrane rates, capabilities, limits, and availability.
 
 Missing or forbidden evidence remains explicit. A failed optional panel does not make a deployment
@@ -103,6 +104,8 @@ export INFERCRANE_HOSTED_AUTH_AUDIENCE="infercrane-control-api"
 export INFERCRANE_HOSTED_AUTH_JWT_KEY="-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----"
 # Alternative: INFERCRANE_HOSTED_AUTH_JWT_KEY_FILE=/run/secrets/clerk-jwt-public.pem
 export INFERCRANE_HOSTED_AUTH_AUTHORIZED_PARTIES="https://console.infercrane.com"
+# Optional: the dashboard that approves `infercrane login`
+export INFERCRANE_CONSOLE_URL="https://console.infercrane.com"
 # Public signup only; defaults to false for fail-closed private installations.
 export INFERCRANE_HOSTED_AUTH_AUTO_PROVISION="true"
 ```

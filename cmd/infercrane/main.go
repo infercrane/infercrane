@@ -41,6 +41,7 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/brezelexecutor"
 	"github.com/infercrane/infercrane/internal/brezelsandbox"
+	"github.com/infercrane/infercrane/internal/clilogin"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/contextpassport"
 	"github.com/infercrane/infercrane/internal/controlapi"
@@ -287,6 +288,21 @@ func runLegacy(ctx context.Context, args []string) error {
 		return nil
 	case "init":
 		return initCommand(args[1:])
+	case "login":
+		return loginCommand(ctx, args[1:])
+	case "logout":
+		return logoutCommand(ctx, args[1:])
+	case "open":
+		return openCommand(ctx, args[1:])
+	case "auth":
+		if len(args) > 1 && args[1] == "login" {
+			return loginCommand(ctx, args[2:])
+		}
+		if len(args) > 1 && args[1] == "logout" {
+			return logoutCommand(ctx, args[2:])
+		}
+	case "whoami":
+		args = append([]string{"auth", "status"}, args[1:]...)
 	case "context":
 		return contextCommand(args[1:])
 	case "workload":
@@ -1985,6 +2001,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		} else {
 			fmt.Printf("\nFollow progress\n  infercrane operation watch %s\n  infercrane status %s --watch\n  infercrane events %s\n", response.Operation.ID, *name, *name)
 		}
+		printResourceLink(cfg, "deployment", *name)
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
@@ -2292,7 +2309,9 @@ func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path
 	if err != nil {
 		return fmt.Errorf("create control-plane request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	if cfg.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
 	if requestBody != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -2544,7 +2563,7 @@ func contextCommand(args []string) error {
 
 func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 || args[0] != "status" {
-		return errors.New("usage: infercrane auth status [--output human|json]")
+		return errors.New("usage: infercrane auth status|login|logout [--output human|json]")
 	}
 	fs := flag.NewFlagSet("auth status", flag.ContinueOnError)
 	output := fs.String("output", "human", "human or json")
@@ -2568,11 +2587,21 @@ func authCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return err
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(response, "", "  ")
+		encoded, _ := json.MarshalIndent(map[string]any{
+			"principal": response.Principal, "context": cfg.ClientContextName, "control_url": cfg.ControlURL,
+			"console_url": cfg.ConsoleURL, "credential_source": cfg.CredentialSource,
+		}, "", "  ")
 		fmt.Println(string(encoded))
 		return nil
 	}
 	fmt.Printf("Authenticated  yes\nPrincipal      %s\nRole           %s\nScopes         %s\nTenant         %s\nControl plane  %s\n", response.Principal.Name, response.Principal.Role, strings.Join(response.Principal.Scopes, ","), response.Principal.TenantID, cfg.ControlURL)
+	if cfg.CredentialSource != "" {
+		fmt.Printf("Key from       %s\n", cfg.CredentialSource)
+	}
+	if response.Principal.Kind == clilogin.PrincipalKind {
+		fmt.Println("Signed in by   infercrane login (revoke with infercrane logout)")
+	}
+	printDashboardLink(os.Stdout, dashboardURL(cfg, ""))
 	return nil
 }
 
@@ -3898,6 +3927,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			fmt.Println(string(encoded))
 		} else {
 			fmt.Printf("Deployment  %s\nAction      validate\nOperation   %s\nStatus      %s\n", name, response.Operation.ID, response.Operation.Status)
+			printResourceLink(cfg, "deployment", name)
 		}
 		return nil
 	}
@@ -4001,6 +4031,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
 		fmt.Printf("Deployment  %s\nAction      %s\nOperation   %s\nStatus      %s\n", name, action, response.Operation.ID, response.Operation.Status)
+		printResourceLink(cfg, "deployment", name)
 	}
 	return nil
 }
@@ -4448,7 +4479,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
