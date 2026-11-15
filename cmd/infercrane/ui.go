@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"image/color"
 	"net/http"
@@ -101,7 +100,7 @@ type uiModel struct {
 }
 
 func uiCommand(ctx context.Context, cfg config.Config, args []string) error {
-	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	fs := newFlagSet("ui")
 	readOnly := fs.Bool("read-only", false, "disable all control actions")
 	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
 		return errors.New("usage: infercrane ui [--read-only]")

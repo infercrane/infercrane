@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +21,7 @@ func finOpsCollectCommand(ctx context.Context, cfg config.Config, args []string)
 		return errors.New("usage: infercrane finops collect opencost DEPLOYMENT --allocation NAME --currency CODE [flags]")
 	}
 	deployment := args[1]
-	fs := flag.NewFlagSet("finops collect opencost", flag.ContinueOnError)
+	fs := newFlagSet("finops collect opencost")
 	collectorURL := fs.String("url", "http://127.0.0.1:9003/allocation", "OpenCost allocation API URL")
 	file := fs.String("file", "", "saved OpenCost allocation response")
 	windowText := fs.String("window", "24h", "OpenCost allocation window")

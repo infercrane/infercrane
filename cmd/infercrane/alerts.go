@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,7 +15,7 @@ func alertCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return errors.New("usage: infercrane alert list|configure|evaluate ENDPOINT [flags]")
 	}
 	action, endpoint := args[0], args[1]
-	fs := flag.NewFlagSet("alert "+action, flag.ContinueOnError)
+	fs := newFlagSet("alert " + action)
 	name := fs.String("name", "operations", "alert policy name")
 	webhook := fs.String("webhook", "", "HTTPS webhook URL")
 	secretReference := fs.String("secret-reference", "", "signing secret reference ID")

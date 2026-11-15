@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -101,7 +100,7 @@ func optimizeWatchCommand(ctx context.Context, args []string) error {
 		return errors.New("usage: infercrane optimize watch CAMPAIGN [--once]")
 	}
 	id := args[0]
-	fs := flag.NewFlagSet("optimize watch", flag.ContinueOnError)
+	fs := newFlagSet("optimize watch")
 	once := fs.Bool("once", false, "print one plain-text snapshot and exit")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return errors.New("usage: infercrane optimize watch CAMPAIGN [--once]")
