@@ -51,6 +51,16 @@ func TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker(t *t
 	}
 }
 
+func TestServerlessConvergeWithoutEndpointPublishesNothing(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen-opt-12345678", ActiveRevisionID: "rev-1", RoutingStrategy: "round-robin", MinReplicas: 0, MaxReplicas: 4}}
+	provider := &fakeServerlessProvider{endpoint: provision.ServerlessEndpoint{ID: "endpoint-1", Name: "infercrane-deployment-1-rev-1-serverless", TemplateID: "template-1", WorkersMin: 0, WorkersMax: 4, Workers: 0}}
+	operation := domain.Operation{ID: "serverless-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"name":"qwen-opt-12345678","no_endpoint":true,"model":"Qwen/Qwen3-8B","compute_mode":"serverless","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":0,"max_replicas":4}`}
+	result, err := ServerlessHandlers(store, testServerlessBackend(provider), fakeArtifactResolver{})[ServerlessConvergeKind](context.Background(), operation)
+	if err != nil || !store.applied || store.target.URL == "" || store.publishCalls != 0 || strings.Contains(result, "endpoint_name") {
+		t.Fatalf("result=%s applied=%t target=%+v publish_calls=%d err=%v", result, store.applied, store.target, store.publishCalls, err)
+	}
+}
+
 func TestServerlessConvergeRejectsDifferentPersistedAdapter(t *testing.T) {
 	store := &fakeCloudStore{}
 	provider := &fakeServerlessProvider{}
