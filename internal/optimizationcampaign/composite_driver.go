@@ -288,6 +288,10 @@ func (d CompositeDriver) provisionNewEndpoint(ctx context.Context, campaign doma
 	request := draftCloudRequest(draft)
 	request.Name = candidateDeploymentName(draft.Name, candidate.ID)
 	request.TenantID, request.Actor = candidate.TenantID, "optimization-campaign"
+	// A candidate is measured directly against its replicas, so it never gets
+	// an endpoint of its own. The customer sees only the endpoint activation
+	// publishes for the winner, and cleanup has no endpoint to leave behind.
+	request.NoEndpoint = true
 	encoded, _ := json.Marshal(request)
 	kind := workflows.ConvergeKind
 	if request.ComputeMode == "serverless" {

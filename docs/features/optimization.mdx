@@ -293,6 +293,15 @@ campaign may promote only a `guard_passed` candidate and delegates the traffic m
 normal guarded rollout workflow. Approval expiry is checked before mutation, while a retry after a
 completed activation remains a successful no-op.
 
+A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, with no
+endpoint of its own. Candidates are measured directly against their replicas, so they never appear
+on the endpoint list, during the run or after it. The only endpoint a new-endpoint campaign creates
+is the one activation publishes for the winner. Cleanup deletes the deployments of the other
+candidates. It never touches the activated endpoint, the winner's deployment, or an endpoint you
+created. Candidates provisioned by a control plane released before this behavior published an
+endpoint under the candidate deployment name, and cleanup leaves it without a backend. Remove such
+an endpoint with `infercrane endpoint delete <endpoint>-opt-<candidate> --yes`.
+
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable
 execution operation. The worker composes the existing deployment/rollout lifecycle, measures each

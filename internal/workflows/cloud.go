@@ -62,6 +62,21 @@ type CloudRequest struct {
 	TenantID               string                   `json:"tenant_id,omitempty"`
 	Workload               runtimecontract.Workload `json:"workload,omitzero"`
 	Serving                servingcontract.Topology `json:"serving,omitzero"`
+	// NoEndpoint keeps the deployment off the tenant's endpoint list: converge
+	// and scale never publish a stable endpoint for it. Optimization campaigns
+	// set it on candidate deployments, which are measured directly against
+	// their replicas; activation publishes the requested endpoint for the
+	// winner. The public deployment API rejects it.
+	NoEndpoint bool `json:"no_endpoint,omitempty"`
+}
+
+// PublishedEndpointName is the stable endpoint a converge publishes for this
+// validated request, or "" when the deployment has no endpoint of its own.
+func (r CloudRequest) PublishedEndpointName() string {
+	if r.NoEndpoint {
+		return ""
+	}
+	return r.EndpointName
 }
 
 var endpointNamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
@@ -103,11 +118,17 @@ func (r *CloudRequest) Validate() error {
 	if r.ComputeMode == "serverless" && r.GPUCount != 1 {
 		return errors.New("serverless compute currently requires gpu_count 1")
 	}
-	if r.EndpointName == "" {
-		r.EndpointName = r.Name
-	}
-	if !endpointNamePattern.MatchString(r.EndpointName) {
-		return errors.New("endpoint_name must contain 1 to 64 lowercase letters, numbers, dots, underscores, or dashes and must start and end with a letter or number")
+	if r.NoEndpoint {
+		if r.EndpointName != "" {
+			return errors.New("endpoint_name cannot be set for a deployment without an endpoint")
+		}
+	} else {
+		if r.EndpointName == "" {
+			r.EndpointName = r.Name
+		}
+		if !endpointNamePattern.MatchString(r.EndpointName) {
+			return errors.New("endpoint_name must contain 1 to 64 lowercase letters, numbers, dots, underscores, or dashes and must start and end with a letter or number")
+		}
 	}
 	if r.ComputeMode == "" {
 		r.ComputeMode = "elastic"
@@ -570,13 +591,12 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			}
 		}
 		_ = checkpoint(ctx, store, operation, "deployment.route", "succeeded", map[string]any{"targets": targetNames}, 95, "Healthy capacity published")
-		published, err := store.PublishDeploymentEndpoint(ctx, request.TenantID, request.EndpointName, request.Name)
-		if err != nil {
-			return "", classify("endpoint_publication_failed", err)
+		result := map[string]any{"deployment_id": deployment.ID, "resource_ids": resourceIDs, "replicas": len(targetNames)}
+		if err = publishStableEndpoint(ctx, store, operation, request, result); err != nil {
+			return "", err
 		}
-		_ = checkpoint(ctx, store, operation, "endpoint.publish", "succeeded", map[string]any{"endpoint_name": published.Endpoint.Name}, 100, "Stable application endpoint published")
-		result, _ := json.Marshal(map[string]any{"deployment_id": deployment.ID, "endpoint_name": published.Endpoint.Name, "resource_ids": resourceIDs, "replicas": len(targetNames)})
-		return string(result), nil
+		encoded, _ := json.Marshal(result)
+		return string(encoded), nil
 	}
 
 	cleanup := func(ctx context.Context, operation domain.Operation) (string, error) {
@@ -1437,6 +1457,23 @@ func checkpoint(ctx context.Context, store CloudStore, operation domain.Operatio
 		return err
 	}
 	return store.CheckpointClaimedOperation(ctx, operation.ID, operation.LeaseOwner, operation.LeaseGeneration, step, status, string(encoded), progress, message)
+}
+
+// publishStableEndpoint publishes the request's stable endpoint and records
+// its name in the operation result. A deployment without an endpoint of its
+// own publishes nothing, so it never appears on the tenant's endpoint list.
+func publishStableEndpoint(ctx context.Context, store CloudStore, operation domain.Operation, request CloudRequest, result map[string]any) error {
+	name := request.PublishedEndpointName()
+	if name == "" {
+		return nil
+	}
+	published, err := store.PublishDeploymentEndpoint(ctx, request.TenantID, name, request.Name)
+	if err != nil {
+		return classify("endpoint_publication_failed", err)
+	}
+	_ = checkpoint(ctx, store, operation, "endpoint.publish", "succeeded", map[string]any{"endpoint_name": published.Endpoint.Name}, 100, "Stable application endpoint published")
+	result["endpoint_name"] = published.Endpoint.Name
+	return nil
 }
 
 func classify(code string, err error) error {

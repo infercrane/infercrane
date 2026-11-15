@@ -5212,6 +5212,10 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
 		return
 	}
+	if request.NoEndpoint {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: no_endpoint is reserved for optimization campaign candidates")
+		return
+	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	if request.BillingMode == "" {
 		request.BillingMode = "provider_account"
