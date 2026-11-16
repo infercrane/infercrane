@@ -35,6 +35,14 @@ revoke their CLI keys; revoke them in **Settings → CLI sessions**. The CLI kee
 keychain, written on standard input rather than the command line, and falls back to its `0600`
 config file.
 
+Compute configured on the control-plane process (cloud workload identity, a kubeconfig context,
+SkyPilot manifests) is not tenant-scoped. Only the bootstrap operator may deploy or optimize on it
+without a tenant compute connection, unless `INFERCRANE_OPERATOR_COMPUTE_TENANTS` names the
+workspace or is `*`. The wildcard is refused when the control plane sells managed capacity or
+auto-provisions workspaces at sign-up. The grant never extends to InferCrane-managed prepaid
+capacity or the RunPod supply key. See
+[Let workspaces use operator compute](/provider-setup#let-workspaces-use-operator-compute).
+
 Gateway authentication uses an in-memory last-known-good credential snapshot so an established data
 plane does not add PostgreSQL latency or fail immediately during a database outage. Rotation and
 revocation take effect on the next successful snapshot refresh. If immediate revocation is required

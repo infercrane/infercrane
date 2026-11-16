@@ -91,6 +91,10 @@ organization, grants its first member administrator access, and maps later verif
 changing existing roles or restoring revoked access. Leave this setting disabled for invite-only
 or manually provisioned installations.
 
+Leave `INFERCRANE_OPERATOR_COMPUTE_TENANTS` unset on the hosted control plane. It lets workspaces use
+the control plane's own provider accounts, which only fits a control plane that serves one
+customer. Startup rejects the `*` value together with hosted sign-up or managed capacity.
+
 For a test-mode Stripe account authenticated with the Stripe CLI, create or verify the fixed-price
 prepaid catalog with `scripts/bootstrap-stripe-prepaid.sh`. The command is idempotent by product
 name and denomination and prints the non-secret `INFERCRANE_STRIPE_PRICE_IDS_JSON` value. It never

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -31,23 +30,20 @@ type observeSnapshot struct {
 }
 
 func observeCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: infercrane observe ENDPOINT_OR_DEPLOYMENT [--watch] [--diagnose] [--events N] [--output human|json]")
-	}
-	name := args[0]
-	fs := flag.NewFlagSet("observe", flag.ContinueOnError)
+	fs := newFlagSet("observe")
 	watch := fs.Bool("watch", false, "refresh until interrupted")
 	diagnose := fs.Bool("diagnose", false, "persist a fresh deterministic Doctor evaluation for an endpoint")
 	eventLimit := fs.Int("events", 5, "recent deployment events to include")
 	window := fs.Duration("window", time.Hour, "Doctor and Release Guard evidence window")
 	output := fs.String("output", "human", "human or json")
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := parseSubjectFlags(fs, args, 0, "usage: infercrane observe ENDPOINT_OR_DEPLOYMENT [--watch] [--diagnose] [--events N] [--output human|json]")
+	if err != nil {
 		return err
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 || *eventLimit < 0 || *eventLimit > 100 || *window <= 0 || *window > 30*24*time.Hour {
+	if *eventLimit < 0 || *eventLimit > 100 || *window <= 0 || *window > 30*24*time.Hour {
 		return errors.New("--events must be between 0 and 100 and --window between 1ns and 720h")
 	}
 	if *watch && *output == "json" {
@@ -81,6 +77,14 @@ func readObserveSnapshot(ctx context.Context, cfg config.Config, name string, di
 	var endpoint map[string]any
 	err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/endpoints/"+url.PathEscape(name), "", nil, &endpoint)
 	if err == nil {
+		// The control API omits candidate_plan when nothing is staged. Keep the
+		// key so JSON clients read an explicit null rather than a missing field.
+		if endpoint == nil {
+			endpoint = map[string]any{}
+		}
+		if _, staged := endpoint["candidate_plan"]; !staged {
+			endpoint["candidate_plan"] = nil
+		}
 		snapshot.Kind, snapshot.Endpoint = "endpoint", endpoint
 		monitoringPath := fmt.Sprintf("/api/v1/endpoints/%s/monitoring?window_seconds=%d", url.PathEscape(name), int(window.Seconds()))
 		var monitoring domain.EndpointMonitoringSnapshot
@@ -154,13 +158,13 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 		view := snapshot.Deployment
 		d := view.Deployment
 		lifecycle := view.LifecycleStatus
-		fmt.Printf("STATE\n  Serving       %s\n  Convergence   %s\n  Ready         %d/%d\n  Provisioning  %d\n  Draining      %d\n\nIDENTITY\n  Model         %s\n  Runtime       %s\n  Revision      %s\n  Candidate     %s\n  Routing       %s\n\nTRAFFIC\n  Requests/s    %.2f\n  Error rate    %.2f%%\n", lifecycle.ServingState, lifecycle.ConvergenceState, lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, d.Model, d.Runtime, shortValue(d.ActiveRevisionID), emptyAs(shortValue(d.CandidateRevisionID), "none"), d.RoutingStrategy, view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+		fmt.Printf("STATE\n  Serving       %s\n  Convergence   %s\n  Ready         %d/%d\n  Provisioning  %d\n  Draining      %d\n\nIDENTITY\n  Model         %s\n  Runtime       %s\n  Revision      %s\n  Candidate     %s\n  Routing       %s\n\nTRAFFIC\n  Requests/s    %.2f\n  Error rate    %.2f%%\n", emptyAs(lifecycle.ServingState, "unknown"), emptyAs(lifecycle.ConvergenceState, "unknown"), lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, emptyAs(d.Model, "unknown"), emptyAs(d.Runtime, "unknown"), noneOrShort(d.ActiveRevisionID), noneOrShort(d.CandidateRevisionID), emptyAs(d.RoutingStrategy, "unknown"), view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
 		if view.ActiveOperation != nil {
 			fmt.Printf("\nOPERATION\n  %s  %s  %s\n  Resume: infercrane operation watch %s\n", view.ActiveOperation.Kind, view.ActiveOperation.Status, view.ActiveOperation.ID, view.ActiveOperation.ID)
 		}
 		if len(view.ReleaseGuardEvaluations) > 0 {
 			latest := view.ReleaseGuardEvaluations[0]
-			fmt.Printf("\nRELEASE GUARD\n  Decision      %s\n  Candidate     %s\n  Evaluated     %s\n", latest.Decision, shortValue(latest.CandidateRevisionID), latest.CreatedAt.Format(time.RFC3339))
+			fmt.Printf("\nRELEASE GUARD\n  Decision      %s\n  Candidate     %s\n  Evaluated     %s\n", emptyAs(latest.Decision, "unknown"), noneOrShort(latest.CandidateRevisionID), latest.CreatedAt.Format(time.RFC3339))
 		}
 		if len(snapshot.RecentEvents) > 0 {
 			fmt.Println("\nRECENT EVENTS")
@@ -176,7 +180,7 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 	active, _ := snapshot.Endpoint["active_plan"].(map[string]any)
 	candidate, _ := snapshot.Endpoint["candidate_plan"].(map[string]any)
 	bindings, _ := snapshot.Endpoint["bindings"].([]any)
-	fmt.Printf("IDENTITY\n  Logical model  %v\n  Environment    %v\n  State          %v\n  Stable model   %s\n\nSERVING PLAN\n  Active         %s\n  Policy         %v\n  Candidate      %s\n  Bindings       %d\n", logical["name"], environment["name"], endpoint["observed_state"], snapshot.Name, shortValue(fmt.Sprint(active["id"])), active["routing_policy"], emptyAs(shortValue(fmt.Sprint(candidate["id"])), "none"), len(bindings))
+	fmt.Printf("IDENTITY\n  Logical model  %s\n  Environment    %s\n  State          %s\n  Stable model   %s\n\nSERVING PLAN\n  Active         %s\n  Policy         %s\n  Candidate      %s\n  Bindings       %d\n", observeText(logical["name"], "unknown"), observeText(environment["name"], "unknown"), observeText(endpoint["observed_state"], "unknown"), snapshot.Name, noneOrShort(observeText(active["id"], "")), observeText(active["routing_policy"], "unknown"), noneOrShort(observeText(candidate["id"], "")), len(bindings))
 	if snapshot.Monitoring != nil {
 		stats := snapshot.Monitoring.Summary
 		fmt.Printf("\nTRAFFIC\n  Requests      %d (%.2f/s)\n  Error rate    %s\n  Fallback      %s\n  TTFT p95      %s\n  Latency p95   %s\n  Output        %s\n  Evidence      %s · %d samples\n", stats.Requests, stats.RequestsPerSecond, observePercent(stats.ErrorRate), observePercent(stats.FallbackRate), observeMillis(stats.P95TTFTMS), observeMillis(stats.P95LatencyMS), observeTokenRate(stats.OutputTokensPerSecond), observeFreshness(snapshot.Monitoring.Evidence), snapshot.Monitoring.Evidence.SampleCount)
@@ -184,14 +188,14 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 		fmt.Printf("\nTRAFFIC\n  Unavailable   %s\n", emptyAs(snapshot.MonitoringUnavailable, "monitoring capability unavailable"))
 	}
 	if evaluations, ok := snapshot.Guard["evaluations"].([]map[string]any); ok && len(evaluations) > 0 {
-		fmt.Printf("\nRELEASE GUARD\n  Decision       %v\n  Evaluated      %v\n", evaluations[0]["decision"], evaluations[0]["created_at"])
+		fmt.Printf("\nRELEASE GUARD\n  Decision       %s\n  Evaluated      %s\n", observeText(evaluations[0]["decision"], "unknown"), observeText(evaluations[0]["created_at"], "unknown"))
 	} else {
 		fmt.Println("\nRELEASE GUARD\n  No persisted evaluation")
 	}
 	if len(snapshot.Findings) > 0 {
 		fmt.Println("\nDOCTOR")
 		for _, finding := range snapshot.Findings {
-			fmt.Printf("  %-8s %v — %v\n", strings.ToUpper(fmt.Sprint(finding["severity"])), finding["code"], finding["summary"])
+			fmt.Printf("  %-8s %s — %s\n", strings.ToUpper(observeText(finding["severity"], "unknown")), observeText(finding["code"], "unknown"), observeText(finding["summary"], "unknown"))
 		}
 	} else {
 		fmt.Println("\nDOCTOR\n  Not evaluated in this snapshot; add --diagnose to persist deterministic findings.")
@@ -201,6 +205,26 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 		fmt.Printf("\nADMISSION\n  %s\n", encoded)
 	}
 	fmt.Printf("\nNEXT\n  Send request    infercrane request %s\n  Diagnose        infercrane observe %s --diagnose\n  Open console    infercrane ui\n", snapshot.Name, snapshot.Name)
+}
+
+// observeText renders a decoded JSON value for human output. An absent or
+// null field becomes the fallback instead of Go's "<nil>".
+func observeText(value any, fallback string) string {
+	if value == nil {
+		return fallback
+	}
+	if text := fmt.Sprint(value); text != "" {
+		return text
+	}
+	return fallback
+}
+
+// noneOrShort shortens an identifier, reporting an absent one as "none".
+func noneOrShort(id string) string {
+	if id == "" {
+		return "none"
+	}
+	return shortValue(id)
 }
 
 func observePercent(value *float64) string {

@@ -1165,6 +1165,27 @@ func TestCloudDeploymentFailsClosedWithoutReadyCompute(t *testing.T) {
 	}
 }
 
+func TestCloudDeploymentRejectsCampaignOnlyNoEndpoint(t *testing.T) {
+	store := &fakeStore{created: true}
+	handler := (API{Store: store, APIKey: "secret", ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready", BillingModes: []string{"provider_account"}}}}).Handler()
+	submit := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		request.Header.Set("Idempotency-Key", "test-no-endpoint")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	response := submit(`{"name":"qwen","no_endpoint":true,"model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":1}`)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "no_endpoint") || store.operation.RequestJSON != "" {
+		t.Fatalf("deployment status=%d body=%s submitted=%q", response.Code, response.Body.String(), store.operation.RequestJSON)
+	}
+	response = submit(`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","min_replicas":1,"max_replicas":1}`)
+	if response.Code != http.StatusAccepted || !strings.Contains(store.operation.RequestJSON, `"endpoint_name":"qwen"`) {
+		t.Fatalf("deployment status=%d body=%s submitted=%q", response.Code, response.Body.String(), store.operation.RequestJSON)
+	}
+}
+
 func TestTenantCannotUseProcessGlobalProviderAccountCompute(t *testing.T) {
 	store := &fakeStore{principal: domain.Principal{
 		ID: "operator-1", TenantID: "tenant-1", Name: "operator", Role: "operator",

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,7 +89,7 @@ type cliLoginExchangeResponse struct {
 }
 
 func loginCommand(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs := newFlagSet("login")
 	controlURL := fs.String("url", "", "control-plane URL (default: the context's URL, INFERCRANE_URL, or http://127.0.0.1:8080)")
 	consoleURL := fs.String("console-url", "", "dashboard URL that approves the sign-in (default: INFERCRANE_CONSOLE_URL, the control plane's advertised dashboard, or the hosted dashboard)")
 	contextName := fs.String("context", contextFlagDefault(), "context to sign in")
@@ -299,7 +298,7 @@ func formatLoginDuration(value time.Duration) string {
 }
 
 func logoutCommand(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("logout", flag.ContinueOnError)
+	fs := newFlagSet("logout")
 	contextName := fs.String("context", contextFlagDefault(), "context to sign out")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
@@ -417,7 +416,7 @@ func printResourceLink(cfg config.Config, kind, name string) {
 }
 
 func openCommand(_ context.Context, args []string) error {
-	fs := flag.NewFlagSet("open", flag.ContinueOnError)
+	fs := newFlagSet("open")
 	noBrowser := fs.Bool("no-browser", false, "print the URL instead of opening a browser")
 	usage := "usage: infercrane open [endpoint NAME | deployment NAME | run ID | model NAME | operation ID] [--no-browser]"
 	var positional []string

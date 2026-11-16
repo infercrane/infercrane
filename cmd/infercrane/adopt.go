@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,7 +16,7 @@ func connectCommand(ctx context.Context, cfg config.Config, args []string) error
 		return errors.New("usage: infercrane connect URL --as NAME [--model UPSTREAM_MODEL] [--type auto|vllm|litellm|openai-compatible]")
 	}
 	rawURL := args[0]
-	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
+	fs := newFlagSet("connect")
 	name := fs.String("as", "", "stable endpoint and logical model name")
 	upstreamModel := fs.String("model", "", "physical upstream model; discovered when omitted")
 	typeName := fs.String("type", "auto", "auto, vllm, litellm, or openai-compatible")
@@ -58,7 +57,7 @@ func connectCommand(ctx context.Context, cfg config.Config, args []string) error
 
 func adoptCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) >= 2 && args[0] == "promote" {
-		fs := flag.NewFlagSet("adopt promote", flag.ContinueOnError)
+		fs := newFlagSet("adopt promote")
 		ownership := fs.String("ownership", "traffic-managed", "traffic-managed")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
@@ -81,7 +80,7 @@ func adoptCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return errors.New("usage: infercrane adopt endpoint NAME --url URL --model LOGICAL_MODEL [--ownership observe-only]")
 	}
 	name := args[1]
-	fs := flag.NewFlagSet("adopt endpoint", flag.ContinueOnError)
+	fs := newFlagSet("adopt endpoint")
 	rawURL := fs.String("url", "", "existing OpenAI-compatible base URL")
 	model := fs.String("model", "", "stable logical model name")
 	upstreamModel := fs.String("upstream-model", "", "physical model name exposed by the workload")

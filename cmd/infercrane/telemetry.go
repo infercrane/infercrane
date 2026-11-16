@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,7 +23,7 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("usage: infercrane telemetry collect dcgm DEPLOYMENT [--url URL | --file PATH] [--selector key=value]")
 	}
 	deployment := args[2]
-	fs := flag.NewFlagSet("telemetry collect dcgm", flag.ContinueOnError)
+	fs := newFlagSet("telemetry collect dcgm")
 	collectorURL := fs.String("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
 	file := fs.String("file", "", "saved DCGM Prometheus snapshot")
 	selectorText := fs.String("selector", "", "comma-separated exact label selectors")

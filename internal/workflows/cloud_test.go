@@ -180,6 +180,23 @@ func TestConvergeCreatesExactlyOneResourcePerMinimumReplica(t *testing.T) {
 	}
 }
 
+func TestConvergeAndScaleWithoutEndpointPublishNothing(t *testing.T) {
+	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen-opt-12345678", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 2}}
+	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+	handlers := QualifiedCloudHandlers(store, provider, fakeInspector{ready: true})
+	request := `{"deployment_id":"deployment-1","name":"qwen-opt-12345678","no_endpoint":true,"model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":2}`
+
+	result, err := handlers[ConvergeKind](context.Background(), domain.Operation{ID: "converge-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: request})
+	if err != nil || !store.applied || len(store.targetNames) != 1 || store.publishCalls != 0 || strings.Contains(result, "endpoint_name") {
+		t.Fatalf("converge result=%s applied=%t targets=%v publish_calls=%d err=%v", result, store.applied, store.targetNames, store.publishCalls, err)
+	}
+	// Autoscaling copies the converge request, so a scale keeps the flag.
+	scale := strings.Replace(request, `"max_replicas":2`, `"max_replicas":2,"desired_replicas":2,"previous_replicas":1`, 1)
+	if _, err = handlers[ScaleKind](context.Background(), domain.Operation{ID: "scale-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: scale}); err != nil || len(store.replicas) != 2 || store.publishCalls != 0 {
+		t.Fatalf("scale replicas=%d publish_calls=%d err=%v", len(store.replicas), store.publishCalls, err)
+	}
+}
+
 func TestConvergePreservesNonVLLMRuntimeWhenPublishingTargets(t *testing.T) {
 	store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Runtime: "sglang", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
 	provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
@@ -887,6 +904,21 @@ func TestCloudRequestDefaultsAndValidatesStableEndpointName(t *testing.T) {
 	request.EndpointName = "Customer Endpoint"
 	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "endpoint_name") {
 		t.Fatalf("invalid endpoint name was accepted: %v", err)
+	}
+}
+
+func TestCloudRequestWithoutEndpointHasNoEndpointName(t *testing.T) {
+	request := CloudRequest{Name: "coder-opt-12345678", NoEndpoint: true, Model: "openai/gpt-oss-20b", Cloud: "runpod", GPU: "L40S", MinReplicas: 1, MaxReplicas: 1}
+	if err := request.Validate(); err != nil || request.EndpointName != "" || request.PublishedEndpointName() != "" {
+		t.Fatalf("request=%#v published=%q err=%v", request, request.PublishedEndpointName(), err)
+	}
+	request.EndpointName = "coder-production"
+	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "without an endpoint") {
+		t.Fatalf("endpoint name was accepted for a deployment without an endpoint: %v", err)
+	}
+	published := CloudRequest{Name: "coder-production", Model: "openai/gpt-oss-20b", Cloud: "runpod", GPU: "L40S", MinReplicas: 1, MaxReplicas: 1}
+	if err := published.Validate(); err != nil || published.PublishedEndpointName() != "coder-production" {
+		t.Fatalf("published endpoint=%q err=%v", published.PublishedEndpointName(), err)
 	}
 }
 

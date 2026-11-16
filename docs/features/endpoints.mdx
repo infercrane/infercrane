@@ -22,7 +22,8 @@ application model="coder-production"
 
 This lets an operator stage a different serving implementation without changing application code.
 Existing v1 deployment aliases are migrated automatically to a `production` environment, a logical
-model, a lifecycle-managed binding, and a one-binding active plan of the same name.
+model, a lifecycle-managed binding, and a one-binding active plan of the same name. Each new
+deployment gets the same set. Its logical model has an empty description.
 
 ## Create an endpoint
 

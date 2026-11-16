@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,7 +41,7 @@ func trainingCommand(ctx context.Context, cfg config.Config, args []string) erro
 }
 
 func trainingKeygen(args []string) error {
-	fs := flag.NewFlagSet("training keygen", flag.ContinueOnError)
+	fs := newFlagSet("training keygen")
 	path := fs.String("file", "training-handoff.key", "private-key destination")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
@@ -84,7 +83,7 @@ func trainingSign(args []string) error {
 		return errors.New("usage: infercrane training sign DEPLOYMENT REVISION [flags]")
 	}
 	deployment, revision := args[0], args[1]
-	fs := flag.NewFlagSet("training sign", flag.ContinueOnError)
+	fs := newFlagSet("training sign")
 	provider := fs.String("provider", "", "external training system")
 	runID := fs.String("run", "", "external immutable run identity")
 	repository := fs.String("repository", "", "checkpoint repository identity or approved URI without credentials")
@@ -139,7 +138,7 @@ func trainingVerify(args []string) error {
 	if len(args) < 1 {
 		return errors.New("usage: infercrane training verify FILE [--output human|json]")
 	}
-	fs := flag.NewFlagSet("training verify", flag.ContinueOnError)
+	fs := newFlagSet("training verify")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -162,7 +161,7 @@ func trainingAttach(ctx context.Context, cfg config.Config, args []string) error
 	if len(args) < 2 {
 		return errors.New("usage: infercrane training attach DEPLOYMENT FILE [--output human|json]")
 	}
-	fs := flag.NewFlagSet("training attach", flag.ContinueOnError)
+	fs := newFlagSet("training attach")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -193,7 +192,7 @@ func trainingList(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 1 {
 		return errors.New("usage: infercrane training list DEPLOYMENT [--output human|json]")
 	}
-	fs := flag.NewFlagSet("training list", flag.ContinueOnError)
+	fs := newFlagSet("training list")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

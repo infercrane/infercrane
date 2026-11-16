@@ -943,6 +943,66 @@
         ],
         "type": "object"
       },
+      "ComputeProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "billing_modes": {
+            "items": {
+              "enum": [
+                "provider_account",
+                "customer_wallet"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "How the control plane reaches this provider, for example BYOC, SkyPilot, or control-plane.",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "description": "ready only when this control plane can create a billable resource; other values carry a reason.",
+            "type": "string"
+          },
+          "workspace_owned": {
+            "description": "Computed for the caller. True when the calling workspace may deploy and optimize on this ready provider with provider_account billing and no compute_connection_id, because it is the bootstrap operator or INFERCRANE_OPERATOR_COMPUTE_TENANTS grants it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "mode",
+          "state",
+          "billing_modes",
+          "workspace_owned"
+        ],
+        "type": "object"
+      },
+      "ComputeProviderList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ComputeProvider"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "ConsoleIdentityProvisioning": {
         "additionalProperties": false,
         "properties": {
@@ -1178,7 +1238,7 @@
             "type": "string"
           },
           "compute_connection_id": {
-            "description": "Verified tenant-owned compute connection required for provider-account deployments.",
+            "description": "Verified tenant-owned compute connection. Required for provider-account deployments unless the selected provider reports workspace_owned.",
             "type": "string"
           },
           "compute_mode": {
@@ -9221,7 +9281,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObjectList"
+                  "$ref": "#/components/schemas/ComputeProviderList"
                 }
               }
             },

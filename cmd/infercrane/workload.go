@@ -39,7 +39,7 @@ func workloadCommand(ctx context.Context, args []string) error {
 
 func workloadInitCommand(args []string) error {
 	leadingPath, args := workloadLeadingPath(args)
-	fs := flag.NewFlagSet("workload init", flag.ContinueOnError)
+	fs := newFlagSet("workload init")
 	model := fs.String("model", "", "Hugging Face model identity")
 	recipeName := fs.String("recipe", "", "reviewed curated recipe name")
 	profileName := fs.String("profile", "", "reviewed serving profile from the selected recipe")
@@ -182,7 +182,7 @@ func providerPreflightCommand(cloud string) string {
 
 func workloadValidateCommand(args []string) error {
 	leadingPath, args := workloadLeadingPath(args)
-	fs := flag.NewFlagSet("workload validate", flag.ContinueOnError)
+	fs := newFlagSet("workload validate")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -214,7 +214,7 @@ func workloadValidateCommand(args []string) error {
 
 func workloadBuildCommand(ctx context.Context, args []string) error {
 	leadingPath, args := workloadLeadingPath(args)
-	fs := flag.NewFlagSet("workload build", flag.ContinueOnError)
+	fs := newFlagSet("workload build")
 	tag := fs.String("tag", "", "registry image tag")
 	dockerfile := fs.String("file", "Dockerfile", "Dockerfile path inside the project")
 	platform := fs.String("platform", "", "target platform, for example linux/amd64")
@@ -283,7 +283,7 @@ func workloadBuildCommand(ctx context.Context, args []string) error {
 
 func workloadDevCommand(ctx context.Context, args []string) error {
 	leadingPath, args := workloadLeadingPath(args)
-	fs := flag.NewFlagSet("workload dev", flag.ContinueOnError)
+	fs := newFlagSet("workload dev")
 	hostPort := fs.Int("port", 8000, "loopback port")
 	detach := fs.Bool("detach", false, "run in the background")
 	output := fs.String("output", "human", "human or json")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,7 +17,7 @@ func asyncCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return errors.New("usage: infercrane async submit ENDPOINT|async get JOB_ID|async cancel JOB_ID [flags]")
 	}
 	action, subject := args[0], args[1]
-	fs := flag.NewFlagSet("async "+action, flag.ContinueOnError)
+	fs := newFlagSet("async " + action)
 	file := fs.String("file", "", "protocol-native JSON request file")
 	protocol := fs.String("protocol", "chat", "chat, responses, embeddings, completions, or batch")
 	idempotency := fs.String("idempotency-key", "", "stable submission idempotency key")

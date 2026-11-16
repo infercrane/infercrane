@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -116,25 +113,14 @@ func TestCLIHelpOmitsInternalMethodNames(t *testing.T) {
 	}
 	walk(newRootCommand(context.Background()))
 
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	// Go's flag package never prints its own usage; every help form is Cobra's.
+	usage, err := captureStdout(t, func() error {
+		return run(context.Background(), []string{"optimize", "propose", "acme/model", "-help"})
+	})
+	if err != nil || !strings.Contains(usage, "--model-config") {
+		t.Fatalf("optimize usage err=%v output=%q", err, usage)
 	}
-	original := os.Stderr
-	os.Stderr = writer
-	runErr := optimizeCommand(context.Background(), []string{"propose", "acme/model", "-h"})
-	os.Stderr = original
-	if err = writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	usage, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !errors.Is(runErr, flag.ErrHelp) || !strings.Contains(string(usage), "-model-config") {
-		t.Fatalf("optimize usage err=%v output=%q", runErr, usage)
-	}
-	if match := internalMethodWording.FindString(string(usage)); match != "" {
+	if match := internalMethodWording.FindString(usage); match != "" {
 		t.Fatalf("optimize usage shows %q:\n%s", match, usage)
 	}
 }
