@@ -1,4 +1,4 @@
-ARG GO_BUILDER_IMAGE=golang:1.26.6-bookworm
+ARG GO_BUILDER_IMAGE=golang:1.26.7-bookworm
 ARG SGLANG_IMAGE=lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f
 FROM ${GO_BUILDER_IMAGE} AS edge-builder
 
