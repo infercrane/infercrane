@@ -37,6 +37,8 @@ ARG TARGETARCH
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
 # SkyPilot clouds the image can drive. Each still needs a provider manifest and its credentials.
+# SkyPilot 0.13.0 passes extra keyword arguments to FastAPI(); FastAPI 0.145 removed them, so
+# `sky api start` exits at boot. Keep fastapi below 0.145 until SkyPilot is upgraded.
 ARG SKYPILOT_EXTRAS=runpod,vast
 ARG HUGGINGFACE_HUB_VERSION=1.24.0
 ARG AIPERF_VERSION=0.12.0
@@ -51,7 +53,7 @@ ARG KUBECTL_AMD64_SHA256=123d8c8844f46b1244c547fffb3c17180c0c26dac9890589fe7e677
 ARG KUBECTL_ARM64_SHA256=9f9d9c44a7b5264515ac9da5991584e2395bd50662e651132337e7b4d0c56f8f
 RUN apt-get update \
     && apt-get install --no-install-recommends -y build-essential ca-certificates curl git openssh-client rsync unzip \
-	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[${SKYPILOT_EXTRAS}]==${SKYPILOT_VERSION}" "aiperf==${AIPERF_VERSION}" \
+	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[${SKYPILOT_EXTRAS}]==${SKYPILOT_VERSION}" "fastapi<0.145" "aiperf==${AIPERF_VERSION}" \
 	&& python -m venv /opt/infercrane-huggingface \
 	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}"
 RUN case "$TARGETARCH" in \
