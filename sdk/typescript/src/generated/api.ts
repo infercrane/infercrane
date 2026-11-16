@@ -288,6 +288,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  getEndpointGPUProfile(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profile`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getEndpointOptimizationReadiness(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/endpoints/${encodeURIComponent(name)}/optimization-readiness`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
@@ -421,6 +426,11 @@ export class ControlApi {
   recordOperationalMeasurements(name: string, body: JsonValue): Promise<ObjectList> {
     const requestPath = `/deployments/${encodeURIComponent(name)}/measurements`;
     return this.transport.request('POST', requestPath, { body }) as Promise<ObjectList>;
+  }
+
+  recordGPUProfile(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/gpu-profiles`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
   importTrafficObservations(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {

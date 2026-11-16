@@ -312,3 +312,78 @@ later rollout. Once its TTL expires, the monitoring API returns a stale envelope
 This integration proves the control-plane semantics locally; actual DCGM field availability varies
 by GPU and DCGM version and still requires real-hardware qualification. Collector snapshots follow
 the configured high-volume request-evidence retention period (`INFERCRANE_REQUEST_RETENTION_HOURS`).
+
+## GPU profiles
+
+A GPU profile shows where sampled GPU time goes, from Python and PyTorch down through the CUDA
+launch to each kernel, its SASS instructions, and the reason its warps were waiting. A collector
+records one capture against a deployment:
+
+```bash
+curl -fsS "$INFERCRANE_API_URL/api/v1/deployments/coder-production/gpu-profiles" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d @capture.json
+```
+
+`capture.json` follows `infercrane.gpu-profile/v1`. Frames are listed once and each stack refers to
+them by index, root first:
+
+```json
+{
+  "schema_version": "infercrane.gpu-profile/v1",
+  "capture": {
+    "tool": "cupti-pc-sampling", "tool_version": "12.8", "evidence_class": "measured",
+    "accelerator": "NVIDIA L40S", "gpus": 1, "content_recorded": false,
+    "started_at": "2026-11-15T23:00:05Z", "ended_at": "2026-11-15T23:01:05Z"
+  },
+  "timeline": {
+    "bucket_seconds": 2,
+    "buckets": [
+      { "start": "2026-11-15T23:00:05Z", "gpu_seconds": 1.72 },
+      { "start": "2026-11-15T23:00:07Z", "gpu_seconds": null }
+    ]
+  },
+  "frames": [
+    { "kind": "python", "name": "LlamaMLP.forward", "file": "vllm/model_executor/models/llama.py", "line": 92 },
+    { "kind": "torch", "name": "aten::mm" },
+    { "kind": "kernel", "name": "sm89_xmma_gemm_bf16bf16_bf16f32" },
+    { "kind": "sass", "name": "LDG.E.128" },
+    { "kind": "stall", "name": "long_scoreboard" }
+  ],
+  "stacks": [{ "frames": [0, 1, 2, 3, 4], "gpu_ns": 4211000000 }],
+  "unavailable_layers": []
+}
+```
+
+- `kind` is `python`, `torch`, `native`, `cuda_api`, `kernel`, `sass`, or `stall`. Key Python
+  frames by the function's definition line, not the call site, so one function stays one frame.
+- `gpu_ns` is GPU time attributed to exactly that stack. All stacks together cannot exceed the
+  capture length times its GPU count.
+- Stall frames use the CUPTI PC sampling reason without its `smsp__pcsamp_warps_issue_stalled_`
+  prefix, for example `long_scoreboard` or `math_pipe_throttle`.
+- A bucket with no samples has `gpu_seconds: null`, never `0`.
+- List the layers the tool could not record in `unavailable_layers`. A capture without PC sampling,
+  for example, names `sass` and `stall`, and the dashboard then says stall reasons were not
+  recorded instead of drawing an empty layer.
+- Only `evidence_class: "measured"` is accepted, and `content_recorded` must be `false`. Frames
+  carry code identifiers only, never prompts or outputs.
+
+A capture is limited to 8 MiB, 20,000 frames, 10,000 stacks, 128 frames per stack, 500 timeline
+buckets, and 24 hours, and must have ended within the last 30 days. Unknown fields are rejected.
+Recording requires the deploy permission.
+
+The capture is attached to the revision that is active when it arrives. A retry of the same capture
+(same tool, start, and end) returns the original receipt, and a retry that changes the samples is a
+conflict. The newest eight captures per deployment are kept.
+
+`GET /api/v1/endpoints/{name}/gpu-profile` returns the newest capture of the active revision of any
+deployment the endpoint routes to, with the endpoint, deployment, and revision number it belongs
+to. It needs only read permission. After a rollout, captures of the previous revision are no longer
+returned: they describe code that no longer serves. When nothing is recorded the API answers 404
+`gpu_profile_not_found`, and the dashboard shows **Not recorded** under Observe › Profiling with
+Advanced on, rather than an empty graph. Recording and reading a profile never touch the inference
+path.
+
+InferCrane does not run the profiler for you yet. The capture comes from your own CUPTI PC sampling
+or Nsight run, converted to this format.

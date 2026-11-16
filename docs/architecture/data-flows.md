@@ -68,3 +68,17 @@ Both return a target that follows the same runtime and reconciliation path as an
    never enters the inference path.
 5. The selected target and any denial are persisted in bounded request evidence. Requests are not
    replayed or duplicated after a possible send.
+
+## GPU profile capture
+
+1. A collector posts one bounded `infercrane.gpu-profile/v1` capture to
+   `POST /api/v1/deployments/{name}/gpu-profiles` with deploy permission. The control API rejects
+   unknown fields, bodies over 8 MiB, captures that claim content, and anything but measured
+   evidence before touching PostgreSQL.
+2. In one transaction the store resolves the deployment's active revision, inserts the capture into
+   `gpu_profiles` as one JSONB document keyed by tenant, deployment, revision, tool, start, and end,
+   and removes all but the newest eight captures for that deployment. A retry with the same samples
+   returns the stored receipt; a retry with different samples is a conflict.
+3. `GET /api/v1/endpoints/{name}/gpu-profile` reads the newest capture whose revision is still the
+   active revision of a deployment bound to the endpoint. None is a typed 404.
+4. Neither step runs on the inference path, and the gateway never reads `gpu_profiles`.

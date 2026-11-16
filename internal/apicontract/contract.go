@@ -84,6 +84,7 @@ var Routes = []Route{
 	{"GET", "/requests/{id}", "inspectRequest", "Diagnostics", "Inspect persisted request metadata without content", "", "Object", 200, false},
 	{"GET", "/endpoints/{name}", "getEndpoint", "Endpoints", "Inspect an endpoint and its serving plans", "", "Object", 200, false},
 	{"GET", "/endpoints/{name}/monitoring", "getEndpointMonitoring", "Monitoring", "Read bounded normalized inference and lifecycle evidence", "", "EndpointMonitoring", 200, false},
+	{"GET", "/endpoints/{name}/gpu-profile", "getEndpointGPUProfile", "Monitoring", "Read the newest content-free GPU profile capture of the active revision behind an endpoint", "", "GPUProfile", 200, false},
 	{"GET", "/endpoints/{name}/optimization-readiness", "getEndpointOptimizationReadiness", "Inference optimization", "Turn content-free monitoring into a conservative next profiling action", "", "Object", 200, false},
 	{"POST", "/endpoints/{name}/doctor", "diagnoseEndpoint", "Diagnostics", "Persist deterministic endpoint findings", "Object", "ObjectList", 200, false},
 	{"GET", "/endpoints/{name}/alerts", "listAlertPolicies", "Alerts", "List signed webhook alert policies", "", "ObjectList", 200, false},
@@ -111,6 +112,7 @@ var Routes = []Route{
 	{"GET", "/deployments", "listDeployments", "Deployments", "List logical deployments", "", "DeploymentList", 200, false},
 	{"GET", "/deployments/{name}", "getDeployment", "Deployments", "Inspect deployment lifecycle state", "", "DeploymentView", 200, false},
 	{"POST", "/deployments/{name}/measurements", "recordOperationalMeasurements", "Monitoring", "Attach bounded content-free operational measurements to the active revision", "OperationalMeasurementIngest", "ObjectList", 201, false},
+	{"POST", "/deployments/{name}/gpu-profiles", "recordGPUProfile", "Monitoring", "Attach one bounded content-free GPU profile capture to the active revision", "GPUProfileRecording", "GPUProfileReceipt", 201, false},
 	{"POST", "/deployments/{name}/traffic-observations", "importTrafficObservations", "Monitoring", "Import bounded content-free production request shapes for monitoring and replay", "TrafficObservationImport", "Object", 201, false},
 	{"POST", "/deployments/{name}/cost-evidence", "recordCostEvidence", "FinOps", "Attach bounded currency-explicit cost evidence to the active revision", "CostEvidenceIngest", "ObjectList", 201, false},
 	{"GET", "/deployments/{name}/events", "listDeploymentEvents", "Deployments", "List deployment events", "", "ObjectList", 200, false},
@@ -558,6 +560,9 @@ func schemas() map[string]any {
 	supportedExternalAdapters := []string{"openrouter", "openai-compatible-external", "modal", "runpod-serverless-api", "fly-io", "baseten", "fireworks"}
 	for _, schemaName := range []string{"ProviderConnectionCreate", "ExternalPolicyRequest"} {
 		result[schemaName].(map[string]any)["properties"].(map[string]any)["adapter"].(map[string]any)["enum"] = supportedExternalAdapters
+	}
+	for name, schema := range gpuProfileSchemas() {
+		result[name] = schema
 	}
 	return result
 }
