@@ -140,7 +140,7 @@ func terminalStatus(value string) string {
 	switch strings.ToLower(value) {
 	case "healthy", "ready", "active", "serving", "converged", "succeeded", "pass":
 		return terminalColor("32", strings.ToUpper(value))
-	case "pending", "starting", "running", "waiting":
+	case "pending", "starting", "running", "waiting", "observing":
 		return terminalColor("34", strings.ToUpper(value))
 	case "degraded", "warning", "draining", "retrying":
 		return terminalColor("33", strings.ToUpper(value))

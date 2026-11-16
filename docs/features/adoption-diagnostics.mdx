@@ -16,7 +16,8 @@ infercrane adopt endpoint coder-production \
   --ownership observe-only
 ```
 
-`observe-only` records health and evidence but never publishes a route. `traffic-managed` may route
+`observe-only` records health and evidence but never publishes a route, so the endpoint reads
+`observing` rather than `degraded`. `traffic-managed` may route
 through the existing target after its qualified runtime health check succeeds. Neither mode creates,
 scales, updates, or deletes the imported workload. `lifecycle-managed` is available only through an
 InferCrane Deployment binding.
@@ -129,7 +130,8 @@ infercrane doctor coder-production --window 1h
 ```
 
 Doctor persists reproducible `Evidence → Rule → Finding` results. Current rules cover unavailable
-endpoint routes, statistically bounded elevated error rate, and queue-dominant latency. A healthy
+endpoint routes, statistically bounded elevated error rate, and queue-dominant latency. An
+`observing` endpoint publishes no route by design, so it does not raise the unavailable-route finding. A healthy
 result explicitly reports that no deterministic issue is active; it does not guess a cause.
 
 ## Signed alerts

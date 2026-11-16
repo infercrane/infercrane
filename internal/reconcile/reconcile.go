@@ -468,10 +468,15 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 			}
 			compiled := make([]routes.Snapshot, 0, len(resolved.ActivePlan.Bindings))
 			plannedBindingIDs := make([]string, 0, len(resolved.ActivePlan.Bindings))
+			observeOnly := 0
 			for _, planned := range resolved.ActivePlan.Bindings {
 				plannedBindingIDs = append(plannedBindingIDs, planned.BindingID)
 				binding, found := bindings[planned.BindingID]
-				if !found || binding.OwnershipMode == "observe-only" {
+				if !found {
+					continue
+				}
+				if binding.OwnershipMode == "observe-only" {
+					observeOnly++
 					continue
 				}
 				if binding.Kind == "external" {
@@ -532,7 +537,12 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				compiled = append(compiled, base)
 			}
 			state := "serving"
-			if len(compiled) == 0 || resolved.ActivePlan.RoutingPolicy == "manual" && len(compiled) != 1 {
+			if len(plannedBindingIDs) > 0 && observeOnly == len(plannedBindingIDs) {
+				// Observe-only bindings never publish a route by design, so a
+				// plan made only of them is being watched, not failing.
+				state = "observing"
+				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
+			} else if len(compiled) == 0 || resolved.ActivePlan.RoutingPolicy == "manual" && len(compiled) != 1 {
 				state = "degraded"
 				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
 			} else {

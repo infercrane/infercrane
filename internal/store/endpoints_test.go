@@ -591,6 +591,47 @@ func TestAdoptInspectDiagnoseAndAlertPolicyAreTenantScoped(t *testing.T) {
 	}
 }
 
+func TestObservingEndpointStatePersistsWithoutOutageFinding(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	suffix := time.Now().UTC().Format("150405.000000000")
+	name := "observed-" + suffix
+	resolved, _, err := s.AdoptEndpoint(ctx, "global", name, "coder-"+suffix, "coder", "https://inference.example.test/v1", "vllm", "observe-only", "vllm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetEndpointState(ctx, "another-tenant", resolved.Endpoint.ID, "observing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant state write error=%v", err)
+	}
+	if err = s.SetEndpointState(ctx, "global", resolved.Endpoint.ID, "observing"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.ResolveEndpointForTenant(ctx, "global", name)
+	if err != nil || stored.Endpoint.ObservedState != "observing" {
+		t.Fatalf("stored endpoint=%#v err=%v", stored.Endpoint, err)
+	}
+	findings, err := s.DiagnoseEndpoint(ctx, "global", name, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Code != "no_active_finding" {
+		t.Fatalf("observing endpoint findings=%#v", findings)
+	}
+	if err = s.SetEndpointState(ctx, "global", resolved.Endpoint.ID, "watching"); err == nil {
+		t.Fatal("unknown endpoint state accepted")
+	}
+	if _, err = s.ExecContext(ctx, `UPDATE endpoints SET observed_state='watching' WHERE id=?`, resolved.Endpoint.ID); err == nil {
+		t.Fatal("database CHECK accepted an unknown endpoint state")
+	}
+	if err = s.SetEndpointState(ctx, "global", resolved.Endpoint.ID, "degraded"); err != nil {
+		t.Fatal(err)
+	}
+	findings, err = s.DiagnoseEndpoint(ctx, "global", name, time.Hour)
+	if err != nil || len(findings) == 0 || findings[0].Code != "endpoint_not_serving" || findings[0].Severity != "critical" {
+		t.Fatalf("degraded endpoint findings=%#v err=%v", findings, err)
+	}
+}
+
 func TestPublishDeploymentEndpointIsAtomicIdempotentAndNeverRebinds(t *testing.T) {
 	ctx := context.Background()
 	s := openStore(t, ctx)
