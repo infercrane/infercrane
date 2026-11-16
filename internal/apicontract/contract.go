@@ -48,6 +48,7 @@ var Routes = []Route{
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
 	{"GET", "/catalog/hugging-face/models", "listHuggingFaceCatalogModels", "Model catalog", "List reviewed model identities and publisher-optimized checkpoint candidates", "", "Object", 200, false},
 	{"GET", "/catalog/hugging-face/search", "searchHuggingFaceModels", "Model catalog", "Search public Hugging Face text-generation and embedding models; results are not reviewed", "", "Object", 200, false},
+	{"GET", "/catalog/stacks", "listBestKnownStacks", "Model catalog", "Rank the best-known serving stacks for a model and goal from cited benchmark evidence", "", "BestKnownStacks", 200, false},
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
@@ -267,6 +268,9 @@ func Document() (map[string]any, error) {
 		if route.Path == "/catalog/hugging-face/search" {
 			parameters = append(parameters, huggingFaceSearchQueryParameters()...)
 		}
+		if route.Path == "/catalog/stacks" {
+			parameters = append(parameters, bestKnownStackQueryParameters()...)
+		}
 		if route.Path == "/billing/webhooks/stripe" {
 			parameters = append(parameters, map[string]any{"name": "Stripe-Signature", "in": "header", "required": true, "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.", "schema": map[string]any{"type": "string"}})
 		}
@@ -392,7 +396,7 @@ func schemas() map[string]any {
 		"Error":                       map[string]any{"type": "object", "required": []string{"code", "message"}, "properties": map[string]any{"code": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "request_id": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "remediation": map[string]any{"type": "string"}}},
 		"ErrorEnvelope":               map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": ref("Error")}},
 		"ConsoleIdentityProvisioning": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "external_user_id", "external_organization_id", "display_name", "role", "access"}, "properties": map[string]any{"provider": map[string]any{"type": "string", "enum": []string{"clerk"}}, "external_user_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "external_organization_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "display_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "role": map[string]any{"type": "string", "enum": []string{"viewer", "operator", "admin"}}, "scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32}, "access": map[string]any{"type": "boolean"}}},
-		"IntentPlanRequest":           map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"intent": map[string]any{"type": "string", "maxLength": 2048}, "model": map[string]any{"type": "string", "maxLength": 256}, "provider": map[string]any{"type": "string", "maxLength": 64}, "region": map[string]any{"type": "string", "maxLength": 128}, "gpu": map[string]any{"type": "string", "maxLength": 128}, "objective": map[string]any{"type": "string", "enum": []string{"interactive", "latency", "throughput", "cost-efficiency"}}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}}}, "anyOf": []map[string]any{{"required": []string{"intent"}}, {"required": []string{"model"}}}},
+		"IntentPlanRequest":           map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"intent": map[string]any{"type": "string", "maxLength": 2048}, "model": map[string]any{"type": "string", "maxLength": 256}, "provider": map[string]any{"type": "string", "maxLength": 64}, "region": map[string]any{"type": "string", "maxLength": 128}, "gpu": map[string]any{"type": "string", "maxLength": 128}, "objective": map[string]any{"type": "string", "enum": []string{"interactive", "latency", "throughput", "cost-efficiency"}}, "compute_mode": map[string]any{"type": "string", "enum": []string{"elastic", "serverless"}}, "stack": map[string]any{"type": "string", "maxLength": 128, "description": "Start from one best-known stack from GET /catalog/stacks; its reviewed launch profile, GPU and GPU count are used."}}, "anyOf": []map[string]any{{"required": []string{"intent"}}, {"required": []string{"model"}}, {"required": []string{"stack"}}}},
 		"IntentPlanOption":            intentPlanOptionSchema(),
 		"IntentPlanChoice":            intentPlanChoiceSchema(),
 		"IntentPlanMissingChoice":     intentPlanMissingChoiceSchema(),
@@ -561,6 +565,9 @@ func schemas() map[string]any {
 	for _, schemaName := range []string{"ProviderConnectionCreate", "ExternalPolicyRequest"} {
 		result[schemaName].(map[string]any)["properties"].(map[string]any)["adapter"].(map[string]any)["enum"] = supportedExternalAdapters
 	}
+	for name, schema := range bestKnownStackSchemas() {
+		result[name] = schema
+	}
 	for name, schema := range gpuProfileSchemas() {
 		result[name] = schema
 	}
@@ -709,7 +716,7 @@ func intentPlanArchitectureSchema() map[string]any {
 func intentPlanSchema() map[string]any {
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "status", "mutation", "interpretation", "choices", "missing_choices", "architecture", "evidence", "warnings"}, "properties": map[string]any{
 		"schema_version": map[string]any{"type": "string", "const": "infercrane.intent-plan/v1"}, "status": map[string]any{"type": "string", "enum": []string{"ready", "needs_input"}},
-		"mutation": map[string]any{"type": "string", "const": "none"}, "interpretation": ref("IntentPlanInterpretation"), "model": ref("IntentPlanModel"),
+		"mutation": map[string]any{"type": "string", "const": "none"}, "interpretation": ref("IntentPlanInterpretation"), "model": ref("IntentPlanModel"), "stack": ref("IntentPlanStack"),
 		"configuration": ref("IntentPlanConfiguration"), "choices": map[string]any{"type": "array", "items": ref("IntentPlanChoice")},
 		"missing_choices": map[string]any{"type": "array", "items": ref("IntentPlanMissingChoice")}, "architecture": ref("IntentPlanArchitecture"),
 		"evidence": ref("IntentPlanEvidence"), "warnings": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},

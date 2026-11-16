@@ -95,6 +95,10 @@ class ControlAPI:
         request_path = "/catalog/hugging-face/search"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def list_best_known_stacks(self) -> dict[str, Any]:
+        request_path = "/catalog/stacks"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         request_path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))

@@ -270,6 +270,67 @@ it timed out and HTTP 502 for any other failure, with the reason in `error.messa
 without outbound HTTPS access to `huggingface.co` always returns that error; the catalog routes keep
 working.
 
+## Best-known stacks
+
+Before anything is measured on your traffic, InferCrane can show which serving stacks did best for a
+model in cited benchmarks, and deploy the top one:
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/stacks?model=gpt-oss-120b&goal=lowest_cost&min_per_user_output_tokens_per_second=50" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+`model` is a catalog name or an exact `organization/repository`. The other parameters are optional:
+
+| Parameter | Meaning |
+| --- | --- |
+| `goal` | `lowest_cost` (default): lowest estimated cost per 1M output tokens. `lowest_latency`: lowest first-token p95, then the fastest per-user output speed where no p95 was published. `highest_throughput`: most output tokens per second per GPU. |
+| `input_tokens`, `output_tokens` | Your expected request shape, 1,024 and 1,024 by default. Only stacks measured at the closest published shape are compared, and the response says which shape that was. |
+| `max_ttft_p95_ms`, `min_per_user_output_tokens_per_second` | The latency target. A stack is ranked at its best measured point that meets it. |
+| `gpus` | Comma-separated accelerators you can use, such as `H100,H200`. |
+| `limit` | 1 to 50 rows, 10 by default. |
+
+Each row is one stack (engine and version, GPU type and count, precision, parallelism) at one
+measured operating point, with:
+
+- `metrics`: output tokens per second for the whole stack and per GPU, per-user output speed, and
+  first-token p50, p95 and p99. A value the source did not publish is `null`. When only one of the
+  two throughputs was published, the other is that figure multiplied or divided by the GPU count,
+  and `metrics.derived` names it.
+- `cost`: an estimate of cost per 1M output tokens, computed as the hourly price divided by output
+  tokens per hour. The price is the cheapest current, complete, one-replica USD price for exactly
+  that GPU type and count in the price catalog. Accelerator-only components, stale rows and other
+  currencies never count. With no such price, `cost.state` is `unknown` and `cost.basis` says why.
+- `source`: who measured it, when, under which license, and where to re-read the number. `display`
+  is the label every client shows: `Public benchmark · <source> · <date>`,
+  `Measured by InferCrane · <date>`, or `Vendor recipe · <source> · <date>`.
+- `target`: `met`, `unknown`, or `no_target`. Sources often publish p99 but not p95. Because a p95
+  is never above the p99 and never below the p90 or p50, a published p99 inside the target counts as
+  met (`metrics.ttft_p95_at_most_ms` holds it), a p90 or p50 above the target counts as missed, and
+  anything between stays `unknown`. A point that misses the target is never chosen; stacks with no
+  point inside it are listed in `excluded`. Rows whose target is unknown rank after rows that meet it.
+- `stale`: measured more than a year ago. Stale rows rank after fresh ones.
+- `deploy`: `ready` when a reviewed catalog profile launches this exact stack (same GPU type and
+  count, engine version and image); otherwise `not_reviewed` with a reason. `default_stack` is the
+  highest-ranked ready stack.
+
+When no evidence exists for the exact checkpoint, rows for a model with the same architecture are
+returned with `model.match: "family"`, the family's stated basis, and the measured checkpoint on
+each row. A model with no evidence returns no rows; nothing is extrapolated from other models.
+
+To deploy a stack, plan from it and deploy the returned draft:
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/planning/intents" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"stack":"gpt-oss-120b-mxfp4-h200x1-vllm-0.22.0-tp1-1k1k"}'
+```
+
+The cited numbers describe the source's hardware and synthetic or recorded requests. Once the stack
+is serving, record traffic and start an [optimization run](/features/optimization) to measure it on
+your own requests against the setups InferCrane proposes. [Benchmark evidence](/benchmarks#best-known-stacks-dataset)
+lists the sources and what was left out.
+
 ## API
 
 Authenticated consoles and automation can use:

@@ -19,9 +19,14 @@ curl -fsS "$INFERCRANE_URL/api/v1/planning/intents" \
   }'
 ```
 
-Optional fields are `model`, `provider`, `region`, `gpu`, `objective`, and `compute_mode`. Explicit
-fields override only the matching interpretation. Objectives are `interactive`, `latency`,
+Optional fields are `model`, `provider`, `region`, `gpu`, `objective`, `compute_mode`, and `stack`.
+Explicit fields override only the matching interpretation. Objectives are `interactive`, `latency`,
 `throughput`, or `cost-efficiency`; compute mode is `elastic` or `serverless`.
+
+`stack` starts the plan from one [best-known stack](/features/model-catalog#best-known-stacks): the
+plan uses that stack's reviewed launch profile, GPU type and GPU count, and returns `plan.stack` with
+the stack's label and source. A stack with no reviewed launch profile, or one that conflicts with the
+requested model, GPU or compute mode, returns `422 invalid_intent`.
 
 When no provider is named, InferCrane ranks compatible registered providers only when it has an
 exact, fresh USD quote for the reviewed GPU count and region. The quote must be a complete instance
@@ -51,7 +56,8 @@ The plan combines only these facts:
 - configured compute-connection readiness; and
 - a current exact provider catalog observation for one replica, when one exists.
 
-The plan always reports performance as `unmeasured` and capacity as unknown until a bounded provider
+The plan reports performance as `unmeasured`, or, when it starts from a stack, as
+`cited, not measured here: <source>`. Capacity stays unknown until a bounded provider
 probe or accepted launch supplies evidence. A catalog price is not stock, quota, a reservation, an
 account-specific discount, or a final invoice. Accelerator-only price components remain explicitly
 non-comparable with complete instance totals.

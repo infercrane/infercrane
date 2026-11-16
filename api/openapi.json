@@ -427,6 +427,582 @@
         ],
         "type": "object"
       },
+      "BestKnownStack": {
+        "additionalProperties": false,
+        "properties": {
+          "cost": {
+            "additionalProperties": false,
+            "properties": {
+              "basis": {
+                "type": "string"
+              },
+              "hourly_usd": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "per_million_output_tokens_usd": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "price_authority": {
+                "type": "string"
+              },
+              "price_observed_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "price_source": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "region": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "estimated",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "per_million_output_tokens_usd",
+              "basis"
+            ],
+            "type": "object"
+          },
+          "deploy": {
+            "additionalProperties": false,
+            "properties": {
+              "catalog_model": {
+                "type": "string"
+              },
+              "profile": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "ready",
+                  "not_reviewed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "engine_version": {
+            "type": "string"
+          },
+          "gpu": {
+            "type": "string"
+          },
+          "gpu_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "gpu_vendor": {
+            "enum": [
+              "nvidia",
+              "amd"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "measured_at": {
+            "format": "date",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": false,
+            "properties": {
+              "derived": {
+                "description": "Throughputs the source did not publish itself: the published figure times or divided by the GPU count.",
+                "items": {
+                  "enum": [
+                    "output_tokens_per_second",
+                    "output_tokens_per_second_per_gpu"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "itl_p95_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "output_tokens_per_second": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "output_tokens_per_second_per_gpu": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "per_user_output_tokens_per_second": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "per_user_statistic": {
+                "enum": [
+                  "mean",
+                  "median"
+                ],
+                "type": "string"
+              },
+              "ttft_p50_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "ttft_p95_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "ttft_p99_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "output_tokens_per_second",
+              "output_tokens_per_second_per_gpu",
+              "per_user_output_tokens_per_second",
+              "ttft_p50_ms",
+              "ttft_p95_ms",
+              "ttft_p99_ms",
+              "itl_p95_ms",
+              "derived"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "description": "The checkpoint the source measured.",
+            "type": "string"
+          },
+          "model_match": {
+            "enum": [
+              "exact",
+              "family"
+            ],
+            "type": "string"
+          },
+          "operating_point": {
+            "additionalProperties": false,
+            "properties": {
+              "concurrency": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "concurrency",
+              "ref"
+            ],
+            "type": "object"
+          },
+          "parallelism": {
+            "type": "string"
+          },
+          "precision": {
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "rank_basis": {
+            "enum": [
+              "cost_per_million_output_tokens",
+              "ttft_p95",
+              "per_user_output_tokens_per_second",
+              "output_tokens_per_second_per_gpu"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "additionalProperties": false,
+            "properties": {
+              "display": {
+                "description": "For example \"Public benchmark · SemiAnalysis InferenceMAX · 2025-10-09\" or \"Measured by InferCrane · 2026-09-23\".",
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "public_benchmark",
+                  "vendor_recipe",
+                  "measured_by_infercrane"
+                ],
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "license_url": {
+                "format": "uri",
+                "type": "string"
+              },
+              "published_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "publisher": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "format": "uri",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "label",
+              "display",
+              "publisher",
+              "title",
+              "url",
+              "license",
+              "license_url",
+              "published_at",
+              "ref"
+            ],
+            "type": "object"
+          },
+          "stale": {
+            "description": "Measured longer ago than the dataset's freshness window; stale rows rank after fresh ones.",
+            "type": "boolean"
+          },
+          "target": {
+            "enum": [
+              "met",
+              "unknown",
+              "no_target"
+            ],
+            "type": "string"
+          },
+          "techniques": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "dataset": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "input_tokens": {
+                "type": "integer"
+              },
+              "output_tokens": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "input_tokens",
+              "output_tokens",
+              "dataset"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "rank",
+          "id",
+          "label",
+          "model",
+          "model_match",
+          "engine",
+          "engine_version",
+          "gpu",
+          "gpu_vendor",
+          "gpu_count",
+          "precision",
+          "parallelism",
+          "techniques",
+          "workload",
+          "measured_at",
+          "stale",
+          "rank_basis",
+          "operating_point",
+          "metrics",
+          "cost",
+          "target",
+          "source",
+          "deploy",
+          "limitations"
+        ],
+        "type": "object"
+      },
+      "BestKnownStacks": {
+        "additionalProperties": false,
+        "description": "Serving stacks ranked from cited benchmark evidence. Throughput and latency are copied from the source at one measured operating point; cost per 1M output tokens is an estimate from that throughput and a current price, or unknown.",
+        "properties": {
+          "dataset_version": {
+            "type": "string"
+          },
+          "default_stack": {
+            "description": "Highest-ranked stack with a reviewed launch configuration; Deploy uses it unless another is chosen.",
+            "type": "string"
+          },
+          "evidence_policy": {
+            "type": "string"
+          },
+          "excluded": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "goal": {
+            "enum": [
+              "lowest_latency",
+              "lowest_cost",
+              "highest_throughput"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "label",
+                  "basis"
+                ],
+                "type": "object"
+              },
+              "match": {
+                "description": "family means no evidence exists for this exact checkpoint and rows are for a model with the same architecture, named on each row.",
+                "enum": [
+                  "exact",
+                  "family",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "requested": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "requested",
+              "match"
+            ],
+            "type": "object"
+          },
+          "other_workloads": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "input_tokens": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "output_tokens": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "stacks": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "input_tokens",
+                "output_tokens"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "ranked_by": {
+            "description": "One sentence naming the ranking metric and target.",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "infercrane.best-known-stacks/v1",
+            "type": "string"
+          },
+          "stacks": {
+            "items": {
+              "$ref": "#/components/schemas/BestKnownStack"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "target": {
+            "additionalProperties": false,
+            "properties": {
+              "max_ttft_p95_ms": {
+                "type": "number"
+              },
+              "min_per_user_output_tokens_per_second": {
+                "type": "number"
+              }
+            },
+            "type": "object"
+          },
+          "total": {
+            "description": "Ranked stacks before the limit.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "input_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "match": {
+                "enum": [
+                  "exact",
+                  "closest",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "output_tokens": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "requested": {
+                "additionalProperties": false,
+                "properties": {
+                  "input_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "output_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "stacks": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "input_tokens",
+                  "output_tokens"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "requested",
+              "match"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "dataset_version",
+          "model",
+          "goal",
+          "ranked_by",
+          "workload",
+          "target",
+          "stacks",
+          "total",
+          "excluded",
+          "other_workloads",
+          "evidence_policy"
+        ],
+        "type": "object"
+      },
       "BurstGuardEvaluationRequest": {
         "properties": {
           "breach_intervals": {
@@ -2662,6 +3238,9 @@
             "const": "infercrane.intent-plan/v1",
             "type": "string"
           },
+          "stack": {
+            "$ref": "#/components/schemas/IntentPlanStack"
+          },
           "status": {
             "enum": [
               "ready",
@@ -3120,6 +3699,11 @@
             "required": [
               "model"
             ]
+          },
+          {
+            "required": [
+              "stack"
+            ]
           }
         ],
         "properties": {
@@ -3158,8 +3742,44 @@
           "region": {
             "maxLength": 128,
             "type": "string"
+          },
+          "stack": {
+            "description": "Start from one best-known stack from GET /catalog/stacks; its reviewed launch profile, GPU and GPU count are used.",
+            "maxLength": 128,
+            "type": "string"
           }
         },
+        "type": "object"
+      },
+      "IntentPlanStack": {
+        "additionalProperties": false,
+        "description": "The best-known stack this plan launches. Its cited numbers stay in GET /catalog/stacks.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "measured_at": {
+            "format": "date",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "source",
+          "source_url",
+          "measured_at"
+        ],
         "type": "object"
       },
       "KernelOpportunityRequest": {
@@ -9276,6 +9896,138 @@
           }
         ],
         "summary": "Inspect one reviewed model and its serving profiles",
+        "tags": [
+          "Model catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/stacks": {
+      "get": {
+        "operationId": "listBestKnownStacks",
+        "parameters": [
+          {
+            "description": "Exact Hugging Face organization/repository, or a reviewed catalog name.",
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "maxLength": 192,
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "description": "What to rank by: lowest first-token p95, lowest estimated cost per 1M output tokens at the target, or most output tokens per second per GPU.",
+            "in": "query",
+            "name": "goal",
+            "required": false,
+            "schema": {
+              "default": "lowest_cost",
+              "enum": [
+                "lowest_latency",
+                "lowest_cost",
+                "highest_throughput"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Expected prompt length. Only stacks measured at the closest published workload shape are compared.",
+            "in": "query",
+            "name": "input_tokens",
+            "required": false,
+            "schema": {
+              "default": 1024,
+              "maximum": 1048576,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Expected output length.",
+            "in": "query",
+            "name": "output_tokens",
+            "required": false,
+            "schema": {
+              "default": 1024,
+              "maximum": 262144,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Comma-separated accelerators you can use, for example H100,H200. Omit for any.",
+            "in": "query",
+            "name": "gpus",
+            "required": false,
+            "schema": {
+              "maxLength": 1024,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Latency target: first-token p95 at most this many milliseconds. A point whose p95 was not published reads as unknown, never as met.",
+            "in": "query",
+            "name": "max_ttft_p95_ms",
+            "required": false,
+            "schema": {
+              "maximum": 600000,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "Latency target: each request streams at least this many output tokens per second.",
+            "in": "query",
+            "name": "min_per_user_output_tokens_per_second",
+            "required": false,
+            "schema": {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "number"
+            }
+          },
+          {
+            "description": "Maximum ranked stacks returned.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BestKnownStacks"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rank the best-known serving stacks for a model and goal from cited benchmark evidence",
         "tags": [
           "Model catalog"
         ]

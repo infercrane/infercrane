@@ -56,5 +56,38 @@ InferCrane distinguishes modeled proposals, screening measurements, qualificatio
 public repeated evidence. Only comparable measurements can be ranked. Missing identity, quality,
 cost, or workload evidence produces `WAIT` or `REJECT`; it is never converted into a release win.
 
+## Best-known stacks dataset
+
+[Best-known stacks](/features/model-catalog#best-known-stacks) ranks serving stacks from a reviewed
+dataset embedded in the control plane (`internal/stackevidence/dataset.json`, version
+`2026-11-17.1`). Every number in it was copied from its source with a reference back to the exact
+file, run or API row. Nothing is estimated or interpolated. The only computed number a ranking
+shows is cost per 1M output tokens, from a cited throughput and a current price.
+
+| Source | Label | What it contributes | License |
+| --- | --- | --- | --- |
+| The InferCrane receipt above | Measured by InferCrane | Qwen3.8-27B-FP8 on one H200, SGLang 0.5.20, control and selected recipe, four concurrency lanes with first-token p50 and p95 | Apache-2.0 |
+| [SemiAnalysis InferenceX](https://inferencex.semianalysis.com/api/v1/benchmarks) (formerly InferenceMAX), public API read on 2026-11-17 | Public benchmark | gpt-oss-120b, DeepSeek-R1-0528 and Llama 3.3 70B checkpoints on H100, H200, B200, MI300X, MI325X and MI355X with vLLM, SGLang and TensorRT-LLM, at 1k/1k, 1k/8k and 8k/1k tokens and fixed concurrency | [Apache-2.0](https://github.com/SemiAnalysisAI/InferenceX/blob/main/LICENSE) repository; cited with attribution |
+
+From InferenceX the dataset keeps only single-node, non-disaggregated rows without speculative
+decoding or expert parallelism, whose exact Hugging Face checkpoint the run recorded. Rows whose
+model was a local path, or whose engine is not one InferCrane names, were left out. The Llama 3.3
+70B runs date from 2025-10-29 on vLLM 0.10.2 and TensorRT-LLM 1.1.0rc2; they are marked stale.
+InferenceX's own cost figures use its hourly GPU assumptions and interpolation, so they are not
+reused.
+
+Left out on purpose:
+
+- **MLPerf® Inference results.** Their results-messaging rules forbid comparing MLPerf numbers with
+  non-MLPerf numbers in one list, and per-GPU and latency figures are secondary metrics.
+- **TensorRT-LLM Performance Overview.** It reports offline maximum-load throughput with no latency
+  or concurrency, which cannot be compared with fixed-concurrency rows.
+- **AMD's "Performance Results with ROCm" page.** Its site terms forbid commercial reuse.
+- **Vendor recipe pages** (vLLM recipes, ROCm docs) publish configurations but no numbers. The
+  `Vendor recipe` label is ready for vendor-published results that pass these rules.
+
+Within one ranking, stacks are compared only at one workload shape. Inter-token latency is not
+copied from InferenceX, because its streaming makes the figure incomparable across engines.
+
 Read [benchmarking](/features/benchmarking), [optimization](/features/optimization), and
 [compatibility and qualification](/compatibility) for the evidence rules.
