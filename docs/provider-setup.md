@@ -148,7 +148,15 @@ build argument (default `runpod,vast`); build with more, for example
 `--build-arg SKYPILOT_EXTRAS=runpod,vast,lambda,nebius`, to drive other SkyPilot clouds. Vast.ai's
 SkyPilot backend reads its key only from the Vast CLI config, so the entrypoint writes
 `VAST_API_KEY` (or the file named by `VAST_API_KEY_FILE`) to `~/.config/vastai/vast_api_key` with
-owner-only permissions before InferCrane starts. A registered runtime is a routing capability, not real-infrastructure qualification;
+owner-only permissions before InferCrane starts.
+
+A declared cloud is outside the public qualification matrix, so a deployment selects it only by its
+exact adapter identity, `skypilot-<cloud>`, in elastic mode; a cloud name alone is rejected:
+
+```yaml
+provider: {cloud: vast, adapter: skypilot-vast}
+resources: {gpu: L40S}
+``` A registered runtime is a routing capability, not real-infrastructure qualification;
 the exact provider, region, accelerator, runtime, image, and model tuple must still pass the release
 qualification workflow.
 

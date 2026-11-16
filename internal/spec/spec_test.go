@@ -144,6 +144,21 @@ scaling: {min_replicas: 1, max_replicas: 4}
 	}
 }
 
+func TestLoadAdmitsDeclaredSkyPilotCloudOnlyByAdapter(t *testing.T) {
+	loaded, err := Load(writeSpec(t, `
+name: qwen-vast
+model: {id: Qwen/Qwen3-0.6B}
+resources: {gpu: L40S}
+provider: {cloud: vast, adapter: skypilot-vast}
+`))
+	if err != nil || loaded.Provider.Cloud != "vast" || loaded.Provider.Adapter != "skypilot-vast" {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	if _, err := Load(writeSpec(t, "name: qwen-vast\nmodel: {id: Qwen/Qwen3-0.6B}\nresources: {gpu: L40S}\nprovider: {cloud: vast}\n")); err == nil {
+		t.Fatal("a SkyPilot cloud without its adapter identity was admitted")
+	}
+}
+
 func TestLoadRejectsExcludedRuntimeAndCloud(t *testing.T) {
 	for name, override := range map[string]string{
 		"runtime": "runtime: {engine: unknown-runtime}\nprovider: {cloud: runpod}",
