@@ -1830,26 +1830,55 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
 	response := map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
-	if warnings, ok := optimizationProposalWarnings(campaign.ProposalJSON); ok {
-		response["warnings"] = warnings
+	if recorded, ok := readCampaignProposal(campaign.ProposalJSON); ok {
+		response["warnings"] = recorded.Warnings
+		if recorded.Workload != nil {
+			response["workload"] = recorded.Workload
+		}
 	}
 	return response
 }
 
-// optimizationProposalWarnings reads the warnings recorded on a campaign's
-// immutable proposal. It reports false when the stored proposal cannot be
-// decoded, so the response omits warnings rather than claiming there were none.
-func optimizationProposalWarnings(proposalJSON string) ([]string, bool) {
+// campaignWorkloadView is the load a campaign's immutable proposal bound it
+// to: the customer's recorded Replay (customer_observed, with its shape
+// digest as fingerprint), the public prior, or a reviewed synthetic profile.
+// It states what the campaign was asked to replay, not what was measured.
+type campaignWorkloadView struct {
+	Source      string `json:"source"`
+	Fingerprint string `json:"fingerprint"`
+	Profile     string `json:"profile"`
+}
+
+type campaignProposalView struct {
+	Warnings []string
+	Workload *campaignWorkloadView
+}
+
+// readCampaignProposal reads the warnings and bound workload recorded on a
+// campaign's immutable proposal. It reports false when the stored proposal
+// cannot be decoded, so the response omits both rather than claiming there
+// were no warnings or no workload. Workload stays nil when the proposal
+// recorded no workload source.
+func readCampaignProposal(proposalJSON string) (campaignProposalView, bool) {
 	var proposal struct {
 		Warnings []string `json:"warnings"`
+		Input    struct {
+			WorkloadProfile     string `json:"workload_profile"`
+			WorkloadSource      string `json:"workload_source"`
+			WorkloadFingerprint string `json:"workload_fingerprint"`
+		} `json:"input"`
 	}
 	if json.Unmarshal([]byte(proposalJSON), &proposal) != nil {
-		return nil, false
+		return campaignProposalView{}, false
 	}
-	if proposal.Warnings == nil {
-		return []string{}, true
+	view := campaignProposalView{Warnings: proposal.Warnings}
+	if view.Warnings == nil {
+		view.Warnings = []string{}
 	}
-	return proposal.Warnings, true
+	if source := proposal.Input.WorkloadSource; source != "" {
+		view.Workload = &campaignWorkloadView{Source: source, Fingerprint: proposal.Input.WorkloadFingerprint, Profile: proposal.Input.WorkloadProfile}
+	}
+	return view, true
 }
 
 func (a API) createOptimizedArtifact(w http.ResponseWriter, r *http.Request) {

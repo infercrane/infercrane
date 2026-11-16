@@ -198,6 +198,19 @@ only when the stored proposal cannot be read. `infercrane optimize inspect`, `re
 is at least one warning, and `--output json` keeps the field exactly as returned. Warnings explain
 what was skipped or left unproven. They are not performance evidence.
 
+Campaign responses also return `workload`, the load the immutable proposal bound the campaign to:
+
+| `workload.source` | Load the campaign sends | `workload.fingerprint` |
+|---|---|---|
+| `customer_observed` | Your recorded content-free Replay | The Replay shape digest |
+| `public_prior` | The public workload prior | The public prior's digest |
+| `reviewed_default` | A reviewed synthetic profile (`workload.profile`) | Empty |
+
+The console uses it to show whether a run tests on your recorded traffic before anything is
+measured. `workload` is absent when the stored proposal cannot be read or recorded no source, and
+it states what the campaign was asked to replay, not what was measured. Each candidate's measured
+workload evidence records what actually ran.
+
 Use `propose` for a completely offline preview. Use `create` to persist the same immutable proposal
 without provisioning anything:
 
