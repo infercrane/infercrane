@@ -210,3 +210,46 @@ func hasMissing(plan Plan, field string) bool {
 	}
 	return false
 }
+
+func TestPlanStartsFromABestKnownStack(t *testing.T) {
+	stack := "qwen3.8-27b-fp8-h200x1-sglang-0.5.20-nextn"
+	plan, err := testPlanner(t).Plan(Request{Stack: stack, Provider: "runpod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Model == nil || plan.Model.Name != "qwen3.8-27b-fp8" {
+		t.Fatalf("model = %+v", plan.Model)
+	}
+	if plan.Configuration == nil || plan.Configuration.Profile != "sglang-h200-nextn-k4-provisional" || plan.Configuration.GPU != "H200" || plan.Configuration.GPUCount != 1 {
+		t.Fatalf("configuration = %+v", plan.Configuration)
+	}
+	if plan.Stack == nil || plan.Stack.ID != stack || plan.Stack.Source != "Measured by InferCrane · 2026-09-23" || !strings.HasPrefix(plan.Stack.SourceURL, "https://github.com/infercrane/infercrane/") {
+		t.Fatalf("stack = %+v", plan.Stack)
+	}
+	if !strings.HasPrefix(plan.Evidence.Performance, "cited, not measured here") {
+		t.Fatalf("performance evidence = %q", plan.Evidence.Performance)
+	}
+	if plan.Status != "ready" || plan.DeploymentDraft == nil || plan.DeploymentDraft.Workload == nil || !strings.HasPrefix(plan.DeploymentDraft.Workload.Image, "lmsysorg/sglang@sha256:06e4f2ed") {
+		t.Fatalf("draft = %+v status %s missing %+v", plan.DeploymentDraft, plan.Status, plan.Missing)
+	}
+
+	same, err := testPlanner(t).Plan(Request{Stack: stack, Model: "Qwen/Qwen3.8-27B-FP8", GPU: "H200", Provider: "runpod"})
+	if err != nil || same.Configuration.Profile != plan.Configuration.Profile {
+		t.Fatalf("explicit matching model and GPU: %v %+v", err, same.Configuration)
+	}
+}
+
+func TestPlanRefusesAStackThatCannotLaunch(t *testing.T) {
+	for name, request := range map[string]Request{
+		"unknown stack":       {Stack: "no-such-stack"},
+		"no reviewed profile": {Stack: "qwen3.8-27b-fp8-h200x1-sglang-0.5.20"},
+		"different model":     {Stack: "qwen3.8-27b-fp8-h200x1-sglang-0.5.20-nextn", Model: "Qwen/Qwen3-8B"},
+		"conflicting GPU":     {Stack: "qwen3.8-27b-fp8-h200x1-sglang-0.5.20-nextn", GPU: "L40S"},
+		"conflicting mode":    {Stack: "qwen3.8-27b-fp8-h200x1-sglang-0.5.20-nextn", ComputeMode: "serverless"},
+		"oversized stack":     {Stack: strings.Repeat("s", 129)},
+	} {
+		if _, err := testPlanner(t).Plan(request); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+	}
+}

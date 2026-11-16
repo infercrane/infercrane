@@ -19,6 +19,7 @@ import (
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/stackevidence"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -34,6 +35,9 @@ type Request struct {
 	GPU         string `json:"gpu,omitempty"`
 	Objective   string `json:"objective,omitempty"`
 	ComputeMode string `json:"compute_mode,omitempty"`
+	// Stack starts the plan from one best-known stack: its reviewed launch
+	// profile, GPU and GPU count.
+	Stack string `json:"stack,omitempty"`
 }
 
 type Provider struct {
@@ -45,7 +49,20 @@ type Planner struct {
 	Compatibility []integration.RuntimeCompatibility
 	Providers     []Provider
 	Prices        map[pricing.Request]pricing.Estimate
-	Now           func() time.Time
+	// Stacks is the benchmark evidence a request's stack is read from; nil
+	// uses the embedded reviewed dataset.
+	Stacks *stackevidence.Dataset
+	Now    func() time.Time
+}
+
+// SelectedStack is the best-known stack a plan starts from. Its numbers stay
+// in the stacks read; the plan only records which cited stack it launches.
+type SelectedStack struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Source     string `json:"source"`
+	SourceURL  string `json:"source_url"`
+	MeasuredAt string `json:"measured_at"`
 }
 
 type Interpretation struct {
@@ -210,6 +227,7 @@ type Plan struct {
 	Mutation        string           `json:"mutation"`
 	Interpretation  Interpretation   `json:"interpretation"`
 	Model           *Model           `json:"model,omitempty"`
+	Stack           *SelectedStack   `json:"stack,omitempty"`
 	Configuration   *Configuration   `json:"configuration,omitempty"`
 	Choices         []Choice         `json:"choices"`
 	Missing         []MissingChoice  `json:"missing_choices"`
@@ -239,12 +257,19 @@ func (p Planner) Plan(request Request) (Plan, error) {
 			Price:         unavailablePrice("no exact current catalog observation selected"),
 		},
 	}
+	stack, err := p.selectStack(&request)
+	if err != nil {
+		return Plan{}, err
+	}
 	recipes := append([]curatedrecipe.Entry(nil), p.Recipes...)
 	if len(recipes) == 0 {
 		recipes = curatedrecipe.All()
 	}
 	sort.Slice(recipes, func(i, j int) bool { return recipes[i].Name < recipes[j].Name })
 	entry, matched, suggestions := resolveModel(recipes, request.Model, request.Intent)
+	if stack != nil && (!matched || entry.Name != stack.Deploy.CatalogModel) {
+		return Plan{}, errors.Join(ErrInvalidRequest, fmt.Errorf("stack %s launches %s, not the requested model", stack.ID, stack.Deploy.CatalogModel))
+	}
 	if !matched {
 		result.Missing = append(result.Missing, MissingChoice{
 			Field: "model", Prompt: "Which reviewed model do you want to deploy?",
@@ -258,6 +283,15 @@ func (p Planner) Plan(request Request) (Plan, error) {
 	result.Model = &Model{Name: entry.Name, DisplayName: entry.DisplayName, Repository: entry.Model, Revision: entry.Revision, Runtime: entry.Runtime, Tasks: append([]string(nil), entry.Tasks...), Gated: entry.Gated, EvidenceClass: entry.EvidenceClass, EvidenceSummary: entry.EvidenceSummary}
 
 	profile, profileOK := chooseProfile(entry.Profiles, result.Interpretation.Objective, result.Interpretation.ComputeMode, request.GPU)
+	if stack != nil {
+		profile, profileOK = stackProfile(entry.Profiles, *stack, result.Interpretation.ComputeMode, request.GPU)
+		if !profileOK {
+			return Plan{}, errors.Join(ErrInvalidRequest, fmt.Errorf("stack %s launches profile %s on %d × %s; the requested GPU or compute mode conflicts with it", stack.ID, stack.Deploy.Profile, stack.GPUCount, stack.GPU))
+		}
+		result.Stack = p.selectedStack(*stack)
+		result.Evidence.Performance = "cited, not measured here: " + result.Stack.Source
+		result.Warnings = append(result.Warnings, "Throughput and latency for this stack are cited from "+result.Stack.Source+"; this deployment is not measured until an optimization run compares it on your traffic.")
+	}
 	if !profileOK {
 		options := profileOptions(entry.Profiles)
 		result.Missing = append(result.Missing, MissingChoice{Field: "compute_mode", Prompt: "Choose a reviewed compute profile.", Reason: "No reviewed profile matches the requested compute mode and GPU.", Options: options, Remediation: "Select one of the reviewed profiles or request qualification for the desired mode/GPU tuple."})
@@ -379,6 +413,61 @@ func validatedDeploymentDraft(name string, configuration Configuration, workload
 	return draft, nil
 }
 
+// selectStack resolves a requested stack and fills the model and GPU it
+// implies. A stack without a reviewed launch profile cannot be planned.
+func (p Planner) selectStack(request *Request) (*stackevidence.Stack, error) {
+	if request.Stack == "" {
+		return nil, nil
+	}
+	dataset := p.Stacks
+	if dataset == nil {
+		embedded, err := stackevidence.Default()
+		if err != nil {
+			return nil, fmt.Errorf("benchmark evidence is unavailable: %w", err)
+		}
+		dataset = &embedded
+	}
+	stack, ok := dataset.Stack(request.Stack)
+	if !ok {
+		return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("stack %s is not in the benchmark evidence dataset", request.Stack))
+	}
+	if stack.Deploy == nil {
+		return nil, errors.Join(ErrInvalidRequest, fmt.Errorf("stack %s has no reviewed launch configuration yet; choose a stack that is ready to deploy", stack.ID))
+	}
+	if request.Model == "" {
+		request.Model = stack.Deploy.CatalogModel
+	}
+	if request.GPU == "" {
+		request.GPU = stack.GPU
+	}
+	return &stack, nil
+}
+
+func (p Planner) selectedStack(stack stackevidence.Stack) *SelectedStack {
+	dataset := p.Stacks
+	if dataset == nil {
+		embedded := stackevidence.MustDefault()
+		dataset = &embedded
+	}
+	source, _ := dataset.Source(stack.Source)
+	return &SelectedStack{ID: stack.ID, Label: stack.Label(), Source: stackevidence.SourceDisplay(source, stack.MeasuredAt), SourceURL: source.URL, MeasuredAt: stack.MeasuredAt}
+}
+
+// stackProfile returns the stack's reviewed profile when the request's compute
+// mode and GPU do not contradict it.
+func stackProfile(profiles []curatedrecipe.ServingProfile, stack stackevidence.Stack, mode, gpu string) (curatedrecipe.ServingProfile, bool) {
+	for _, profile := range profiles {
+		if profile.Name != stack.Deploy.Profile {
+			continue
+		}
+		if profile.ComputeMode != mode || profile.GPUCount != stack.GPUCount || gpu != "" && !profileAcceptsGPU(profile, gpu) {
+			return curatedrecipe.ServingProfile{}, false
+		}
+		return profile, true
+	}
+	return curatedrecipe.ServingProfile{}, false
+}
+
 func normalizeRequest(request Request) Request {
 	request.Intent = strings.TrimSpace(request.Intent)
 	request.Model = strings.TrimSpace(request.Model)
@@ -387,12 +476,16 @@ func normalizeRequest(request Request) Request {
 	request.GPU = strings.TrimSpace(request.GPU)
 	request.Objective = strings.ToLower(strings.TrimSpace(request.Objective))
 	request.ComputeMode = strings.ToLower(strings.TrimSpace(request.ComputeMode))
+	request.Stack = strings.TrimSpace(request.Stack)
 	return request
 }
 
 func validateRequest(request Request) error {
-	if request.Intent == "" && request.Model == "" {
-		return errors.Join(ErrInvalidRequest, errors.New("intent or model is required"))
+	if request.Intent == "" && request.Model == "" && request.Stack == "" {
+		return errors.Join(ErrInvalidRequest, errors.New("intent, model, or stack is required"))
+	}
+	if len(request.Stack) > 128 {
+		return errors.Join(ErrInvalidRequest, errors.New("stack must not exceed 128 characters"))
 	}
 	if len(request.Intent) > 2048 || len(request.Model) > 256 || len(request.Provider) > 64 || len(request.Region) > 128 || len(request.GPU) > 128 || len(request.Objective) > 64 || len(request.ComputeMode) > 64 {
 		return errors.Join(ErrInvalidRequest, errors.New("intent planning fields exceed their bounded size"))
