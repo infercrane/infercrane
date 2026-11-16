@@ -8740,6 +8740,67 @@
         ]
       }
     },
+    "/api/v1/catalog/hugging-face/search": {
+      "get": {
+        "operationId": "searchHuggingFaceModels",
+        "parameters": [
+          {
+            "description": "Text matched against public Hugging Face model repository names. Two to 100 characters.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 2,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum models returned across the text-generation and feature-extraction pipelines, most downloaded first.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Search public Hugging Face text-generation and embedding models; results are not reviewed",
+        "tags": [
+          "Model catalog"
+        ]
+      }
+    },
     "/api/v1/catalog/models": {
       "get": {
         "operationId": "listCatalogModels",

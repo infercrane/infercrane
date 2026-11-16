@@ -1,12 +1,16 @@
 package controlapi
 
 import (
+	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
+	"github.com/infercrane/infercrane/internal/huggingfacesearch"
 )
 
 // huggingFaceCatalogModels returns a deliberately small, reviewed discovery
@@ -109,6 +113,76 @@ func (a API) huggingFaceCatalogModels(w http.ResponseWriter, r *http.Request) {
 			"Publisher builds for hardware InferCrane cannot run yet are listed as unsupported_hardware and never become candidates.",
 		},
 		"models": models,
+	})
+}
+
+// huggingFaceSearch passes a typed query to the public Hugging Face models
+// API. Every result is unreviewed: it is a repository someone can try, not
+// InferCrane evidence. It reads no tenant state and never touches PostgreSQL.
+func (a API) huggingFaceSearch(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	for key, values := range query {
+		if (key != "query" && key != "limit") || len(values) != 1 {
+			writeError(w, http.StatusBadRequest, "invalid_query", "only one query and one limit parameter are supported")
+			return
+		}
+	}
+	limit := huggingfacesearch.DefaultLimit
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > huggingfacesearch.MaxLimit {
+			writeError(w, http.StatusBadRequest, "invalid_query", "limit must be an integer from 1 to "+strconv.Itoa(huggingfacesearch.MaxLimit))
+			return
+		}
+		limit = parsed
+	}
+	normalized, err := huggingfacesearch.NormalizeQuery(query.Get("query"))
+	if err != nil {
+		var invalid *huggingfacesearch.InvalidQueryError
+		if errors.As(err, &invalid) {
+			writeError(w, http.StatusBadRequest, "invalid_query", invalid.Reason)
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid_query", "query is invalid")
+		return
+	}
+	if a.HuggingFaceSearch == nil {
+		writeError(w, http.StatusServiceUnavailable, "hugging_face_search_unavailable", "Hugging Face search is not enabled on this control plane")
+		return
+	}
+	result, err := a.HuggingFaceSearch.Search(r.Context(), normalized, limit)
+	if err != nil {
+		var invalid *huggingfacesearch.InvalidQueryError
+		var unavailable *huggingfacesearch.UnavailableError
+		switch {
+		case errors.As(err, &invalid):
+			writeError(w, http.StatusBadRequest, "invalid_query", invalid.Reason)
+		case errors.As(err, &unavailable) && unavailable.Timeout:
+			writeError(w, http.StatusGatewayTimeout, "hugging_face_search_unavailable", unavailable.Reason)
+		case errors.As(err, &unavailable):
+			writeError(w, http.StatusBadGateway, "hugging_face_search_unavailable", unavailable.Reason)
+		default:
+			writeError(w, http.StatusBadGateway, "hugging_face_search_unavailable", "Hugging Face search failed")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version":     huggingfacesearch.SchemaVersion,
+		"state":              "live",
+		"query":              result.Query,
+		"limit":              result.Limit,
+		"source":             result.Source,
+		"fetched_at":         result.FetchedAt.Format(time.RFC3339),
+		"cached":             result.Cached,
+		"pipelines":          huggingfacesearch.Pipelines,
+		"reviewed":           false,
+		"performance_claims": false,
+		"limitations": []string{
+			"Results come directly from the public Hugging Face models API and are not reviewed by InferCrane.",
+			"downloads is the count Hugging Face reports for the last 30 days. It is a popularity signal, not a quality, compatibility, or performance claim.",
+			"license, gated, downloads, and last_modified are null when Hugging Face did not report them.",
+		},
+		"models": result.Models,
 	})
 }
 

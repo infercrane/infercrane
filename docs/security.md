@@ -135,4 +135,10 @@ through their service account; the control plane stores only its name and key. S
 apply preserves field ownership and never force-steals conflicts. InferCrane deletes only exact names
 with matching durable ownership labels and annotations.
 
+The control plane contacts `huggingface.co` over HTTPS when an authenticated principal searches
+Hugging Face models (`GET /api/v1/catalog/hugging-face/search`). It sends only the search text, the
+pipeline filter, and a fixed `User-Agent`, never a Hugging Face token or tenant data. If your network
+policy blocks that destination, the search returns a typed `hugging_face_search_unavailable` error
+and nothing else changes. See [Search Hugging Face](/features/model-catalog#search-hugging-face).
+
 Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities through the repository's private GitHub security-advisory flow; do not open a public issue.

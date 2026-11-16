@@ -103,6 +103,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  searchHuggingFaceModels(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/hugging-face/search';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   planIntent(body: JsonValue): Promise<IntentPlanEnvelope> {
     const requestPath = '/planning/intents';
     return this.transport.request('POST', requestPath, { body }) as Promise<IntentPlanEnvelope>;

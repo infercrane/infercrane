@@ -47,6 +47,7 @@ var Routes = []Route{
 	{"GET", "/catalog/models", "listCatalogModels", "Model catalog", "Search reviewed model starting points", "", "ObjectList", 200, false},
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
 	{"GET", "/catalog/hugging-face/models", "listHuggingFaceCatalogModels", "Model catalog", "List reviewed model identities and publisher-optimized checkpoint candidates", "", "Object", 200, false},
+	{"GET", "/catalog/hugging-face/search", "searchHuggingFaceModels", "Model catalog", "Search public Hugging Face text-generation and embedding models; results are not reviewed", "", "Object", 200, false},
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
 	{"GET", "/model-api-catalog/{id}", "getModelAPICatalogEntry", "Model APIs", "Inspect one managed Model API identity without supplier disclosure", "", "Object", 200, false},
@@ -261,6 +262,9 @@ func Document() (map[string]any, error) {
 		if route.Path == "/model-api-usage" {
 			parameters = append(parameters, hostedModelAPIUsageQueryParameters()...)
 		}
+		if route.Path == "/catalog/hugging-face/search" {
+			parameters = append(parameters, huggingFaceSearchQueryParameters()...)
+		}
 		if route.Path == "/billing/webhooks/stripe" {
 			parameters = append(parameters, map[string]any{"name": "Stripe-Signature", "in": "header", "required": true, "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.", "schema": map[string]any{"type": "string"}})
 		}
@@ -358,6 +362,13 @@ func gpuPriceQueryParameters(public bool) []map[string]any {
 		{"name": "order", "in": "query", "required": false, "description": "Sort direction.", "schema": map[string]any{"type": "string", "enum": []string{"asc", "desc"}, "default": "asc"}},
 		{"name": "limit", "in": "query", "required": false, "description": "Maximum observations returned.", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": maxLimit}},
 		{"name": "offset", "in": "query", "required": false, "description": "Zero-based result offset.", "schema": map[string]any{"type": "integer", "minimum": 0, "default": 0}},
+	}
+}
+
+func huggingFaceSearchQueryParameters() []map[string]any {
+	return []map[string]any{
+		{"name": "query", "in": "query", "required": true, "description": "Text matched against public Hugging Face model repository names. Two to 100 characters.", "schema": map[string]any{"type": "string", "minLength": 2, "maxLength": 100}},
+		{"name": "limit", "in": "query", "required": false, "description": "Maximum models returned across the text-generation and feature-extraction pipelines, most downloaded first.", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 20}},
 	}
 }
 

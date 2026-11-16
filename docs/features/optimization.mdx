@@ -664,7 +664,9 @@ marked `unsupported_hardware`, but proposes none of them.
 
 Network access happens only in an explicit sync step. The optimizer and the control API read the
 reviewed catalog compiled into the binary. Proposals never contact Hugging Face, and the inference
-request path never reads the catalog.
+request path never reads the catalog. The separate live search route,
+[`/catalog/hugging-face/search`](/features/model-catalog#search-hugging-face), does contact Hugging
+Face, but its results never enter this catalog or a proposal.
 
 1. Record a snapshot of the public Hugging Face API. The fetch lists each publisher's organization
    twice: newest first back to the publisher's `created_after` date, and most downloaded first
