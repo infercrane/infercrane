@@ -218,8 +218,10 @@ To follow a campaign live, run `infercrane optimize watch CAMPAIGN_ID`. It shows
 where each setup is (starting a server, measuring against your current setup, checking answer
 quality), what was measured (throughput, p95 time to first token, p95 latency, and cost per million
 tokens when the price is sourced), how each setup compared with the current one including the
-measurement noise floor, and the decision with the exact `activate` command when a setup qualifies.
-It only reads the control API; `--once` prints one plain snapshot for scripts and logs.
+measurement noise floor, each setup's answer check, and the decision with the exact `activate`
+command when a setup qualifies. When a setup waits on you, for your eval set or your signed
+evaluation, it prints the exact command that unblocks it. It only reads the control API; `--once`
+prints one plain snapshot for scripts and logs.
 
 ### Read the outcome of a campaign
 
@@ -241,8 +243,11 @@ window, and each change is checked against that window's noise floor: the report
 `worse`, or `no real difference`. When it was not, the report shows each setup's own measurement and
 leaves the decision `unknown`. Cost and per-GPU throughput are rescaled by price and GPU count the same
 way the campaign ranking rescales them. The answer-quality verdict comes from the Release Guard
-evaluation when one exists. Otherwise it is the campaign's own gate, which requires the winner's signed
-eval to pass and has no WATCH band. The monthly projection assumes servers stay busy, so idle capacity
+evaluation when one exists. Otherwise it comes from the evidence that decided the winner's answer
+check, and `quality.source` says whose it is. For InferCrane's built-in check (`infercrane`, basis
+`builtin_answer_check`) the verdict uses the check's own watch and block thresholds. For signed
+customer evidence (`customer`, basis `campaign_quality_gate`) it is the eval's pass or fail, with no
+WATCH band. The monthly projection assumes servers stay busy, so idle capacity
 is not included. It is only made for a campaign that replayed your traffic, and only when every
 replayed request recorded its output tokens.
 
@@ -279,8 +284,8 @@ infercrane optimize create llama-3.1-8b-instruct \
 ```
 
 InferCrane keeps these proof paths distinct. A new endpoint has no production baseline, so a winning
-candidate may become `qualified` after measured performance, sourced cost, and signed semantic
-quality evidence. It then waits for explicit human activation. An `evolve_endpoint` campaign must
+candidate may become `qualified` after measured performance, sourced cost, and a passing answer
+check. It then waits for explicit human activation. An `evolve_endpoint` campaign must
 create a candidate revision against the named deployment, compare it with active production through
 Release Guard, and wait for explicit human promotion. InferCrane never invents a baseline for a new
 endpoint and never lets an evolution bypass Release Guard.
@@ -305,9 +310,10 @@ an endpoint with `infercrane endpoint delete <endpoint>-opt-<candidate> --yes`.
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable
 execution operation. The worker composes the existing deployment/rollout lifecycle, measures each
-exact candidate revision directly with AIPerf against the campaign control, adopts revision-bound
-signed quality evidence, ranks persisted results, evaluates Release Guard for evolution campaigns, and
-cleans rejected candidates. It never promotes automatically.
+exact candidate revision directly with AIPerf against the campaign control, checks each candidate's
+answers (see [How a campaign checks answers](#how-a-campaign-checks-answers)), ranks persisted
+results, evaluates Release Guard for evolution campaigns, and cleans rejected candidates. It never
+promotes automatically.
 
 The execution capability is fail-closed. The control plane must find AIPerf and must have an exact
 price snapshot valid for the entire approval window. Configure price evidence before approving:
@@ -378,7 +384,7 @@ cannot be extended, so a campaign whose measurement outlives its approval must b
 approved again with a longer `--expires-in`.
 
 Execution uses a measured-evidence barrier: all viable candidates reach AIPerf measurement and
-revision-bound quality validation before ranking begins. Candidates are provisioned and measured
+the revision-bound answer check before ranking begins. Candidates are provisioned and measured
 one at a time, control first. A candidate that reaches the barrier waits there while the next one
 is provisioned, so a deployment that converges between execution attempts is recorded on the next
 attempt. A winner stays in the ranking after it becomes `qualified` (or `guarding` for an
@@ -390,6 +396,42 @@ workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost vi
 `rejected`. For evolution campaigns, the selected candidate still has to pass
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
 benchmark, quality, Lab, and, where a real baseline exists, Release Guard evidence separately.
+
+### How a campaign checks answers
+
+A faster setup is no use if its answers changed. After a candidate is measured, the worker checks its
+answers before ranking, so a run started from the dashboard or `infercrane optimize` reaches a
+decision without you signing anything:
+
+1. **Your evidence wins.** If signed evidence you attached exists for the candidate's exact revision,
+   it decides. Nothing else runs.
+2. **Otherwise InferCrane checks.** The worker asks the candidate and a reference the same prompts,
+   one at a time, with greedy decoding (`temperature 0`, fixed seed). The reference is the campaign
+   control. For an evolve-endpoint campaign it is the target's active revision when that revision is
+   directly reachable, because Release Guard compares the candidate with the active revision. The
+   prompts are InferCrane's small built-in suite, pinned by digest in the product, or an eval set you
+   uploaded and named with `--eval-set`.
+3. **Answers are scored, then discarded.** Each answer is scored by how closely it matches the
+   reference's answer to the same prompt (token overlap, ignoring case, punctuation, and reasoning
+   blocks). A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10%
+   is `BLOCK`, which rejects the candidate with `quality_gate_rejected`. These are the same
+   PASS/WATCH/BLOCK rules Release Guard applies.
+4. **The result is signed evidence.** It is stored as quality evidence signed with the control plane's
+   own key and labelled `source: infercrane`, separate from evidence you sign (`source: customer`).
+   The reference gets its own row with score 1: its answers are the reference.
+
+The check never passes on missing evidence. When no serving reference exists, for example because
+the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
+When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
+every candidate wait for your own signed evaluation instead, create the campaign with
+`--quality-check customer_evidence`. Each candidate's `quality` object in the campaign API, the run
+page, and `infercrane optimize inspect` show which of these states it is in and, while it waits on
+you, the exact command to run. [Semantic quality evidence](/features/semantic-quality#built-in-answer-check)
+covers the evidence format, eval sets, and the signing key.
+
+Agreement with the control is not task accuracy: it shows the candidate answers like your current
+setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
+your prompts, or attach your own evaluator's signed results.
 
 ### How a campaign measures candidates
 

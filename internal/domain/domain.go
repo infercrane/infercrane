@@ -806,19 +806,35 @@ type QualityEvalSide struct {
 	Scores        []float64
 }
 
-// QualityEvidence is signed, revision-bound output from a customer-selected
-// semantic evaluator. It contains aggregate evidence only, never prompt or
-// response bodies.
+// QualityEvidence is signed, revision-bound output from a semantic evaluator.
+// It contains aggregate evidence only, never prompt or response bodies.
+// Source is QualityEvidenceSourceCustomer for evidence a customer signed and
+// attached, and QualityEvidenceSourceInferCrane for InferCrane's built-in
+// answer check, which also records the revision it compared against.
 type QualityEvidence struct {
 	ID, TenantID, DeploymentID, RevisionID                     string
 	Suite, SuiteVersion, Evaluator, EvaluatorVersion           string
 	ArtifactDigest, PayloadDigest, Signature, PublicKey, KeyID string
 	Algorithm                                                  string
+	Source, ReferenceRevisionID                                string
 	Score                                                      float64
 	Passed                                                     bool
 	SampleCount                                                int
 	DistributionJSON                                           string
 	EvaluatedAt, CreatedAt                                     time.Time
+}
+
+const (
+	QualityEvidenceSourceCustomer   = "customer"
+	QualityEvidenceSourceInferCrane = "infercrane"
+)
+
+// QualityEvalSet is a customer's prompt set for the built-in answer check,
+// stored as the exact uploaded bytes and addressed by their SHA-256 digest.
+type QualityEvalSet struct {
+	ID, TenantID, Digest, Name, Version, Body, CreatedBy string
+	PromptCount                                          int
+	CreatedAt                                            time.Time
 }
 
 type EnvironmentPromotion struct {

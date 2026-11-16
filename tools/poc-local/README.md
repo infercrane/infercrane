@@ -3,7 +3,7 @@
 Runs one real optimization campaign through the real InferCrane control plane on a laptop:
 a kind cluster, Postgres and `infercrane serve` in the cluster, a llama.cpp model server, real
 traffic through the gateway, a Replay capture, a campaign that measures each candidate against the
-current setup in turns, signed quality evidence, ranking, and activation.
+current setup in turns, the control plane's built-in answer check, ranking, and activation.
 
 The laptop has no GPU. Pods schedule on an invented `infercrane.dev/simulated-accelerator`
 resource labeled `SIMULATED-CPU` and run on the CPU. Every number is a CPU number; the run proves

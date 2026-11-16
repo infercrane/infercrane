@@ -42,7 +42,10 @@ type MeasurementResult struct {
 type ValidationResult struct {
 	QualityEvidenceID string
 	Passed            bool
-	FailureCode       string
+	// Inconclusive means the answers could not be compared at all. The
+	// candidate ends inconclusive with FailureCode; it never passes.
+	Inconclusive bool
+	FailureCode  string
 }
 
 type RankingResult struct {
@@ -160,6 +163,12 @@ func (c Coordinator) Step(ctx context.Context, tenant, campaignID, candidateID s
 			return result, fmt.Errorf("validate candidate: %w", validateErr)
 		}
 		updates := domain.OptimizationCandidateRun{BenchmarkID: candidate.BenchmarkID, QualityEvidenceID: validated.QualityEvidenceID, FailureCode: validated.FailureCode}
+		if validated.Inconclusive {
+			if updates.FailureCode == "" {
+				updates.FailureCode = "quality_inconclusive"
+			}
+			return c.transition(ctx, campaign, candidate, CandidateInconclusive, updates)
+		}
 		if !validated.Passed {
 			if updates.FailureCode == "" {
 				updates.FailureCode = "quality_gate_rejected"

@@ -125,3 +125,27 @@ func TestPairedDistributionIsBoundedAndContentFree(t *testing.T) {
 		t.Fatalf("mismatched distribution accepted: %v", err)
 	}
 }
+
+func TestRecordCopiesTheVerifiedEnvelopeWithoutChoosingASource(t *testing.T) {
+	_, privateKey, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := Payload{Schema: Schema, Deployment: "prod", RevisionID: "rev-1", Suite: "suite", SuiteVersion: "v1", Evaluator: "eval", EvaluatorVersion: "v1", Score: .75, Passed: true, SampleCount: 2, ArtifactDigest: "sha256:" + strings.Repeat("b", 64), EvaluatedAt: time.Now().UTC().Truncate(time.Second),
+		Distribution: &Distribution{Schema: DistributionSchema, Kind: "paired_scores", PairingDigest: "sha256:" + strings.Repeat("c", 64), Scores: []float64{.5, 1}}}
+	envelope, err := passport.Sign(payload, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := Record(payload, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.RevisionID != "rev-1" || row.Score != .75 || row.PayloadDigest != envelope.Digest || row.Signature != envelope.Signature || row.KeyID != envelope.KeyID || row.Source != "" || !strings.Contains(row.DistributionJSON, `"scores":[0.5,1]`) {
+		t.Fatalf("row = %+v", row)
+	}
+	payload.Distribution = nil
+	if row, err = Record(payload, envelope); err != nil || row.DistributionJSON != "{}" {
+		t.Fatalf("row without distribution = %+v err=%v", row, err)
+	}
+}

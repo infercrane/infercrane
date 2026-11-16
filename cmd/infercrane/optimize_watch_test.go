@@ -100,3 +100,30 @@ func TestOptimizeWatchRequiresCampaign(t *testing.T) {
 		t.Fatal("a flag was accepted as the campaign ID")
 	}
 }
+
+func TestRenderOptimizeWatchShowsTheAnswerCheck(t *testing.T) {
+	control := watchCandidate{ID: "control", Rank: 1, State: "ranked", DeploymentSpec: watchSpec("vllm"), Quality: &watchQuality{State: "passed", Source: "infercrane", Role: "reference", Reason: "This setup's answers to the 24 prompts are the reference the other setups are compared with."}}
+	waiting := watchCandidate{ID: "fast", Rank: 2, State: "validating", DeploymentSpec: watchSpec("vllm", "--max-num-seqs", "256"), Quality: &watchQuality{State: "waiting_for_evidence", Reason: "Waiting for your signed evaluation of this setup.", Command: "infercrane evaluation ingest qwen-opt-1 rev-1 --result ./evaluator-result.json --key ./quality-evidence.key --file ./quality-evidence.json --attach"}}
+	blocked := watchCandidate{ID: "q4", Rank: 3, State: "rejected", FailureCode: "quality_gate_rejected", DeploymentSpec: watchSpec("vllm", "--quantization", "awq"), Quality: &watchQuality{State: "blocked", Source: "infercrane", Reason: "Answers matched the reference 80% across 24 prompts. More than 10% different blocks a setup."}}
+	pending := watchCandidate{ID: "later", Rank: 4, State: "measuring", DeploymentSpec: watchSpec("sglang"), Quality: &watchQuality{State: "pending", Reason: "Runs after this setup is measured."}}
+	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-1", ModelIdentity: "Qwen/Qwen3-0.6B", State: "running", Candidates: []watchCandidate{control, waiting, blocked, pending}}, measurements: map[string]watchMeasurement{}}
+	text := renderOptimizeWatch(snapshot, newUIStyles(true), 120, false)
+	for _, want := range []string{
+		"waiting for your signed evaluation",
+		"answers changed too much",
+		"Answers",
+		"are the reference the other setups are compared with. (InferCrane check)",
+		"run: infercrane evaluation ingest qwen-opt-1 rev-1",
+		"More than 10% different blocks a setup. (InferCrane check)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("watch view lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Runs after this setup is measured") {
+		t.Fatalf("a pending answer check was listed:\n%s", text)
+	}
+	if status := watchStatus(watchCandidate{State: "validating", Quality: &watchQuality{State: "checking"}}); status != "checking answers against your current setup" {
+		t.Fatalf("checking status = %q", status)
+	}
+}

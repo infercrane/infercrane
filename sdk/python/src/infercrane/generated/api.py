@@ -371,6 +371,18 @@ class ControlAPI:
         request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
+    def upload_quality_eval_set(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/quality/eval-sets"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_quality_eval_set(self, digest: str) -> dict[str, Any]:
+        request_path = f"/quality/eval-sets/{quote(digest, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def delete_quality_eval_set(self, digest: str) -> None:
+        request_path = f"/quality/eval-sets/{quote(digest, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
+
     def list_quality_evidence(self, name: str) -> QualityEvidenceList:
         request_path = f"/deployments/{quote(name, safe='')}/quality-evidence"
         return cast(QualityEvidenceList, self._transport.request("GET", request_path))

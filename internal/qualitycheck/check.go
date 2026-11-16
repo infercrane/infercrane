@@ -1,0 +1,160 @@
+package qualitycheck
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
+	"github.com/infercrane/infercrane/internal/releaseguard"
+)
+
+const (
+	// Evaluator names InferCrane's built-in check in evidence. The control API
+	// refuses customer evidence that claims this name.
+	Evaluator = "infercrane-builtin"
+	// EvaluatorVersion covers the request settings, the agreement score, and
+	// the thresholds below. Changing any of them requires a new version.
+	EvaluatorVersion = "1"
+	// WatchRegressionPercent and BlockRegressionPercent are the built-in
+	// thresholds. A candidate whose answers agree with the reference less than
+	// 95% of the way is WATCH; less than 90% is BLOCK.
+	WatchRegressionPercent = 5.0
+	BlockRegressionPercent = 10.0
+)
+
+// Comparison is the in-memory result of one candidate against its reference.
+// It holds scores and digests only; answers are discarded.
+type Comparison struct {
+	Set                 EvalSet
+	ReferenceRevisionID string
+	CandidateRevisionID string
+	// Scores holds one agreement score per prompt, in eval-set order.
+	Scores []float64
+	Score  float64
+	// ResultDigest commits to the eval set, both revisions, a digest of every
+	// answer, and the scores, without storing the answers.
+	ResultDigest string
+	Eval         releaseguard.QualityEval
+	EvaluatedAt  time.Time
+}
+
+// Compare asks the reference and the candidate every prompt in turn and
+// scores the candidate's answers against the reference's. When both targets
+// are the same revision the candidate is the reference, so each prompt is
+// asked once and agreement is 1 by definition.
+func Compare(ctx context.Context, completer Completer, set EvalSet, reference, candidate Target, now func() time.Time) (Comparison, error) {
+	if completer == nil || len(set.Prompts) == 0 || !ValidDigest(set.Digest) || reference.RevisionID == "" || candidate.RevisionID == "" {
+		return Comparison{}, errors.New("quality check requires a completer, a decoded eval set, and both revisions")
+	}
+	self := reference.RevisionID == candidate.RevisionID
+	scores := make([]float64, 0, len(set.Prompts))
+	referenceAnswers := make([]string, 0, len(set.Prompts))
+	candidateAnswers := make([]string, 0, len(set.Prompts))
+	for _, prompt := range set.Prompts {
+		referenceAnswer, err := completer.Complete(ctx, reference, set, prompt)
+		if err != nil {
+			return Comparison{}, fmt.Errorf("reference revision: %w", err)
+		}
+		candidateAnswer := referenceAnswer
+		if !self {
+			if candidateAnswer, err = completer.Complete(ctx, candidate, set, prompt); err != nil {
+				return Comparison{}, fmt.Errorf("candidate revision: %w", err)
+			}
+		}
+		scores = append(scores, Agreement(referenceAnswer, candidateAnswer))
+		referenceAnswers = append(referenceAnswers, answerDigest(referenceAnswer))
+		candidateAnswers = append(candidateAnswers, answerDigest(candidateAnswer))
+	}
+	score := round(mean(scores))
+	bundle, _ := json.Marshal(map[string]any{
+		"evaluator": Evaluator, "evaluator_version": EvaluatorVersion, "eval_set": set.Digest,
+		"reference_revision_id": reference.RevisionID, "candidate_revision_id": candidate.RevisionID,
+		"reference_answers": referenceAnswers, "candidate_answers": candidateAnswers, "scores": scores,
+	})
+	stamp := time.Now().UTC()
+	if now != nil {
+		stamp = now().UTC()
+	}
+	comparison := Comparison{Set: set, ReferenceRevisionID: reference.RevisionID, CandidateRevisionID: candidate.RevisionID, Scores: scores, Score: score, ResultDigest: Digest(bundle), EvaluatedAt: stamp.Truncate(time.Second)}
+	comparison.Eval = Classify(set, score, scores)
+	return comparison, nil
+}
+
+// Policy is the fixed policy the built-in check applies through Release
+// Guard's own classifier.
+func Policy() domain.ReleaseGuardPolicy {
+	watch, block := WatchRegressionPercent, BlockRegressionPercent
+	return domain.ReleaseGuardPolicy{Enabled: true, RequireQualityEvidence: true, QualityComparisonMode: "threshold", MaxQualityRegressionPercent: &block, QualityWatchRegressionPercent: &watch}
+}
+
+// Classify returns the PASS, WATCH, or BLOCK verdict for a candidate whose
+// answers agree with the reference by score. The reference's own score is 1.
+// scores may be nil when only the aggregate is known.
+func Classify(set EvalSet, score float64, scores []float64) releaseguard.QualityEval {
+	reference := make([]float64, len(scores))
+	for index := range reference {
+		reference[index] = 1
+	}
+	pairing := ""
+	if len(scores) > 0 {
+		pairing = set.PairingDigest()
+	}
+	eval := domain.QualityEvalEvidence{
+		Suite: set.Name, SuiteVersion: set.SuiteVersion(), Evaluator: Evaluator, EvaluatorVersion: EvaluatorVersion,
+		Candidate: domain.QualityEvalSide{Score: score, Passed: true, SampleCount: len(set.Prompts), PairingDigest: pairing, Scores: scores},
+		Reference: &domain.QualityEvalSide{Score: 1, Passed: true, SampleCount: len(set.Prompts), PairingDigest: pairing, Scores: reference},
+	}
+	report := releaseguard.CompareQuality(Policy(), []domain.QualityEvalEvidence{eval})
+	return report.Evals[0]
+}
+
+// VerdictForScore classifies a stored built-in score. It applies the same
+// thresholds as Classify and needs no prompts.
+func VerdictForScore(score float64) releaseguard.QualityEval {
+	return Classify(EvalSet{Name: "stored", Version: "stored"}, score, nil)
+}
+
+// Payload binds one side of the comparison to an exact revision. The
+// reference side records score 1: its answers are the reference.
+func (c Comparison) Payload(deployment string, reference bool) qualityevidence.Payload {
+	revision, score, passed := c.CandidateRevisionID, c.Score, c.Eval.Verdict != releaseguard.QualityBlock
+	scores := c.Scores
+	if reference {
+		revision, score, passed = c.ReferenceRevisionID, 1, true
+		scores = make([]float64, len(c.Scores))
+		for index := range scores {
+			scores[index] = 1
+		}
+	}
+	return qualityevidence.Payload{
+		Schema: qualityevidence.Schema, Deployment: deployment, RevisionID: revision,
+		Suite: c.Set.Name, SuiteVersion: c.Set.SuiteVersion(), Evaluator: Evaluator, EvaluatorVersion: EvaluatorVersion,
+		Score: score, Passed: passed, SampleCount: len(c.Scores), ArtifactDigest: c.ResultDigest, EvaluatedAt: c.EvaluatedAt,
+		Distribution: &qualityevidence.Distribution{Schema: qualityevidence.DistributionSchema, Kind: "paired_scores", PairingDigest: c.Set.PairingDigest(), Scores: scores},
+	}
+}
+
+func answerDigest(answer string) string {
+	sum := sha256.Sum256([]byte(answer))
+	return hex.EncodeToString(sum[:])
+}
+
+func mean(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, value := range values {
+		total += value
+	}
+	return total / float64(len(values))
+}
+
+func round(value float64) float64 { return math.Round(value*10000) / 10000 }

@@ -453,6 +453,21 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
+  uploadQualityEvalSet(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/quality/eval-sets';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getQualityEvalSet(digest: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/quality/eval-sets/${encodeURIComponent(digest)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteQualityEvalSet(digest: string): Promise<void> {
+    const requestPath = `/quality/eval-sets/${encodeURIComponent(digest)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
+  }
+
   listQualityEvidence(name: string): Promise<QualityEvidenceList> {
     const requestPath = `/deployments/${encodeURIComponent(name)}/quality-evidence`;
     return this.transport.request('GET', requestPath) as Promise<QualityEvidenceList>;

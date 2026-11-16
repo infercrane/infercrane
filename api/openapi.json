@@ -5066,6 +5066,9 @@
           "proposal_candidate_id": {
             "type": "string"
           },
+          "quality": {
+            "$ref": "#/components/schemas/OptimizationCandidateQuality"
+          },
           "quality_evidence_id": {
             "type": "string"
           },
@@ -5912,6 +5915,7 @@
                 "enum": [
                   "release_guard",
                   "campaign_quality_gate",
+                  "builtin_answer_check",
                   "baseline_kept",
                   "unknown"
                 ],
@@ -6003,6 +6007,14 @@
                 ]
               },
               "release_guard_evaluation_id": {
+                "type": "string"
+              },
+              "source": {
+                "description": "Who produced the winner's deciding evidence.",
+                "enum": [
+                  "infercrane",
+                  "customer"
+                ],
                 "type": "string"
               },
               "verdict": {
@@ -6128,6 +6140,97 @@
         ],
         "type": "object"
       },
+      "OptimizationCandidateQuality": {
+        "additionalProperties": false,
+        "description": "The candidate's answer-quality step, derived from persisted state. Answers and prompts are never returned.",
+        "properties": {
+          "block_limit_percent": {
+            "type": "number"
+          },
+          "check": {
+            "enum": [
+              "builtin",
+              "customer_evidence"
+            ],
+            "type": "string"
+          },
+          "command": {
+            "description": "The exact command that unblocks a waiting step.",
+            "type": "string"
+          },
+          "eval_set": {
+            "description": "Digest of the customer eval set the campaign named.",
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "prompt_count": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference_revision_id": {
+            "type": "string"
+          },
+          "regression_percent": {
+            "type": "number"
+          },
+          "role": {
+            "description": "reference when this revision's own answers are what the other candidates are compared with.",
+            "enum": [
+              "reference",
+              "candidate"
+            ],
+            "type": "string"
+          },
+          "score": {
+            "description": "Built-in: mean answer agreement with the reference. Customer: the evaluator's score.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "source": {
+            "description": "Who produced the deciding evidence: InferCrane's built-in check or the customer's signed evaluation.",
+            "enum": [
+              "infercrane",
+              "customer"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "checking",
+              "waiting_for_eval_set",
+              "waiting_for_evidence",
+              "passed",
+              "watch",
+              "blocked",
+              "inconclusive",
+              "not_run"
+            ],
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          },
+          "suite_version": {
+            "type": "string"
+          },
+          "watch_limit_percent": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "state",
+          "check",
+          "reason"
+        ],
+        "type": "object"
+      },
       "OptimizationProposalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6221,6 +6324,20 @@
           "provider": {
             "maxLength": 128,
             "minLength": 1,
+            "type": "string"
+          },
+          "quality_check": {
+            "default": "builtin",
+            "description": "builtin runs InferCrane's answer check against the campaign control; customer_evidence waits for evidence the customer signs and attaches. Attached customer evidence wins in both modes.",
+            "enum": [
+              "builtin",
+              "customer_evidence"
+            ],
+            "type": "string"
+          },
+          "quality_eval_set": {
+            "description": "Digest of an uploaded customer eval set that replaces the built-in prompts. Only with quality_check builtin.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
             "type": "string"
           },
           "region": {
@@ -6447,6 +6564,114 @@
           "adapter",
           "target",
           "secret_reference_id"
+        ],
+        "type": "object"
+      },
+      "QualityEvalSet": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "digest": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prompt_count": {
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest",
+          "name",
+          "version",
+          "prompt_count",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "QualityEvalSetEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "eval_set": {
+            "$ref": "#/components/schemas/QualityEvalSet"
+          }
+        },
+        "required": [
+          "eval_set"
+        ],
+        "type": "object"
+      },
+      "QualityEvalSetUpload": {
+        "additionalProperties": false,
+        "description": "At most 512 KiB. Unknown fields are rejected, so expected answers are not accepted.",
+        "properties": {
+          "max_tokens": {
+            "default": 64,
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "prompts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+                  "type": "string"
+                },
+                "prompt": {
+                  "maxLength": 8192,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "system": {
+                  "maxLength": 8192,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema": {
+            "const": "infercrane.dev/quality-eval-set/v1",
+            "type": "string"
+          },
+          "version": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "name",
+          "version",
+          "prompts"
         ],
         "type": "object"
       },
@@ -15805,6 +16030,137 @@
         "summary": "List public timestamped GPU price observations without claiming stock",
         "tags": [
           "Compute"
+        ]
+      }
+    },
+    "/api/v1/quality/eval-sets": {
+      "post": {
+        "operationId": "uploadQualityEvalSet",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityEvalSetUpload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityEvalSetEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Upload a customer eval set for the built-in answer check; it is addressed by the SHA-256 digest of the exact bytes",
+        "tags": [
+          "Release evidence"
+        ]
+      }
+    },
+    "/api/v1/quality/eval-sets/{digest}": {
+      "delete": {
+        "operationId": "deleteQualityEvalSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "digest",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an uploaded eval set; campaigns that name it wait until it is uploaded again",
+        "tags": [
+          "Release evidence"
+        ]
+      },
+      "get": {
+        "operationId": "getQualityEvalSet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "digest",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityEvalSetEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect an uploaded eval set without its prompts",
+        "tags": [
+          "Release evidence"
         ]
       }
     },

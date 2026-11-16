@@ -5,7 +5,7 @@
                    Postgres and `infercrane serve` in the cluster
     poc.py run     baseline deployment, real traffic, Replay capture, an
                    optimization campaign (control plus candidates measured in turns),
-                   signed quality evidence, ranking, activation, summary
+                   the control plane's built-in answer check, ranking, activation, summary
     poc.py down    delete everything this script created and check nothing is left
 
 The laptop has no GPU. Pods schedule on an invented, clearly named
@@ -565,53 +565,12 @@ def campaign_create(proposal_doc: dict) -> str:
     return campaign
 
 
-EVAL = [(a, b) for a, b in ((17, 25), (38, 47), (123, 456), (9, 99), (64, 36), (250, 125), (73, 19), (500, 501), (12, 88), (31, 69), (7, 8), (45, 55), (210, 90), (999, 1), (26, 74), (13, 29), (300, 450), (88, 12), (61, 39), (150, 150))]
-
-
 def service_for(deployment_name: str) -> str:
     detail = api("GET", f"/api/v1/deployments/{deployment_name}")
     endpoints = sorted(set(re.findall(r"http://(infercrane-[0-9a-f]+)\." + NAMESPACE + r"\.svc:\d+", json.dumps(detail))))
     if not endpoints:
         fail(f"no serving endpoint recorded for {deployment_name}")
     return endpoints[0]
-
-
-def evaluate(deployment_name: str) -> tuple[float, int]:
-    service = service_for(deployment_name)
-    process = subprocess.Popen(["kubectl", "--context", CONTEXT, "-n", NAMESPACE, "port-forward", f"svc/{service}", f":{SERVER_PORT}"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    try:
-        line = process.stdout.readline()
-        match = re.search(r"127\.0\.0\.1:(\d+)", line)
-        if not match:
-            fail(f"port-forward to {service} failed: {line}")
-        port = match.group(1)
-        correct = 0
-        for a, b in EVAL:
-            body = {"model": MODEL_ID, "temperature": 0, "max_tokens": 24, "messages": [{"role": "user", "content": f"What is {a} + {b}? Reply with only the number."}]}
-            request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
-            request.add_header("Content-Type", "application/json")
-            request.add_header("Authorization", f"Bearer {state()['api_key']}")
-            with urllib.request.urlopen(request, timeout=120) as response:
-                text = json.loads(response.read())["choices"][0]["message"].get("content") or ""
-            correct += str(a + b) in re.sub(r"<think>.*?</think>", "", text, flags=re.S)
-        return correct / len(EVAL), len(EVAL)
-    finally:
-        process.terminate()
-
-
-def attach_quality(candidate: dict, control_score: float | None) -> float:
-    score, samples = evaluate(candidate["deployment_name"])
-    passed = score >= 0.5 if control_score is None else score >= control_score - 0.10
-    result = {"schema": "infercrane.dev/evaluator-result/v2", "suite": "poc-arithmetic", "suite_version": "1", "evaluator": "tools/poc-local", "evaluator_version": "1", "score": round(score, 4), "passed": passed, "sample_count": samples, "artifact_digest": f"sha256:{GGUF_SHA256}", "evaluated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")}
-    path = STATE_DIR / f"quality-{candidate['id'][:12]}.json"
-    path.write_text(json.dumps(result))
-    key = STATE_DIR / "evaluator.key"
-    if not key.exists():
-        cli("evaluation", "keygen", "--file", str(key))
-    signed = STATE_DIR / f"signed-{candidate['id'][:12]}-{int(time.time())}.json"
-    cli("evaluation", "ingest", candidate["deployment_name"], candidate["revision_id"], "--result", str(path), "--key", str(key), "--file", str(signed), "--attach")
-    log("quality", f"{candidate.get('label', candidate['id'][:8])}: {int(score * len(EVAL))} of {len(EVAL)} test answers correct → {'PASS' if passed else 'BLOCK'} (signed and attached as evidence)")
-    return score
 
 
 def inspect(campaign: str) -> dict:
@@ -642,7 +601,7 @@ def restart_port_forward() -> None:
 
 def watch(campaign: str, labels: dict, timeout_s: int = 6 * 3600, unreachable_limit_s: int = 20 * 60) -> dict:
     seen: dict[str, str] = {}
-    control_score: float | None = None
+    answers: dict[str, str] = {}
     measured: dict = state().get("measured", {})
     deadline = time.monotonic() + timeout_s
     unreachable_since: float | None = None
@@ -670,17 +629,20 @@ def watch(campaign: str, labels: dict, timeout_s: int = 6 * 3600, unreachable_li
                 seen[candidate["id"]] = status
                 reason = candidate.get("failure_code") or ""
                 log("campaign", f"{candidate['label']}: {words(status, reason or None)}")
-            already_scored = candidate["id"] in state().get("quality", {})
-            if status == "validating" and not already_scored and not candidate.get("quality_evidence_id") and candidate.get("revision_id"):
-                try:
-                    score = attach_quality(candidate, control_score)
-                except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
-                    log("quality", f"{candidate['label']}: evaluation did not complete ({error}); retrying on the next poll")
-                    continue
-                control_score = score if control_score is None else control_score
-                scores = state().get("quality", {})
-                scores[candidate["id"]] = score
-                save({"quality": scores})
+            # The control plane runs its own answer check and signs the evidence;
+            # the harness only reports what it decided.
+            quality = candidate.get("quality") or {}
+            verdict = quality.get("state", "")
+            if verdict and verdict not in ("pending", "not_run") and answers.get(candidate["id"]) != verdict:
+                answers[candidate["id"]] = verdict
+                source = {"infercrane": " · InferCrane check", "customer": " · your evaluation"}.get(quality.get("source", ""), "")
+                log("quality", f"{candidate['label']}: {verdict.replace('_', ' ')}{source} · {quality.get('reason', '')}")
+                if quality.get("command"):
+                    log("quality", f"{candidate['label']}: waiting on: {quality['command']}")
+                if quality.get("score") is not None and verdict in ("passed", "watch", "blocked"):
+                    scores = state().get("quality", {})
+                    scores[candidate["id"]] = quality["score"]
+                    save({"quality": scores})
             if candidate.get("benchmark_id") and candidate["id"] not in measured:
                 row = benchmark_row(candidate)
                 if row:
@@ -727,7 +689,7 @@ def result_card(record: dict, labels: dict) -> list[str]:
     for label, candidate, metrics, score in rows:
         tps = metrics.get("output_tps")
         cost = cost_per_million(tps)
-        quality = "-" if score is None else f"{round(score * len(EVAL))}/{len(EVAL)}"
+        quality = "-" if score is None else f"match {score:.0%}"
         lines.append(f"{label}")
         lines.append(f"   {('%.1f' % tps) if tps else '-'} tokens/s · p95 latency {('%.0f ms' % metrics['latency_p95_ms']) if metrics.get('latency_p95_ms') else '-'} · ${('%.2f' % cost) if cost else '-'} per 1M tokens · answers {quality}")
         if candidate is not rows[0][1]:
@@ -742,7 +704,7 @@ def result_card(record: dict, labels: dict) -> list[str]:
         lines.append("Decision: keep your current setup. Nothing beat it by more than the measurement noise, so nothing changes in production.")
     lines.append(f"Costs use a stated laptop rate (${NOMINAL_HOURLY_USD}/h). CPU run on a laptop: this proves the process, not GPU speed.")
     lines.append("")
-    lines.append(f"Audit trail: campaign {record.get('id', '')} · signed quality records attached to each revision")
+    lines.append(f"Audit trail: campaign {record.get('id', '')} · InferCrane-signed answer checks attached to each revision")
     lines.append(f"Pinned: model {MODEL_ID}@{MODEL_REVISION[:12]} · server image {current.get('model_image', '').split('@')[-1][:19]}… · trace Mooncake FAST'25 sha256:{MOONCAKE_SHA256[:12]}…")
     lines.append(f"Follow it: infercrane optimize watch {record.get('id', '')} · rerun: make poc-local-run")
     return lines

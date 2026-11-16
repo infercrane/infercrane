@@ -89,6 +89,8 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	writeDir := fs.String("write-dir", "", "write candidate DeploymentSpecs into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for campaign creation")
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
+	qualityCheck := fs.String("quality-check", "builtin", "who checks answer quality: builtin (InferCrane compares answers with the control) or customer_evidence (wait for your signed evaluation)")
+	evalSet := fs.String("eval-set", "", "digest of an uploaded eval set that replaces the built-in prompts (see: infercrane evaluation set upload)")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -99,7 +101,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if err := validateOutput(*output); err != nil {
 		return err
 	}
-	request := optimizer.Request{ModelIdentity: model, ModelRevision: *modelRevision, Provider: *provider, Region: *region, GPU: *gpu, GPUCount: *gpuCount, Runtimes: splitList(*runtimes), Objective: *objective, WorkloadProfile: *profile, IncludeSimulated: *includeSimulated, WorkloadFingerprint: *workloadFingerprint, MaxCandidates: *maxCandidates}
+	request := optimizer.Request{ModelIdentity: model, ModelRevision: *modelRevision, Provider: *provider, Region: *region, GPU: *gpu, GPUCount: *gpuCount, Runtimes: splitList(*runtimes), Objective: *objective, WorkloadProfile: *profile, IncludeSimulated: *includeSimulated, WorkloadFingerprint: *workloadFingerprint, MaxCandidates: *maxCandidates, QualityCheck: *qualityCheck, QualityEvalSet: *evalSet}
 	var err error
 	if request.MaxTTFTP95MS, err = optionalMilliseconds(*maxTTFT); err != nil {
 		return fmt.Errorf("max TTFT p95: %w", err)
@@ -499,9 +501,30 @@ type optimizationCampaignView struct {
 		DeploymentName      string `json:"deployment_name"`
 		RevisionID          string `json:"revision_id"`
 		BenchmarkID         string `json:"benchmark_id"`
+		QualityEvidenceID   string `json:"quality_evidence_id"`
 		FailureCode         string `json:"failure_code"`
 		Rank                int    `json:"rank"`
+		// Quality is the control API's answer-check view, passed through
+		// unchanged in --output json.
+		Quality *watchQualityDetail `json:"quality,omitempty"`
 	} `json:"candidates"`
+}
+
+// watchQualityDetail keeps every field of the answer-check view so JSON output
+// does not drop what the control API reported.
+type watchQualityDetail struct {
+	watchQuality
+	Check               string   `json:"check,omitempty"`
+	Suite               string   `json:"suite,omitempty"`
+	SuiteVersion        string   `json:"suite_version,omitempty"`
+	EvalSet             string   `json:"eval_set,omitempty"`
+	PromptCount         int      `json:"prompt_count,omitempty"`
+	Score               *float64 `json:"score,omitempty"`
+	RegressionPercent   *float64 `json:"regression_percent,omitempty"`
+	WatchLimitPercent   *float64 `json:"watch_limit_percent,omitempty"`
+	BlockLimitPercent   *float64 `json:"block_limit_percent,omitempty"`
+	ReferenceRevisionID string   `json:"reference_revision_id,omitempty"`
+	EvidenceID          string   `json:"evidence_id,omitempty"`
 }
 
 func optimizeCampaignCommand(ctx context.Context, args []string) error {
@@ -621,6 +644,12 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 				fmt.Printf(" · %s", candidate.FailureCode)
 			}
 			fmt.Println()
+			if quality := candidate.Quality; quality != nil && quality.State != "pending" && quality.State != "not_run" {
+				fmt.Printf("     answers: %s\n", quality.Reason)
+				if quality.Command != "" {
+					fmt.Printf("     run: %s\n", quality.Command)
+				}
+			}
 		}
 	}
 	printResourceLink(cfg, "run", view.ID)

@@ -22,9 +22,11 @@ import (
 
 func evaluationCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane evaluation keygen|ingest|sign|verify|attach|list [arguments]")
+		return errors.New("usage: infercrane evaluation keygen|ingest|sign|verify|attach|list|set [arguments]")
 	}
 	switch args[0] {
+	case "set":
+		return evaluationSetCommand(ctx, args[1:])
 	case "keygen":
 		return evaluationKeygenCommand(args[1:])
 	case "sign":

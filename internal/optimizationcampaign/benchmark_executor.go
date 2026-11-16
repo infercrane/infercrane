@@ -155,7 +155,17 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 // directTarget selects the lowest-ordinal healthy ready replica of one exact
 // revision and the server-side credential for its provider.
 func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
-	replicas, err := e.Store.ReplicasForDeployment(ctx, candidate.TenantID, deploymentID)
+	return directReplica(ctx, e.Store, e.Backends, candidate, deploymentID, draft)
+}
+
+type replicaLister interface {
+	ReplicasForDeployment(context.Context, string, string) ([]domain.Replica, error)
+}
+
+// directReplica is shared by measurement and the built-in answer check, so
+// both address the same exact revision with the same credential.
+func directReplica(ctx context.Context, store replicaLister, backends map[string]BenchmarkBackend, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
+	replicas, err := store.ReplicasForDeployment(ctx, candidate.TenantID, deploymentID)
 	if err != nil {
 		return armTarget{}, "", err
 	}
@@ -168,7 +178,7 @@ func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.Op
 	if endpoint == "" || provider == "" {
 		return armTarget{}, "", fmt.Errorf("candidate %w", errNoDirectEndpoint)
 	}
-	backend, ok := e.Backends[provider]
+	backend, ok := backends[provider]
 	if !ok || backend.APIKey == "" {
 		return armTarget{}, "", fmt.Errorf("%w: benchmark credential is unavailable for provider %s", errNoDirectEndpoint, provider)
 	}

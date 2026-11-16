@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -89,7 +90,23 @@ type Request struct {
 	Search                string   `json:"search,omitempty"`
 	ModelFeatures         []string `json:"model_features,omitempty"`
 	ModelConfigDigest     string   `json:"model_config_digest,omitempty"`
+	// QualityCheck chooses who decides whether a candidate's answers are still
+	// good enough. QualityCheckBuiltin (the default) runs InferCrane's
+	// built-in answer check against the campaign control; QualityCheckCustomer
+	// waits for evidence the customer signs and attaches. Customer evidence
+	// attached for a candidate wins in both modes.
+	QualityCheck string `json:"quality_check,omitempty"`
+	// QualityEvalSet optionally names an uploaded customer eval set by its
+	// sha256 digest. It replaces the built-in prompts in the answer check.
+	QualityEvalSet string `json:"quality_eval_set,omitempty"`
 }
+
+const (
+	QualityCheckBuiltin  = "builtin"
+	QualityCheckCustomer = "customer_evidence"
+)
+
+var qualityEvalSetDigest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 type SourceInfo struct {
 	Name            string `json:"name"`
@@ -442,6 +459,12 @@ func normalizeRequest(request Request) Request {
 	request.WorkloadProfile = strings.ToLower(strings.TrimSpace(request.WorkloadProfile))
 	request.WorkloadSource = strings.ToLower(strings.TrimSpace(request.WorkloadSource))
 	request.WorkloadFingerprint = strings.TrimSpace(request.WorkloadFingerprint)
+	request.QualityCheck = strings.ToLower(strings.TrimSpace(request.QualityCheck))
+	request.QualityEvalSet = strings.ToLower(strings.TrimSpace(request.QualityEvalSet))
+	if request.QualityCheck == QualityCheckBuiltin {
+		// The default is stored as empty so existing proposal digests stay stable.
+		request.QualityCheck = ""
+	}
 	if request.WorkloadProfile == "" {
 		request.WorkloadProfile = objectives[request.Objective]
 	}
@@ -554,6 +577,15 @@ func validateRequest(request Request) error {
 	}
 	if request.MaxErrorRate != nil && *request.MaxErrorRate > 1 {
 		return errors.New("max_error_rate must be between zero and one")
+	}
+	if request.QualityCheck != "" && request.QualityCheck != QualityCheckCustomer {
+		return errors.New("quality_check must be builtin or customer_evidence")
+	}
+	if request.QualityEvalSet != "" && !qualityEvalSetDigest.MatchString(request.QualityEvalSet) {
+		return errors.New("quality_eval_set must be sha256:<64 lowercase hex characters>")
+	}
+	if request.QualityEvalSet != "" && request.QualityCheck == QualityCheckCustomer {
+		return errors.New("quality_eval_set applies to the built-in answer check, not to customer_evidence")
 	}
 	return nil
 }

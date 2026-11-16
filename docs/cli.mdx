@@ -257,11 +257,24 @@ infercrane evaluation sign DEPLOYMENT REVISION --suite SUITE --suite-version VER
 infercrane evaluation verify evidence.json
 infercrane evaluation attach DEPLOYMENT --file evidence.json
 infercrane evaluation list DEPLOYMENT
+
+# Eval sets for the built-in answer check
+infercrane evaluation set default > eval-set.json
+infercrane evaluation set digest eval-set.json
+infercrane evaluation set upload eval-set.json
+infercrane evaluation set inspect sha256:DIGEST
+infercrane evaluation set delete sha256:DIGEST
 ```
 
 `ingest` accepts the strict evaluator-result v1 interchange contract, rejects unknown content fields,
 binds it to one immutable revision, signs it, and optionally attaches it. Evidence is
-signature-verified and contains aggregate values only.
+signature-verified and contains aggregate values only. The evaluator name `infercrane-builtin` is
+reserved for InferCrane's own answer check and is refused.
+
+`evaluation set` manages the prompt sets that replace the built-in prompts of an optimization run's
+answer check. `default` prints the built-in suite to copy and adapt, `digest` validates a file
+without uploading it, and `upload` prints the digest a campaign names with `--eval-set`. See
+[Semantic quality evidence](/features/semantic-quality#built-in-answer-check).
 
 ### `mcp`
 
@@ -363,6 +376,13 @@ infrastructure. The default `new_endpoint` intent stops at human activation afte
 promotion. `optimize activate` is the explicit boundary in both cases: it marks the qualified new
 deployment active, or delegates an evolution to the existing guarded rollout operation. Retrying
 the command adopts the same durable operation; InferCrane never promotes from the optimizer loop.
+
+Every candidate's answers are checked before ranking. By default InferCrane runs its built-in answer
+check against the campaign control. `--eval-set sha256:DIGEST` replaces the built-in prompts with an
+uploaded eval set, and `--quality-check customer_evidence` makes every candidate wait for evidence you
+sign and attach instead. `inspect` prints each candidate's answer-check result and, while a candidate
+waits on you, the exact command that unblocks it. `--output json` returns the control API's
+`quality` object for every candidate.
 
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
 the campaign's proposal recorded warnings, such as skipped speculative-decoding setups.

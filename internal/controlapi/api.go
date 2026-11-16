@@ -56,6 +56,7 @@ import (
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/releaseguard"
@@ -637,6 +638,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/deployments/{name}/recommendations", a.auth(authz.Read, a.recommendations))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/revisions", a.auth(authz.Read, a.revisions))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/quality-evidence", a.auth(authz.Deploy, a.recordQualityEvidence))
+	mux.HandleFunc("POST /api/v1/quality/eval-sets", a.auth(authz.Deploy, a.uploadQualityEvalSet))
+	mux.HandleFunc("GET /api/v1/quality/eval-sets/{digest}", a.auth(authz.Read, a.qualityEvalSet))
+	mux.HandleFunc("DELETE /api/v1/quality/eval-sets/{digest}", a.auth(authz.Deploy, a.deleteQualityEvalSet))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/quality-evidence", a.auth(authz.Read, a.qualityEvidence))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts", a.auth(authz.Deploy, a.createRollout))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/rollouts/guard/evaluate", a.auth(authz.Deploy, a.evaluateReleaseGuard))
@@ -696,17 +700,18 @@ func (a API) recordQualityEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "revision_mismatch", "quality evidence deployment does not match the request path")
 		return
 	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	distributionJSON := "{}"
-	if payload.Distribution != nil {
-		encoded, encodeErr := json.Marshal(payload.Distribution)
-		if encodeErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_quality_evidence", "quality distribution could not be encoded")
-			return
-		}
-		distributionJSON = string(encoded)
+	if strings.EqualFold(strings.TrimSpace(payload.Evaluator), qualitycheck.Evaluator) {
+		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator name "+qualitycheck.Evaluator+" is reserved for InferCrane's built-in answer check")
+		return
 	}
-	item := domain.QualityEvidence{RevisionID: payload.RevisionID, Suite: payload.Suite, SuiteVersion: payload.SuiteVersion, Evaluator: payload.Evaluator, EvaluatorVersion: payload.EvaluatorVersion, Score: payload.Score, Passed: payload.Passed, SampleCount: payload.SampleCount, DistributionJSON: distributionJSON, ArtifactDigest: payload.ArtifactDigest, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, EvaluatedAt: payload.EvaluatedAt}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	item, err := qualityevidence.Record(payload, envelope)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_quality_evidence", err.Error())
+		return
+	}
+	// Evidence from this endpoint is always the customer's, whatever it claims.
+	item.Source, item.ReferenceRevisionID = domain.QualityEvidenceSourceCustomer, ""
 	item, created, err := store.RecordQualityEvidence(r.Context(), actor.TenantID, payload.Deployment, item)
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "deployment or revision was not found")
@@ -782,7 +787,14 @@ func qualityEvidenceResponse(item domain.QualityEvidence) map[string]any {
 	if !json.Valid(distribution) {
 		distribution = json.RawMessage(`{}`)
 	}
-	return map[string]any{"id": item.ID, "deployment_id": item.DeploymentID, "revision_id": item.RevisionID, "suite": item.Suite, "suite_version": item.SuiteVersion, "evaluator": item.Evaluator, "evaluator_version": item.EvaluatorVersion, "score": item.Score, "passed": item.Passed, "sample_count": item.SampleCount, "distribution": distribution, "artifact_digest": item.ArtifactDigest, "payload_digest": item.PayloadDigest, "algorithm": item.Algorithm, "key_id": item.KeyID, "evaluated_at": item.EvaluatedAt, "created_at": item.CreatedAt}
+	return map[string]any{"id": item.ID, "deployment_id": item.DeploymentID, "revision_id": item.RevisionID, "suite": item.Suite, "suite_version": item.SuiteVersion, "evaluator": item.Evaluator, "evaluator_version": item.EvaluatorVersion, "score": item.Score, "passed": item.Passed, "sample_count": item.SampleCount, "distribution": distribution, "artifact_digest": item.ArtifactDigest, "payload_digest": item.PayloadDigest, "algorithm": item.Algorithm, "key_id": item.KeyID, "evaluated_at": item.EvaluatedAt, "created_at": item.CreatedAt, "source": qualityEvidenceSource(item), "reference_revision_id": item.ReferenceRevisionID}
+}
+
+func qualityEvidenceSource(item domain.QualityEvidence) string {
+	if item.Source == "" {
+		return domain.QualityEvidenceSourceCustomer
+	}
+	return item.Source
 }
 
 func (a API) integrations(w http.ResponseWriter, _ *http.Request) {
@@ -1508,7 +1520,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		status = http.StatusCreated
 	}
 	w.Header().Set("Location", "/api/v1/optimization/campaigns/"+campaign.ID)
-	writeJSON(w, status, map[string]any{"campaign": optimizationCampaignResponse(campaign), "created": created, "provider_mutation": false})
+	writeJSON(w, status, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "created": created, "provider_mutation": false})
 }
 
 func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1527,7 +1539,7 @@ func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign)})
+	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID])})
 }
 
 // optimizationCampaignReport serves the customer outcome of one campaign: the
@@ -1622,8 +1634,9 @@ func (a API) optimizationCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := make([]map[string]any, 0, len(campaigns))
+	quality := a.campaignQualityInputs(r.Context(), actor.TenantID, campaigns...)
 	for _, campaign := range campaigns {
-		data = append(data, optimizationCampaignResponse(campaign))
+		data = append(data, optimizationCampaignResponse(campaign, quality[campaign.ID]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
@@ -1704,7 +1717,7 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
-	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false})
+	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false})
 }
 
 func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1738,7 +1751,7 @@ func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.cancel", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
-	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign), "cleanup_operation": operationResponse(cleanup)})
+	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "cleanup_operation": operationResponse(cleanup)})
 }
 
 func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1783,7 +1796,7 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if selected.State == optimizationcampaign.CandidatePromoted || selected.State == optimizationcampaign.CandidateObserved {
-		writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign), "activation": "already_completed", "automatic_promotion": false})
+		writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "activation": "already_completed", "automatic_promotion": false})
 		return
 	}
 	if campaign.ApprovalExpiresAt == nil || !campaign.ApprovalExpiresAt.After(time.Now().UTC()) {
@@ -1797,10 +1810,10 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.activate", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
-	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign), "activation_operation": operationResponse(operation), "automatic_promotion": false})
+	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "activation_operation": operationResponse(operation), "automatic_promotion": false})
 }
 
-func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[string]any {
+func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality campaignQualityInputs) map[string]any {
 	candidates := make([]map[string]any, 0, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
 		targetEndpoint := campaign.TargetDeployment
@@ -1810,7 +1823,7 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign) map[stri
 				targetEndpoint = draft.Name
 			}
 		}
-		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
+		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
 	}
 	proofBoundary := "modeled evidence cannot qualify; measured benchmark, quality, and cost evidence are required before human activation"
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {

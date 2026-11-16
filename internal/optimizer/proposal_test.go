@@ -447,3 +447,45 @@ func stringIndex(value, target string) int {
 	}
 	return -1
 }
+
+func TestProposalBindsTheAnswerCheckChoice(t *testing.T) {
+	base := Request{ModelIdentity: "mistral-7b-instruct", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Objective: "interactive", MaxCandidates: 3}
+	plain, err := catalogSource(t).Propose(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// builtin is the default and is stored empty, so earlier proposal digests stay valid.
+	explicit := base
+	explicit.QualityCheck = " Builtin "
+	same, err := catalogSource(t).Propose(context.Background(), explicit)
+	if err != nil || same.InputDigest != plain.InputDigest || same.Input.QualityCheck != "" {
+		t.Fatalf("explicit builtin changed the proposal: %+v err=%v", same.Input, err)
+	}
+	digest := "sha256:" + strings.Repeat("c", 64)
+	withSet := base
+	withSet.QualityEvalSet = strings.ToUpper(digest[:7]) + digest[7:]
+	bound, err := catalogSource(t).Propose(context.Background(), withSet)
+	if err != nil || bound.Input.QualityEvalSet != digest || bound.InputDigest == plain.InputDigest || ValidateProposal(bound) != nil {
+		t.Fatalf("eval set proposal = %+v err=%v", bound.Input, err)
+	}
+	bound.Input.QualityEvalSet = "sha256:" + strings.Repeat("d", 64)
+	if ValidateProposal(bound) == nil {
+		t.Fatal("a swapped eval set kept the reviewed proposal digest")
+	}
+	for _, invalid := range []Request{
+		{QualityCheck: "llm-judge"},
+		{QualityEvalSet: "support-v1"},
+		{QualityCheck: QualityCheckCustomer, QualityEvalSet: digest},
+	} {
+		request := base
+		request.QualityCheck, request.QualityEvalSet = invalid.QualityCheck, invalid.QualityEvalSet
+		if _, err = catalogSource(t).Propose(context.Background(), request); err == nil {
+			t.Fatalf("invalid answer-check choice accepted: %+v", invalid)
+		}
+	}
+	customer := base
+	customer.QualityCheck = QualityCheckCustomer
+	if proposal, err := catalogSource(t).Propose(context.Background(), customer); err != nil || proposal.Input.QualityCheck != QualityCheckCustomer {
+		t.Fatalf("customer evidence proposal = %+v err=%v", proposal.Input, err)
+	}
+}
