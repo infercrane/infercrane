@@ -239,6 +239,10 @@ class ControlAPI:
         request_path = f"/endpoints/{quote(name, safe='')}/monitoring"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def get_endpoint_g_p_u_profile(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profile"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:
         request_path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
@@ -346,6 +350,10 @@ class ControlAPI:
     def record_operational_measurements(self, name: str, *, body: dict[str, Any]) -> ObjectList:
         request_path = f"/deployments/{quote(name, safe='')}/measurements"
         return cast(ObjectList, self._transport.request("POST", request_path, body=body))
+
+    def record_g_p_u_profile(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/deployments/{quote(name, safe='')}/gpu-profiles"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def import_traffic_observations(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = f"/deployments/{quote(name, safe='')}/traffic-observations"

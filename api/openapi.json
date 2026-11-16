@@ -2006,6 +2006,403 @@
         },
         "type": "object"
       },
+      "GPUProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "capture": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "content_recorded": {
+                "const": false,
+                "type": "boolean"
+              },
+              "ended_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "evidence_class": {
+                "const": "measured",
+                "type": "string"
+              },
+              "gpus": {
+                "maximum": 1024,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "id": {
+                "pattern": "^gpc-[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "started_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "tool": {
+                "description": "Capture tool, for example cupti-pc-sampling.",
+                "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+                "type": "string"
+              },
+              "tool_version": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "tool",
+              "tool_version",
+              "evidence_class",
+              "accelerator",
+              "gpus",
+              "started_at",
+              "ended_at",
+              "content_recorded"
+            ],
+            "type": "object"
+          },
+          "deployment": {
+            "description": "The deployment whose active revision was profiled.",
+            "type": "string"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/GPUProfileFrame"
+            },
+            "maxItems": 20000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": "infercrane.gpu-profile/v1",
+            "type": "string"
+          },
+          "stacks": {
+            "items": {
+              "$ref": "#/components/schemas/GPUProfileStack"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeline": {
+            "$ref": "#/components/schemas/GPUProfileTimeline"
+          },
+          "unavailable_layers": {
+            "description": "Layers this capture could not record, for example sass and stall without PC sampling.",
+            "items": {
+              "enum": [
+                "python",
+                "torch",
+                "native",
+                "cuda_api",
+                "kernel",
+                "sass",
+                "stall"
+              ],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "endpoint",
+          "deployment",
+          "revision",
+          "capture",
+          "timeline",
+          "frames",
+          "stacks",
+          "unavailable_layers",
+          "recorded_at"
+        ],
+        "type": "object"
+      },
+      "GPUProfileFrame": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "python",
+              "torch",
+              "native",
+              "cuda_api",
+              "kernel",
+              "sass",
+              "stall"
+            ],
+            "type": "string"
+          },
+          "line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "GPUProfileReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "deployment": {
+            "type": "string"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "frames": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "pattern": "^gpc-[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stacks": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "deployment",
+          "revision",
+          "started_at",
+          "ended_at",
+          "frames",
+          "stacks",
+          "recorded_at"
+        ],
+        "type": "object"
+      },
+      "GPUProfileRecording": {
+        "additionalProperties": false,
+        "description": "One content-free GPU profile capture: sampled GPU time attributed to root-first stacks of interned frames.",
+        "properties": {
+          "capture": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "content_recorded": {
+                "const": false,
+                "type": "boolean"
+              },
+              "ended_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "evidence_class": {
+                "const": "measured",
+                "type": "string"
+              },
+              "gpus": {
+                "maximum": 1024,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "started_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "tool": {
+                "description": "Capture tool, for example cupti-pc-sampling.",
+                "pattern": "^[a-z][a-z0-9._-]{0,63}$",
+                "type": "string"
+              },
+              "tool_version": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "tool",
+              "tool_version",
+              "evidence_class",
+              "accelerator",
+              "gpus",
+              "started_at",
+              "ended_at",
+              "content_recorded"
+            ],
+            "type": "object"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/GPUProfileFrame"
+            },
+            "maxItems": 20000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "infercrane.gpu-profile/v1",
+            "type": "string"
+          },
+          "stacks": {
+            "items": {
+              "$ref": "#/components/schemas/GPUProfileStack"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeline": {
+            "$ref": "#/components/schemas/GPUProfileTimeline"
+          },
+          "unavailable_layers": {
+            "description": "Layers this capture could not record, for example sass and stall without PC sampling.",
+            "items": {
+              "enum": [
+                "python",
+                "torch",
+                "native",
+                "cuda_api",
+                "kernel",
+                "sass",
+                "stall"
+              ],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "schema_version",
+          "capture",
+          "timeline",
+          "frames",
+          "stacks",
+          "unavailable_layers"
+        ],
+        "type": "object"
+      },
+      "GPUProfileStack": {
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "description": "Root-first indexes into frames.",
+            "items": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array"
+          },
+          "gpu_ns": {
+            "description": "GPU time attributed to exactly this stack.",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "frames",
+          "gpu_ns"
+        ],
+        "type": "object"
+      },
+      "GPUProfileTimeline": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_seconds": {
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "buckets": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "gpu_seconds": {
+                  "description": "Null when the bucket has no samples, never zero.",
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "start": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start",
+                "gpu_seconds"
+              ],
+              "type": "object"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "bucket_seconds",
+          "buckets"
+        ],
+        "type": "object"
+      },
       "HostedModelAPIUsage": {
         "additionalProperties": false,
         "properties": {
@@ -10571,6 +10968,63 @@
         ]
       }
     },
+    "/api/v1/deployments/{name}/gpu-profiles": {
+      "post": {
+        "operationId": "recordGPUProfile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GPUProfileRecording"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPUProfileReceipt"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach one bounded content-free GPU profile capture to the active revision",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
     "/api/v1/deployments/{name}/measurements": {
       "post": {
         "operationId": "recordOperationalMeasurements",
@@ -12721,6 +13175,53 @@
         "summary": "Persist deterministic endpoint findings",
         "tags": [
           "Diagnostics"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/gpu-profile": {
+      "get": {
+        "operationId": "getEndpointGPUProfile",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPUProfile"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the newest content-free GPU profile capture of the active revision behind an endpoint",
+        "tags": [
+          "Monitoring"
         ]
       }
     },
