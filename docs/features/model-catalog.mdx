@@ -231,6 +231,45 @@ Mutable references are resolved into `ModelArtifact` identity during the durable
 lifecycle. A catalog entry simply starts with a reviewed commit and clearer license/protocol
 metadata.
 
+### Search Hugging Face
+
+To find a repository that is not in the catalog, search the public Hugging Face models API through
+the control plane:
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/hugging-face/search?query=phi&limit=20" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The control plane asks Hugging Face for public `text-generation` and `feature-extraction` models
+whose repository name matches `query`, merges the two lists, and returns the most downloaded first.
+`query` takes 2 to 100 characters. `limit` takes 1 to 50 and defaults to 20.
+
+Each result reports `repository`, `pipeline_tag`, `license`, `gated` and `gated_mode`, `downloads`,
+`last_modified`, and `library_name` exactly as Hugging Face returned them. A value Hugging Face did
+not report is `null`, never a guess. `license` comes from the repository's `license:` tag.
+`downloads` is Hugging Face's count for the last 30 days. It shows popularity, not quality,
+compatibility, or performance.
+
+Every result has `reviewed: false` and `source_kind: "hugging-face-search"`. A search result is a
+repository you can try with `--model organization/repository` or the dashboard's New endpoint
+screen. It does not join the catalog and does not become an optimization candidate.
+
+The search is bounded:
+
+- Each search waits at most 4 seconds for Hugging Face.
+- Successful answers are kept in memory for 10 minutes, up to 256 queries per control-plane
+  process. Failures are not kept.
+- At most 8 searches reach Hugging Face at the same time.
+- The control plane sends no Hugging Face token, so private repositories are never listed. Gated
+  repositories are listed with `gated: true`; deploying one still needs a token that has accepted
+  its terms.
+
+When Hugging Face cannot answer, the route returns `hugging_face_search_unavailable`: HTTP 504 when
+it timed out and HTTP 502 for any other failure, with the reason in `error.message`. A control plane
+without outbound HTTPS access to `huggingface.co` always returns that error; the catalog routes keep
+working.
+
 ## API
 
 Authenticated consoles and automation can use:
@@ -247,6 +286,7 @@ The response includes `performance_claims: false`. Trustworthy performance comes
 [AIPerf benchmarking](/features/benchmarking), [Inference Lab](/features/recipes-lab), and the exact
 evidence attached to a revision.
 
-InferCrane does not mirror a third-party discovery catalog. Customer-visible models are reviewed
-InferCrane products, while private deployment workflows resolve each artifact to an immutable
-repository revision before any capacity can be created.
+InferCrane does not mirror a third-party discovery catalog. The Hugging Face search above passes
+each query through and keeps answers in memory only for a few minutes. Customer-visible models are
+reviewed InferCrane products, while private deployment workflows resolve each artifact to an
+immutable repository revision before any capacity can be created.

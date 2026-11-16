@@ -38,6 +38,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/finops"
+	"github.com/infercrane/infercrane/internal/huggingfacesearch"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/kernelplanner"
@@ -333,6 +334,9 @@ type API struct {
 	EndpointRefresh          func(context.Context) error
 	CredentialRefresh        func(context.Context) error
 	DiscoveryClient          *http.Client
+	// HuggingFaceSearch answers live searches of the public Hugging Face
+	// models API. Nil disables the search route with a typed 503.
+	HuggingFaceSearch *huggingfacesearch.Searcher
 	// Secrets resolves tenant-owned credential references only at the final
 	// network boundary. Resolved values must never enter API responses.
 	Secrets        secrets.Resolver
@@ -489,6 +493,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/models", a.auth(authz.Read, a.catalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/models", a.auth(authz.Read, a.huggingFaceCatalogModels))
+	mux.HandleFunc("GET /api/v1/catalog/hugging-face/search", a.auth(authz.Read, a.huggingFaceSearch))
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))

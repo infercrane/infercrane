@@ -36,6 +36,19 @@
 4. The migration version is recorded in the same transaction.
 5. The lock is released before serving commands or traffic.
 
+## Hugging Face model search
+
+1. An authenticated principal with read permission calls `GET /api/v1/catalog/hugging-face/search`.
+2. The control API validates `query` and `limit`, then answers from a bounded in-memory cache when
+   the same query and limit were answered in the last 10 minutes.
+3. Otherwise it sends two unauthenticated HTTPS requests to the public Hugging Face models API, one
+   per pipeline, under one 4-second deadline and an 8-search concurrency bound. Redirects are not
+   followed.
+4. Results are merged, marked `reviewed: false`, cached on success, and returned.
+
+The route reads no tenant state, never touches PostgreSQL, and is not on the inference request path.
+Results do not enter the reviewed catalog, the checkpoint catalog, or optimization proposals.
+
 ## Provisioning
 
 The durable workflow resolves a registered provider backend by cloud, runtime, and persisted adapter
