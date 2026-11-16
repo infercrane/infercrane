@@ -32,6 +32,23 @@ if [ -n "$runpod_key" ]; then
 fi
 unset runpod_key
 
+# SkyPilot's Vast.ai backend reads its key only from the Vast CLI config file.
+vast_key=${VAST_API_KEY:-}
+if [ -z "$vast_key" ] && [ -n "${VAST_API_KEY_FILE:-}" ]; then
+  [ -r "$VAST_API_KEY_FILE" ] || {
+    echo "VAST_API_KEY_FILE is not readable: $VAST_API_KEY_FILE" >&2
+    exit 1
+  }
+  vast_key=$(tr -d '\r\n' <"$VAST_API_KEY_FILE")
+fi
+if [ -n "$vast_key" ]; then
+  umask 077
+  mkdir -p "${HOME:?}/.config/vastai"
+  printf '%s' "$vast_key" >"$HOME/.config/vastai/vast_api_key"
+  export VAST_API_KEY="$vast_key"
+fi
+unset vast_key
+
 # Fly and similar platforms inject secrets as environment variables, while the
 # Brezel client deliberately accepts only a protected credential file. Materialize
 # the deployment secret on container-local storage and remove it from the child

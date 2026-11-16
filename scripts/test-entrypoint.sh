@@ -28,7 +28,7 @@ export HOME="$fixture/home"
 export ENTRYPOINT_TEST_LOG="$fixture/log"
 
 : >"$ENTRYPOINT_TEST_LOG"
-env -u RUNPOD_API_KEY -u RUNPOD_API_KEY_FILE -u INFERCRANE_SKYPILOT_API \
+env -u RUNPOD_API_KEY -u RUNPOD_API_KEY_FILE -u VAST_API_KEY -u VAST_API_KEY_FILE -u INFERCRANE_SKYPILOT_API \
   sh "$root/scripts/entrypoint.sh" infercrane serve
 grep -qx 'infercrane:serve' "$ENTRYPOINT_TEST_LOG"
 if grep -Eq '^runpod:|^sky:' "$ENTRYPOINT_TEST_LOG"; then
@@ -43,6 +43,20 @@ RUNPOD_API_KEY_FILE="$key_file" INFERCRANE_SKYPILOT_API=disabled \
   sh "$root/scripts/entrypoint.sh" infercrane version
 grep -qx 'runpod:config test-only-key' "$ENTRYPOINT_TEST_LOG"
 grep -qx 'infercrane:version' "$ENTRYPOINT_TEST_LOG"
+[ ! -e "$HOME/.config/vastai/vast_api_key" ] || {
+  echo 'entrypoint wrote a Vast key without one being configured' >&2
+  exit 1
+}
+
+vast_file="$fixture/vast-key"
+printf '%s\n' 'test-only-vast-key' >"$vast_file"
+VAST_API_KEY_FILE="$vast_file" INFERCRANE_SKYPILOT_API=disabled \
+  sh "$root/scripts/entrypoint.sh" sh -c '
+    test "$(cat "$HOME/.config/vastai/vast_api_key")" = test-only-vast-key
+    test "$(stat -c %a "$HOME/.config/vastai/vast_api_key" 2>/dev/null || stat -f %Lp "$HOME/.config/vastai/vast_api_key")" = 600
+    test "$VAST_API_KEY" = test-only-vast-key
+  '
+rm -rf "$HOME/.config/vastai"
 
 : >"$ENTRYPOINT_TEST_LOG"
 INFERCRANE_BREZEL_SANDBOX_TOKEN='brezel-test-token' INFERCRANE_SKYPILOT_API=disabled \

@@ -36,6 +36,8 @@ FROM python:3.12-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebf
 ARG TARGETARCH
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
+# SkyPilot clouds the image can drive. Each still needs a provider manifest and its credentials.
+ARG SKYPILOT_EXTRAS=runpod,vast
 ARG HUGGINGFACE_HUB_VERSION=1.24.0
 ARG AIPERF_VERSION=0.12.0
 ARG AWS_CLI_VERSION=2.27.41
@@ -49,7 +51,7 @@ ARG KUBECTL_AMD64_SHA256=123d8c8844f46b1244c547fffb3c17180c0c26dac9890589fe7e677
 ARG KUBECTL_ARM64_SHA256=9f9d9c44a7b5264515ac9da5991584e2395bd50662e651132337e7b4d0c56f8f
 RUN apt-get update \
     && apt-get install --no-install-recommends -y build-essential ca-certificates curl git openssh-client rsync unzip \
-	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[runpod]==${SKYPILOT_VERSION}" "aiperf==${AIPERF_VERSION}" \
+	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[${SKYPILOT_EXTRAS}]==${SKYPILOT_VERSION}" "aiperf==${AIPERF_VERSION}" \
 	&& python -m venv /opt/infercrane-huggingface \
 	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}"
 RUN case "$TARGETARCH" in \
