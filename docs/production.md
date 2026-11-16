@@ -66,7 +66,8 @@ are all operational.
 
 To enable customer-owned RunPod Pods, inject separate random
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY` values of at least 32
-bytes each. The first encrypts tenant provider credentials at rest; the second derives
+bytes each. The first encrypts tenant provider credentials and optimization run notification
+destinations at rest; the second derives
 tenant-and-deployment-scoped worker credentials. Neither is a RunPod credential. Back them up and
 rotate them through an explicit credential migration and controlled worker replacement. Keep the
 operator `RUNPOD_API_KEY` separate. Customer deployments never receive the control plane's global

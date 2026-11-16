@@ -236,6 +236,54 @@ command when a setup qualifies. When a setup waits on you, for your eval set or 
 evaluation, it prints the exact command that unblocks it. It only reads the control API; `--once`
 prints one plain snapshot for scripts and logs.
 
+### Get told when a run needs you
+
+A run can wait hours for measurements, and it stops for a person twice: to approve spending before
+it starts and to roll out the winner before the approval ends. Add a notification destination so
+you hear about both outside the dashboard. In the dashboard, open **Settings › Notifications**. From
+automation:
+
+```bash
+curl -X POST "$INFERCRANE_URL/api/v1/notifications/subscriptions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" -H "Content-Type: application/json" \
+  -d '{"destination":"webhook","url":"https://hooks.example.com/infercrane",
+       "events":["approval_needed","approval_expiring","decided","failed"]}'
+```
+
+| Event | Sent when |
+|---|---|
+| `approval_needed` | A run is created and waits for spend approval. |
+| `approval_expiring` | A run's approval ends within a quarter of its window, at most one hour. A result waiting for rollout is discarded at that time; work still running stops and is cleaned up. |
+| `quality_evidence_needed` | A setup has waited more than five minutes for signed answer-quality evidence. |
+| `decided` | The run reaches a decision. `outcome.kind` is `winner`, `no_clear_winner` (nothing beat your current setup by more than the measurement noise), or `nothing_passed` (no setup qualified). It comes from the [outcome report](#read-the-outcome-of-a-campaign) and is `unknown` when the report cannot be read. |
+| `failed` | The run failed. `failure.code` is the first candidate failure, or `unknown`. |
+| `rolled_out` | The winner is rolled out. |
+
+Each event is sent once per destination, only for runs that change after the destination was
+added, and never more than 24 hours late. A cancelled run sends nothing.
+
+- **Webhook** destinations receive JSON with `schema_version`, `id` (stable per run and event; use it
+  to drop duplicates), `event` (for example `infercrane.optimization.decided`), `occurred_at`,
+  `workspace_id`, a one-sentence `summary`, `campaign`, `outcome` or `failure` when they apply, and
+  `links`. `links.dashboard` opens the run, including its outcome report, when the control plane
+  knows the dashboard address (`INFERCRANE_CONSOLE_URL`); `links.report_api` is the report's path on
+  the control API. Deliveries are signed exactly like [alerts](/features/adoption-diagnostics#signed-webhooks)
+  with the signing secret returned once when the destination is created.
+- **Slack** destinations take an incoming webhook URL (`https://hooks.slack.com/services/…`) and
+  receive the summary as a message with a link to the run.
+- **Email** is not available: the control plane has no email sender.
+
+The URL and signing secret are encrypted at rest and never returned; the API shows only the host
+and the last characters of the path. To rotate the secret, delete the destination and add it again.
+`POST /api/v1/notifications/subscriptions/{id}/test` sends one signed test event and returns the
+result, and every destination shows its last delivery. A failed delivery is retried after 30
+seconds, then four times longer each time up to an hour, at most six attempts; a 4xx response other
+than 429 is final. A workspace can have ten destinations. Destinations need
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane; without it the routes return
+`503 capability_unavailable`. Listing needs read access; changing and testing need an admin.
+
+`infercrane inbox` lists the same waiting runs with the next command to run.
+
 ### Read the outcome of a campaign
 
 When a campaign finishes, `infercrane optimize report CAMPAIGN_ID` shows what it changed. It compares

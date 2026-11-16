@@ -4692,6 +4692,297 @@
         },
         "type": "object"
       },
+      "NotificationDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delivered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_code": {
+            "description": "network_error, http_\u003cstatus\u003e, destination_rejected, destination_disabled, or destination_unreadable.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event": {
+            "description": "Event name, or test for a test event.",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "response_status": {
+            "description": "HTTP status of the last attempt; null when no response arrived.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "status",
+          "attempts",
+          "response_status",
+          "error_code",
+          "occurred_at",
+          "updated_at",
+          "delivered_at"
+        ],
+        "type": "object"
+      },
+      "NotificationDeliveryEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "$ref": "#/components/schemas/NotificationDelivery"
+          }
+        },
+        "required": [
+          "delivery"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscription": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "destination": {
+            "enum": [
+              "webhook",
+              "slack"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "enum": [
+                "approval_needed",
+                "approval_expiring",
+                "quality_evidence_needed",
+                "decided",
+                "failed",
+                "rolled_out"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_delivery": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationDelivery"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "url_hint": {
+            "description": "Scheme, host, and the last characters of the path. The full URL is never returned.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "destination",
+          "url_hint",
+          "events",
+          "enabled",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "last_delivery"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscriptionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "enum": [
+              "webhook",
+              "slack"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "enum": [
+                "approval_needed",
+                "approval_expiring",
+                "quality_evidence_needed",
+                "decided",
+                "failed",
+                "rolled_out"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "name": {
+            "description": "Label shown in the dashboard. Defaults to the URL host.",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "url": {
+            "description": "Absolute HTTPS URL. A Slack destination must be an incoming webhook URL on https://hooks.slack.com/services/. Sealed at rest and never returned.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "destination",
+          "url",
+          "events"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscriptionCreated": {
+        "additionalProperties": false,
+        "properties": {
+          "signing_secret": {
+            "description": "Webhook destinations only. Verify InferCrane-Signature with it. Shown once; delete and recreate the destination to rotate it.",
+            "type": "string"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/NotificationSubscription"
+          }
+        },
+        "required": [
+          "subscription"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscriptionEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/NotificationSubscription"
+          }
+        },
+        "required": [
+          "subscription"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscriptionList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationSubscription"
+            },
+            "type": "array"
+          },
+          "events": {
+            "description": "Every event a destination can subscribe to, in display order.",
+            "items": {
+              "enum": [
+                "approval_needed",
+                "approval_expiring",
+                "quality_evidence_needed",
+                "decided",
+                "failed",
+                "rolled_out"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "events"
+        ],
+        "type": "object"
+      },
+      "NotificationSubscriptionUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "enum": [
+                "approval_needed",
+                "approval_expiring",
+                "quality_evidence_needed",
+                "decided",
+                "failed",
+                "rolled_out"
+              ],
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "name": {
+            "description": "Label shown in the dashboard. Defaults to the URL host.",
+            "maxLength": 64,
+            "type": "string"
+          },
+          "url": {
+            "description": "Absolute HTTPS URL. A Slack destination must be an incoming webhook URL on https://hooks.slack.com/services/. Sealed at rest and never returned.",
+            "format": "uri",
+            "maxLength": 2048,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "type": "object"
+      },
       "Object": {
         "additionalProperties": true,
         "type": "object"
@@ -14516,6 +14807,228 @@
         ]
       }
     },
+    "/api/v1/notifications/subscriptions": {
+      "get": {
+        "operationId": "listNotificationSubscriptions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSubscriptionList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List workspace destinations for optimization run events without returning URLs or secrets",
+        "tags": [
+          "Notifications"
+        ]
+      },
+      "post": {
+        "operationId": "createNotificationSubscription",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationSubscriptionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSubscriptionCreated"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add a webhook or Slack destination; a webhook's signing secret is returned once",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/subscriptions/{id}": {
+      "delete": {
+        "operationId": "deleteNotificationSubscription",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a destination and its pending deliveries",
+        "tags": [
+          "Notifications"
+        ]
+      },
+      "patch": {
+        "operationId": "updateNotificationSubscription",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationSubscriptionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSubscriptionEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Change a destination's name, URL, events, or enabled state",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/subscriptions/{id}/test": {
+      "post": {
+        "operationId": "testNotificationSubscription",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDeliveryEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one signed test event now and return its delivery result",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
     "/api/v1/operations": {
       "get": {
         "operationId": "listOperations",
@@ -18257,6 +18770,9 @@
     },
     {
       "name": "Monitoring"
+    },
+    {
+      "name": "Notifications"
     },
     {
       "name": "Operations"

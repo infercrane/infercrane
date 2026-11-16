@@ -118,6 +118,14 @@ calls decrypt the credential in memory, while worker authentication uses a separ
 tenant-and-deployment-scoped credential. Operator-owned provider keys, volumes, and provider secret
 references are never copied into customer accounts.
 
+Optimization run notification destinations use the same key. A destination URL can itself be a
+bearer credential (a Slack incoming webhook is one), so the URL and the generated signing secret are
+both stored as AES-256-GCM ciphertext bound to the tenant and destination ID. API responses show only
+the host and the last characters of the path; the signing secret is returned once, at creation.
+Deliveries go only to public HTTPS addresses through the same checked transport as signed alerts, and
+carry run metadata and outcome summaries, never prompts, responses, or credentials. Changing a
+destination requires an admin principal with the `manage_secrets` scope.
+
 External fallback is disabled by default. Enabling it requires a persisted acknowledgement that
 prompt and output data can leave controlled infrastructure, plus atomic hard request and worst-case
 cost reservations. Selection happens before transmission; InferCrane does not replay a stream or

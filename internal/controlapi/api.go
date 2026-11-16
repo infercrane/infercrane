@@ -406,6 +406,9 @@ type API struct {
 		List(context.Context, string) ([]domain.ComputeConnection, error)
 		Delete(context.Context, string, string) error
 	}
+	// Notifications manages workspace destinations for optimization run
+	// events. Nil when sealed destination storage is not configured.
+	Notifications notificationService
 	// ConsoleURL is the dashboard origin advertised to `infercrane login` and
 	// returned with an approved CLI sign-in. Empty means not advertised.
 	ConsoleURL string
@@ -570,6 +573,11 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
+	mux.HandleFunc("GET /api/v1/notifications/subscriptions", a.auth(authz.Read, a.notificationSubscriptions))
+	mux.HandleFunc("POST /api/v1/notifications/subscriptions", a.auth(authz.ManageSecrets, a.createNotificationSubscription))
+	mux.HandleFunc("PATCH /api/v1/notifications/subscriptions/{id}", a.auth(authz.ManageSecrets, a.updateNotificationSubscription))
+	mux.HandleFunc("DELETE /api/v1/notifications/subscriptions/{id}", a.auth(authz.ManageSecrets, a.deleteNotificationSubscription))
+	mux.HandleFunc("POST /api/v1/notifications/subscriptions/{id}/test", a.auth(authz.ManageSecrets, a.testNotificationSubscription))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/continual-optimization/policy", a.auth(authz.Read, a.continualOptimizationPolicy))
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/continual-optimization/policy", a.auth(authz.Deploy, a.setContinualOptimizationPolicy))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/continual-optimization/evaluate", a.auth(authz.Deploy, a.evaluateContinualOptimization))

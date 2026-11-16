@@ -82,3 +82,24 @@ Both return a target that follows the same runtime and reconciliation path as an
 3. `GET /api/v1/endpoints/{name}/gpu-profile` reads the newest capture whose revision is still the
    active revision of a deployment bound to the endpoint. None is a typed 404.
 4. Neither step runs on the inference path, and the gateway never reads `gpu_profiles`.
+
+## Optimization run notifications
+
+1. A workspace admin adds a destination with `POST /api/v1/notifications/subscriptions`. The
+   control API seals the destination URL and a generated signing secret with
+   `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` (AES-256-GCM bound to tenant and destination ID) and
+   stores them in `notification_subscriptions`. Only a host-level hint is stored in the clear.
+2. Every candidate transition that changes a campaign's aggregate state also records the change in
+   `optimization_campaign_transitions`, in the same transaction as the state update. A failed
+   campaign keeps the first candidate failure code in `optimization_campaigns.failure_code`.
+   Cleanup rewrites the aggregate state seconds after a decision; these rows keep the decision
+   readable.
+3. Every 15 seconds each control-plane replica derives events for workspaces with an enabled
+   destination: waiting states from campaigns updated in the last 24 hours, and decisions, failures,
+   and rollouts from the recorded transitions. A decision reads the outcome report. Each new event
+   becomes one `notification_deliveries` row per destination, holding the exact body;
+   `UNIQUE(subscription_id, event_id)` makes a second replica's insert a no-op.
+4. The same pass leases due rows with `FOR UPDATE SKIP LOCKED`, decrypts the destination in memory,
+   and sends one signed POST through `internal/alert`'s public-network-checked client. Retries back
+   off from 30 seconds to an hour, at most six attempts; a 4xx other than 429 stops at once.
+5. None of this runs on the inference path, and the gateway never reads these tables.

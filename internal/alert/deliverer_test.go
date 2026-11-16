@@ -109,3 +109,42 @@ func TestDelivererRetriesBoundedlyAndRejectsPrivateDestinations(t *testing.T) {
 		t.Fatalf("private destination error=%v", err)
 	}
 }
+
+func TestPostSignsOneAttemptAndClassifiesRefusals(t *testing.T) {
+	secret := "event-secret"
+	statuses := []int{http.StatusAccepted, http.StatusTooManyRequests, http.StatusGone}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = mac.Write([]byte(r.Header.Get("InferCrane-Timestamp") + "."))
+		_, _ = mac.Write(body)
+		if r.Header.Get("InferCrane-Signature") != "v1="+hex.EncodeToString(mac.Sum(nil)) || r.Header.Get("InferCrane-Delivery") != "delivery-9" || string(body) != `{"event":"x"}` {
+			t.Errorf("unsigned or altered request: %#v %s", r.Header, body)
+		}
+		status := statuses[0]
+		statuses = statuses[1:]
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	deliverer := Deliverer{Client: server.Client(), AllowPrivate: true}
+	for _, want := range []Attempt{{Status: 202, Delivered: true}, {Status: 429, Code: "http_429"}, {Status: 410, Code: "http_410", Permanent: true}} {
+		got, err := deliverer.Post(context.Background(), server.URL, secret, "delivery-9", []byte(`{"event":"x"}`))
+		if err != nil || got != want {
+			t.Fatalf("attempt=%+v want %+v err=%v", got, want, err)
+		}
+	}
+	unreachable := Deliverer{Client: server.Client(), AllowPrivate: true}
+	server.Close()
+	if got, err := unreachable.Post(context.Background(), server.URL, secret, "delivery-9", nil); err != nil || got.Code != "network_error" || got.Delivered {
+		t.Fatalf("closed server attempt=%+v err=%v", got, err)
+	}
+	private := Deliverer{ResolveIP: func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("10.0.0.7")}}, nil
+	}}
+	if _, err := private.Post(context.Background(), "https://hooks.example.test/x", secret, "delivery-9", nil); err == nil {
+		t.Fatal("Post sent to a private address")
+	}
+	if _, err := private.Post(context.Background(), "http://hooks.example.test/x", secret, "delivery-9", nil); err == nil {
+		t.Fatal("Post sent over plain HTTP")
+	}
+}

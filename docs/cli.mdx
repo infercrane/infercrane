@@ -186,10 +186,18 @@ infercrane inbox
 infercrane inbox --limit 100 --output json
 ```
 
-The inbox reads tenant-scoped endpoint and deployment summaries, ranks non-serving state and staged
-candidates deterministically (an `observing` endpoint is observe-only by design and is not listed), and prints the exact persisted field behind each item. It fails the
-whole read if either fleet API is unavailable, so a partial inventory cannot look healthy. It does
+The inbox reads tenant-scoped endpoint, deployment, and optimization run summaries, ranks
+non-serving state and staged candidates deterministically (an `observing` endpoint is observe-only
+by design and is not listed), and prints the exact persisted field behind each item. It fails the
+whole read if any of those APIs is unavailable, so a partial inventory cannot look healthy. It does
 not run Doctor implicitly and never reads prompt or response content.
+
+Optimization runs appear with the same rules as [run notifications](/features/optimization#get-told-when-a-run-needs-you):
+a run waiting for spend approval, a result waiting for your decision (critical once its approval is
+about to end), a running run whose approval is about to end, setups that have waited more than five
+minutes for your signed evaluation or for the eval set the run names, and a run that failed in the
+last 24 hours. Each item names the next command, such as `infercrane optimize approve` or
+`infercrane evaluation set upload`. The inbox reads the newest 100 runs.
 
 ### `observe`
 
@@ -700,7 +708,7 @@ Supported strategies are `round-robin`, `consistent-hash`, `power-of-two`, and `
 
 | Command | Purpose |
 |---|---|
-| `inbox [--limit N]` | Rank persisted fleet state requiring operator attention without mutation |
+| `inbox [--limit N]` | Rank persisted fleet and optimization run state requiring attention without mutation |
 | `observe ENDPOINT_OR_DEPLOYMENT` | Join one resource's lifecycle, traffic, Guard, policy, operation, and event evidence |
 | `deployments [--output json]` | List logical deployments |
 | `system instances [--output json]` | Inspect live control-plane membership and mixed-version protocol evidence |

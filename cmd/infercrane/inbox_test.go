@@ -9,11 +9,22 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
 )
 
 func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
+	now := time.Now().UTC()
+	at := func(offset time.Duration) string { return now.Add(offset).Format(time.RFC3339Nano) }
+	campaigns := fmt.Sprintf(`{"data":[
+      {"id":"run-approval","model_identity":"Qwen/Qwen3-8B","state":"awaiting_approval","created_at":%[1]q,"updated_at":%[1]q,"candidates":[]},
+      {"id":"run-winner","model_identity":"Qwen/Qwen3-8B","state":"qualified","approved_at":%[2]q,"approval_expires_at":%[3]q,"updated_at":%[1]q,"candidates":[{"id":"cand-1","state":"qualified","updated_at":%[1]q}]},
+      {"id":"run-failed","model_identity":"Qwen/Qwen3-8B","state":"cleaned","failure_code":"approval_expired","updated_at":%[1]q,"candidates":[{"id":"cand-2","state":"cleaned","failure_code":"approval_expired","updated_at":%[1]q}]},
+      {"id":"run-quality","model_identity":"Qwen/Qwen3-8B","state":"running","approved_at":%[4]q,"approval_expires_at":%[5]q,"updated_at":%[4]q,"candidates":[{"id":"cand-3","state":"validating","deployment_name":"qwen-opt-cand-3","updated_at":%[6]q}]},
+      {"id":"run-cancelled","model_identity":"Qwen/Qwen3-8B","state":"awaiting_approval","cancel_requested":true,"updated_at":%[1]q,"candidates":[]},
+      {"id":"run-done","model_identity":"Qwen/Qwen3-8B","state":"cleaned","updated_at":%[1]q,"candidates":[{"id":"cand-4","state":"cleaned","updated_at":%[1]q}]}
+    ]}`, at(-time.Minute), at(-3*time.Hour), at(10*time.Minute), at(-time.Hour), at(5*time.Hour), at(-10*time.Minute))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer secret" {
 			t.Fatal("missing authentication")
@@ -32,6 +43,8 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
               {"name":"bad-worker","observed_state":"degraded","candidate_revision_id":"rev-2","updated_at":"2026-08-13T20:04:00Z"},
               {"name":"starting-worker","observed_state":"pending","updated_at":"2026-08-13T20:05:00Z"}
             ]}`)
+		case "/api/v1/optimization/campaigns":
+			_, _ = io.WriteString(w, campaigns)
 		default:
 			t.Fatalf("unexpected route %s", r.URL.Path)
 		}
@@ -51,10 +64,17 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
 	if strings.Contains(output, "never-expose-this-content") {
 		t.Fatal("inbox copied unrecognized request content from a fleet response")
 	}
-	if report.TotalAttention != 5 || report.Critical != 2 || report.Warnings != 3 || report.TotalEndpoints != 3 || report.TotalDeploys != 3 || report.Truncated || report.Returned != 5 || report.Evidence != "persisted_control_plane_state" {
+	if report.TotalAttention != 9 || report.Critical != 4 || report.Warnings != 5 || report.TotalEndpoints != 3 || report.TotalDeploys != 3 || report.TotalRuns != 6 || report.Truncated || report.Returned != 9 || report.Evidence != "persisted_control_plane_state" {
 		t.Fatalf("report=%#v", report)
 	}
-	want := []string{"deployment/bad-worker/deployment_degraded", "endpoint/broken-api/endpoint_not_serving", "deployment/starting-worker/deployment_not_converged", "deployment/bad-worker/deployment_candidate_requires_review", "endpoint/coder-production/endpoint_candidate_requires_review"}
+	want := []string{
+		"deployment/bad-worker/deployment_degraded", "endpoint/broken-api/endpoint_not_serving", "optimization/run-failed/optimization_failed", "optimization/run-winner/optimization_decision_waiting",
+		"deployment/starting-worker/deployment_not_converged", "optimization/run-approval/optimization_approval_needed", "optimization/run-quality/optimization_quality_evidence_needed",
+		"deployment/bad-worker/deployment_candidate_requires_review", "endpoint/coder-production/endpoint_candidate_requires_review",
+	}
+	if len(report.Items) != len(want) {
+		t.Fatalf("items=%#v", report.Items)
+	}
 	for i, item := range report.Items {
 		actual := item.ResourceKind + "/" + item.ResourceName + "/" + item.Code
 		if actual != want[i] {
@@ -63,6 +83,12 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
 		if item.Evidence == "" || item.Next == "" || item.UpdatedAt.IsZero() {
 			t.Fatalf("item lacks actionable evidence: %#v", item)
 		}
+	}
+	if next := report.Items[6].Next; next != "infercrane evaluation attach qwen-opt-cand-3 --file evidence.json" {
+		t.Fatalf("quality evidence next=%q", next)
+	}
+	if summary := report.Items[2].Summary; !strings.Contains(summary, "spend approval ended") {
+		t.Fatalf("failure summary=%q", summary)
 	}
 }
 

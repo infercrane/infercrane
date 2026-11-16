@@ -22,7 +22,7 @@ func TestControlAPIWithoutCredentialKeyServesDisabledComputeConnections(t *testi
 		t.Fatalf("newComputeConnectionService() = %#v without a credential key, want nil", connections)
 	}
 	api := controlapi.API{APIKey: "secret"}
-	bindOptionalControlServices(&api, nil, connections)
+	bindOptionalControlServices(&api, nil, connections, nil)
 	if api.ComputeConnections != nil {
 		t.Fatalf("ComputeConnections = %T(nil) stored in an interface, want an untyped nil field", api.ComputeConnections)
 	}
@@ -59,7 +59,7 @@ func TestComputeConnectionServiceBindsOnlyWithValidCredentialKey(t *testing.T) {
 		t.Fatalf("newComputeConnectionService() = %v, %v; want a configured service", connections, err)
 	}
 	api := controlapi.API{}
-	bindOptionalControlServices(&api, nil, connections)
+	bindOptionalControlServices(&api, nil, connections, nil)
 	if api.ComputeConnections == nil {
 		t.Fatal("ComputeConnections is nil after binding a configured service")
 	}

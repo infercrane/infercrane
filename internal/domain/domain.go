@@ -942,6 +942,37 @@ type OptimizationCampaign struct {
 	Candidates                                                          []OptimizationCandidateRun `json:"candidates,omitempty"`
 }
 
+// OptimizationCampaignTransition records one change of a campaign's aggregate
+// state. It survives candidate cleanup, which rewrites the aggregate state.
+type OptimizationCampaignTransition struct {
+	ID, TenantID, CampaignID, From, To string
+	CreatedAt                          time.Time
+}
+
+// NotificationSubscription is a workspace destination for campaign events.
+// The URL and signing secret are sealed; only URLHint is safe to return.
+type NotificationSubscription struct {
+	ID, TenantID, Name, Destination, URLHint string
+	URLCiphertext, URLNonce                  []byte `json:"-"`
+	SecretCiphertext, SecretNonce            []byte `json:"-"`
+	KeyReference                             string `json:"-"`
+	Events                                   []string
+	Enabled                                  bool
+	CreatedBy                                string
+	CreatedAt, UpdatedAt                     time.Time
+	LastDelivery                             *NotificationDelivery
+}
+
+// NotificationDelivery is one event sent, or waiting to be sent, to one
+// subscription. Body holds the exact bytes that are signed on every attempt.
+type NotificationDelivery struct {
+	ID, TenantID, SubscriptionID, EventID, EventType, CampaignID string
+	Body, BodyDigest, Status, ErrorCode                          string
+	Attempts, MaxAttempts, ResponseStatus                        int
+	OccurredAt, NextAttemptAt, CreatedAt, UpdatedAt              time.Time
+	DeliveredAt                                                  *time.Time
+}
+
 type OptimizationCandidateRun struct {
 	ID, TenantID, CampaignID, ProposalCandidateID, State, EvidenceState string
 	DeploymentSpecJSON, PredictedEvidenceJSON, ActualEvidenceJSON       string
