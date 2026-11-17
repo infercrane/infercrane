@@ -67,6 +67,24 @@ INFERCRANE_BREZEL_SANDBOX_TOKEN='brezel-test-token' INFERCRANE_SKYPILOT_API=disa
     test -z "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}"
   '
 
+cat >"$fixture/bin/sky" <<'SKY'
+#!/bin/sh
+printf 'sky:%s\n' "$*" >>"$ENTRYPOINT_TEST_LOG"
+echo 'HTTPError: 401 for url: https://console.vast.ai/api/v0/ssh/?api_key=leaked-test-secret&x=1'
+exit 91
+SKY
+chmod 755 "$fixture/bin/sky"
+if INFERCRANE_SKYPILOT_API=enabled INFERCRANE_SKYPILOT_PROVIDERS_JSON='[{"cloud":"vast"}]' \
+  sh "$root/scripts/entrypoint.sh" infercrane serve >"$fixture/out" 2>&1; then
+  echo 'entrypoint ignored a SkyPilot API server that exited' >&2
+  exit 1
+fi
+if grep -q 'leaked-test-secret' "$fixture/out"; then
+  echo 'SkyPilot output leaked a provider API key' >&2
+  exit 1
+fi
+grep -q 'api_key=\[REDACTED\]&x=1' "$fixture/out"
+
 if env -u INFERCRANE_SKYPILOT_PROVIDERS_JSON INFERCRANE_SKYPILOT_API=enabled \
   sh "$root/scripts/entrypoint.sh" infercrane serve >"$fixture/out" 2>"$fixture/error"; then
   echo 'enabled SkyPilot mode accepted a missing provider manifest' >&2

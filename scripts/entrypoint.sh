@@ -84,12 +84,21 @@ case "$skypilot_mode" in
 esac
 unset skypilot_providers
 
-sky api start --host 127.0.0.1 --foreground &
+# SkyPilot logs failed provider calls with their full URL, and some provider SDKs
+# (Vast.ai) put the API key in the query string. Pass the server's output through
+# a filter that redacts key-bearing parameters before it reaches the log stream.
+sky_log_dir=$(mktemp -d /tmp/infercrane-sky-log.XXXXXX)
+mkfifo "$sky_log_dir/out"
+sed -u -E 's/((api_key|apikey|api-key|token|secret)=)[^&[:space:]"]+/\1[REDACTED]/Ig' <"$sky_log_dir/out" &
+sky_log_pid=$!
+sky api start --host 127.0.0.1 --foreground >"$sky_log_dir/out" 2>&1 &
 sky_pid=$!
 
 cleanup() {
   kill "${app_pid:-}" "$sky_pid" 2>/dev/null || true
   wait "${app_pid:-}" "$sky_pid" 2>/dev/null || true
+  wait "$sky_log_pid" 2>/dev/null || true
+  rm -rf "$sky_log_dir"
 }
 trap cleanup INT TERM EXIT
 
