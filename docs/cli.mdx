@@ -43,6 +43,11 @@ Help and human-readable output use the dashboard's words. Command names, flag na
 A deployment's staged revision is still the candidate revision (`--revision candidate`,
 `candidate_revision_id`), and an endpoint's staged serving plan is its candidate plan.
 
+Control API error messages use the same words, so the CLI and the dashboard read alike:
+`optimization run was not found`, `setup was not found in this run`. Error codes are identifiers
+that clients match on and keep the API's names, for example `campaign_state_conflict` and
+`candidate_not_decided`.
+
 Where the CLI turns a state into words, a run or setup the API calls `promoted` reads
 `rolled out` (`live` in `optimize report`), and the current setup reads `baseline` where the API
 says `rejected` because another setup was chosen. That applies to the styled `optimize list` and
