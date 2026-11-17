@@ -1,10 +1,10 @@
 {
   "schema_version": "infercrane.checkpoint-catalog/v2",
-  "reviewed_at": "2026-11-12",
+  "reviewed_at": "2026-11-17",
   "snapshot": {
     "source": "https://huggingface.co/api/models",
-    "fetched_at": "2026-11-12T03:52:00Z",
-    "digest": "sha256:9fc27bc94c4437e741ea7a26d14c40b16d34a71b0af66cdb6c374f000e3dda2e",
+    "fetched_at": "2026-11-17T16:37:44Z",
+    "digest": "sha256:7322f797455c53e1c0792fe5cf5c99906b621ceae3d0b7561ec2e7f74674ba69",
     "policy_digest": "sha256:1ea6af223870045d78ce7ae41bf7ad9aab4560b2aeefa30d6786583a79e073bc"
   },
   "publishers": [
@@ -87,8 +87,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -120,13 +120,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/DeepSeek-R1-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -152,8 +151,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -184,13 +183,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/DeepSeek-V4-Flash-NVFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -216,8 +214,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -266,13 +264,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/DeepSeek-V4.1-Flash-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -298,8 +295,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -342,13 +339,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/DeepSeek-V4.1-Flash-Quark-PTPC-FP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "vllm needs vllm-project/vllm#57071, which is not in a reviewed release.",
         "vllm needs vllm-project/vllm#57760, which is not in a reviewed release."
       ]
@@ -376,8 +372,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -414,13 +410,15 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "license \"gemma\" is unresolved"]
+        "blockers": [
+          "license \"gemma\" is unresolved",
+          "no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"
+        ]
       },
       "source_url": "https://huggingface.co/amd/gemma-4-12B-it-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"gemma\" must be resolved before a customer trial."
       ]
     },
@@ -447,8 +445,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -485,13 +483,15 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "license \"gemma\" is unresolved"]
+        "blockers": [
+          "license \"gemma\" is unresolved",
+          "no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"
+        ]
       },
       "source_url": "https://huggingface.co/amd/gemma-4-26B-A4B-it-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"gemma\" must be resolved before a customer trial."
       ]
     },
@@ -518,8 +518,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -550,13 +550,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/GLM-5.2-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -582,8 +581,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -622,13 +621,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/GLM-5.3-Flash-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "sglang needs sgl-project/sglang#36607, which is not in a reviewed release."
       ]
     },
@@ -655,8 +653,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -692,17 +690,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/GLM-5.3-Quark-MXFP4-AttnFP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -729,8 +722,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -768,13 +761,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/gpt-oss-20b-BF16-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -800,8 +792,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -839,13 +831,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-small-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -871,8 +862,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -910,13 +901,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-small-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -942,8 +932,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -981,13 +971,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-tiny-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -1013,8 +1002,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1052,13 +1041,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-tiny-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -1084,8 +1072,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1122,13 +1110,15 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "license \"other\" is unresolved"]
+        "blockers": [
+          "license \"other\" is unresolved",
+          "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"
+        ]
       },
       "source_url": "https://huggingface.co/amd/Instella-MoE-16B-A3B-SFT-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -1155,8 +1145,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1193,13 +1183,15 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "license \"other\" is unresolved"]
+        "blockers": [
+          "license \"other\" is unresolved",
+          "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"
+        ]
       },
       "source_url": "https://huggingface.co/amd/Instella-MoE-16B-A3B-SFT-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -1226,8 +1218,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -1258,13 +1250,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/K2-Horizon-375B-A23B-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "No license file at the pinned revision; the license comes from the model card metadata."
       ]
     },
@@ -1291,8 +1282,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -1329,17 +1320,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/MiniMax-M3-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "vllm needs vllm-project/vllm#45794, which is not in a reviewed release.",
         "License \"other\" must be resolved before a customer trial."
       ]
@@ -1367,8 +1353,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -1405,17 +1391,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/MiniMax-M3-MXFP4-AttnFP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "vllm needs vllm-project/vllm#45794, which is not in a reviewed release.",
         "License \"other\" must be resolved before a customer trial."
       ]
@@ -1443,8 +1424,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -1481,17 +1462,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/MiniMax-M3.1-Flash-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -1518,8 +1494,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -1599,17 +1575,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"unknown\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"unknown\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Mistral-Large-4-1T-A52B-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"unknown\" must be resolved before a customer trial."
       ]
     },
@@ -1636,8 +1607,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1675,13 +1646,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -1707,8 +1677,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1746,13 +1716,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.31.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -1778,8 +1747,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -1817,13 +1786,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Muse-Glimmer-30B-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -1849,8 +1817,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -1891,17 +1859,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -1928,8 +1891,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -1949,17 +1912,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Muse-Spark-Open-816B-A42B-Quark-PTPC-FP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -1986,8 +1944,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -2025,13 +1983,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Phi-4-mini-instruct-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2057,8 +2014,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -2097,13 +2054,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3-VL-8B-Instruct-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2129,8 +2085,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -2169,13 +2125,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3-VL-8B-Instruct-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2201,8 +2156,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2233,13 +2188,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.5-397B-A17B-MXFP4-AttnFP8-V3",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2265,8 +2219,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -2304,13 +2258,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.5-397B-A17B-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "sglang needs sgl-project/sglang#38870, which is not in a reviewed release."
       ]
     },
@@ -2337,8 +2290,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2396,13 +2349,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-Quark-INT4-G128",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2428,8 +2380,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2487,13 +2439,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-Quark-UINT4-G128",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2519,8 +2470,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -2558,13 +2509,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-w4a16-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2590,8 +2540,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -2629,13 +2579,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2661,8 +2610,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2692,17 +2641,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"unknown\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"unknown\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-2.4T-A95B-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"unknown\" must be resolved before a customer trial."
       ]
     },
@@ -2729,8 +2673,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -2788,13 +2732,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-27B-Quark-AWQ-INT4-W4A16",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "vllm needs vllm-project/vllm#46110, which is not in a reviewed release.",
         "vllm needs vllm-project/vllm#48606, which is not in a reviewed release."
       ]
@@ -2822,8 +2765,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2867,13 +2810,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-27B-Quark-AWQ-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
-        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
       ]
     },
     {
@@ -2897,8 +2839,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -2930,7 +2872,6 @@
         "state": "catalog_only",
         "blockers": [
           "speculator: speculative-decoding candidates need acceptance and output-parity gates first",
-          "targets amd hardware the product cannot run yet",
           "license \"unknown\" is unresolved"
         ]
       },
@@ -2938,7 +2879,6 @@
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"unknown\" must be resolved before a customer trial.",
         "No license file at the pinned revision; the license comes from the model card metadata."
       ]
@@ -2966,8 +2906,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -3025,13 +2965,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-27B-Quark-Qronos-INT4-W4A16",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "vllm needs vllm-project/vllm#46110, which is not in a reviewed release.",
         "vllm needs vllm-project/vllm#48606, which is not in a reviewed release."
       ]
@@ -3059,8 +2998,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna3", "cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["vllm"],
       "engine_requirements": [
@@ -3098,13 +3037,90 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet"]
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-27B-w8a8-llmcompressor",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot."
+      ]
+    },
+    {
+      "id": "amd-qwen38-flash-next-quark-awq-uint4-6a1554e1",
+      "kind": "quantized_checkpoint",
+      "publisher": "amd",
+      "repository": "amd/Qwen3.8-Flash-Next-Quark-AWQ-UINT4",
+      "revision": "6a1554e1f1ceb0e42b8ffd6e6820329b9e07fbf1",
+      "revision_state": "current",
+      "created_at": "2026-08-29T05:35:52.000Z",
+      "last_modified": "2026-11-03T23:19:55.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-Flash-Next",
+        "lineage": "publisher_declared",
+        "screening_revision": "812d96e10a0dd82b69d749e68693698cf6c36daa",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-Flash-Next"
+      },
+      "quantization": {
+        "tool": "quark",
+        "tool_version": "unknown",
+        "method": "quark",
+        "scheme": "awq-w4a16"
+      },
+      "hardware": {
+        "vendor": "amd",
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "engine_requirements": [
+        {
+          "engine": "vllm",
+          "state": "minimum_version",
+          "minimum_version": "0.31.0"
+        },
+        {
+          "engine": "vllm",
+          "state": "requires_unreleased_change",
+          "pull_request": "vllm-project/vllm#48606"
+        }
+      ],
+      "license": {
+        "tag": "other",
+        "state": "unresolved",
+        "digest": "sha256:a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:3dc563e60ee5b6fbdf4b24c8063f49a3e1bc257939a5940162eb5819aae37b48",
+        "model_card_digest": "sha256:65a30503f74512518863ce6cc96aacb478c4e17766b62f3820d6044147238a13",
+        "file_count": 18,
+        "size_bytes": 180896060718
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 6a1554e1f1ceb0e42b8ffd6e6820329b9e07fbf1",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark", "Mode", "n", "bf16 base", "AWQ", "Recovery"],
+          "rows": [
+            ["GPQA-Diamond", "thinking, reasoning_effort=medium, 40k", "198", "84.34%", "85.35% +-2.52", "101.2%"],
+            ["GSM8K (strict-match)", "thinking", "1319", "97.42%", "97.65% +-0.42", "100.2%"],
+            ["GSM8K (strict-match)", "non-thinking", "1319", "95.98%", "95.38% +-0.58", "99.4%"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
+      },
+      "source_url": "https://huggingface.co/amd/Qwen3.8-Flash-Next-Quark-AWQ-UINT4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet."
+        "vllm needs vllm-project/vllm#48606, which is not in a reviewed release.",
+        "License \"other\" must be resolved before a customer trial."
       ]
     },
     {
@@ -3130,8 +3146,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -3168,17 +3184,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-Flash-Next-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -3205,8 +3216,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -3248,17 +3259,12 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-Flash-Next-Quark-MXFP4-AttnFP8-PLEFP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "sglang needs sgl-project/sglang#36601, which is not in a reviewed release.",
         "sglang needs sgl-project/sglang#39064, which is not in a reviewed release.",
         "License \"other\" must be resolved before a customer trial."
@@ -3287,8 +3293,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "license": {
@@ -3318,17 +3324,97 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "targets amd hardware the product cannot run yet",
-          "license \"other\" is unresolved",
-          "tool quark cannot seed product candidates yet"
-        ]
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-Flash-Next-Quark-MXFP4-PLEFP8",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
+        "License \"other\" must be resolved before a customer trial."
+      ]
+    },
+    {
+      "id": "amd-qwen38-flash-next-quark-tokenple-awq-uint4-bb81c1cb",
+      "kind": "quantized_checkpoint",
+      "publisher": "amd",
+      "repository": "amd/Qwen3.8-Flash-Next-Quark-TokenPLE-AWQ-UINT4",
+      "revision": "bb81c1cb5573837c9e44d1dd088f0ed5d6c9f0b4",
+      "revision_state": "current",
+      "created_at": "2026-10-13T20:24:15.000Z",
+      "last_modified": "2026-11-13T00:25:22.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-Flash-Next",
+        "lineage": "publisher_declared",
+        "screening_revision": "812d96e10a0dd82b69d749e68693698cf6c36daa",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-Flash-Next"
+      },
+      "quantization": {
+        "tool": "quark",
+        "tool_version": "unknown",
+        "method": "quark",
+        "scheme": "awq-w4a16"
+      },
+      "hardware": {
+        "vendor": "amd",
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "engine_requirements": [
+        {
+          "engine": "vllm",
+          "state": "requires_unreleased_change",
+          "pull_request": "vllm-project/vllm#64369"
+        }
+      ],
+      "license": {
+        "tag": "other",
+        "state": "unresolved",
+        "digest": "sha256:a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:9f7e36767d21e883cbb7e449797945066b7a4ae75a26f32eb77c537ed54e8fb4",
+        "model_card_digest": "sha256:4812364d65b5454a6e4f52721e08d035b449e690a913b37d45bdadc563ac1f17",
+        "file_count": 20,
+        "size_bytes": 80116195302
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision bb81c1cb5573837c9e44d1dd088f0ed5d6c9f0b4",
+          "evidence_state": "unmeasured",
+          "columns": [
+            "Benchmark (thinking, effort xhigh)",
+            "Original n-gram table, mean ± SE (5 runs)",
+            "Per-token table U (this model), mean ± SE (5 runs)",
+            "Paired difference U − original, ± SE (per question)"
+          ],
+          "rows": [
+            ["GSM8K (1,319 questions, 5-shot, strict-match)", "97.07 ± 0.11", "96.38 ± 0.20", "-0.70 ± 0.23"],
+            ["MMLU-Pro (12,032 questions, 5-shot)", "87.79 ± 0.07", "86.72 ± 0.03", "-1.07 ± 0.13"],
+            ["GPQA-Diamond (198 questions, 0-shot)", "92.12 ± 0.34", "91.11 ± 0.71", "-1.01 ± 0.88"],
+            ["BFCL V4 without web_search (overall, 20 categories)", "67.50 ± 0.34", "65.55 ± 0.37", "-1.95 ± 0.51"],
+            [
+              "LiveCodeBench v6 (131 problems, 2025-02-01 to 2025-05-01), pass@1",
+              "87.63 ± 0.82",
+              "88.24 ± 0.92",
+              "+0.61 ± 1.04"
+            ]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["license \"other\" is unresolved", "tool quark cannot seed product candidates yet"]
+      },
+      "source_url": "https://huggingface.co/amd/Qwen3.8-Flash-Next-Quark-TokenPLE-AWQ-UINT4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "vllm needs vllm-project/vllm#64369, which is not in a reviewed release.",
         "License \"other\" must be resolved before a customer trial."
       ]
     },
@@ -5568,7 +5654,7 @@
       "base": {
         "repository": "google/diffusiongemma-26B-A4B-it",
         "lineage": "publisher_declared",
-        "screening_revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+        "screening_revision": "cd40195554d3cfcb56f34b9adfb66efc790ed5b6",
         "screening_revision_source": "https://huggingface.co/api/models/google/diffusiongemma-26B-A4B-it"
       },
       "quantization": {
@@ -6990,6 +7076,92 @@
         "blockers": ["license \"other\" is unresolved"]
       },
       "source_url": "https://huggingface.co/nvidia/Llama-3.1-8B-Instruct-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-llama-32-1b-qwen38-27b-draft-a01c05f4",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Llama-3.2-1B-Qwen3.8-27B-Draft",
+      "revision": "a01c05f41e2cdaf1920433647f69021e03aca523",
+      "revision_state": "current",
+      "created_at": "2026-11-11T20:26:31.000Z",
+      "last_modified": "2026-11-17T15:52:52.000Z",
+      "base": {
+        "repository": "meta-llama/Llama-3.2-1B",
+        "lineage": "publisher_declared",
+        "screening_revision": "4e20de362430cd3b72f300e6b0f18e50e7166e08",
+        "screening_revision_source": "https://huggingface.co/api/models/meta-llama/Llama-3.2-1B"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.48.0rc0",
+        "method": "",
+        "scheme": "unknown"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": [],
+        "product_support": "unknown"
+      },
+      "runtimes": [],
+      "license": {
+        "tag": "other",
+        "state": "unresolved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:64b36c27bf50de7b7c4f22c97133cc0d08e16cd173d13901b35eaa7e7b5b05ad",
+        "model_card_digest": "sha256:344031d92685d4b34645234eb16aa575cb56eaba47022f07fdcdd10bc3422bc3",
+        "file_count": 8,
+        "size_bytes": 2983448123
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision a01c05f41e2cdaf1920433647f69021e03aca523",
+          "evidence_state": "unmeasured",
+          "columns": ["Category", "This draft", "Qwen3.8-27B MTP head"],
+          "rows": [
+            ["coding", "3.29", "3.78"],
+            ["humanities", "3.29", "3.61"],
+            ["math", "3.10", "3.63"],
+            ["multilingual", "3.55", "4.38"],
+            ["qa", "3.65", "3.75"],
+            ["rag", "4.19", "4.68"],
+            ["reasoning", "3.50", "3.93"],
+            ["roleplay", "3.02", "3.16"],
+            ["stem", "3.10", "3.61"],
+            ["summarization", "4.03", "4.13"],
+            ["writing", "2.91", "3.29"],
+            ["Overall Average", "3.42", "3.81"]
+          ]
+        },
+        {
+          "source": "model card table 3 at revision a01c05f41e2cdaf1920433647f69021e03aca523",
+          "evidence_state": "unmeasured",
+          "columns": ["Draft", "Embedding", "Non-embedding", "Total", "qualitative", "throughput-32k"],
+          "rows": [
+            ["Qwen3.5-4B", "0.64B", "3.57B", "4.21B", "5.58", "5.11"],
+            ["Qwen3.5-0.8B", "0.25B", "0.50B", "0.75B", "3.92", "3.60"],
+            ["Llama-3.2-1B (this model)", "0.51B", "0.97B", "1.48B", "3.42", "3.07"],
+            ["Qwen3.8-27B built-in MTP head", "0 (shared)", "0.42B", "0.42B", "3.81", "3.86"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new format quantized_checkpoint modelopt/unknown for nvidia requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "target hardware is not reviewed", "license \"other\" is unresolved", "no reviewed runtime"]
+      },
+      "source_url": "https://huggingface.co/nvidia/Llama-3.2-1B-Qwen3.8-27B-Draft",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
@@ -8966,14 +9138,14 @@
       ]
     },
     {
-      "id": "nvidia-nvidia-nemotron-35-super-vl-120b-a12b-nvfp4-3acb0995",
+      "id": "nvidia-nvidia-nemotron-35-super-vl-120b-a12b-nvfp4-ae136832",
       "kind": "quantized_checkpoint",
       "publisher": "nvidia",
       "repository": "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4",
-      "revision": "3acb09951cff50cda7be0200ebbad2c15a3e63ba",
+      "revision": "ae1368329b1fc76b71534c5d04b87b35d9cc6e15",
       "revision_state": "current",
       "created_at": "2026-10-12T15:32:30.000Z",
-      "last_modified": "2026-11-10T19:42:38.000Z",
+      "last_modified": "2026-11-16T18:34:42.000Z",
       "base": {
         "repository": "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16",
         "lineage": "publisher_declared",
@@ -8998,14 +9170,14 @@
       },
       "artifact": {
         "format": "safetensors",
-        "manifest_digest": "sha256:1193f54992d07c49c8f4cbe42d0c9f40c48985bc8f2bfd751d0f240e1cfd4df5",
-        "model_card_digest": "sha256:e304e720f16647dcaaa6d2fd19d30ca3800700dc788f2f566058f3648b9d8194",
+        "manifest_digest": "sha256:8f9245990af60752a8cb4fe6527af6d969d192138e70b673e32a9c5dc07626ba",
+        "model_card_digest": "sha256:f886508599d3cc921b5d0179df6daac023980e8ec5209ccde00b0b46922e2e07",
         "file_count": 113,
-        "size_bytes": 75063309379
+        "size_bytes": 75063309364
       },
       "publisher_priors": [
         {
-          "source": "model card table 2 at revision 3acb09951cff50cda7be0200ebbad2c15a3e63ba",
+          "source": "model card table 2 at revision ae1368329b1fc76b71534c5d04b87b35d9cc6e15",
           "evidence_state": "unmeasured",
           "columns": ["Benchmark", "Nemotron 3.5 Super VL BF16", "Nemotron 3.5 Super VL NVFP4"],
           "rows": [
@@ -9032,7 +9204,7 @@
           ]
         },
         {
-          "source": "model card table 4 at revision 3acb09951cff50cda7be0200ebbad2c15a3e63ba",
+          "source": "model card table 4 at revision ae1368329b1fc76b71534c5d04b87b35d9cc6e15",
           "evidence_state": "unmeasured",
           "columns": ["Dataset Collection", "Token Counts", "Description"],
           "rows": [
@@ -9065,7 +9237,7 @@
           ]
         },
         {
-          "source": "model card table 5 at revision 3acb09951cff50cda7be0200ebbad2c15a3e63ba",
+          "source": "model card table 5 at revision ae1368329b1fc76b71534c5d04b87b35d9cc6e15",
           "evidence_state": "unmeasured",
           "columns": ["Dataset", "Collection Period"],
           "rows": [
@@ -9234,6 +9406,152 @@
         ]
       },
       "source_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Transcribe-30B-A4B-DFlash2",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial."
+      ]
+    },
+    {
+      "id": "nvidia-nvidia-nemotron-labs-3-puzzle-75b-a9b-nvfp4-1d370e47",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-NVFP4",
+      "revision": "1d370e47fbc56d1019a471c2339663cdbbb5236f",
+      "revision_state": "current",
+      "created_at": "2026-06-24T15:31:37.000Z",
+      "last_modified": "2026-07-07T10:58:31.000Z",
+      "base": {
+        "repository": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+        "lineage": "publisher_declared",
+        "screening_revision": "2dc98e2afe4face0e4ce40972a915c45368bd34a",
+        "screening_revision_source": "https://huggingface.co/api/models/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "unknown",
+        "method": "modelopt",
+        "scheme": "mixed-nvfp4-fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["sglang", "vllm"],
+      "license": {
+        "tag": "other",
+        "state": "unresolved",
+        "digest": "sha256:8693c8dea35e24fed3d0b39c1c8f2087d8fc860f351de571c3a9b7fc4996ddca"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:56b54dbb9059922530c98b20920c8588f867e6305798a1792626151d641cdea4",
+        "model_card_digest": "sha256:0b2101cd8a8ab0c4229c4decca8b52c7b24b699c9412fd5cac82ec3cfb24b76f",
+        "file_count": 24,
+        "size_bytes": 53545340845
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 1d370e47fbc56d1019a471c2339663cdbbb5236f",
+          "evidence_state": "unmeasured",
+          "columns": [
+            "Benchmark",
+            "Nemotron-Labs-3-Puzzle-75B-A9B-BF16",
+            "Nemotron-Labs-3-Puzzle-75B-A9B-FP8",
+            "Nemotron-Labs-3-Puzzle-75B-A9B-NVFP4"
+          ],
+          "rows": [
+            ["General Knowledge", "", "", ""],
+            ["MMLU-Pro", "82.4", "82.0", "82.2"],
+            ["Reasoning", "", "", ""],
+            ["AIME25 (no tools)", "89.7", "89.4", "89.9"],
+            ["HMMT Feb25 (no tools)", "93.4", "92.7", "92.9"],
+            ["HMMT Feb25 (with tools)", "93.9", "93.6", "93.1"],
+            ["GPQA (no tools)", "78.6", "77.8", "78.0"],
+            ["GPQA (with tools)", "79.5", "80.6", "78.2"],
+            ["LiveCodeBench (v5 2024-07↔2024-12)", "81.1", "80.5", "79.9"],
+            ["SciCode (subtask)", "40.6", "39.6", "40.3"],
+            ["HLE (no tools)", "16.5", "16.0", "15.7"],
+            ["Agentic", "", "", ""],
+            ["Terminal Bench (hard subset)", "24.0", "22.9", "23.4"],
+            ["TauBench V2", "", "", ""],
+            ["Airline", "55.8", "54.5", "55.7"],
+            ["Retail", "63.2", "63.4", "63.7"],
+            ["Telecom", "61.5", "61.3", "60.3"],
+            ["Average", "60.2", "59.7", "59.9"],
+            ["Chat & Instruction Following", "", "", ""],
+            ["IFBench (prompt)", "71.9", "71.9", "71.3"]
+          ]
+        },
+        {
+          "source": "model card table 2 at revision 1d370e47fbc56d1019a471c2339663cdbbb5236f",
+          "evidence_state": "unmeasured",
+          "columns": ["Dataset Collection", "Token Counts", "Description"],
+          "rows": [
+            [
+              "Nemotron-CC-v2 & v2.1",
+              "9.13T",
+              "A massive collection of English web data filtered from Common Crawl, including …"
+            ],
+            [
+              "Nemotron-CC-Code-v1",
+              "427.9B",
+              "High-quality code tokens extracted from Common Crawl using the Lynx + LLM pipel…"
+            ],
+            [
+              "Nemotron-Pretraining-Code-v1 & v2",
+              "1.09T",
+              "Curated GitHub code references with multi-stage filtering, deduplication, and l…"
+            ],
+            [
+              "Nemotron-CC-Math-v1",
+              "133.3B",
+              "High-quality math pre-training dataset preserving LaTeX formatting and mathemat…"
+            ],
+            [
+              "Nemotron-Pretraining-Specialized-v1",
+              "336.4B",
+              "Synthetic datasets targeting specialized domains such as STEM reasoning and sci…"
+            ]
+          ]
+        },
+        {
+          "source": "model card table 3 at revision 1d370e47fbc56d1019a471c2339663cdbbb5236f",
+          "evidence_state": "unmeasured",
+          "columns": ["Dataset", "Collection Period"],
+          "rows": [
+            ["GSM8K", "4/23/2025"],
+            ["CC-NEWS", "4/23/2025"],
+            ["Common Crawl", "4/23/2025"],
+            ["Wikimedia", "4/23/2025"],
+            ["Bespoke-Stratos-17k", "4/23/2025"],
+            ["tigerbot-kaggle-leetcodesolutions-en-2k", "4/23/2025"],
+            ["glaive-function-calling-v2", "4/23/2025"],
+            ["APIGen Function-Calling", "4/23/2025"],
+            ["LMSYS-Chat-1M", "4/23/2025"],
+            ["Open Textbook Library \\- CC BY-SA & GNU subset and OpenStax \\- CC BY-SA subset", "4/23/2025"],
+            ["Advanced Reasoning Benchmark, tigerbot-kaggle-leetcodesolutions-en-2k, PRM800K,…", "4/23/2025"],
+            ["FineWeb-2", "4/23/2025"],
+            ["Court Listener", "Legacy Download"],
+            ["peS2o", "Legacy Download"],
+            ["OpenWebMath", "Legacy Download"],
+            ["BioRxiv", "Legacy Download"],
+            ["PMC Open Access Subset", "Legacy Download"],
+            ["OpenWebText2", "Legacy Download"],
+            ["Stack Exchange Data Dump", "Legacy Download"],
+            ["PubMed Abstracts", "Legacy Download"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["license \"other\" is unresolved"]
+      },
+      "source_url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-Labs-3-Puzzle-75B-A9B-NVFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
@@ -10396,6 +10714,92 @@
       ]
     },
     {
+      "id": "nvidia-qwen35-08b-qwen38-27b-draft-6afca85a",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Qwen3.5-0.8B-Qwen3.8-27B-Draft",
+      "revision": "6afca85a17ef55a7b89ec0be38cf62983f68d23b",
+      "revision_state": "current",
+      "created_at": "2026-11-11T20:25:54.000Z",
+      "last_modified": "2026-11-17T15:52:51.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.5-0.8B",
+        "lineage": "publisher_declared",
+        "screening_revision": "2fc06364715b967f1860aea9cf38778875588b17",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.5-0.8B"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.48.0rc0",
+        "method": "",
+        "scheme": "unknown"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": [],
+        "product_support": "unknown"
+      },
+      "runtimes": [],
+      "license": {
+        "tag": "other",
+        "state": "unresolved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:8124434c928cb3a4bdfd2540ad0ea5157c8576b3a020554906dab2a8a146ecdd",
+        "model_card_digest": "sha256:a76d987f8be9555f6771149de13faca8a36aa846e64af50905f8fbe4734fedd4",
+        "file_count": 8,
+        "size_bytes": 1524849984
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 6afca85a17ef55a7b89ec0be38cf62983f68d23b",
+          "evidence_state": "unmeasured",
+          "columns": ["Category", "This draft", "Qwen3.8-27B MTP head"],
+          "rows": [
+            ["coding", "3.79", "3.78"],
+            ["humanities", "3.79", "3.61"],
+            ["math", "3.79", "3.63"],
+            ["multilingual", "4.67", "4.38"],
+            ["qa", "3.88", "3.75"],
+            ["rag", "4.78", "4.68"],
+            ["reasoning", "4.12", "3.93"],
+            ["roleplay", "3.10", "3.16"],
+            ["stem", "3.72", "3.61"],
+            ["summarization", "4.26", "4.13"],
+            ["writing", "3.22", "3.29"],
+            ["Overall Average", "3.92", "3.81"]
+          ]
+        },
+        {
+          "source": "model card table 3 at revision 6afca85a17ef55a7b89ec0be38cf62983f68d23b",
+          "evidence_state": "unmeasured",
+          "columns": ["Draft", "Embedding", "Non-embedding", "Total", "qualitative", "throughput-32k"],
+          "rows": [
+            ["Qwen3.5-4B", "0.64B", "3.57B", "4.21B", "5.58", "5.11"],
+            ["Qwen3.5-0.8B (this model)", "0.25B", "0.50B", "0.75B", "3.92", "3.60"],
+            ["Llama-3.2-1B", "0.51B", "0.97B", "1.48B", "3.42", "3.07"],
+            ["Qwen3.8-27B built-in MTP head", "0 (shared)", "0.42B", "0.42B", "3.81", "3.86"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new format quantized_checkpoint modelopt/unknown for nvidia requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "target hardware is not reviewed", "license \"other\" is unresolved", "no reviewed runtime"]
+      },
+      "source_url": "https://huggingface.co/nvidia/Qwen3.5-0.8B-Qwen3.8-27B-Draft",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
       "id": "nvidia-qwen35-122b-a10b-nvfp4-98915d83",
       "kind": "quantized_checkpoint",
       "publisher": "nvidia",
@@ -10581,6 +10985,92 @@
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-qwen35-4b-qwen38-27b-draft-bc5ad93d",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Qwen3.5-4B-Qwen3.8-27B-Draft",
+      "revision": "bc5ad93d03d96a9c1ef49748e00ec5130a7080de",
+      "revision_state": "current",
+      "created_at": "2026-11-11T20:23:07.000Z",
+      "last_modified": "2026-11-17T15:52:50.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.5-4B",
+        "lineage": "publisher_declared",
+        "screening_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.5-4B"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.48.0rc0",
+        "method": "",
+        "scheme": "unknown"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": [],
+        "product_support": "unknown"
+      },
+      "runtimes": [],
+      "license": {
+        "tag": "other",
+        "state": "unresolved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:d974476186efc0fb6dc05134aa1bf75ecc4a45dd1c5e2f635947996fbbbb9258",
+        "model_card_digest": "sha256:47d8d3d194b0dd4b69cb8048eb392bfad44e66053ed6414607e6e3b060484316",
+        "file_count": 8,
+        "size_bytes": 8431580958
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision bc5ad93d03d96a9c1ef49748e00ec5130a7080de",
+          "evidence_state": "unmeasured",
+          "columns": ["Category", "This draft", "Qwen3.8-27B MTP head"],
+          "rows": [
+            ["coding", "5.22", "3.78"],
+            ["humanities", "5.39", "3.61"],
+            ["math", "5.61", "3.63"],
+            ["multilingual", "6.55", "4.38"],
+            ["qa", "5.39", "3.75"],
+            ["rag", "6.58", "4.68"],
+            ["reasoning", "5.98", "3.93"],
+            ["roleplay", "4.41", "3.16"],
+            ["stem", "5.44", "3.61"],
+            ["summarization", "6.19", "4.13"],
+            ["writing", "4.59", "3.29"],
+            ["Overall Average", "5.58", "3.81"]
+          ]
+        },
+        {
+          "source": "model card table 3 at revision bc5ad93d03d96a9c1ef49748e00ec5130a7080de",
+          "evidence_state": "unmeasured",
+          "columns": ["Draft", "Embedding", "Non-embedding", "Total", "qualitative", "throughput-32k"],
+          "rows": [
+            ["Qwen3.5-4B (this model)", "0.64B", "3.57B", "4.21B", "5.58", "5.11"],
+            ["Qwen3.5-0.8B", "0.25B", "0.50B", "0.75B", "3.92", "3.60"],
+            ["Llama-3.2-1B", "0.51B", "0.97B", "1.48B", "3.42", "3.07"],
+            ["Qwen3.8-27B built-in MTP head", "0 (shared)", "0.42B", "0.42B", "3.81", "3.86"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new format quantized_checkpoint modelopt/unknown for nvidia requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "target hardware is not reviewed", "license \"other\" is unresolved", "no reviewed runtime"]
+      },
+      "source_url": "https://huggingface.co/nvidia/Qwen3.5-4B-Qwen3.8-27B-Draft",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial.",
         "No license file at the pinned revision; the license comes from the model card metadata."
       ]
     },
@@ -10982,6 +11472,75 @@
         "vllm needs vllm-project/vllm#55513, which is not in a reviewed release.",
         "License \"other\" must be resolved before a customer trial.",
         "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "nvidia-qwen38-flash-next-nvfp4-qad-eec0322c",
+      "kind": "quantized_checkpoint",
+      "publisher": "nvidia",
+      "repository": "nvidia/Qwen3.8-Flash-Next-NVFP4-QAD",
+      "revision": "eec0322cb03229cae4cd8e2fa45547542e472eac",
+      "revision_state": "current",
+      "created_at": "2026-11-17T09:32:35.000Z",
+      "last_modified": "2026-11-17T11:41:45.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-Flash-Next",
+        "lineage": "publisher_declared",
+        "screening_revision": "812d96e10a0dd82b69d749e68693698cf6c36daa",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-Flash-Next"
+      },
+      "quantization": {
+        "tool": "modelopt",
+        "tool_version": "0.46.0.dev281+g73d778422",
+        "method": "modelopt",
+        "scheme": "mixed-nvfp4-fp8-fp8_block-mxfp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": [],
+        "product_support": "unknown"
+      },
+      "runtimes": [],
+      "license": {
+        "tag": "other",
+        "state": "unresolved",
+        "digest": "sha256:a0dc422560841fd68e06d974907f8b4c709bca44a67daad2b528437bdf676c08"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:1704c4425d29fc27107af77a14aec4bbab46233227f435f2504dfae2395ae98a",
+        "model_card_digest": "sha256:45034114db817df047540328344adb5625bf0152112ce44bd272312308f1d78d",
+        "file_count": 60,
+        "size_bytes": 129780932631
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 3 at revision eec0322cb03229cae4cd8e2fa45547542e472eac",
+          "evidence_state": "unmeasured",
+          "columns": ["Benchmark / metric", "Original model (BF16)", "QAD update 100"],
+          "rows": [
+            ["GPQA-Diamond accuracy", "92.05", "91.60"],
+            ["IFBench instruction-following score", "79.60", "79.93"],
+            ["SciCode subtask success", "50.22", "51.11"],
+            ["AA-LCR accuracy", "77.81", "77.13"],
+            ["MMMU-Pro accuracy", "77.75", "77.34"],
+            ["Terminal-Bench 2.1 native pass@1, qualified", "85.96", "85.96"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new format quantized_checkpoint modelopt/mixed-nvfp4-fp8-fp8_block-mxfp8 for nvidia requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "target hardware is not reviewed", "license \"other\" is unresolved", "no reviewed runtime"]
+      },
+      "source_url": "https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4-QAD",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "License \"other\" must be resolved before a customer trial."
       ]
     },
     {
@@ -12391,7 +12950,7 @@
       "base": {
         "repository": "google/diffusiongemma-26B-A4B-it",
         "lineage": "publisher_declared",
-        "screening_revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+        "screening_revision": "cd40195554d3cfcb56f34b9adfb66efc790ed5b6",
         "screening_revision_source": "https://huggingface.co/api/models/google/diffusiongemma-26B-A4B-it"
       },
       "quantization": {
@@ -12463,7 +13022,7 @@
       "base": {
         "repository": "google/diffusiongemma-26B-A4B-it",
         "lineage": "publisher_declared",
-        "screening_revision": "f7f5b7f5fa82ffc52addd066915886d497f5517b",
+        "screening_revision": "cd40195554d3cfcb56f34b9adfb66efc790ed5b6",
         "screening_revision_source": "https://huggingface.co/api/models/google/diffusiongemma-26B-A4B-it"
       },
       "quantization": {
@@ -13565,14 +14124,14 @@
       ]
     },
     {
-      "id": "redhatai-glm-53-speculatordflash2-preview-3325df9c",
+      "id": "redhatai-glm-53-speculatordflash2-preview-83c1f7eb",
       "kind": "speculator",
       "publisher": "RedHatAI",
       "repository": "RedHatAI/GLM-5.3-speculator.dflash2-preview",
-      "revision": "3325df9c8ddad6b11afc9623ca6c3833d70fa4ef",
+      "revision": "83c1f7eb0ee7f12b3b853206a712c8b57362edfa",
       "revision_state": "current",
       "created_at": "2026-10-25T00:56:16.000Z",
-      "last_modified": "2026-11-04T18:24:48.000Z",
+      "last_modified": "2026-11-13T18:47:14.000Z",
       "base": {
         "repository": "zai-org/GLM-5.3",
         "lineage": "publisher_declared",
@@ -13595,14 +14154,14 @@
       },
       "artifact": {
         "format": "safetensors",
-        "manifest_digest": "sha256:5a148e081097099f783df108c93e3898e63a97817341765b8fe5825fa4523e96",
+        "manifest_digest": "sha256:3655692d1c95ceda06d090736d0ac704219449aec3f907ce9c0c85de5717f060",
         "model_card_digest": "sha256:74cff44b22d7a914d0041811a85c8c0b838b29da97dc0b537c66acf387027c27",
-        "file_count": 43,
-        "size_bytes": 4118775837
+        "file_count": 45,
+        "size_bytes": 4118779327
       },
       "publisher_priors": [
         {
-          "source": "model card table 1 at revision 3325df9c8ddad6b11afc9623ca6c3833d70fa4ef",
+          "source": "model card table 1 at revision 83c1f7eb0ee7f12b3b853206a712c8b57362edfa",
           "evidence_state": "unmeasured",
           "columns": ["Property", "Value"],
           "rows": [
@@ -13617,7 +14176,7 @@
           ]
         },
         {
-          "source": "model card table 2 at revision 3325df9c8ddad6b11afc9623ca6c3833d70fa4ef",
+          "source": "model card table 2 at revision 83c1f7eb0ee7f12b3b853206a712c8b57362edfa",
           "evidence_state": "unmeasured",
           "columns": ["Dataset / category", "Acceptance length", "Acceptance rate", "Pos 1", "Pos 2", "Pos 3", "Pos 4", "Pos 5"],
           "rows": [
@@ -13628,7 +14187,7 @@
           ]
         },
         {
-          "source": "model card table 3 at revision 3325df9c8ddad6b11afc9623ca6c3833d70fa4ef",
+          "source": "model card table 3 at revision 83c1f7eb0ee7f12b3b853206a712c8b57362edfa",
           "evidence_state": "unmeasured",
           "columns": ["Dataset / category", "Acceptance length", "Acceptance rate", "Pos 1", "Pos 2", "Pos 3", "Pos 4", "Pos 5"],
           "rows": [
@@ -14083,7 +14642,11 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["review pending", "license \"openmdw-1.1\" is unresolved"]
+        "blockers": [
+          "review pending",
+          "license \"openmdw-1.1\" is unresolved",
+          "no reviewed runtime fits the pinned images: vllm needs 0.25.1 or newer, pinned 0.22.1"
+        ]
       },
       "source_url": "https://huggingface.co/RedHatAI/Laguna-S-2.1-NVFP4",
       "limitations": [
@@ -16798,6 +17361,70 @@
       ]
     },
     {
+      "id": "redhatai-qwen3-coder-next-fp8-dynamic-4d55dc42",
+      "kind": "quantized_checkpoint",
+      "publisher": "RedHatAI",
+      "repository": "RedHatAI/Qwen3-Coder-Next-FP8-dynamic",
+      "revision": "4d55dc42f51a6368c771c12ee3c08cc49430d4b8",
+      "revision_state": "current",
+      "created_at": "2026-02-27T13:54:29.000Z",
+      "last_modified": "2026-02-27T13:56:18.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3-Coder-Next",
+        "lineage": "publisher_declared",
+        "screening_revision": "a7fbcb5c0e12d62a448eaa0e260346bf5dcc0feb",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3-Coder-Next"
+      },
+      "quantization": {
+        "tool": "llm-compressor",
+        "tool_version": "0.13.0",
+        "method": "compressed-tensors",
+        "scheme": "fp8"
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["hopper", "blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:51055d91b0b742abcf27cb0412ea7d2f73346d3cdcd306102359db2f795df1e0",
+        "model_card_digest": "sha256:4950ea7da510a1ec09070df4897b4e05d3eac69ec5ade8b1364136bca0dce493",
+        "file_count": 32,
+        "size_bytes": 81762006517
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 1 at revision 4d55dc42f51a6368c771c12ee3c08cc49430d4b8",
+          "evidence_state": "unmeasured",
+          "columns": ["Category", "Metric", "Qwen3-Coder-Next", "Qwen3-Coder-Next-FP8-dynamic", "Recovery (%)"],
+          "rows": [
+            ["SWE-Bench", "Lite", "49.33", "53", "107.4"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new publisher RedHatAI requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending"]
+      },
+      "source_url": "https://huggingface.co/RedHatAI/Qwen3-Coder-Next-FP8-dynamic",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
       "id": "redhatai-qwen35-35b-a3b-quantizedw8a8-17ad3d3f",
       "kind": "quantized_checkpoint",
       "publisher": "RedHatAI",
@@ -18136,7 +18763,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["review pending"]
+        "blockers": ["review pending", "no reviewed runtime fits the pinned images: vllm needs 0.32.0 or newer, pinned 0.22.1"]
       },
       "source_url": "https://huggingface.co/RedHatAI/Qwen3.8-27B-MXFP4xFP8",
       "limitations": [
@@ -18219,6 +18846,94 @@
         "blockers": ["review pending"]
       },
       "source_url": "https://huggingface.co/RedHatAI/Qwen3.8-27B-NVFP4",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "redhatai-qwen38-27b-speculatordflash2-668a2d44",
+      "kind": "speculator",
+      "publisher": "RedHatAI",
+      "repository": "RedHatAI/Qwen3.8-27B-speculator.dflash2",
+      "revision": "668a2d449dd26763ff1924dd9e254fbf2c23aa07",
+      "revision_state": "current",
+      "created_at": "2026-11-09T14:34:27.000Z",
+      "last_modified": "2026-11-16T15:41:51.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "37561816e66b5b9153b1b64c10968c18c1e6f4a0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "speculator": {
+        "method": "dflash2",
+        "targets": ["Qwen/Qwen3.8-27B"]
+      },
+      "hardware": {
+        "vendor": "nvidia",
+        "architectures": ["hopper", "blackwell"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["vllm"],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:968b409c026118dfae2eb8b10b2577e422b4daadf33335022cab475f93a42765",
+        "model_card_digest": "sha256:0e21c817b84aa145723ec308242b909eaba24b18850a9cb6a43df339203ffabc",
+        "file_count": 7,
+        "size_bytes": 3954062050
+      },
+      "publisher_priors": [
+        {
+          "source": "model card table 3 at revision 668a2d449dd26763ff1924dd9e254fbf2c23aa07",
+          "evidence_state": "unmeasured",
+          "columns": ["Dataset", "Pos 0", "Pos 1", "Pos 2", "Pos 3", "Pos 4", "Pos 5", "Pos 6"],
+          "rows": [
+            ["HumanEval", "83.89%", "68.07%", "55.16%", "45.12%", "37.47%", "31.68%", "27.16%"],
+            ["Math Reasoning", "92.54%", "84.88%", "77.48%", "69.89%", "63.48%", "58.08%", "51.74%"],
+            ["QA", "80.92%", "64.68%", "51.94%", "42.02%", "34.36%", "28.16%", "22.91%"],
+            ["Question", "79.80%", "61.40%", "47.47%", "36.81%", "29.11%", "23.38%", "19.16%"],
+            ["RAG", "86.16%", "73.39%", "62.26%", "53.18%", "45.24%", "38.86%", "33.60%"],
+            ["Summarization", "82.91%", "66.13%", "51.20%", "39.43%", "29.85%", "22.60%", "16.34%"],
+            ["Tool Call", "79.28%", "59.90%", "45.12%", "34.25%", "26.34%", "20.66%", "16.23%"],
+            ["Translation", "85.11%", "71.65%", "59.73%", "50.15%", "41.92%", "34.82%", "28.42%"],
+            ["Writing", "79.56%", "60.31%", "46.20%", "35.23%", "27.14%", "21.42%", "17.05%"]
+          ]
+        },
+        {
+          "source": "model card table 4 at revision 668a2d449dd26763ff1924dd9e254fbf2c23aa07",
+          "evidence_state": "unmeasured",
+          "columns": ["Dataset", "Pos 0", "Pos 1", "Pos 2", "Pos 3", "Pos 4", "Pos 5", "Pos 6"],
+          "rows": [
+            ["Coding", "80.78%", "62.86%", "48.88%", "38.50%", "30.81%", "25.12%", "20.81%"],
+            ["Humanities", "80.23%", "64.00%", "50.90%", "40.88%", "33.13%", "27.29%", "22.55%"],
+            ["Math", "77.19%", "58.93%", "44.63%", "34.31%", "26.47%", "20.64%", "16.04%"],
+            ["Multilingual", "79.96%", "64.46%", "52.37%", "42.91%", "35.61%", "29.84%", "25.19%"],
+            ["QA", "81.87%", "66.38%", "54.52%", "45.29%", "38.28%", "32.71%", "28.23%"],
+            ["RAG", "85.26%", "71.05%", "58.64%", "49.55%", "41.78%", "35.60%", "30.64%"],
+            ["Reasoning", "81.71%", "64.14%", "50.21%", "39.79%", "31.42%", "25.53%", "20.80%"],
+            ["Roleplay", "77.91%", "58.38%", "44.19%", "34.27%", "27.74%", "23.03%", "19.64%"],
+            ["STEM", "79.63%", "61.14%", "46.70%", "36.01%", "28.14%", "22.19%", "17.74%"],
+            ["Summarization", "85.13%", "69.91%", "56.80%", "45.81%", "37.33%", "30.89%", "25.21%"],
+            ["Writing", "76.75%", "56.74%", "42.59%", "32.44%", "25.56%", "20.42%", "16.75%"]
+          ]
+        }
+      ],
+      "review": {
+        "state": "pending",
+        "reasons": ["new publisher RedHatAI requires review"]
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["review pending", "speculator: speculative-decoding candidates need acceptance and output-parity gates first"]
+      },
+      "source_url": "https://huggingface.co/RedHatAI/Qwen3.8-27B-speculator.dflash2",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
@@ -18424,7 +19139,7 @@
       "base": {
         "repository": "ricursiveAI/Ripple-65B-Preview",
         "lineage": "publisher_declared",
-        "screening_revision": "b172323ffd63e62de9ce1ba3830dfffe493c7671",
+        "screening_revision": "d58dbcf43344e27494a40cec6727e180450f4a6b",
         "screening_revision_source": "https://huggingface.co/api/models/ricursiveAI/Ripple-65B-Preview"
       },
       "quantization": {
