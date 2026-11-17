@@ -25,9 +25,15 @@ if [ -z "$runpod_key" ] && [ -n "${RUNPOD_API_KEY_FILE:-}" ]; then
   runpod_key=$(tr -d '\r\n' <"$RUNPOD_API_KEY_FILE")
 fi
 if [ -n "$runpod_key" ]; then
+  # SkyPilot's RunPod backend requires ~/.runpod/config.toml. The runpod 2.x
+  # CLI removed `runpod config`, so write the file it used to write directly,
+  # as a TOML basic string with backslashes and quotes escaped.
   umask 077
-  rm -f "${HOME:?}/.runpod/config.toml"
-  runpod config "$runpod_key" >/dev/null
+  mkdir -p "${HOME:?}/.runpod"
+  rm -f "$HOME/.runpod/config.toml"
+  runpod_toml_key=$(printf '%s' "$runpod_key" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '[default]\napi_key = "%s"\n' "$runpod_toml_key" >"$HOME/.runpod/config.toml"
+  unset runpod_toml_key
   export RUNPOD_API_KEY="$runpod_key"
 fi
 unset runpod_key
@@ -62,6 +68,23 @@ if [ -n "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}" ]; then
   chmod 600 "$brezel_token_file"
   export INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE="$brezel_token_file"
   unset INFERCRANE_BREZEL_SANDBOX_TOKEN brezel_secret_dir brezel_token_file
+fi
+
+# The passport signing key follows the same rule: InferCrane reads it only from
+# an owner-only file, so a platform-injected secret becomes one here.
+if [ -n "${INFERCRANE_PASSPORT_SIGNING_KEY:-}" ]; then
+  if [ -n "${INFERCRANE_PASSPORT_SIGNING_KEY_FILE:-}" ]; then
+    echo "set INFERCRANE_PASSPORT_SIGNING_KEY or INFERCRANE_PASSPORT_SIGNING_KEY_FILE, not both" >&2
+    exit 1
+  fi
+  passport_secret_dir=/tmp/infercrane-secrets
+  passport_key_file="$passport_secret_dir/passport-signing-key"
+  umask 077
+  mkdir -p "$passport_secret_dir"
+  printf '%s\n' "$INFERCRANE_PASSPORT_SIGNING_KEY" >"$passport_key_file"
+  chmod 600 "$passport_key_file"
+  export INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$passport_key_file"
+  unset INFERCRANE_PASSPORT_SIGNING_KEY passport_secret_dir passport_key_file
 fi
 
 if [ "${1:-}" != "infercrane" ] || [ "${2:-}" != "serve" ]; then

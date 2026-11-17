@@ -38,11 +38,24 @@ fi
 
 key_file="$fixture/runpod-key"
 printf '%s\n' 'test-only-key' >"$key_file"
+printf '[default]\napi_key = "%s"\n' 'test-only-key' >"$fixture/expected-runpod-config"
 : >"$ENTRYPOINT_TEST_LOG"
 RUNPOD_API_KEY_FILE="$key_file" INFERCRANE_SKYPILOT_API=disabled \
   sh "$root/scripts/entrypoint.sh" infercrane version
-grep -qx 'runpod:config test-only-key' "$ENTRYPOINT_TEST_LOG"
 grep -qx 'infercrane:version' "$ENTRYPOINT_TEST_LOG"
+cmp "$fixture/expected-runpod-config" "$HOME/.runpod/config.toml"
+test "$(stat -c %a "$HOME/.runpod/config.toml" 2>/dev/null || stat -f %Lp "$HOME/.runpod/config.toml")" = 600
+if grep -q '^runpod:' "$ENTRYPOINT_TEST_LOG"; then
+  echo 'entrypoint ran the RunPod CLI; runpod 2.x has no config command' >&2
+  exit 1
+fi
+
+# The key is written as a TOML basic string: quotes and backslashes are escaped.
+printf '[default]\napi_key = "%s"\n' 'quote\"back\\slash' >"$fixture/expected-runpod-config"
+RUNPOD_API_KEY='quote"back\slash' INFERCRANE_SKYPILOT_API=disabled \
+  sh "$root/scripts/entrypoint.sh" infercrane version
+cmp "$fixture/expected-runpod-config" "$HOME/.runpod/config.toml"
+rm -rf "$HOME/.runpod"
 [ ! -e "$HOME/.config/vastai/vast_api_key" ] || {
   echo 'entrypoint wrote a Vast key without one being configured' >&2
   exit 1
@@ -66,6 +79,23 @@ INFERCRANE_BREZEL_SANDBOX_TOKEN='brezel-test-token' INFERCRANE_SKYPILOT_API=disa
     test "$(cat "$INFERCRANE_BREZEL_SANDBOX_TOKEN_FILE")" = brezel-test-token
     test -z "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}"
   '
+
+env -u INFERCRANE_PASSPORT_SIGNING_KEY_FILE INFERCRANE_PASSPORT_SIGNING_KEY='passport-test-key' \
+  INFERCRANE_SKYPILOT_API=disabled \
+  sh "$root/scripts/entrypoint.sh" sh -c '
+    test -r "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE"
+    test "$(stat -c %a "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE" 2>/dev/null || stat -f %Lp "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE")" = 600
+    test "$(cat "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE")" = passport-test-key
+    test -z "${INFERCRANE_PASSPORT_SIGNING_KEY:-}"
+    rm -f "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE"
+  '
+if INFERCRANE_PASSPORT_SIGNING_KEY='passport-test-key' INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$fixture/passport-key" \
+  INFERCRANE_SKYPILOT_API=disabled sh "$root/scripts/entrypoint.sh" infercrane version \
+  >"$fixture/out" 2>"$fixture/error"; then
+  echo 'entrypoint accepted both a passport signing key and a key file' >&2
+  exit 1
+fi
+grep -q 'not both' "$fixture/error"
 
 cat >"$fixture/bin/sky" <<'SKY'
 #!/bin/sh

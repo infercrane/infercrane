@@ -43,42 +43,54 @@ func (r RunPodPods) VerifyCredential(ctx context.Context, credential string) err
 
 const runPodPodsUserAgent = "InferCrane-RunPod-Pods/1.0"
 
+// runPodArtifactMountPath is where an identity-bound network volume is mounted
+// inside a native Pod.
+const runPodArtifactMountPath = "/workspace"
+
 type runPodNetworkVolume struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
-	DataCenterID string `json:"dataCenterId"`
+	DataCenterID string `json:"dataCenter"`
 	Size         int    `json:"size"`
 }
 
+type runPodGPU struct {
+	ID    string `json:"id"`
+	Count int    `json:"count"`
+}
+
+type runPodNetworkMount struct {
+	VolumeID string `json:"volumeId"`
+	Path     string `json:"path"`
+}
+
+// runPodRecord is the subset of RunPod REST v2's Pod schema that InferCrane
+// reads (GET /v2/pods). Status is the observed lifecycle state.
 type runPodRecord struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	DesiredStatus    string               `json:"desiredStatus"`
-	Image            string               `json:"image"`
-	ImageName        string               `json:"imageName"`
-	GPUCount         int                  `json:"gpuCount"`
-	DockerEntrypoint []string             `json:"dockerEntrypoint"`
-	DockerStartCmd   []string             `json:"dockerStartCmd"`
-	Ports            []string             `json:"ports"`
-	MachineID        string               `json:"machineId"`
-	LastStartedAt    string               `json:"lastStartedAt"`
-	LastStatusChange string               `json:"lastStatusChange"`
-	CostPerHour      json.RawMessage      `json:"costPerHr"`
-	AdjustedCost     json.RawMessage      `json:"adjustedCostPerHr"`
-	Environment      map[string]string    `json:"env"`
-	PublicIP         string               `json:"publicIp"`
-	ContainerDiskGiB int                  `json:"containerDiskInGb"`
-	VolumeInGiB      int                  `json:"volumeInGb"`
-	VolumeMountPath  string               `json:"volumeMountPath"`
-	GPUTypeID        string               `json:"gpuTypeId"`
-	NetworkVolume    *runPodNetworkVolume `json:"networkVolume"`
-	GPU              struct {
-		ID string `json:"id"`
-	} `json:"gpu"`
-	Machine struct {
-		GPUTypeID    string `json:"gpuTypeId"`
-		DataCenterID string `json:"dataCenterId"`
-	} `json:"machine"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Status       string            `json:"status"`
+	Image        string            `json:"image"`
+	Entrypoint   []string          `json:"entrypoint"`
+	Cmd          []string          `json:"cmd"`
+	Ports        []string          `json:"ports"`
+	Environment  map[string]string `json:"env"`
+	DiskGiB      int               `json:"disk"`
+	DataCenterID string            `json:"dataCenterId"`
+	CostPerHour  json.RawMessage   `json:"cost"`
+	CreatedAt    string            `json:"createdAt"`
+	StartedAt    string            `json:"startedAt"`
+	GPU          *runPodGPU        `json:"gpu"`
+	Mounts       struct {
+		Network []runPodNetworkMount `json:"network"`
+	} `json:"mounts"`
+}
+
+func (pod runPodRecord) networkVolumeID() string {
+	if len(pod.Mounts.Network) == 0 {
+		return ""
+	}
+	return pod.Mounts.Network[0].VolumeID
 }
 
 func (r RunPodPods) Handle(externalKey string) ProviderHandle {
@@ -152,23 +164,23 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		}
 		environment["HF_TOKEN"] = "{{ RUNPOD_SECRET_" + r.HFTokenSecret + " }}"
 	}
+	// RunPod REST v2 CreatePodRequest. v2 rejects unknown body fields with 422,
+	// so only schema fields are sent. One exact GPU type is placed per create;
+	// v2 never substitutes another type. Spot (interruptible) Pods were retired.
 	body := map[string]any{
-		"name": name, "imageName": spec.Workload.Image,
-		"gpuTypeIds": []string{RunPodGPUTypeID(spec.GPU)}, "gpuTypePriority": "custom", "gpuCount": spec.GPUCount,
-		"cloudType": "SECURE", "computeType": "GPU", "interruptible": false,
-		"containerDiskInGb": disk,
-		"dockerEntrypoint":  []string{command[0]}, "dockerStartCmd": command[1:],
+		"name": name, "image": spec.Workload.Image,
+		"gpu":        map[string]any{"id": RunPodGPUTypeID(spec.GPU), "count": spec.GPUCount},
+		"cloud":      "SECURE",
+		"disk":       disk,
+		"entrypoint": []string{command[0]}, "cmd": command[1:],
 		"ports": []string{strconv.Itoa(spec.Workload.Port) + "/http"},
 		"env":   environment,
 	}
 	dataCenterID := runPodDataCenterConstraint(spec.Region)
 	if volume.ID != "" {
-		body["networkVolumeId"] = volume.ID
-		body["volumeMountPath"] = "/workspace"
-		// The attached network volume is already an exact placement constraint.
-		// Omitting the redundant dataCenterIds field avoids coupling creates to
-		// RunPod's lagging REST enum when a newly advertised datacenter is valid
-		// for volumes and stock but is not yet present in the OpenAPI schema.
+		body["mounts"] = map[string]any{"network": []runPodNetworkMount{{VolumeID: volume.ID, Path: runPodArtifactMountPath}}}
+		// The attached network volume is already an exact placement constraint:
+		// v2 requires every network volume to be in the Pod's data center.
 		dataCenterID = ""
 		environment["HF_HOME"] = "/workspace/huggingface"
 		environment["HUGGINGFACE_HUB_CACHE"] = "/workspace/huggingface/hub"
@@ -177,7 +189,6 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	}
 	if dataCenterID != "" {
 		body["dataCenterIds"] = []string{dataCenterID}
-		body["dataCenterPriority"] = "custom"
 	}
 	var created runPodRecord
 	if err = r.do(ctx, http.MethodPost, "/pods", body, &created); err != nil {
@@ -195,7 +206,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod create returned no Pod ID", ErrRequestFailed)
 	}
 	// Keep the deterministic provider name as InferCrane's durable identity.
-	// RunPod allocates the opaque Pod ID only after POST /pods; replacing the
+	// RunPod allocates the opaque Pod ID only after POST /v2/pods; replacing the
 	// pre-persisted name with that ID would violate the control plane's
 	// write-once provider identity contract. Observe and delete resolve this
 	// stable name to the current opaque Pod ID on every call.
@@ -224,15 +235,15 @@ func (r RunPodPods) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		port = 8000
 	}
 	details, _ := json.Marshal(map[string]any{
-		"provider": "runpod-pods", "pod_id": pod.ID, "status": pod.DesiredStatus,
-		"machine_id": pod.MachineID, "last_started_at": pod.LastStartedAt,
-		"last_status_change": pod.LastStatusChange, "container_disk_gib": pod.ContainerDiskGiB,
-		"cost_per_hour": rawNumber(pod.CostPerHour), "adjusted_cost_per_hour": rawNumber(pod.AdjustedCost),
-		"network_volume":            runPodVolumeEvidence(pod.NetworkVolume),
+		"provider": "runpod-pods", "pod_id": pod.ID, "status": pod.Status,
+		"data_center_id": nullableString(pod.DataCenterID), "created_at": nullableString(pod.CreatedAt),
+		"started_at": nullableString(pod.StartedAt), "container_disk_gib": pod.DiskGiB,
+		"cost_per_hour":             rawNumber(pod.CostPerHour),
+		"network_volume":            runPodVolumeEvidence(pod.Mounts.Network),
 		"worker_credential_version": r.WorkerCredentialVersion,
 	})
-	switch strings.ToUpper(pod.DesiredStatus) {
-	case "EXITED", "TERMINATED":
+	switch strings.ToUpper(pod.Status) {
+	case "EXITED", "ERROR", "TERMINATED":
 		return Observation{Exists: true, State: "failed", Details: string(details)}, nil
 	case "RUNNING":
 		return Observation{Exists: true, State: "ready", Endpoint: fmt.Sprintf("https://%s-%d.proxy.runpod.net", pod.ID, port), Details: string(details)}, nil
@@ -253,7 +264,9 @@ func (r RunPodPods) DeleteReplica(ctx context.Context, handle ProviderHandle) er
 		if pod.ID != handle.ResourceID && pod.Name != handle.ResourceID {
 			continue
 		}
-		if err = r.do(ctx, http.MethodDelete, "/pods/"+url.PathEscape(pod.ID), nil, nil); err != nil {
+		// A Pod removed between the inventory read and this call is already
+		// in the requested state.
+		if err = r.do(ctx, http.MethodDelete, "/pods/"+url.PathEscape(pod.ID), nil, nil); err != nil && !errors.Is(err, errRunPodNotFound) {
 			return err
 		}
 	}
@@ -316,19 +329,16 @@ func runPodVolumeLocation(location string) (string, error) {
 }
 
 func (r RunPodPods) list(ctx context.Context) ([]runPodRecord, error) {
-	var pods []runPodRecord
-	if err := r.do(ctx, http.MethodGet, "/pods?includeMachine=true&includeNetworkVolume=true", nil, &pods); err != nil {
-		return nil, err
-	}
-	return pods, nil
+	return runPodListAll[runPodRecord](ctx, r.do, "/pods", "pods")
 }
+
+// errRunPodNotFound marks an HTTP 404 from the Pod API. Callers that treat an
+// absent resource as success test for it explicitly.
+var errRunPodNotFound = errors.New("RunPod resource not found")
 
 func (r RunPodPods) do(ctx context.Context, method, path string, body, output any) error {
 	providerAPIKey := strings.TrimSpace(r.APIKey)
-	base := strings.TrimRight(r.BaseURL, "/")
-	if base == "" {
-		base = defaultRunPodRESTURL
-	}
+	base := runPodBaseURL(r.BaseURL)
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -364,20 +374,30 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 		return fmt.Errorf("read RunPod Pod response: %w", readErr)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		message := safeRunPodDiagnostic(string(payload), providerAPIKey)
+		message := strings.ToLower(safeRunPodDiagnostic(runPodProblemText(payload), providerAPIKey))
+		// Classification follows RunPod REST v2's documented create semantics
+		// (https://docs.runpod.io/api-reference-v2/pods/create-a-pod).
 		switch response.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return fmt.Errorf("%w: RunPod rejected the provider credential (HTTP %d)", ErrProviderAuthorization, response.StatusCode)
-		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			// RunPod uses these responses for request-schema and immutable
-			// launch-tuple errors. Retrying the same durable intent cannot heal
-			// either condition and can keep a customer operation alive for its
-			// entire retry budget without ever creating capacity.
-			return fmt.Errorf("%w: RunPod rejected the Pod specification (HTTP %d)", ErrInvalidReplicaSpec, response.StatusCode)
+		case http.StatusPaymentRequired:
+			return fmt.Errorf("%w: RunPod reported insufficient account balance (HTTP 402)", ErrProviderQuota)
+		case http.StatusNotFound:
+			return fmt.Errorf("%w: RunPod Pod API returned HTTP 404", errRunPodNotFound)
+		case http.StatusUnprocessableEntity:
+			// v2 returns 422 when the body does not match the published
+			// contract. Retrying the same durable intent cannot heal it and
+			// would keep a customer operation alive for its whole retry budget.
+			return fmt.Errorf("%w: RunPod rejected the Pod specification (HTTP 422)", ErrInvalidReplicaSpec)
+		case http.StatusBadRequest:
+			// v2 returns 400 both for a broken cross-field rule and for a GPU
+			// and data center combination that could not be placed. The create
+			// body is fixed by contract tests, so a 400 here is placement.
+			return fmt.Errorf("%w: RunPod could not place the requested Pod (HTTP 400)", ErrProviderCapacity)
 		case http.StatusConflict, http.StatusTooManyRequests:
 			return fmt.Errorf("%w: RunPod could not allocate the requested Pod (HTTP %d)", ErrProviderCapacity, response.StatusCode)
 		default:
-			if strings.Contains(strings.ToLower(message), "capacity") || strings.Contains(strings.ToLower(message), "stock") {
+			if strings.Contains(message, "capacity") || strings.Contains(message, "stock") {
 				return fmt.Errorf("%w: RunPod could not allocate the requested Pod (HTTP %d)", ErrProviderCapacity, response.StatusCode)
 			}
 			return fmt.Errorf("%w: RunPod Pod API request failed (HTTP %d)", ErrRequestFailed, response.StatusCode)
@@ -394,7 +414,7 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 	matches := make([]runPodRecord, 0, 1)
 	for _, pod := range pods {
-		if pod.Name == name && strings.ToUpper(pod.DesiredStatus) != "TERMINATED" {
+		if pod.Name == name && strings.ToUpper(pod.Status) != "TERMINATED" {
 			matches = append(matches, pod)
 		}
 	}
@@ -402,31 +422,13 @@ func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 }
 
 func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID, hfTokenSecret string) error {
-	image := pod.ImageName
-	if image == "" {
-		image = pod.Image
-	}
-	actualGPU := pod.GPUTypeID
-	if actualGPU == "" {
-		actualGPU = pod.Machine.GPUTypeID
-	}
-	if actualGPU == "" {
-		actualGPU = pod.GPU.ID
-	}
+	gpuMismatch := pod.GPU == nil || pod.GPU.Count != spec.GPUCount || (pod.GPU.ID != "" && pod.GPU.ID != RunPodGPUTypeID(spec.GPU))
 	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] == "" || pod.Environment["VLLM_API_KEY"] == "")
 	secretMismatch := hfTokenSecret != "" && len(pod.Environment) > 0 && pod.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_"+hfTokenSecret+" }}"
 	engineMismatch := len(pod.Environment) > 0 && !engineEnvironmentMatches(pod.Environment, spec.RuntimeEnv)
-	actualVolumeID := ""
-	if pod.NetworkVolume != nil {
-		actualVolumeID = pod.NetworkVolume.ID
-	}
-	actualDataCenterID := pod.Machine.DataCenterID
-	if actualDataCenterID == "" && pod.NetworkVolume != nil {
-		actualDataCenterID = pod.NetworkVolume.DataCenterID
-	}
 	requestedDataCenterID := runPodDataCenterConstraint(spec.Region)
-	regionMismatch := requestedDataCenterID != "" && actualDataCenterID != "" && actualDataCenterID != requestedDataCenterID
-	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != RunPodGPUTypeID(spec.GPU)) || credentialMismatch || secretMismatch || engineMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
+	regionMismatch := requestedDataCenterID != "" && pod.DataCenterID != "" && pod.DataCenterID != requestedDataCenterID
+	if pod.Image != spec.Workload.Image || gpuMismatch || credentialMismatch || secretMismatch || engineMismatch || pod.networkVolumeID() != volumeID || regionMismatch || !equalStrings(pod.Entrypoint, command[:1]) || !equalStrings(pod.Cmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
 	return nil
@@ -465,8 +467,8 @@ func (r RunPodPods) configuredNetworkVolume(spec ReplicaSpec) (string, error) {
 }
 
 func (r RunPodPods) verifyNetworkVolume(ctx context.Context, identity, volumeID, region string) (runPodNetworkVolume, error) {
-	var volumes []runPodNetworkVolume
-	if err := r.do(ctx, http.MethodGet, "/networkvolumes", nil, &volumes); err != nil {
+	volumes, err := runPodListAll[runPodNetworkVolume](ctx, r.do, "/network-volumes", "networkVolumes")
+	if err != nil {
 		return runPodNetworkVolume{}, fmt.Errorf("verify RunPod network volume: %w", err)
 	}
 	expectedName := runPodArtifactVolumeName(identity)
@@ -491,11 +493,21 @@ func runPodArtifactVolumeName(identity string) string {
 	return "infercrane-artifact-" + hexDigest[:20]
 }
 
-func runPodVolumeEvidence(volume *runPodNetworkVolume) any {
-	if volume == nil {
+// runPodVolumeEvidence reports the attached network volume as the Pod lists
+// it. RunPod v2 Pod reads carry only the volume ID and mount path; name, size,
+// and data center were verified before create and are not repeated here.
+func runPodVolumeEvidence(mounts []runPodNetworkMount) any {
+	if len(mounts) == 0 {
 		return nil
 	}
-	return map[string]any{"id": volume.ID, "name": volume.Name, "size_gib": volume.Size, "data_center_id": volume.DataCenterID, "mount": "/workspace", "state": "attached"}
+	return map[string]any{"id": mounts[0].VolumeID, "mount": mounts[0].Path, "state": "attached"}
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func expandWorkloadCommand(command []string, model, revision string, port int, runtimeArgs []string) []string {

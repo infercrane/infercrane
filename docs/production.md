@@ -18,7 +18,10 @@ Required configuration:
   only by its owner (`0600`); the private key is never persisted in PostgreSQL. Back it up and rotate
   it through the workload secret manager. Without it, Inference Passports are unavailable and each
   process signs built-in quality evidence with a key it generates at startup, so that key ID changes
-  on restart.
+  on restart. On platforms that inject secrets as environment variables, set
+  `INFERCRANE_PASSPORT_SIGNING_KEY` to the key file's contents instead. The container entrypoint
+  writes it to an owner-only file under `/tmp/infercrane-secrets`, points the file variable at it,
+  and removes the value from the server's environment. Setting both variables is an error.
 
 ## Hosted control plane on Fly.io
 
@@ -69,6 +72,20 @@ catalog, set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. The control plane 
 HTTPS to `huggingface.co` and reads model metadata only when someone plans, checks, or proposes such
 a model. Leave it unset to keep planning to reviewed models; see
 [Check any model automatically](/features/model-catalog#check-any-model-automatically).
+
+Give the control plane a stable signing key so built-in quality evidence keeps one key ID across
+restarts and Inference Passports can be issued. Generate the key on a trusted machine, import it as
+a Fly secret without printing it, then delete the local copy once it is backed up in your secret
+manager:
+
+```sh
+infercrane passport keygen --file ./passport-signing-key
+printf 'INFERCRANE_PASSPORT_SIGNING_KEY=%s\n' "$(cat ./passport-signing-key)" \
+  | fly secrets import --stage -a YOUR_APP_NAME
+```
+
+The next deploy applies it. Startup no longer logs that quality evidence is signed with a key
+generated for the process.
 
 To enable customer-owned RunPod Pods, inject separate random
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY` values of at least 32
@@ -167,9 +184,18 @@ docker compose --env-file /private/path/infercrane.env \
 ```
 
 The overlay mounts the RunPod key read-only and persists only the provider client's local state.
-The entrypoint configures the RunPod client without printing the key. Native RunPod Pods remain
-available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an explicit provider
-manifest in an operator-owned overlay.
+The entrypoint writes the RunPod client configuration (`~/.runpod/config.toml`, mode 600) without
+printing the key; it no longer runs `runpod config`, which the `runpod` 2.x CLI removed. Native
+RunPod Pods remain available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an
+explicit provider manifest in an operator-owned overlay.
+
+Native RunPod Pods and Serverless endpoints use RunPod's REST API v2 at `https://api.runpod.io/v2`.
+`INFERCRANE_RUNPOD_REST_URL` overrides that base, for example to route through the acceptance
+fault proxy; leave it unset in production. RunPod retired REST v1 (`https://rest.runpod.io/v1`) on
+2026-11-15 and that host no longer resolves, so a control plane built before this change cannot
+create, observe, or delete RunPod resources. Upgrade it, then check the RunPod inventory for
+resources it could not delete (see [RunPod](/integrations/runpod#check-for-leftover-resources)).
+RunPod's GPU price feed and stock check use `https://api.runpod.io/graphql`, which is a separate API.
 
 InferCrane-paid GPU deployments remain disabled unless
 `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` is set explicitly in that private environment file.
