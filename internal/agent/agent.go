@@ -2,8 +2,7 @@ package agent
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,10 +20,12 @@ type Config struct {
 	Client  Client
 	Version string
 	// Servers are named explicitly; AutoDetect adds the default loopback
-	// ports. DefaultAuth is the Authorization header for detected servers.
-	Servers     []ServerConfig
-	AutoDetect  bool
-	DefaultAuth string
+	// ports. Only named servers receive a credential.
+	Servers    []ServerConfig
+	AutoDetect bool
+	// HashKey keys the gateway's request hashes. It is a secret kept on
+	// this machine and never sent; nil means a random key for this run.
+	HashKey []byte
 	// Model and EndpointName apply when exactly one server is observed.
 	Model, EndpointName string
 	// Gateway is the local listen address of the recording pass-through;
@@ -97,6 +98,21 @@ func New(config Config) *Agent {
 	return &Agent{config: config, windows: newMetricWindows(), shapes: &shapeBuffer{}, detected: map[string]Detected{}, status: map[string]*ServerStatus{}, poll: agentprotocol.DefaultPollInterval}
 }
 
+func (a *Agent) setHardware(hardware agentprotocol.Hardware) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.hardware = hardware
+}
+
+func (a *Agent) hashKey() []byte {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.config.HashKey) == 0 {
+		a.config.HashKey = NewHashKey()
+	}
+	return a.config.HashKey
+}
+
 func (a *Agent) now() time.Time {
 	if a.config.Now != nil {
 		return a.config.Now()
@@ -110,13 +126,11 @@ func (a *Agent) emit(event Event) {
 	}
 }
 
-// hashKey derives the key for request hashes from the agent key. The control
-// plane stores only a SHA-256 of the agent key, so it cannot derive this key
-// or reverse the hashes.
-func hashKey(agentKey string) []byte {
-	mac := hmac.New(sha256.New, []byte(agentKey))
-	_, _ = mac.Write([]byte("infercrane.agent.request-shape-hash/v1"))
-	return mac.Sum(nil)
+// NewHashKey returns a random key for request hashes.
+func NewHashKey() []byte {
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	return key
 }
 
 // Sent lists what leaves the machine, for the privacy line the CLI prints.
@@ -136,10 +150,11 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 	if err := CheckControlURL(a.config.Client.ControlURL); err != nil {
 		return nil, err
 	}
-	a.hardware = a.config.Hardware.Inventory(ctx)
-	a.emit(Event{Kind: "hardware", Message: HardwareSummary(a.hardware)})
+	hardware := a.config.Hardware.Inventory(ctx)
+	a.setHardware(hardware)
+	a.emit(Event{Kind: "hardware", Message: HardwareSummary(hardware)})
 	a.Probe(ctx)
-	if err := a.sync(ctx, false); err != nil {
+	if err := a.firstSync(ctx); err != nil {
 		return nil, err
 	}
 	if err := a.register(ctx); err != nil {
@@ -152,6 +167,24 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 		}
 	}
 	return gatewayErrors, a.sync(ctx, true)
+}
+
+// firstSync tolerates a just-minted key: each control-plane replica learns
+// new keys from a snapshot refreshed every second, so a key can be unknown
+// for a moment after it was created.
+func (a *Agent) firstSync(ctx context.Context) error {
+	deadline := a.now().Add(10 * time.Second)
+	for {
+		err := a.sync(ctx, false)
+		if !errors.Is(err, ErrUnauthenticated) || a.now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // Step probes every server, registers new ones, and syncs once.
@@ -186,7 +219,7 @@ func (a *Agent) Run(ctx context.Context) (Status, error) {
 		case err := <-gatewayErrors:
 			return a.Status(), fmt.Errorf("local gateway stopped: %w", err)
 		case <-hardwareTicker.C:
-			a.hardware = a.config.Hardware.Inventory(ctx)
+			a.setHardware(a.config.Hardware.Inventory(ctx))
 		case <-probeTicker.C:
 			a.Probe(ctx)
 			if err := a.register(ctx); err != nil && fatal(err) {
@@ -230,7 +263,7 @@ func (a *Agent) pollInterval() time.Duration {
 // Probe reads every candidate server, records health, and keeps each engine
 // scrape for the next relay.
 func (a *Agent) Probe(ctx context.Context) {
-	candidates := Candidates(a.config.Servers, a.config.AutoDetect, a.config.DefaultAuth)
+	candidates := Candidates(a.config.Servers, a.config.AutoDetect)
 	explicit := map[string]bool{}
 	for _, server := range a.config.Servers {
 		if base, err := NormalizeBaseURL(server.URL); err == nil {
@@ -370,7 +403,7 @@ func (a *Agent) startGateway(ctx context.Context, failures chan<- error) error {
 	if chosen == nil {
 		return errors.New("the local gateway needs one observed server; none matched")
 	}
-	gateway := &Gateway{Upstream: chosen.BaseURL, ServerKey: chosen.Key, HashKey: hashKey(a.config.Client.Key), Shapes: a.shapes, Now: a.config.Now}
+	gateway := &Gateway{Upstream: chosen.BaseURL, ServerKey: chosen.Key, HashKey: a.hashKey(), Shapes: a.shapes, Now: a.config.Now}
 	handler, err := gateway.Handler()
 	if err != nil {
 		return err
@@ -409,15 +442,17 @@ func (a *Agent) syncRequest() (agentprotocol.SyncRequest, map[string]time.Time, 
 		servers = append(servers, server.Server)
 	}
 	gatewayKey := a.gatewayKey
+	hardware := a.hardware
 	a.mu.Unlock()
 	sort.Slice(servers, func(i, j int) bool { return servers[i].Key < servers[j].Key })
 	if len(servers) > agentprotocol.MaxServers {
 		servers = servers[:agentprotocol.MaxServers]
 	}
 	relays, relayed := a.windows.Relays(now)
+	relays = withinBudget(relays, relayed)
 	request := agentprotocol.SyncRequest{
 		Protocol: agentprotocol.Version, AgentVersion: a.config.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
-		SentAt: now.UTC(), Hardware: a.hardware, Servers: servers, Metrics: relays,
+		SentAt: now.UTC(), Hardware: hardware, Servers: servers, Metrics: relays,
 	}
 	var shapes []agentprotocol.TrafficShape
 	if gatewayKey != "" {
@@ -436,6 +471,15 @@ func (a *Agent) sync(ctx context.Context, withEvidence bool) error {
 		shapes = nil
 	}
 	response, err := a.config.Client.Sync(ctx, request)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != http.StatusTooManyRequests {
+		// The control plane refused this batch as invalid. Resending it
+		// would fail the same way forever, so its evidence is dropped and
+		// the next sync carries only new evidence.
+		a.windows.Sent(relayed)
+		a.emit(Event{Kind: "rejected", Message: fmt.Sprintf("the control plane refused a sync (%v); its metrics and %d request shapes were dropped", err, len(shapes))})
+		return err
+	}
 	if err != nil {
 		a.shapes.restore(shapes)
 		return err
@@ -447,6 +491,16 @@ func (a *Agent) sync(ctx context.Context, withEvidence bool) error {
 	a.agentID, a.agentName, a.upgrade = response.AgentID, response.AgentName, response.Upgrade
 	if interval := time.Duration(response.PollIntervalSeconds) * time.Second; interval >= agentprotocol.MinPollInterval && interval <= agentprotocol.MaxPollInterval {
 		a.poll = interval
+	}
+	observed := map[string]bool{}
+	for _, server := range response.Servers {
+		observed[server.Key] = true
+	}
+	for key, status := range a.status {
+		if status.Registered && !observed[key] {
+			// Its endpoint was deleted; register the server again.
+			status.Registered, status.Endpoint, status.Model = false, "", ""
+		}
 	}
 	for _, server := range response.Servers {
 		status := a.status[server.Key]
@@ -466,6 +520,44 @@ func (a *Agent) sync(ctx context.Context, withEvidence bool) error {
 	}
 	a.emit(Event{Kind: "synced", Message: fmt.Sprintf("%d measurements, %d requests", response.Accepted.Measurements, response.Accepted.Requests)})
 	return nil
+}
+
+// relayBudget keeps one sync well under the control plane's 8 MiB body
+// limit. Baselines go first, then whole relays; a relay left out is retried
+// with the next sync.
+const relayBudget = 6 << 20
+
+func withinBudget(relays []agentprotocol.MetricRelay, relayed map[string]time.Time) []agentprotocol.MetricRelay {
+	size := func() int {
+		total := 0
+		for _, relay := range relays {
+			total += len(relay.Current.Text)
+			if relay.Baseline != nil {
+				total += len(relay.Baseline.Text)
+			}
+		}
+		return total
+	}
+	kept := relays[:0]
+	for _, relay := range relays {
+		if relay.Validate() != nil {
+			// Too large or malformed to relay at all; never retried.
+			continue
+		}
+		kept = append(kept, relay)
+	}
+	relays = kept
+	for index := range relays {
+		if size() <= relayBudget {
+			break
+		}
+		relays[index].Baseline = nil
+	}
+	for size() > relayBudget && len(relays) > 0 {
+		delete(relayed, relays[len(relays)-1].ServerKey)
+		relays = relays[:len(relays)-1]
+	}
+	return relays
 }
 
 // Status returns a copy of the agent's current view.

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Version is the protocol spoken by this build. The control plane refuses a
@@ -38,7 +39,8 @@ const (
 	// MaxSyncBodyBytes bounds one sync request: every server may carry a
 	// current and a baseline scrape, plus traffic shapes.
 	MaxSyncBodyBytes = 8 << 20
-	maxText          = 256
+	// MaxText bounds every free-text field.
+	MaxText = 256
 )
 
 // Engines the agent recognizes. Unknown OpenAI-compatible servers are
@@ -122,8 +124,9 @@ type MetricRelay struct {
 
 // TrafficShape describes one request that passed through the agent's local
 // gateway. It has no prompt, completion, header, or tool content. Hashes are
-// keyed with a secret that never leaves the agent's machine, so they only say
-// whether two requests shared a system prompt or session.
+// keyed with a random secret created on the agent's machine and never sent,
+// independent of the agent key, so they only say whether two requests shared
+// a system prompt or session.
 type TrafficShape struct {
 	ID               string    `json:"id"`
 	ServerKey        string    `json:"server_key"`
@@ -251,8 +254,8 @@ func boundedText(field, value string, required bool) error {
 	if required && strings.TrimSpace(value) == "" {
 		return fmt.Errorf("%s is required", field)
 	}
-	if len(value) > maxText {
-		return fmt.Errorf("%s must be at most %d bytes", field, maxText)
+	if len(value) > MaxText {
+		return fmt.Errorf("%s must be at most %d bytes", field, MaxText)
 	}
 	for _, r := range value {
 		if r < 0x20 || r == 0x7f {
@@ -262,7 +265,11 @@ func boundedText(field, value string, required bool) error {
 	return nil
 }
 
-// Validate bounds a sync request before the control plane acts on it.
+// Validate bounds the envelope of a sync: identity, hardware, counts, and
+// the gateway. Servers, metric relays, and traffic shapes are validated one
+// by one (Server.Validate, MetricRelay.Validate, TrafficShape.Validate) so
+// one bad item is rejected on its own and never blocks the agent's
+// heartbeat.
 func (r SyncRequest) Validate(now time.Time) error {
 	if r.Protocol != Version {
 		return fmt.Errorf("protocol must be %s", Version)
@@ -281,39 +288,11 @@ func (r SyncRequest) Validate(now time.Time) error {
 	if len(r.Servers) > MaxServers {
 		return fmt.Errorf("at most %d servers may be reported", MaxServers)
 	}
-	keys := map[string]struct{}{}
-	for _, server := range r.Servers {
-		if err := server.Validate(); err != nil {
-			return err
-		}
-		if _, duplicate := keys[server.Key]; duplicate {
-			return fmt.Errorf("server %s is reported twice", server.Key)
-		}
-		keys[server.Key] = struct{}{}
-	}
 	if len(r.Metrics) > MaxServers {
 		return fmt.Errorf("at most %d metric relays may be sent", MaxServers)
 	}
-	for _, relay := range r.Metrics {
-		if !ValidServerKey(relay.ServerKey) {
-			return errors.New("metric relay server_key is invalid")
-		}
-		for _, exposition := range []*Exposition{&relay.Current, relay.Baseline} {
-			if exposition == nil {
-				continue
-			}
-			if exposition.AgeMS < 0 || exposition.AgeMS > int64(24*time.Hour/time.Millisecond) || len(exposition.Text) > MaxExpositionBytes || exposition.Text == "" {
-				return fmt.Errorf("metric relay for %s has an invalid scrape", relay.ServerKey)
-			}
-		}
-	}
 	if len(r.Traffic) > MaxTrafficShapes {
 		return fmt.Errorf("at most %d traffic shapes may be sent", MaxTrafficShapes)
-	}
-	for index, shape := range r.Traffic {
-		if err := shape.Validate(); err != nil {
-			return fmt.Errorf("traffic shape %d: %w", index, err)
-		}
 	}
 	if r.Gateway != nil {
 		if err := boundedText("gateway.listen", r.Gateway.Listen, true); err != nil {
@@ -324,6 +303,39 @@ func (r SyncRequest) Validate(now time.Time) error {
 		}
 	}
 	return nil
+}
+
+// Validate bounds one metric relay.
+func (r MetricRelay) Validate() error {
+	if !ValidServerKey(r.ServerKey) {
+		return errors.New("metric relay server_key is invalid")
+	}
+	for _, exposition := range []*Exposition{&r.Current, r.Baseline} {
+		if exposition == nil {
+			continue
+		}
+		if exposition.AgeMS < 0 || exposition.AgeMS > int64(24*time.Hour/time.Millisecond) || len(exposition.Text) > MaxExpositionBytes || exposition.Text == "" {
+			return fmt.Errorf("metric relay for %s has an invalid scrape", r.ServerKey)
+		}
+	}
+	return nil
+}
+
+// CleanText removes control characters and truncates to max bytes on a
+// character boundary, so a value read from a local server always passes
+// validation.
+func CleanText(value string, max int) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		if r < 0x20 || r == 0x7f || r == utf8.RuneError {
+			continue
+		}
+		if b.Len()+utf8.RuneLen(r) > max {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func (h Hardware) validate() error {

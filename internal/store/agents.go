@@ -12,6 +12,11 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 )
 
+// MaxServersPerAgent bounds what one agent key can register, so a leaked key
+// cannot create endpoints without limit. It matches the protocol's limit on
+// servers per sync.
+const MaxServersPerAgent = 32
+
 const agentColumns = `a.id,a.tenant_id,a.principal_id,a.name,a.state,a.created_by,COALESCE(a.agent_version,''),COALESCE(a.protocol_version,''),COALESCE(a.os,''),COALESCE(a.arch,''),a.hardware_json::text,a.servers_json::text,COALESCE(a.gateway_server_key,''),a.last_seen_at,a.created_at,a.updated_at,a.revoked_at`
 
 func scanAgent(row rowScanner) (domain.Agent, error) {
@@ -236,6 +241,15 @@ func (s *Store) RegisterAgentServer(ctx context.Context, tenant, agentID string,
 	if !errors.Is(err, ErrNotFound) {
 		return domain.AgentServer{}, false, err
 	}
+	// An agent endpoint takes its own logical model; it never attaches to
+	// one that another live endpoint already uses.
+	var modelTaken bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM logical_models lm JOIN endpoints e ON e.logical_model_id=lm.id AND e.tenant_id=lm.tenant_id AND e.desired_state<>'deleted' WHERE lm.tenant_id=? AND lm.name=?)`, tenant, registration.EndpointName).Scan(&modelTaken); err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if modelTaken {
+		return domain.AgentServer{}, false, fmt.Errorf("%w: the name %s is already used by another endpoint's model", ErrConflict, registration.EndpointName)
+	}
 	stamp := now()
 	var targetID string
 	switch lookupErr := tx.QueryRowContext(ctx, `SELECT id FROM targets WHERE tenant_id=? AND agent_id=? AND agent_server_key=?`, tenant, agentID, registration.Key).Scan(&targetID); {
@@ -245,11 +259,21 @@ func (s *Store) RegisterAgentServer(ctx context.Context, tenant, agentID string,
 			return domain.AgentServer{}, false, err
 		}
 	case errors.Is(lookupErr, sql.ErrNoRows):
+		var count int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM targets WHERE tenant_id=? AND agent_id=?`, tenant, agentID).Scan(&count); err != nil {
+			return domain.AgentServer{}, false, err
+		}
+		if count >= MaxServersPerAgent {
+			return domain.AgentServer{}, false, fmt.Errorf("%w: an agent observes at most %d servers", ErrConflict, MaxServersPerAgent)
+		}
 		if targetID, err = newID(); err != nil {
 			return domain.AgentServer{}, false, err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO targets(id,name,url,provider,runtime,upstream_model_name,health,provider_details_json,tenant_id,agent_id,agent_server_key,created_at,updated_at) VALUES(?,?,?,'external',?,?,'starting','{}'::jsonb,?,?,?,?,?)`,
 			targetID, "agent-"+targetID, registration.Address, registration.Runtime, registration.UpstreamModel, tenant, agentID, registration.Key, stamp, stamp); err != nil {
+			if isUniqueViolation(err) {
+				return domain.AgentServer{}, false, fmt.Errorf("%w: server %s is being registered concurrently; retry", ErrConflict, registration.Key)
+			}
 			return domain.AgentServer{}, false, err
 		}
 	default:
@@ -275,7 +299,8 @@ func (s *Store) ReportAgentServerHealth(ctx context.Context, tenant, agentID, ke
 	if health != "healthy" && health != "unhealthy" {
 		return errors.New("agent server health must be healthy or unhealthy")
 	}
-	_, err := s.ExecContext(ctx, `UPDATE targets SET health=?,agent_reported_at=?,updated_at=? WHERE tenant_id=? AND agent_id=? AND agent_server_key=?`, health, stamp(at), now(), tenant, agentID, key)
+	// A sync that raced a revocation must not mark the server healthy again.
+	_, err := s.ExecContext(ctx, `UPDATE targets SET health=?,agent_reported_at=?,updated_at=? WHERE tenant_id=? AND agent_id=? AND agent_server_key=? AND EXISTS(SELECT 1 FROM agents WHERE id=? AND tenant_id=? AND state='active')`, health, stamp(at), now(), tenant, agentID, key, agentID, tenant)
 	return err
 }
 

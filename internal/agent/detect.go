@@ -39,7 +39,8 @@ const (
 type ServerConfig struct {
 	URL string
 	// AuthHeader is sent as Authorization on every local request, for a
-	// server started with an API key. It never leaves the machine.
+	// server started with an API key. It is sent only to this server, never
+	// to the control plane or to a server found on a default port.
 	AuthHeader string
 }
 
@@ -68,9 +69,10 @@ func (d Detector) client() *http.Client {
 	return &http.Client{Timeout: probeTimeout, Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
-// Candidates returns the explicit servers, or the default loopback ports
-// when autodetect is on, without duplicates.
-func Candidates(explicit []ServerConfig, autodetect bool, defaultAuth string) []ServerConfig {
+// Candidates returns the explicit servers, then the default loopback ports
+// when autodetect is on, without duplicates. Only explicit servers carry a
+// credential.
+func Candidates(explicit []ServerConfig, autodetect bool) []ServerConfig {
 	seen := map[string]struct{}{}
 	out := []ServerConfig{}
 	add := func(config ServerConfig) {
@@ -89,8 +91,10 @@ func Candidates(explicit []ServerConfig, autodetect bool, defaultAuth string) []
 		add(config)
 	}
 	if autodetect {
+		// A server key is sent only to servers the user named. Whatever
+		// listens on a default port gets no credential.
 		for _, port := range DefaultPorts {
-			add(ServerConfig{URL: fmt.Sprintf("http://127.0.0.1:%d", port), AuthHeader: defaultAuth})
+			add(ServerConfig{URL: fmt.Sprintf("http://127.0.0.1:%d", port)})
 		}
 	}
 	return out
@@ -233,7 +237,10 @@ func (d Detector) models(ctx context.Context, base, auth string) ([]string, int,
 	}
 	models := make([]string, 0, len(payload.Data))
 	for _, item := range payload.Data {
-		if id := strings.TrimSpace(item.ID); id != "" && len(id) <= 256 && len(models) < agentprotocol.MaxModelsPerServer {
+		// A model ID that is not clean text is skipped, never altered: an
+		// altered ID would name a model the server does not serve.
+		id := strings.TrimSpace(item.ID)
+		if id != "" && agentprotocol.CleanText(id, agentprotocol.MaxText) == id && len(models) < agentprotocol.MaxModelsPerServer {
 			models = append(models, id)
 		}
 	}
@@ -428,14 +435,5 @@ func firstNonEmpty(values ...string) string {
 }
 
 func boundedDetail(value string) string {
-	value = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, strings.TrimSpace(value))
-	if len(value) > 256 {
-		value = value[:256]
-	}
-	return value
+	return agentprotocol.CleanText(value, agentprotocol.MaxText)
 }

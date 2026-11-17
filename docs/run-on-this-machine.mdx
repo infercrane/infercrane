@@ -68,8 +68,8 @@ counts are sent only if you route traffic through its local gateway. See
 
 ## A server that needs an API key
 
-Keep the key in an environment variable and name the variable. The agent sends the key only to the
-local server:
+Keep the key in an environment variable, name the variable, and name the server. The agent sends
+the key only to the servers you name with `--server`, never to InferCrane:
 
 ```bash
 export VLLM_API_KEY=...

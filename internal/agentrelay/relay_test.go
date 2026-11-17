@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,8 +64,8 @@ func fixture(t *testing.T, name string) string {
 
 func TestSyncTurnsRelaysIntoScrapeEquivalentEvidence(t *testing.T) {
 	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
-	store := &fakeStore{health: map[string]string{}, servers: []domain.AgentServer{{AgentID: "agent-1", Key: "127.0.0.1-8000", TargetID: "target-1", EndpointID: "endpoint-1", BindingID: "binding-1", Runtime: "vllm", OwnershipMode: "observe-only"}}}
-	service := Service{Store: store, Now: func() time.Time { return now }, RecommendedAgentVersion: "1.2.0"}
+	store := &fakeStore{health: map[string]string{}, servers: []domain.AgentServer{{AgentID: "agent-1", Key: "127.0.0.1-8000", TargetID: "target-1", EndpointID: "endpoint-1", BindingID: "binding-1", Runtime: "vllm", UpstreamModel: "m", OwnershipMode: "observe-only"}}}
+	service := &Service{Store: store, Now: func() time.Time { return now }, RecommendedAgentVersion: "1.2.0"}
 	agent := domain.Agent{ID: "agent-1", TenantID: "tenant-a", Name: "laptop"}
 	ttft := 80.0
 	input, output := 30, 9
@@ -132,7 +133,7 @@ func TestSyncTurnsRelaysIntoScrapeEquivalentEvidence(t *testing.T) {
 
 func TestSyncRefusesRevokedOldAndInvalidAgents(t *testing.T) {
 	store := &fakeStore{health: map[string]string{}, revoked: true}
-	service := Service{Store: store, MinimumAgentVersion: "1.2.0"}
+	service := &Service{Store: store, MinimumAgentVersion: "1.2.0"}
 	base := agentprotocol.SyncRequest{Protocol: agentprotocol.Version, AgentVersion: "1.2.0", OS: "linux", Arch: "arm64", SentAt: time.Now(), Hardware: agentprotocol.Hardware{State: "unavailable"}}
 	if _, err := service.Sync(context.Background(), domain.Agent{ID: "agent-1"}, base); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("revoked: %v", err)
@@ -170,5 +171,80 @@ func TestCompareVersions(t *testing.T) {
 		if got := compareVersions(item.left, item.right); got != item.want {
 			t.Fatalf("compare(%s,%s)=%d want %d", item.left, item.right, got, item.want)
 		}
+	}
+}
+
+func TestOneBadItemNeverBlocksTheRestOfASync(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	store := &fakeStore{health: map[string]string{}, servers: []domain.AgentServer{
+		{AgentID: "agent-1", Key: "127.0.0.1-8000", TargetID: "target-1", UpstreamModel: "Qwen/Qwen3-8B", Runtime: "vllm"},
+		{AgentID: "agent-1", Key: "127.0.0.1-8001", TargetID: "target-2", UpstreamModel: "old/model", Runtime: "vllm"},
+	}}
+	service := &Service{Store: store, Now: func() time.Time { return now }}
+	good := agentprotocol.TrafficShape{ID: "shape-good-1", ServerKey: "127.0.0.1-8000", StartedAt: now, Operation: "chat", StatusCode: 200, LatencyMS: 5}
+	poisoned := good
+	poisoned.ID, poisoned.RequestModel = "shape-bad-01", "qwen\tx"
+	moved := good
+	moved.ID, moved.ServerKey = "shape-moved1", "127.0.0.1-8001"
+	request := agentprotocol.SyncRequest{
+		Protocol: agentprotocol.Version, AgentVersion: "1.0.0", OS: "linux", Arch: "amd64", SentAt: now,
+		Hardware: agentprotocol.Hardware{State: "unavailable"},
+		Servers: []agentprotocol.Server{
+			{Key: "127.0.0.1-8000", Engine: agentprotocol.EngineVLLM, Address: "http://127.0.0.1:8000", Models: []string{"Qwen/Qwen3-8B"}, Health: agentprotocol.HealthHealthy},
+			{Key: "127.0.0.1-8001", Engine: agentprotocol.EngineVLLM, Address: "http://127.0.0.1:8001", Models: []string{"new/model"}, Health: agentprotocol.HealthHealthy},
+			{Key: "BAD KEY", Engine: agentprotocol.EngineVLLM, Address: "x", Health: agentprotocol.HealthHealthy},
+		},
+		Metrics: []agentprotocol.MetricRelay{
+			{ServerKey: "127.0.0.1-8000", Current: agentprotocol.Exposition{AgeMS: 1, Text: ""}},
+			{ServerKey: "127.0.0.1-8001", Current: agentprotocol.Exposition{AgeMS: 1, Text: fixture(t, "vllm_scrape1.prom")}},
+		},
+		Traffic: []agentprotocol.TrafficShape{good, poisoned, moved},
+	}
+	response, err := service.Sync(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, request)
+	if err != nil {
+		t.Fatalf("a bad item failed the whole sync: %v", err)
+	}
+	if response.Accepted.Requests != 1 || len(store.requests) != 1 || store.requests[0].RequestID == "" || len(store.measurements) != 0 {
+		t.Fatalf("accepted=%+v requests=%d measurements=%d", response.Accepted, len(store.requests), len(store.measurements))
+	}
+	if store.health["127.0.0.1-8000"] != "healthy" || store.health["127.0.0.1-8001"] != "unhealthy" {
+		t.Fatalf("health: %v", store.health)
+	}
+	kinds := map[string]int{}
+	for _, rejection := range response.Rejected {
+		kinds[rejection.Kind]++
+		if rejection.ServerKey == "127.0.0.1-8001" && !strings.Contains(rejection.Reason, "now serves new/model") {
+			t.Fatalf("model change reason: %+v", rejection)
+		}
+	}
+	if kinds["server"] != 2 || kinds["metrics"] != 2 || kinds["traffic"] != 2 {
+		t.Fatalf("rejections: %+v", response.Rejected)
+	}
+	if strings.Contains(store.heartbeat.ServersJSON, "BAD KEY") {
+		t.Fatal("an invalid server report was stored")
+	}
+}
+
+func TestRegistrationRefreshesAreCoalesced(t *testing.T) {
+	started := make(chan struct{}, 10)
+	release := make(chan struct{})
+	var runs atomic.Int32
+	service := &Service{RefreshEndpoints: func(context.Context) error {
+		runs.Add(1)
+		started <- struct{}{}
+		<-release
+		return nil
+	}}
+	for index := 0; index < 20; index++ {
+		service.refresh(context.Background())
+	}
+	<-started
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for service.refreshing.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if count := runs.Load(); count < 1 || count > 2 {
+		t.Fatalf("20 registrations ran %d refreshes", count)
 	}
 }

@@ -19,41 +19,87 @@ func validSync() SyncRequest {
 	}
 }
 
-func TestSyncValidationBoundsEveryField(t *testing.T) {
-	if err := validSync().Validate(time.Now()); err != nil {
+func TestSyncValidationBoundsTheEnvelopeAndEachItem(t *testing.T) {
+	request := validSync()
+	if err := request.Validate(time.Now()); err != nil {
 		t.Fatalf("valid sync: %v", err)
 	}
-	cases := map[string]func(*SyncRequest){
+	if err := request.Servers[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := request.Metrics[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := request.Traffic[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+	envelope := map[string]func(*SyncRequest){
 		"protocol":         func(r *SyncRequest) { r.Protocol = "infercrane.agent/v0" },
 		"agent version":    func(r *SyncRequest) { r.AgentVersion = "" },
 		"control char":     func(r *SyncRequest) { r.OS = "linux\n" },
 		"hardware state":   func(r *SyncRequest) { r.Hardware.State = "great" },
 		"vendor":           func(r *SyncRequest) { r.Hardware.Accelerators = []Accelerator{{Vendor: "acme", Count: 1}} },
-		"server key":       func(r *SyncRequest) { r.Servers[0].Key = "Has Space" },
-		"duplicate server": func(r *SyncRequest) { r.Servers = append(r.Servers, r.Servers[0]) },
-		"engine":           func(r *SyncRequest) { r.Servers[0].Engine = "tgi" },
-		"health":           func(r *SyncRequest) { r.Servers[0].Health = "fine" },
-		"too many models": func(r *SyncRequest) {
-			r.Servers[0].Models = make([]string, MaxModelsPerServer+1)
-		},
-		"exposition size": func(r *SyncRequest) { r.Metrics[0].Current.Text = strings.Repeat("x", MaxExpositionBytes+1) },
-		"exposition age":  func(r *SyncRequest) { r.Metrics[0].Current.AgeMS = -1 },
-		"shape id":        func(r *SyncRequest) { r.Traffic[0].ID = "short" },
-		"operation":       func(r *SyncRequest) { r.Traffic[0].Operation = "images" },
-		"status":          func(r *SyncRequest) { r.Traffic[0].StatusCode = 42 },
-		"latency":         func(r *SyncRequest) { r.Traffic[0].LatencyMS = -1 },
-		"hash":            func(r *SyncRequest) { r.Traffic[0].SharedPrefixHash = "not-a-hash" },
-		"too much traffic": func(r *SyncRequest) {
-			r.Traffic = make([]TrafficShape, MaxTrafficShapes+1)
-		},
-		"gateway key": func(r *SyncRequest) { r.Gateway = &Gateway{Listen: "127.0.0.1:4000", ServerKey: "BAD KEY"} },
+		"too many servers": func(r *SyncRequest) { r.Servers = make([]Server, MaxServers+1) },
+		"too many traffic": func(r *SyncRequest) { r.Traffic = make([]TrafficShape, MaxTrafficShapes+1) },
+		"gateway key":      func(r *SyncRequest) { r.Gateway = &Gateway{Listen: "127.0.0.1:4000", ServerKey: "BAD KEY"} },
 	}
-	for name, mutate := range cases {
+	for name, mutate := range envelope {
 		request := validSync()
 		mutate(&request)
 		if err := request.Validate(time.Now()); err == nil {
-			t.Errorf("%s: invalid request accepted", name)
+			t.Errorf("envelope %s: invalid request accepted", name)
 		}
+	}
+	server := map[string]func(*Server){
+		"key":    func(s *Server) { s.Key = "Has Space" },
+		"engine": func(s *Server) { s.Engine = "tgi" },
+		"health": func(s *Server) { s.Health = "fine" },
+		"models": func(s *Server) { s.Models = make([]string, MaxModelsPerServer+1) },
+		"model":  func(s *Server) { s.Models = []string{"qwen\tx"} },
+	}
+	for name, mutate := range server {
+		item := validSync().Servers[0]
+		mutate(&item)
+		if item.Validate() == nil {
+			t.Errorf("server %s: invalid item accepted", name)
+		}
+	}
+	for name, mutate := range map[string]func(*MetricRelay){
+		"size": func(r *MetricRelay) { r.Current.Text = strings.Repeat("x", MaxExpositionBytes+1) },
+		"age":  func(r *MetricRelay) { r.Current.AgeMS = -1 },
+		"key":  func(r *MetricRelay) { r.ServerKey = "" },
+	} {
+		item := validSync().Metrics[0]
+		mutate(&item)
+		if item.Validate() == nil {
+			t.Errorf("metrics %s: invalid item accepted", name)
+		}
+	}
+	for name, mutate := range map[string]func(*TrafficShape){
+		"id":        func(s *TrafficShape) { s.ID = "short" },
+		"operation": func(s *TrafficShape) { s.Operation = "images" },
+		"status":    func(s *TrafficShape) { s.StatusCode = 42 },
+		"latency":   func(s *TrafficShape) { s.LatencyMS = -1 },
+		"hash":      func(s *TrafficShape) { s.SharedPrefixHash = "not-a-hash" },
+		"model":     func(s *TrafficShape) { s.RequestModel = "qwen\nx" },
+	} {
+		item := validSync().Traffic[0]
+		mutate(&item)
+		if item.Validate() == nil {
+			t.Errorf("traffic %s: invalid item accepted", name)
+		}
+	}
+}
+
+func TestCleanTextAlwaysPassesValidation(t *testing.T) {
+	for _, value := range []string{strings.Repeat("a", 255) + "é", "tab\there\n", strings.Repeat("日本", 100), "\x7fdel", "ok"} {
+		cleaned := CleanText(value, MaxText)
+		if err := boundedText("field", cleaned, false); err != nil || len(cleaned) > MaxText {
+			t.Fatalf("CleanText(%q)=%q: %v", value, cleaned, err)
+		}
+	}
+	if CleanText("  qwen\tx  ", MaxText) != "qwenx" {
+		t.Fatal("control characters were not removed")
 	}
 }
 

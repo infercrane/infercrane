@@ -63,26 +63,30 @@ func bindOptionalControlServices(api *controlapi.API, async *asyncinference.Serv
 	}
 }
 
-// newUpstreamCredentialSealer returns nil when credential encryption is not
-// configured: then `infercrane connect --token-env` is refused and the agent,
-// which keeps the credential on the server's machine, is the path.
+// newUpstreamCredentialSealer returns the server-credential sealer. Without a
+// tenant credential key it cannot seal, so `infercrane connect --token-env`
+// is refused and the agent (which keeps the key on the server's machine) is
+// the path; it still resolves, so a credential stored under an earlier key
+// fails closed instead of being skipped.
 func newUpstreamCredentialSealer(cfg config.Config, store upstreamcredential.Store) (*upstreamcredential.Sealer, error) {
+	sealer := &upstreamcredential.Sealer{Store: store}
 	if cfg.CredentialEncryptionKey == "" {
-		return nil, nil
+		return sealer, nil
 	}
 	cipher, err := secretcipher.New(cfg.CredentialEncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("configure server credential encryption: %w", err)
 	}
-	return &upstreamcredential.Sealer{Cipher: cipher, Store: store}, nil
+	sealer.Cipher = &cipher
+	return sealer, nil
 }
 
-// bindUpstreamCredentials wires the sealer only when it exists, for the same
-// typed-nil reason as bindOptionalControlServices.
+// bindUpstreamCredentials gives the reconciler the resolver always, and the
+// API the sealer only when it can seal, so the API's "not configured" branch
+// runs (a typed nil in an interface field would not be nil).
 func bindUpstreamCredentials(api *controlapi.API, reconciler *reconcile.Reconciler, sealer *upstreamcredential.Sealer) {
-	if sealer == nil {
-		return
-	}
-	api.UpstreamCredentials = sealer
 	reconciler.UpstreamCredentials = sealer
+	if sealer.Cipher != nil {
+		api.UpstreamCredentials = sealer
+	}
 }

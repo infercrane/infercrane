@@ -277,6 +277,10 @@
           "agent": {
             "$ref": "#/components/schemas/Agent"
           },
+          "credential_cache_synchronized": {
+            "description": "False when this control plane could not refresh its credential snapshot at once; the key works within a second.",
+            "type": "boolean"
+          },
           "key": {
             "description": "Agent key, returned once. It can call only the agent API.",
             "type": "string"
@@ -289,7 +293,8 @@
         "required": [
           "agent",
           "key",
-          "run_command"
+          "run_command",
+          "credential_cache_synchronized"
         ],
         "type": "object"
       },

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,9 @@ type AgentCredential struct {
 
 type agentCredentialFile struct {
 	Agents map[string]agentCredentialEntry `json:"agents"`
+	// HashKeys hold, per context and control plane, the secret that keys
+	// the agent's request hashes. It never leaves this machine.
+	HashKeys map[string]string `json:"hash_keys,omitempty"`
 }
 
 type agentCredentialEntry struct {
@@ -171,4 +176,36 @@ func ClearAgentCredential(contextName, controlURL string) error {
 	}
 	delete(stored.Agents, slot)
 	return writeAgentCredentialFile(path, stored)
+}
+
+// LoadOrCreateAgentHashKey returns this machine's secret for keying request
+// hashes, creating it on first use. It is independent of the agent key, so
+// neither the control plane nor anything that sees the agent key can derive
+// it, and rotating the agent key keeps hashes comparable.
+func LoadOrCreateAgentHashKey(contextName, controlURL string) ([]byte, error) {
+	slot, err := agentCredentialSlot(contextName, controlURL)
+	if err != nil {
+		return nil, err
+	}
+	stored, path, err := readAgentCredentialFile()
+	if err != nil {
+		return nil, err
+	}
+	if encoded, ok := stored.HashKeys[slot]; ok {
+		if key, decodeErr := hex.DecodeString(encoded); decodeErr == nil && len(key) == 32 {
+			return key, nil
+		}
+	}
+	key := make([]byte, 32)
+	if _, err = rand.Read(key); err != nil {
+		return nil, err
+	}
+	if stored.HashKeys == nil {
+		stored.HashKeys = map[string]string{}
+	}
+	stored.HashKeys[slot] = hex.EncodeToString(key)
+	if err = writeAgentCredentialFile(path, stored); err != nil {
+		return nil, err
+	}
+	return key, nil
 }

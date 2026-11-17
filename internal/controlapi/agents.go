@@ -135,10 +135,15 @@ func (a API) createAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentError(w, err)
 		return
 	}
+	// The agent usually syncs within milliseconds of receiving its key.
+	cacheSynchronized := a.refreshCredentialCache(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "agent.create", ResourceType: "agent", ResourceName: agent.Name, Outcome: "succeeded"})
+	runCommand := "INFERCRANE_AGENT_KEY=<key> infercrane agent run"
+	if base := strings.TrimRight(a.GatewayURL, "/"); base != "" {
+		runCommand = "INFERCRANE_URL=" + base + " " + runCommand
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"agent": agentResponse(agent), "key": key,
-		"run_command": "INFERCRANE_AGENT_KEY=<key> infercrane agent run --url " + strings.TrimRight(a.GatewayURL, "/"),
+		"agent": agentResponse(agent), "key": key, "run_command": runCommand, "credential_cache_synchronized": cacheSynchronized,
 	})
 }
 
@@ -189,9 +194,7 @@ func (a API) revokeAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentError(w, err)
 		return
 	}
-	if a.CredentialRefresh != nil {
-		_ = a.CredentialRefresh(context.WithoutCancel(r.Context()))
-	}
+	a.refreshCredentialCache(r.Context())
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "agent.revoke", ResourceType: "agent", ResourceName: agent.Name, Outcome: "succeeded"})
 	writeJSON(w, http.StatusOK, map[string]any{"agent": agentResponse(agent)})
 }

@@ -208,7 +208,11 @@ func (m *memoryStore) RecordRequest(_ context.Context, record domain.InferenceRe
 func (m *memoryStore) serverByEndpoint(name string) domain.AgentServer {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	server := *m.servers[m.endpoints[name]]
+	found, ok := m.servers[m.endpoints[name]]
+	if !ok {
+		return domain.AgentServer{}
+	}
+	server := *found
 	server.Health = m.health[m.endpoints[name]]
 	return server
 }
@@ -223,4 +227,12 @@ func (m *memoryStore) requestRecords() []domain.InferenceRecord {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]domain.InferenceRecord(nil), m.requests...)
+}
+
+func (m *memoryStore) deleteEndpoint(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	slot := m.endpoints[name]
+	delete(m.servers, slot)
+	delete(m.endpoints, name)
 }

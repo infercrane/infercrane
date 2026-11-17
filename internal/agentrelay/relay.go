@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
@@ -66,16 +67,20 @@ type Service struct {
 	// runs in the background, bounded to 30 seconds.
 	RefreshEndpoints func(context.Context) error
 	Now              func() time.Time
+
+	// refreshing coalesces endpoint refreshes: at most one runs at a time,
+	// and registrations during a run ask for one more pass.
+	refreshing, refreshAgain atomic.Bool
 }
 
-func (s Service) now() time.Time {
+func (s *Service) now() time.Time {
 	if s.Now != nil {
 		return s.Now().UTC()
 	}
 	return time.Now().UTC()
 }
 
-func (s Service) pollInterval() time.Duration {
+func (s *Service) pollInterval() time.Duration {
 	interval := s.PollInterval
 	if interval <= 0 {
 		interval = agentprotocol.DefaultPollInterval
@@ -90,7 +95,7 @@ func (s Service) pollInterval() time.Duration {
 }
 
 // Create mints an agent key for a tenant. The key is returned once.
-func (s Service) Create(ctx context.Context, tenant, name, actor string) (domain.Agent, string, error) {
+func (s *Service) Create(ctx context.Context, tenant, name, actor string) (domain.Agent, string, error) {
 	name = strings.TrimSpace(strings.ToLower(name))
 	if !agentprotocol.ValidEndpointName(name) {
 		return domain.Agent{}, "", fmt.Errorf("%w: agent name must be 1..64 lowercase letters, digits, dots, underscores, or hyphens", ErrInvalid)
@@ -99,12 +104,12 @@ func (s Service) Create(ctx context.Context, tenant, name, actor string) (domain
 }
 
 // List returns a tenant's agents.
-func (s Service) List(ctx context.Context, tenant string) ([]domain.Agent, error) {
+func (s *Service) List(ctx context.Context, tenant string) ([]domain.Agent, error) {
 	return s.Store.AgentsForTenant(ctx, tenant)
 }
 
 // Get returns one agent and the servers observed through it.
-func (s Service) Get(ctx context.Context, tenant, id string) (domain.Agent, []domain.AgentServer, error) {
+func (s *Service) Get(ctx context.Context, tenant, id string) (domain.Agent, []domain.AgentServer, error) {
 	agent, err := s.Store.AgentForTenant(ctx, tenant, id)
 	if err != nil {
 		return domain.Agent{}, nil, err
@@ -114,7 +119,7 @@ func (s Service) Get(ctx context.Context, tenant, id string) (domain.Agent, []do
 }
 
 // Revoke disables an agent. Its next request is refused.
-func (s Service) Revoke(ctx context.Context, tenant, id string) (domain.Agent, error) {
+func (s *Service) Revoke(ctx context.Context, tenant, id string) (domain.Agent, error) {
 	agent, err := s.Store.AgentForTenant(ctx, tenant, id)
 	if err != nil {
 		return domain.Agent{}, err
@@ -124,7 +129,7 @@ func (s Service) Revoke(ctx context.Context, tenant, id string) (domain.Agent, e
 
 // Authenticate resolves the agent behind an authenticated agent principal
 // and refuses a revoked one.
-func (s Service) Authenticate(ctx context.Context, principal domain.Principal) (domain.Agent, error) {
+func (s *Service) Authenticate(ctx context.Context, principal domain.Principal) (domain.Agent, error) {
 	if principal.Kind != domain.AgentPrincipalKind {
 		return domain.Agent{}, ErrRevoked
 	}
@@ -142,7 +147,7 @@ func (s Service) Authenticate(ctx context.Context, principal domain.Principal) (
 }
 
 // Upgrade says whether an agent version may connect.
-func (s Service) Upgrade(agentVersion string) agentprotocol.Upgrade {
+func (s *Service) Upgrade(agentVersion string) agentprotocol.Upgrade {
 	upgrade := agentprotocol.Upgrade{Minimum: s.MinimumAgentVersion, Recommended: s.RecommendedAgentVersion}
 	if s.MinimumAgentVersion != "" && compareVersions(agentVersion, s.MinimumAgentVersion) < 0 {
 		upgrade.Required = true
@@ -154,7 +159,7 @@ func (s Service) Upgrade(agentVersion string) agentprotocol.Upgrade {
 }
 
 // Register observes one agent-local server as an observe-only endpoint.
-func (s Service) Register(ctx context.Context, agent domain.Agent, request agentprotocol.RegisterServerRequest) (agentprotocol.RegisterServerResponse, error) {
+func (s *Service) Register(ctx context.Context, agent domain.Agent, request agentprotocol.RegisterServerRequest) (agentprotocol.RegisterServerResponse, error) {
 	if err := request.Validate(); err != nil {
 		return agentprotocol.RegisterServerResponse{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -164,22 +169,37 @@ func (s Service) Register(ctx context.Context, agent domain.Agent, request agent
 	if err != nil {
 		return agentprotocol.RegisterServerResponse{}, err
 	}
-	if created && s.RefreshEndpoints != nil {
-		// Recompile endpoint state off the agent's request path; the
-		// reconciler's next pass does the same if this one is slow.
-		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		go func() {
-			defer cancel()
-			_ = s.RefreshEndpoints(refreshCtx)
-		}()
+	if created {
+		s.refresh(ctx)
 	}
 	return agentprotocol.RegisterServerResponse{Server: registered(server, agent.GatewayServerKey), Created: created}, nil
+}
+
+// refresh recompiles endpoint state off the agent's request path. Runs are
+// coalesced so registrations cannot pile up recompiles; the reconciler's
+// next pass covers anything a slow run misses.
+func (s *Service) refresh(ctx context.Context) {
+	if s.RefreshEndpoints == nil {
+		return
+	}
+	s.refreshAgain.Store(true)
+	if !s.refreshing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer s.refreshing.Store(false)
+		for s.refreshAgain.Swap(false) {
+			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			_ = s.RefreshEndpoints(refreshCtx)
+			cancel()
+		}
+	}()
 }
 
 // Sync applies one agent sync: heartbeat and inventory, server health,
 // relayed engine scrapes, and traffic shapes. One bad relay is rejected
 // without failing the others.
-func (s Service) Sync(ctx context.Context, agent domain.Agent, request agentprotocol.SyncRequest) (agentprotocol.SyncResponse, error) {
+func (s *Service) Sync(ctx context.Context, agent domain.Agent, request agentprotocol.SyncRequest) (agentprotocol.SyncResponse, error) {
 	now := s.now()
 	if err := request.Validate(now); err != nil {
 		return agentprotocol.SyncResponse{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -188,8 +208,26 @@ func (s Service) Sync(ctx context.Context, agent domain.Agent, request agentprot
 	if upgrade.Required {
 		return agentprotocol.SyncResponse{Upgrade: upgrade}, ErrUpgradeRequired
 	}
+	response := agentprotocol.SyncResponse{
+		AgentID: agent.ID, AgentName: agent.Name, PollIntervalSeconds: int(s.pollInterval() / time.Second),
+		Servers: []agentprotocol.RegisteredServer{}, Rejected: []agentprotocol.Rejection{}, Upgrade: upgrade, Commands: []agentprotocol.Command{},
+	}
+	reported := make([]agentprotocol.Server, 0, len(request.Servers))
+	seen := map[string]struct{}{}
+	for _, server := range request.Servers {
+		if err := server.Validate(); err != nil {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: agentprotocol.CleanText(server.Key, 128), Kind: "server", Reason: err.Error()})
+			continue
+		}
+		if _, duplicate := seen[server.Key]; duplicate {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: server.Key, Kind: "server", Reason: "server is reported twice"})
+			continue
+		}
+		seen[server.Key] = struct{}{}
+		reported = append(reported, server)
+	}
 	hardware, _ := json.Marshal(request.Hardware)
-	servers, _ := json.Marshal(request.Servers)
+	servers, _ := json.Marshal(reported)
 	gatewayKey := ""
 	if request.Gateway != nil {
 		gatewayKey = request.Gateway.ServerKey
@@ -210,25 +248,38 @@ func (s Service) Sync(ctx context.Context, agent domain.Agent, request agentprot
 	for _, server := range known {
 		byKey[server.Key] = server
 	}
-	response := agentprotocol.SyncResponse{
-		AgentID: agent.ID, AgentName: agent.Name, PollIntervalSeconds: int(s.pollInterval() / time.Second),
-		Servers: []agentprotocol.RegisteredServer{}, Rejected: []agentprotocol.Rejection{}, Upgrade: upgrade, Commands: []agentprotocol.Command{},
-	}
-	for _, reported := range request.Servers {
-		server, ok := byKey[reported.Key]
+	// A server that now serves another model is not the observed server:
+	// its health, metrics, and traffic must not land on the old endpoint.
+	moved := map[string]string{}
+	for _, item := range reported {
+		server, ok := byKey[item.Key]
 		if !ok {
 			continue
 		}
-		if err = s.Store.ReportAgentServerHealth(ctx, agent.TenantID, agent.ID, reported.Key, reported.Health, now); err != nil {
+		health := item.Health
+		if len(item.Models) > 0 && !containsModel(item.Models, server.UpstreamModel) {
+			health = agentprotocol.HealthUnhealthy
+			moved[item.Key] = fmt.Sprintf("server now serves %s, not the observed model %s; delete endpoint %s or run the agent with --model", strings.Join(item.Models, ", "), server.UpstreamModel, server.EndpointName)
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: item.Key, Kind: "server", Reason: moved[item.Key]})
+		}
+		if err = s.Store.ReportAgentServerHealth(ctx, agent.TenantID, agent.ID, item.Key, health, now); err != nil {
 			return agentprotocol.SyncResponse{}, err
 		}
-		server.Health = reported.Health
-		byKey[reported.Key] = server
+		server.Health = health
+		byKey[item.Key] = server
 	}
 	for _, relay := range request.Metrics {
+		if err := relay.Validate(); err != nil {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: agentprotocol.CleanText(relay.ServerKey, 128), Kind: "metrics", Reason: err.Error()})
+			continue
+		}
 		server, ok := byKey[relay.ServerKey]
 		if !ok {
 			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: relay.ServerKey, Kind: "metrics", Reason: "server is not registered with this agent"})
+			continue
+		}
+		if reason, changed := moved[relay.ServerKey]; changed {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: relay.ServerKey, Kind: "metrics", Reason: reason})
 			continue
 		}
 		count, relayErr := s.recordMetrics(ctx, agent.TenantID, server, relay, now)
@@ -240,9 +291,17 @@ func (s Service) Sync(ctx context.Context, agent domain.Agent, request agentprot
 	}
 	skew := now.Sub(request.SentAt.UTC())
 	for _, shape := range request.Traffic {
+		if err := shape.Validate(); err != nil {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: agentprotocol.CleanText(shape.ServerKey, 128), Kind: "traffic", Reason: err.Error()})
+			continue
+		}
 		server, ok := byKey[shape.ServerKey]
 		if !ok {
 			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: shape.ServerKey, Kind: "traffic", Reason: "server is not registered with this agent"})
+			continue
+		}
+		if reason, changed := moved[shape.ServerKey]; changed {
+			response.Rejected = append(response.Rejected, agentprotocol.Rejection{ServerKey: shape.ServerKey, Kind: "traffic", Reason: reason})
 			continue
 		}
 		record, shapeErr := requestRecord(agent, server, shape, skew, now)
@@ -263,7 +322,7 @@ func (s Service) Sync(ctx context.Context, agent domain.Agent, request agentprot
 
 // recordMetrics derives measurements from a relayed pair of scrapes with the
 // same parser and window rules as a direct scrape, keyed by the target.
-func (s Service) recordMetrics(ctx context.Context, tenant string, server domain.AgentServer, relay agentprotocol.MetricRelay, now time.Time) (int, error) {
+func (s *Service) recordMetrics(ctx context.Context, tenant string, server domain.AgentServer, relay agentprotocol.MetricRelay, now time.Time) (int, error) {
 	current, err := metrics.ParseEngine(relay.Current.Text)
 	if err != nil {
 		return 0, fmt.Errorf("engine metrics could not be read: %v", err)
@@ -314,6 +373,15 @@ func requestRecord(agent domain.Agent, server domain.AgentServer, shape agentpro
 		InputTokens: shape.InputTokens, OutputTokens: shape.OutputTokens, Streaming: shape.Streaming,
 		ErrorType: shape.ErrorType, SharedPrefixHash: shape.SharedPrefixHash, SessionIDHash: shape.SessionIDHash,
 	}, nil
+}
+
+func containsModel(models []string, model string) bool {
+	for _, candidate := range models {
+		if candidate == model {
+			return true
+		}
+	}
+	return false
 }
 
 func registered(server domain.AgentServer, gatewayKey string) agentprotocol.RegisteredServer {

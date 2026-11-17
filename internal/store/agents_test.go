@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -145,6 +146,14 @@ func TestAgentRegistersObserveOnlyServersAndRevocationStopsIt(t *testing.T) {
 		t.Fatalf("stale reporter marked=%d err=%v", marked, err)
 	}
 
+	// An agent cannot hang its endpoint on another live endpoint's model.
+	if _, _, err = s.AdoptEndpoint(ctx, "tenant-a", "prod-chat", "llama3.2-3b", "llama3.2:3b", "https://chat.internal.example.test", "openai-compatible", "observe-only", "openai-compatible"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.RegisterAgentServer(ctx, "tenant-a", agent.ID, domain.AgentServerRegistration{Key: "127.0.0.1-11434", EndpointName: "llama3.2-3b", UpstreamModel: "llama3.2:3b", Runtime: "ollama", Address: "http://127.0.0.1:11434"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("logical model reuse: %v", err)
+	}
+
 	revoked, err := s.RevokeAgent(ctx, "tenant-a", agent.ID)
 	if err != nil || revoked.State != "revoked" || revoked.RevokedAt == nil {
 		t.Fatalf("revoked=%#v err=%v", revoked, err)
@@ -157,6 +166,12 @@ func TestAgentRegistersObserveOnlyServersAndRevocationStopsIt(t *testing.T) {
 	}
 	if _, _, err = s.RegisterAgentServer(ctx, "tenant-a", agent.ID, domain.AgentServerRegistration{Key: "127.0.0.1-11434", EndpointName: "llama", UpstreamModel: "llama3.2", Runtime: "ollama", Address: "http://127.0.0.1:11434"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("revoked registration: %v", err)
+	}
+	if err = s.ReportAgentServerHealth(ctx, "tenant-a", agent.ID, "127.0.0.1-8000", "healthy", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if target, err = s.TargetForTenantByID(ctx, "tenant-a", server.TargetID); err != nil || target.Health != "unhealthy" {
+		t.Fatalf("a sync that raced revocation marked the server %q: %v", target.Health, err)
 	}
 	if _, err = s.RevokeAgent(ctx, "tenant-a", agent.ID); err != nil {
 		t.Fatalf("second revoke: %v", err)
@@ -198,5 +213,27 @@ func TestDirectAdoptionStoresOnlySealedCredential(t *testing.T) {
 	}
 	if _, err = s.AdoptedCredential(ctx, "global", plain.TargetID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("credential for an adoption without one: %v", err)
+	}
+}
+
+func TestAgentServerRegistrationsAreCapped(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	agent, _, err := s.CreateAgent(ctx, "global", "busy-host", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < MaxServersPerAgent; index++ {
+		registration := domain.AgentServerRegistration{Key: fmt.Sprintf("127.0.0.1-%d", 9000+index), EndpointName: fmt.Sprintf("model-%d", index), UpstreamModel: "m", Runtime: "vllm", Address: fmt.Sprintf("http://127.0.0.1:%d", 9000+index)}
+		if _, _, err = s.RegisterAgentServer(ctx, "global", agent.ID, registration); err != nil {
+			t.Fatalf("registration %d: %v", index, err)
+		}
+	}
+	if _, _, err = s.RegisterAgentServer(ctx, "global", agent.ID, domain.AgentServerRegistration{Key: "127.0.0.1-1", EndpointName: "one-too-many", UpstreamModel: "m", Runtime: "vllm", Address: "http://127.0.0.1:1"}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("registration past the cap: %v", err)
+	}
+	servers, err := s.AgentServers(ctx, "global", agent.ID)
+	if err != nil || len(servers) != MaxServersPerAgent {
+		t.Fatalf("servers=%d err=%v", len(servers), err)
 	}
 }

@@ -27,8 +27,9 @@ func agentSchemas() map[string]any {
 				"gateway_server_key": nullableText, "last_seen_at": nullableTime,
 				"created_at": map[string]any{"type": "string", "format": "date-time"}, "updated_at": map[string]any{"type": "string", "format": "date-time"}, "revoked_at": nullableTime,
 			}},
-		"AgentCreated": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"agent", "key", "run_command"}, "properties": map[string]any{
+		"AgentCreated": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"agent", "key", "run_command", "credential_cache_synchronized"}, "properties": map[string]any{
 			"agent": ref("Agent"), "key": text("Agent key, returned once. It can call only the agent API."), "run_command": text("Command to start the agent with this key on the server's machine."),
+			"credential_cache_synchronized": map[string]any{"type": "boolean", "description": "False when this control plane could not refresh its credential snapshot at once; the key works within a second."},
 		}},
 		"AgentEnvelope": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"agent"}, "properties": map[string]any{"agent": ref("Agent")}},
 		"AgentList":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": ref("Agent")}}},

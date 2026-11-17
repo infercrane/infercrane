@@ -800,8 +800,8 @@ infercrane agent revoke rack-12
 |---|---|---|
 | `--server` | ports 8000, 30000, 8080, 11434, 1234 on loopback | A server URL; repeatable |
 | `--no-detect` | false | Observe only the `--server` URLs |
-| `--token-env` | none | Variable holding the local server's API key, sent as a bearer token to that server only |
-| `--auth-header-env` | none | Variable holding the full `Authorization` header for the local server |
+| `--token-env` | none | Variable holding the API key of the `--server` servers, sent to them only as a bearer token; needs `--server` |
+| `--auth-header-env` | none | Variable holding the full `Authorization` header for the `--server` servers; needs `--server` |
 | `--model` | the loaded or only model | Model to observe when a server lists several |
 | `--as` | derived from the model | Endpoint name, when one server is observed |
 | `--gateway` | off | Listen address of the local pass-through that records request shapes |

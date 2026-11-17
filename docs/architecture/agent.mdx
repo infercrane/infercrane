@@ -32,7 +32,7 @@ customer machine                                    InferCrane control plane
 |---|---|
 | Find vLLM, SGLang, llama.cpp, Ollama, and LM Studio on ports 8000, 30000, 8080, 11434, 1234, or any `--server URL` | Implemented |
 | Read engine and version (`/version`, `/server_info`, `/props`, Ollama `/api/version`), models (`/v1/models`), the loaded model (Ollama `/api/ps`, LM Studio `/api/v0/models`), and health | Implemented |
-| Send an API key to a local server (`--token-env`, `--auth-header-env`); the key never leaves the machine | Implemented |
+| Send an API key to the servers named with `--server` (`--token-env`, `--auth-header-env`); never to InferCrane, and never to a server found on a default port | Implemented |
 | Register each healthy server as an observe-only endpoint | Implemented |
 | Relay engine metrics so Observe, readiness, and bottleneck diagnosis work | Implemented for vLLM, SGLang, llama.cpp |
 | Record content-free request shapes through the optional local gateway | Implemented |
@@ -60,6 +60,11 @@ target as unreachable from itself:
 If its agent has not reported a server for three minutes, the server is marked unhealthy, because
 nothing knows it is healthy. A revoked agent's servers are marked unhealthy at once.
 
+A server is identified by its host and port. If the server at that address now serves a different
+model, its health, metrics, and traffic are refused for the old endpoint, which is marked unhealthy
+with the reason, instead of landing on the wrong endpoint. If an agent's endpoint is deleted, the
+running agent registers the server again on its next pass.
+
 ### The agent key
 
 An agent key is a principal of kind `agent`. It is minted in one of two ways and shown once:
@@ -76,7 +81,8 @@ stored, as for every credential. Agent keys do not expire; revoke and replace th
 An agent key may:
 
 - call `POST /api/v1/agent/sync` and `POST /api/v1/agent/servers`, and nothing else;
-- register servers as observe-only endpoints in its own workspace;
+- register up to 32 servers as observe-only endpoints in its own workspace, each with its own
+  logical model (it cannot attach to a model another endpoint uses);
 - report health, hardware, filtered engine metrics, and request shapes for its own servers.
 
 An agent key may not call any other control-plane route (HTTP 403), invoke inference on the
@@ -88,15 +94,22 @@ Relayed evidence for a server key that this agent did not register is rejected.
 | Sent to the control plane | Never sent |
 |---|---|
 | OS, architecture, accelerator vendor, name, count, memory, driver, and the fields that could not be read | Prompts, completions, tool calls, and message content |
-| Server address as the agent reaches it, engine, version, model names, loaded model, health | Request and response headers, including the local server's API key |
+| Server address as the agent reaches it, engine, version, model names, loaded model, health | Request and response headers, and the API key of any server it reads |
 | Engine metrics, filtered on the machine to the families InferCrane parses | Any other metric family or label the server exposes |
 | With the local gateway only: per-request start time, latency, time to first byte, status, streaming flag, token counts, model name, and keyed hashes of the system prompt and session ID | The hashing key |
 
 The agent filters a scrape with the same family list the control plane's parser reads, so an
 unrelated metric (and any label it carries) is dropped before the request is built. Request hashes
-use HMAC-SHA256 with a key derived from the agent key. The control plane stores only a SHA-256
-digest of that key, so it cannot derive the hashing key or test a guessed prompt against a hash.
-Hashes only tell whether two requests shared a system prompt or a session.
+use HMAC-SHA256 with a random 256-bit secret created on the machine the first time the agent runs
+and kept beside its saved key (`agent-credentials.json`, mode `0600`). The secret is independent of
+the agent key and is never sent, so neither the control plane nor anything that sees the agent's
+requests can derive it or test a guessed prompt against a hash. Hashes only tell whether two
+requests shared a system prompt or a session, and they stay comparable when the agent key is
+rotated.
+
+Strings read from a local server (versions, details, model names) are stripped of control
+characters and cut on a character boundary before they are sent; a model ID that is not clean text
+is left out rather than altered.
 
 ## Protocol
 
@@ -113,8 +126,15 @@ no long-lived connection that a proxy or load balancer has to keep open.
 - The agent honours `HTTPS_PROXY` and the CLI's TLS settings
   (`INFERCRANE_CLIENT_TLS_CA_FILE`, client certificates). It sends its key only over HTTPS, except
   to a control plane on the same machine.
-- A failed sync is retried with backoff up to five minutes. Undelivered request shapes stay in a
-  bounded buffer (10,000; the oldest are dropped and counted).
+- The control plane validates each server report, metric relay, and request shape on its own and
+  returns the ones it refused in `rejected`; one bad item never fails the sync or the heartbeat. If
+  a whole sync is refused as invalid (HTTP 4xx), the agent drops that batch's evidence instead of
+  resending it, so a bad item cannot block it forever. Other failures are retried with backoff up to
+  five minutes. Undelivered request shapes stay in a bounded buffer (10,000; the oldest are dropped
+  and counted). The agent keeps each sync under 6 MiB of scrapes, sending baselines and then whole
+  relays in a later sync.
+- A key minted a moment ago may not be in every replica's credential snapshot yet; the agent retries
+  an unknown key for ten seconds at start, and treats it as fatal after that.
 - Request shapes carry an agent-generated ID, so a retried sync records each request once. The
   control plane corrects the agent's clock skew from the sync's `sent_at`.
 
@@ -157,9 +177,10 @@ to the network.
   customer's machine is always a build the customer chose.
 - **Revocation.** `DELETE /api/v1/agents/{id}`, `infercrane agent revoke NAME`, or the dashboard
   disables the agent's principal, marks the agent revoked, and marks its servers unhealthy. The
-  agent routes re-check the agent's row on every request, so the next sync gets HTTP 401
-  `agent_revoked` even before the credential snapshot refreshes (within one second). The agent then
-  stops, its local gateway included, and sends nothing more. Revocation therefore takes effect within
+  agent routes re-check the agent's row on every request, so the next sync gets HTTP 401: the code
+  is `agent_revoked`, or `agent_unauthenticated` once the credential snapshot has dropped the key
+  (within about a second). The agent then stops, its local gateway included, and sends nothing more.
+  A health report from a sync that raced the revocation is not applied. Revocation therefore takes effect within
   one poll. The endpoints remain, so their history stays readable.
 - **Rotation.** Create a new agent key, restart the agent with it, then revoke the old agent.
 

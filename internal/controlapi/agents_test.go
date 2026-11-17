@@ -92,13 +92,18 @@ func TestAgentKeysReachOnlyTheAgentAPI(t *testing.T) {
 	}
 
 	operator := &fakeStore{principal: domain.Principal{ID: "operator", TenantID: "tenant-a", Name: "operator", Role: string(authz.Operator), Scopes: authz.DefaultScopeNames(authz.Operator)}}
-	operatorHandler := (API{Store: operator, Authenticator: operator, Agents: &fakeAgents{}, GatewayURL: "https://control.example.test"}).Handler()
+	refreshed := 0
+	operatorHandler := (API{Store: operator, Authenticator: operator, Agents: &fakeAgents{}, GatewayURL: "https://control.example.test", CredentialRefresh: func(context.Context) error { refreshed++; return nil }}).Handler()
 	if response = serve(operatorHandler, http.MethodPost, "/api/v1/agent/sync", "operator", string(body)); response.Code != http.StatusUnauthorized {
 		t.Fatalf("a human key reached the agent API: %d", response.Code)
 	}
 	response = serve(operatorHandler, http.MethodPost, "/api/v1/agents", "operator", `{"name":"laptop"}`)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "ic_new_agent_key") || !strings.Contains(response.Body.String(), "https://control.example.test") {
-		t.Fatalf("create: %d %s", response.Code, response.Body.String())
+	var created struct {
+		Key        string `json:"key"`
+		RunCommand string `json:"run_command"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != http.StatusCreated || created.Key != "ic_new_agent_key" || created.RunCommand != "INFERCRANE_URL=https://control.example.test INFERCRANE_AGENT_KEY=<key> infercrane agent run" || refreshed != 1 {
+		t.Fatalf("create: %d %s refreshed=%d err=%v", response.Code, response.Body.String(), refreshed, err)
 	}
 	viewer := &fakeStore{principal: domain.Principal{ID: "viewer", TenantID: "tenant-a", Name: "viewer", Role: string(authz.Viewer), Scopes: []string{"read"}}}
 	if response = serve((API{Store: viewer, Authenticator: viewer, Agents: &fakeAgents{}}).Handler(), http.MethodPost, "/api/v1/agents", "viewer", `{"name":"laptop"}`); response.Code != http.StatusForbidden {

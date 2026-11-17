@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/upstreamcredential"
 )
 
 type healthRecordingStore struct {
@@ -89,9 +90,20 @@ func TestDirectAdoptedProbeUsesStoredCredentialAndNeverDowngrades(t *testing.T) 
 	if runtime.credential != "server-token" || runtime.unauthenticatedCall || store.health["private-target"] != "healthy" {
 		t.Fatalf("credential probe: runtime=%+v health=%v", runtime, store.health)
 	}
+	// A transient read error leaves health alone and sends no probe.
+	transient := &credentialRuntime{}
+	reconciler.Runtimes = testRuntimeBackends(t, transient)
+	reconciler.UpstreamCredentials = failingCredentials{err: context.DeadlineExceeded}
+	if err := reconciler.observeAdoptedTargets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if transient.unauthenticatedCall || transient.credential != "" || store.health["private-target"] != "healthy" {
+		t.Fatalf("a transient credential read changed health or probed: %+v health=%v", transient, store.health)
+	}
+	// A credential that cannot be opened fails closed, never unauthenticated.
 	broken := &credentialRuntime{}
 	reconciler.Runtimes = testRuntimeBackends(t, broken)
-	reconciler.UpstreamCredentials = brokenCredentials{}
+	reconciler.UpstreamCredentials = failingCredentials{err: upstreamcredential.ErrUnreadable}
 	if err := reconciler.observeAdoptedTargets(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +112,8 @@ func TestDirectAdoptedProbeUsesStoredCredentialAndNeverDowngrades(t *testing.T) 
 	}
 }
 
-type brokenCredentials struct{}
+type failingCredentials struct{ err error }
 
-func (brokenCredentials) Resolve(context.Context, string, string) (string, error) {
-	return "", context.DeadlineExceeded
+func (f failingCredentials) Resolve(context.Context, string, string) (string, error) {
+	return "", f.err
 }

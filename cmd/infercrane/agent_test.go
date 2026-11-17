@@ -116,6 +116,13 @@ func TestAgentDetectSendsNothingAndExplainsWhatItFound(t *testing.T) {
 	if err := agentCommand(context.Background(), []string{"run", "--output", "json"}); err == nil || !strings.Contains(err.Error(), "--once") {
 		t.Fatalf("json without --once: %v", err)
 	}
+	// A server key goes only to servers named with --server.
+	t.Setenv("LOCAL_SERVER_KEY", "k")
+	for _, args := range [][]string{{"run", "--once", "--token-env", "LOCAL_SERVER_KEY"}, {"detect", "--token-env", "LOCAL_SERVER_KEY"}} {
+		if err := agentCommand(context.Background(), args); err == nil || !strings.Contains(err.Error(), "--server") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
 }
 
 func TestAgentRunOnceRefusesPlainHTTPToARemoteControlPlane(t *testing.T) {

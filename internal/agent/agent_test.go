@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/testtools/fakeengine"
@@ -103,9 +104,14 @@ func TestNamesAndKeysAreStableAndValid(t *testing.T) {
 	if _, err := NormalizeBaseURL("http://user:pass@host:1"); err == nil {
 		t.Fatal("credentials in a server URL were accepted")
 	}
-	candidates := Candidates([]ServerConfig{{URL: "http://127.0.0.1:8000/v1"}}, true, "Bearer x")
-	if len(candidates) != len(DefaultPorts) || candidates[0].AuthHeader != "" {
+	candidates := Candidates([]ServerConfig{{URL: "http://127.0.0.1:8000/v1", AuthHeader: "Bearer x"}}, true)
+	if len(candidates) != len(DefaultPorts) || candidates[0].AuthHeader != "Bearer x" {
 		t.Fatalf("candidates=%+v", candidates)
+	}
+	for _, candidate := range candidates[1:] {
+		if candidate.AuthHeader != "" {
+			t.Fatalf("a default port received the named server's key: %+v", candidate)
+		}
 	}
 }
 
@@ -209,7 +215,7 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 	engine := fakeengine.Start(fakeengine.Options{Flavor: fakeengine.VLLM})
 	defer engine.Close()
 	shapes := &shapeBuffer{}
-	gateway := &Gateway{Upstream: engine.URL, ServerKey: "127.0.0.1-8000", HashKey: hashKey("ic_test"), Shapes: shapes}
+	gateway := &Gateway{Upstream: engine.URL, ServerKey: "127.0.0.1-8000", HashKey: []byte("machine-secret"), Shapes: shapes}
 	handler, err := gateway.Handler()
 	if err != nil {
 		t.Fatal(err)
@@ -244,8 +250,8 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 			t.Fatalf("shape invalid: %v", err)
 		}
 	}
-	if other := (&Gateway{HashKey: hashKey("ic_other")}).digest([]byte("x")); other == (&Gateway{HashKey: hashKey("ic_test")}).digest([]byte("x")) {
-		t.Fatal("hashes do not depend on the agent key")
+	if other := (&Gateway{HashKey: []byte("another machine")}).digest([]byte("x")); other == (&Gateway{HashKey: []byte("machine-secret")}).digest([]byte("x")) {
+		t.Fatal("hashes do not depend on the machine's secret")
 	}
 	engine.Close()
 	response, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[]}`))
@@ -310,5 +316,102 @@ func TestClientRefusesPlainHTTPAndMapsRefusals(t *testing.T) {
 	}
 	if backoff(15*time.Second, 1) != 15*time.Second || backoff(15*time.Second, 10) != 5*time.Minute {
 		t.Fatal("backoff bounds")
+	}
+}
+
+func TestGatewayRecordsCancelledStreamsAndCleansClientText(t *testing.T) {
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[]}\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer upstream.Close()
+	defer close(release)
+	shapes := &shapeBuffer{}
+	handler, err := (&Gateway{Upstream: upstream.URL, ServerKey: "127.0.0.1-8000", HashKey: []byte("k"), Shapes: shapes}).Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader("{\"model\":\"qwen\\tx\\n\",\"stream\":true,\"messages\":[]}"))
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 64)
+	_, _ = response.Body.Read(buffer)
+	cancel()
+	response.Body.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := shapes.stats(); pending > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	recorded := shapes.take(10)
+	if len(recorded) != 1 || recorded[0].ErrorType != "client_cancelled" || !recorded[0].Streaming || recorded[0].RequestModel != "qwenx" {
+		t.Fatalf("cancelled stream: %+v", recorded)
+	}
+	if err := recorded[0].Validate(); err != nil {
+		t.Fatalf("recorded shape would be refused: %v", err)
+	}
+	huge := 20_000_000
+	if input, output := boundedTokens(&huge, nil); input != nil || output != nil {
+		t.Fatal("an implausible token count was kept")
+	}
+}
+
+func TestRelaysStayWithinTheSyncBudget(t *testing.T) {
+	big := strings.Repeat("vllm:num_requests_running 1\n", (agentprotocol.MaxExpositionBytes-1)/28)
+	relays := []agentprotocol.MetricRelay{}
+	relayed := map[string]time.Time{}
+	for index := 0; index < 8; index++ {
+		key := fmt.Sprintf("127.0.0.1-%d", 8000+index)
+		relays = append(relays, agentprotocol.MetricRelay{ServerKey: key, Current: agentprotocol.Exposition{AgeMS: 1, Text: big}, Baseline: &agentprotocol.Exposition{AgeMS: 2, Text: big}})
+		relayed[key] = time.Unix(int64(index), 0)
+	}
+	relays = append(relays, agentprotocol.MetricRelay{ServerKey: "127.0.0.1-9999", Current: agentprotocol.Exposition{AgeMS: 1, Text: big + big}})
+	relayed["127.0.0.1-9999"] = time.Unix(99, 0)
+	kept := withinBudget(relays, relayed)
+	total := 0
+	for _, relay := range kept {
+		total += len(relay.Current.Text)
+		if relay.Baseline != nil {
+			total += len(relay.Baseline.Text)
+		}
+		if relay.ServerKey == "127.0.0.1-9999" {
+			t.Fatal("an oversized scrape was relayed")
+		}
+	}
+	if total > relayBudget || len(kept) == 0 {
+		t.Fatalf("kept %d relays, %d bytes", len(kept), total)
+	}
+	if _, ok := relayed["127.0.0.1-9999"]; !ok {
+		t.Fatal("an oversized scrape would be retried forever")
+	}
+	if len(relayed) != len(kept)+1 {
+		t.Fatalf("relays left out must stay pending: relayed=%d kept=%d", len(relayed), len(kept))
+	}
+}
+
+func TestDetectedTextIsCleanedOnCharacterBoundaries(t *testing.T) {
+	value := strings.Repeat("a", 255) + "é\x01"
+	cleaned := boundedDetail(value)
+	if len(cleaned) > agentprotocol.MaxText || !utf8.ValidString(cleaned) || strings.ContainsRune(cleaned, 0x01) {
+		t.Fatalf("cleaned=%q (%d bytes)", cleaned, len(cleaned))
+	}
+	engine := fakeengine.Start(fakeengine.Options{Flavor: fakeengine.VLLM, Models: []string{"good/model", "bad\tmodel"}})
+	defer engine.Close()
+	server, _ := Detector{}.Probe(context.Background(), ServerConfig{URL: engine.URL}, false)
+	if len(server.Models) != 1 || server.Models[0] != "good/model" || server.Validate() != nil {
+		t.Fatalf("models=%v", server.Models)
 	}
 }

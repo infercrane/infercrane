@@ -40,13 +40,13 @@ without any inbound access: it only makes outbound HTTPS calls to `/api/v1/agent
 `/api/v1/agent/servers`, and sends its key only over HTTPS (plain HTTP only to a control plane on
 the same machine). An agent key is a principal of kind `agent`, minted with the `deploy` action and
 shown once. It is refused on every other control-plane route and on the inference gateway, so a
-leaked agent key can report about its own servers and nothing else. The control plane never dials,
-probes, or routes to a server it learned through an agent. The agent filters engine metrics on the
-machine to the families InferCrane parses and never sends prompts, completions, headers, or the
-local server's API key; request hashes from its optional local gateway are keyed with a secret
-derived from the agent key, which the control plane cannot derive from the stored digest.
-Revoking an agent disables its principal and is checked on every agent request, so the agent stops
-at its next sync. Agent keys do not expire; rotate them by creating a new agent and revoking the
+leaked agent key can register at most 32 observe-only endpoints and report about them, nothing
+else. The control plane never dials, probes, or routes to a server it learned through an agent. The
+agent filters engine metrics on the machine to the families InferCrane parses and never sends
+prompts, completions, headers, or a server's API key, which it sends only to the servers named
+with `--server`. Request hashes from its optional local gateway are keyed with a random secret
+created on the machine and never sent, independent of the agent key. Revoking an agent disables
+its principal and is checked on every agent request, so the agent stops at its next sync. Agent keys do not expire; rotate them by creating a new agent and revoking the
 old one.
 
 `infercrane connect --token-env VAR` sends a server's API key to the control plane once. It is

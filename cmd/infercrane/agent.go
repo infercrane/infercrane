@@ -101,7 +101,7 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 	var flags agentFlags
 	fs := newFlagSet(name)
 	fs.Var(&flags.servers, "server", "a model server URL on this machine or network (repeatable); default: look on the usual local ports")
-	fs.StringVar(&flags.tokenEnv, "token-env", "", "environment variable holding the local server's API key, sent as a bearer token")
+	fs.StringVar(&flags.tokenEnv, "token-env", "", "environment variable holding the API key of the --server servers, sent to them as a bearer token")
 	fs.StringVar(&flags.headerEnv, "auth-header-env", "", "environment variable holding the full Authorization header for the local server")
 	fs.BoolVar(&flags.noDetect, "no-detect", false, "only observe servers named with --server")
 	fs.StringVar(&flags.output, "output", "human", "human or json")
@@ -149,6 +149,9 @@ func agentDetectCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if auth != "" && len(flags.servers) == 0 {
+		return errors.New("name the server the key belongs to with --server; a key is never sent to servers found on the default ports")
+	}
 	explicit, err := flags.serverConfigs(auth)
 	if err != nil {
 		return err
@@ -161,7 +164,7 @@ func agentDetectCommand(ctx context.Context, args []string) error {
 		base, _ := agent.NormalizeBaseURL(server.URL)
 		named[base] = true
 	}
-	for _, candidate := range agent.Candidates(explicit, !flags.noDetect, auth) {
+	for _, candidate := range agent.Candidates(explicit, !flags.noDetect) {
 		if server, ok := detector.Probe(ctx, candidate, named[candidate.URL]); ok {
 			servers = append(servers, server)
 		}
@@ -301,6 +304,9 @@ func agentRunCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if auth != "" && len(flags.servers) == 0 {
+		return errors.New("name the server the key belongs to with --server; a key is never sent to servers found on the default ports")
+	}
 	explicit, err := flags.serverConfigs(auth)
 	if err != nil {
 		return err
@@ -325,11 +331,15 @@ func agentRunCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	hashKey, err := config.LoadOrCreateAgentHashKey(cfg.ClientContextName, cfg.ControlURL)
+	if err != nil {
+		return fmt.Errorf("prepare the local hashing key: %w", err)
+	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	runner := agent.New(agent.Config{
 		Client:  agent.Client{ControlURL: cfg.ControlURL, Key: key, HTTP: client, UserAgent: "infercrane-agent/" + version},
-		Version: version, Servers: explicit, AutoDetect: !flags.noDetect, DefaultAuth: auth,
+		Version: version, Servers: explicit, AutoDetect: !flags.noDetect, HashKey: hashKey,
 		Model: flags.model, EndpointName: flags.endpoint, Gateway: flags.gateway, GatewayServer: flags.gatewayFor,
 		Once: flags.once, Hardware: agentHardware, Events: agentEventPrinter(human),
 	})
@@ -346,7 +356,10 @@ func agentRunCommand(ctx context.Context, args []string) error {
 		return errors.New("this agent's key was revoked in InferCrane, so the agent stopped and sends nothing more. To connect again, run infercrane agent run with a new key")
 	}
 	if errors.Is(runErr, agent.ErrUnauthenticated) {
-		return fmt.Errorf("the control plane does not accept this agent key; check %s or remove the saved key with infercrane agent revoke", flags.keyEnv)
+		if status.AgentID != "" {
+			return errors.New("the control plane no longer accepts this agent's key (it was revoked), so the agent stopped and sends nothing more. To connect again, run infercrane agent run with a new key")
+		}
+		return fmt.Errorf("the control plane does not accept this agent key; check %s, or create a new key with infercrane agent create", flags.keyEnv)
 	}
 	if flags.output == "json" {
 		if runErr != nil {

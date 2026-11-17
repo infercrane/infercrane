@@ -90,7 +90,7 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	store := newMemoryStore()
-	api := controlapi.API{Store: store, Authenticator: store, Agents: agentrelay.Service{Store: store, RecommendedAgentVersion: "1.0.0"}, GatewayURL: "https://control.example.test"}
+	api := controlapi.API{Store: store, Authenticator: store, Agents: &agentrelay.Service{Store: store, RecommendedAgentVersion: "1.0.0"}, GatewayURL: "https://control.example.test"}
 	sent := &recorder{}
 	control := httptest.NewServer(sent.wrap(api.Handler()))
 	defer control.Close()
@@ -282,6 +282,18 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 		t.Fatalf("streamed records = %d", streamed)
 	}
 
+	// Deleting an agent's endpoint makes the running agent register the
+	// server again instead of relaying into the void.
+	store.deleteEndpoint("laptop-qwen3-8b")
+	for step := 0; step < 2; step++ {
+		if err := runner.Step(ctx); err != nil {
+			t.Fatalf("step after delete: %v", err)
+		}
+	}
+	if again := store.serverByEndpoint("laptop-qwen3-8b"); again.TargetID == "" {
+		t.Fatal("the deleted endpoint was not registered again")
+	}
+
 	// Nothing the agent sent carries a prompt, a completion, an unrelated
 	// metric label, or the local server's key.
 	everything := sent.all()
@@ -318,7 +330,7 @@ func TestRevokedAgentRunLoopStopsWithinOnePoll(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store := newMemoryStore()
-	api := controlapi.API{Store: store, Authenticator: store, Agents: agentrelay.Service{Store: store, PollInterval: agentprotocol.MinPollInterval}}
+	api := controlapi.API{Store: store, Authenticator: store, Agents: &agentrelay.Service{Store: store, PollInterval: agentprotocol.MinPollInterval}}
 	control := httptest.NewServer(api.Handler())
 	defer control.Close()
 	_, created := call(t, http.MethodPost, control.URL+"/api/v1/agents", operatorKey, `{"name":"rack-1"}`)

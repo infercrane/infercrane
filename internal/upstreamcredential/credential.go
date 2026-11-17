@@ -22,9 +22,16 @@ type Store interface {
 	AdoptedCredential(context.Context, string, string) (domain.AdoptedCredential, error)
 }
 
-// Sealer seals and opens server credentials.
+// ErrUnreadable means a credential is stored for the server but cannot be
+// opened: the key changed or is no longer configured. Callers must fail
+// closed and never fall back to an unauthenticated request.
+var ErrUnreadable = errors.New("the stored server credential cannot be opened")
+
+// Sealer seals and opens server credentials. Cipher is nil when no tenant
+// credential key is configured: then nothing can be sealed, and a stored
+// credential resolves to ErrUnreadable.
 type Sealer struct {
-	Cipher secretcipher.Cipher
+	Cipher *secretcipher.Cipher
 	Store  Store
 }
 
@@ -54,6 +61,9 @@ func (s Sealer) Seal(tenant, endpoint, token string) (domain.SealedCredential, e
 	if err := Validate(token); err != nil {
 		return domain.SealedCredential{}, err
 	}
+	if s.Cipher == nil {
+		return domain.SealedCredential{}, errors.New("no credential key is configured")
+	}
 	ciphertext, nonce, err := s.Cipher.Encrypt([]byte(token), associatedData(tenant, endpoint))
 	if err != nil {
 		return domain.SealedCredential{}, errors.New("the server credential could not be sealed")
@@ -62,7 +72,8 @@ func (s Sealer) Seal(tenant, endpoint, token string) (domain.SealedCredential, e
 }
 
 // Resolve opens the credential stored for a target. It returns
-// domain.ErrNotFound when the target has none.
+// domain.ErrNotFound when the target has none, ErrUnreadable when one is
+// stored but cannot be opened, and any other error unchanged.
 func (s Sealer) Resolve(ctx context.Context, tenant, targetID string) (string, error) {
 	if s.Store == nil {
 		return "", domain.ErrNotFound
@@ -71,9 +82,12 @@ func (s Sealer) Resolve(ctx context.Context, tenant, targetID string) (string, e
 	if err != nil {
 		return "", err
 	}
+	if s.Cipher == nil {
+		return "", ErrUnreadable
+	}
 	plaintext, err := s.Cipher.Decrypt(stored.Sealed.Ciphertext, stored.Sealed.Nonce, associatedData(stored.TenantID, stored.EndpointName))
 	if err != nil {
-		return "", errors.New("the stored server credential could not be opened")
+		return "", ErrUnreadable
 	}
 	return string(plaintext), nil
 }

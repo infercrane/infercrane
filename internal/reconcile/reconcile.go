@@ -21,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/upstreamcredential"
 )
 
 type Store interface {
@@ -440,14 +441,20 @@ func (r *Reconciler) observeAdoptedTargets(ctx context.Context) error {
 				credential := ""
 				if r.UpstreamCredentials != nil {
 					resolved, credentialErr := r.UpstreamCredentials.Resolve(ctx, tenant, target.ID)
-					if credentialErr == nil {
+					switch {
+					case credentialErr == nil:
 						credential = resolved
-					} else if !errors.Is(credentialErr, domain.ErrNotFound) {
+					case errors.Is(credentialErr, domain.ErrNotFound):
+					case errors.Is(credentialErr, upstreamcredential.ErrUnreadable):
 						// A stored credential that cannot be opened must not
 						// silently downgrade to an unauthenticated probe.
 						if target.Health != health {
 							_ = r.Store.SetTargetHealth(ctx, target.ID, health)
 						}
+						continue
+					default:
+						// A transient read error says nothing about the
+						// server; keep its health until the next pass.
 						continue
 					}
 				}

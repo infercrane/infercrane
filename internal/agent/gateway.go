@@ -144,8 +144,19 @@ func (g *Gateway) Handler() (http.Handler, error) {
 			rw.WriteHeader(http.StatusBadGateway)
 			_, _ = rw.Write([]byte(`{"error":{"message":"the local model server did not answer","type":"server_error"}}`))
 		}
+		// A client that disconnects mid-stream makes the proxy abort with
+		// http.ErrAbortHandler; the request is still recorded.
+		defer func() {
+			recovered := recover()
+			if recovered != nil && observer.errorType == "" {
+				observer.errorType = "client_cancelled"
+			}
+			g.record(operation, started, info, observer)
+			if recovered != nil {
+				panic(recovered)
+			}
+		}()
 		local.ServeHTTP(observer, r)
-		g.record(operation, started, info, observer)
 	}), nil
 }
 
@@ -189,8 +200,8 @@ func (g *Gateway) inspectRequest(body []byte, headers http.Header) requestInfo {
 	if json.Unmarshal(body, &payload) != nil {
 		return info
 	}
-	if model, ok := payload["model"].(string); ok && len(model) <= 256 {
-		info.model = model
+	if model, ok := payload["model"].(string); ok {
+		info.model = agentprotocol.CleanText(model, agentprotocol.MaxText)
 	}
 	info.streaming, _ = payload["stream"].(bool)
 	if messages, ok := payload["messages"].([]any); ok {
@@ -261,7 +272,10 @@ func (g *Gateway) record(operation string, started time.Time, info requestInfo, 
 	}
 	finished := g.now()
 	status := observer.status
-	if status == 0 {
+	switch {
+	case status == 0 && observer.errorType == "client_cancelled":
+		status = 499
+	case status == 0:
 		status = http.StatusBadGateway
 	}
 	streaming := info.streaming || observer.streaming
@@ -277,9 +291,25 @@ func (g *Gateway) record(operation string, started time.Time, info requestInfo, 
 	if shape.ErrorType == "" && status >= 400 {
 		shape.ErrorType = "http_" + map[bool]string{true: "server_error", false: "client_error"}[status >= 500]
 	}
-	shape.InputTokens, shape.OutputTokens = usage(observer.body)
+	shape.InputTokens, shape.OutputTokens = boundedTokens(usage(observer.body))
 	observer.body = nil
+	if shape.Validate() != nil {
+		// Never buffer a shape the control plane would refuse.
+		return
+	}
 	g.Shapes.add(shape)
+}
+
+// boundedTokens drops token counts outside what the protocol accepts; an
+// implausible count is unknown, not evidence.
+func boundedTokens(input, output *int) (*int, *int) {
+	valid := func(value *int) *int {
+		if value == nil || *value < 0 || *value > 10_000_000 {
+			return nil
+		}
+		return value
+	}
+	return valid(input), valid(output)
 }
 
 func milliseconds(value time.Duration) float64 {
