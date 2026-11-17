@@ -981,6 +981,20 @@ type OptimizationCandidateRun struct {
 	OptimizedArtifactID                                                 string
 	Rank                                                                int
 	CreatedAt, UpdatedAt                                                time.Time
+	// StateEnteredAtJSON maps each state to the first time the candidate
+	// entered it. MeasurementProgressJSON holds the live interleaved
+	// measurement runs. CostQuoteJSON is the sourced hourly quote that
+	// authorized the candidate's provider mutation. All three are display
+	// evidence written by the campaign worker; no decision reads them.
+	StateEnteredAtJSON, MeasurementProgressJSON, CostQuoteJSON string
+}
+
+// ReplicaSpan is when one replica existed. DeletedAt is nil while the replica
+// still exists, including while it is failing or being deleted.
+type ReplicaSpan struct {
+	ReplicaID string
+	CreatedAt time.Time
+	DeletedAt *time.Time
 }
 
 // ContinualOptimizationPolicyRecord and ContinualOptimizationDecisionRecord

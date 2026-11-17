@@ -573,6 +573,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/kernel-opportunities", a.auth(authz.Read, a.kernelOpportunities))
 	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/capabilities", a.auth(authz.Read, a.acceleratorLabCapabilities))
 	mux.HandleFunc("POST /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Deploy, a.runAcceleratorLab))
+	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Read, a.acceleratorLabRuns))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -1604,7 +1605,35 @@ func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID])})
+	response := optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID])
+	response["spend"] = a.campaignSpend(r.Context(), actor.TenantID, campaign)
+	writeJSON(w, http.StatusOK, map[string]any{"campaign": response})
+}
+
+// campaignSpendStore finds the replicas that served a campaign's candidates.
+type campaignSpendStore interface {
+	OptimizationReplicaSpans(context.Context, string, string, string, time.Time) ([]domain.ReplicaSpan, error)
+}
+
+// campaignSpend estimates one run's spend so far from each candidate's bound
+// quote and replica lifetimes. A failed lookup leaves the spend unknown.
+func (a API) campaignSpend(ctx context.Context, tenant string, campaign domain.OptimizationCampaign) optimizationcampaign.RunSpend {
+	store, ok := a.Store.(campaignSpendStore)
+	usage := make(map[string]optimizationcampaign.ReplicaUsage, len(campaign.Candidates))
+	for _, candidate := range campaign.Candidates {
+		deploymentName, revisionID, attributable := optimizationcampaign.CapacityTarget(campaign, candidate)
+		if !ok || !attributable {
+			usage[candidate.ID] = optimizationcampaign.ReplicaUsage{}
+			continue
+		}
+		if deploymentName == "" && revisionID == "" {
+			usage[candidate.ID] = optimizationcampaign.ReplicaUsage{Known: true}
+			continue
+		}
+		spans, err := store.OptimizationReplicaSpans(ctx, tenant, deploymentName, revisionID, candidate.CreatedAt)
+		usage[candidate.ID] = optimizationcampaign.ReplicaUsage{Spans: spans, Known: err == nil}
+	}
+	return optimizationcampaign.EstimateSpend(campaign, usage, time.Now())
 }
 
 // optimizationCampaignReport serves the customer outcome of one campaign: the
@@ -1674,14 +1703,14 @@ func (a API) runAcceleratorLab(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(validated)
 	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{
-		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: validated.CampaignID,
+		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID,
 		IdempotencyKey: "accelerator-lab:" + digest, RequestJSON: string(encoded), MaxAttempts: 20,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "accelerator_lab_enqueue_failed", "accelerator qualification could not be queued")
 		return
 	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: "optimization_campaign", ResourceName: validated.CampaignID, Outcome: "queued"})
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID, Outcome: "queued"})
 	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "input_digest": digest, "provider_mutation": false, "automatic_promotion": false})
 }
 
@@ -1881,6 +1910,8 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality campaignQualityInputs) map[string]any {
 	recorded, recordedOK := readCampaignProposal(campaign.ProposalJSON)
 	candidates := make([]map[string]any, 0, len(campaign.Candidates))
+	labels := optimizationcampaign.CandidateLabels(campaign)
+	control, hasControl := optimizationcampaign.CampaignControl(campaign)
 	for _, candidate := range campaign.Candidates {
 		targetEndpoint := campaign.TargetDeployment
 		if campaign.Intent == optimizationcampaign.IntentNewEndpoint {
@@ -1889,7 +1920,7 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 				targetEndpoint = draft.Name
 			}
 		}
-		view := map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt}
+		view := map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt, "label": labels[candidate.ID], "control": hasControl && control.ID == candidate.ID, "state_entered_at": optimizationcampaign.DecodeStateEnteredAt(candidate.StateEnteredAtJSON), "measurement": candidateMeasurement(candidate)}
 		if reason := recorded.Reasons[candidate.ProposalCandidateID]; reason != nil {
 			view["reason"] = reason
 		}
@@ -1899,7 +1930,7 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
-	response := map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
+	response := map[string]any{"progress": optimizationcampaign.Progress(campaign, time.Now()), "id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
 	if recordedOK {
 		response["warnings"] = recorded.Warnings
 		if recorded.Workload != nil {
@@ -1919,6 +1950,20 @@ type campaignDiagnosisView struct {
 	optimizer.DiagnosisPlan
 	WindowStart time.Time `json:"window_start"`
 	WindowEnd   time.Time `json:"window_end"`
+}
+
+// candidateMeasurement is a candidate's live interleaved measurement with its
+// turn counter, or nil before the candidate started measuring.
+func candidateMeasurement(candidate domain.OptimizationCandidateRun) map[string]any {
+	progress, ok := optimizationcampaign.DecodeMeasurementProgress(candidate.MeasurementProgressJSON)
+	if !ok {
+		return nil
+	}
+	var current any
+	if run, running := progress.Current(); running {
+		current = run
+	}
+	return map[string]any{"method": progress.Method, "started_at": progress.StartedAt, "updated_at": progress.UpdatedAt, "turns_planned": progress.TurnsPlanned, "warmups_planned": progress.WarmupsPlanned, "turns_done": progress.TurnsDone(), "current": current, "runs": progress.Runs}
 }
 
 // campaignWorkloadView is the load a campaign's immutable proposal bound it
@@ -2260,7 +2305,15 @@ func (a API) endpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	items, err := store.EndpointsForTenant(r.Context(), actor.TenantID)
+	list := store.EndpointsForTenant
+	// Optimization candidates are measured directly against their replicas;
+	// the endpoint each new deployment gets is not one the customer created.
+	if listed, ok := a.Store.(interface {
+		CustomerEndpointsForTenant(context.Context, string) ([]domain.Endpoint, error)
+	}); ok {
+		list = listed.CustomerEndpointsForTenant
+	}
+	items, err := list(r.Context(), actor.TenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "endpoints could not be listed")
 		return

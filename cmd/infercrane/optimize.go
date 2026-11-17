@@ -552,23 +552,35 @@ type optimizationCampaignView struct {
 	// Warnings is nil when the response omits the field, which the control API
 	// does when the stored proposal cannot be read. A pointer keeps that
 	// unknown state distinct from an empty list in --output json.
-	Warnings   *[]string `json:"warnings,omitempty"`
-	Candidates []struct {
-		ID                  string `json:"id"`
-		ProposalCandidateID string `json:"proposal_candidate_id"`
-		State               string `json:"state"`
-		EvidenceState       string `json:"evidence_state"`
-		TargetEndpoint      string `json:"target_endpoint"`
-		DeploymentName      string `json:"deployment_name"`
-		RevisionID          string `json:"revision_id"`
-		BenchmarkID         string `json:"benchmark_id"`
-		QualityEvidenceID   string `json:"quality_evidence_id"`
-		FailureCode         string `json:"failure_code"`
-		Rank                int    `json:"rank"`
-		// Quality is the control API's answer-check view, passed through
-		// unchanged in --output json.
-		Quality *watchQualityDetail `json:"quality,omitempty"`
-	} `json:"candidates"`
+	Warnings   *[]string                       `json:"warnings,omitempty"`
+	Candidates []optimizationCampaignSetupView `json:"candidates"`
+	Progress   json.RawMessage                 `json:"progress,omitempty"`
+	Spend      json.RawMessage                 `json:"spend,omitempty"`
+}
+
+// optimizationCampaignSetupView is one setup of a campaign as the control API
+// returns it.
+type optimizationCampaignSetupView struct {
+	ID                  string `json:"id"`
+	ProposalCandidateID string `json:"proposal_candidate_id"`
+	State               string `json:"state"`
+	EvidenceState       string `json:"evidence_state"`
+	TargetEndpoint      string `json:"target_endpoint"`
+	DeploymentName      string `json:"deployment_name"`
+	RevisionID          string `json:"revision_id"`
+	BenchmarkID         string `json:"benchmark_id"`
+	QualityEvidenceID   string `json:"quality_evidence_id"`
+	FailureCode         string `json:"failure_code"`
+	Rank                int    `json:"rank"`
+	// Quality is the control API's answer-check view, passed through
+	// unchanged in --output json.
+	Quality *watchQualityDetail `json:"quality,omitempty"`
+	// Label, Control, StateEnteredAt, and Measurement are passed through
+	// unchanged in --output json; older control planes omit them.
+	Label          string          `json:"label,omitempty"`
+	Control        *bool           `json:"control,omitempty"`
+	StateEnteredAt json.RawMessage `json:"state_entered_at,omitempty"`
+	Measurement    json.RawMessage `json:"measurement,omitempty"`
 }
 
 // watchQualityDetail keeps every field of the answer-check view so JSON output
@@ -652,6 +664,21 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: infercrane optimize " + action + " CAMPAIGN [flags]")
 	}
+	if action == "results" && *output == "human" {
+		// results is the decided-run summary: the same view as watch, once.
+		snapshot := loadWatchSnapshot(ctx, cfg, id)
+		if snapshot.err != nil {
+			return snapshot.err
+		}
+		// Styled only for a person at a terminal, plain for pipes and scripts.
+		t := outputTheme(*output)
+		fmt.Print(renderOptimizeWatch(snapshot, newUIStyles(t.background != "light"), max(t.width, 100), t.styled))
+		if !watchDecided(snapshot.campaign) {
+			fmt.Println("\nStill running. Follow it live: infercrane optimize watch " + id)
+		}
+		printResourceLink(cfg, "run", id)
+		return nil
+	}
 	path := "/api/v1/optimization/campaigns/" + url.PathEscape(id)
 	var response struct {
 		Campaign         optimizationCampaignView `json:"campaign"`
@@ -734,7 +761,15 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	if len(view.Candidates) > 0 {
 		fmt.Println("\nCANDIDATES")
 		for _, candidate := range view.Candidates {
-			fmt.Printf("  %d  %-16s  %-11s  %s", candidate.Rank, candidate.State, candidate.EvidenceState, candidate.ID)
+			name := candidate.Label
+			if name == "" {
+				name = fmt.Sprintf("Setup %d", candidate.Rank)
+			}
+			if candidate.Control != nil && *candidate.Control {
+				name += " (current setup)"
+			}
+			fmt.Printf("  %d  %s\n", candidate.Rank, name)
+			fmt.Printf("     %-16s  %-11s  %s", candidate.State, candidate.EvidenceState, candidate.ID)
 			if candidate.TargetEndpoint != "" {
 				fmt.Printf(" · endpoint %s", candidate.TargetEndpoint)
 			}

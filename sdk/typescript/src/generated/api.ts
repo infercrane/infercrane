@@ -578,6 +578,11 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
+  listAcceleratorLabRuns(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/accelerator-lab/runs';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   listOptimizationCampaigns(): Promise<ObjectList> {
     const requestPath = '/optimization/campaigns';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;

@@ -370,7 +370,41 @@ published, for an evolution the endpoint keeps serving its current revision, and
 is `infercrane optimize cancel CAMPAIGN_ID`, which removes the measurement servers now instead of
 when the approval ends. `infercrane inbox` shows the same step. When a setup waits on you, for your
 eval set or your signed evaluation, it prints the exact command that unblocks it. It only reads the
-control API; `--once` prints one plain snapshot for scripts and logs.
+control API; `--once` prints one plain snapshot for scripts and logs. `infercrane optimize results
+CAMPAIGN_ID` prints the same summary once, and adds a pointer to `watch` while the run is still
+going.
+
+### Follow a run live
+
+A run takes hours, so every campaign read says where it is without guessing. Each candidate has:
+
+| Field | Meaning |
+|---|---|
+| `label` | What the setup changes, in plain words. A description written into the proposal wins, such as "Speculative decoding (n-gram)". Otherwise the label is built from the serving flags InferCrane recognizes, such as "FP8 KV cache, prefill chunks of 2,048 tokens", and a setup with none is "vLLM defaults". An unrecognized flag is shown as written, never guessed. Labels describe configuration, never performance. |
+| `control` | `true` for the current setup every other candidate is measured against. |
+| `state_entered_at` | When the candidate first entered each state. A state it never reached is absent. |
+| `measurement` | The live measurement while and after the candidate measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. `turns_planned` drops when the control stops answering mid-measurement. `null` before measuring starts. |
+
+The campaign's `progress` summarizes the run:
+
+| Field | Meaning |
+|---|---|
+| `stage` | `awaiting_approval`, `running`, `comparing`, `decided`, or `cancelled`. It comes from the candidates, not the campaign `state`, which reads `ranked` as soon as the first setup is ranked while later setups still measure. |
+| `started_at`, `ended_at`, `elapsed_seconds` | From approval to the moment the last setup reached its decision. `ended_at` is `null` while the run goes on or when a decision time was never recorded. |
+| `turns_done`, `turns_total` | Measured turns so far and expected in all. |
+| `eta` | An estimate of the time left, labelled `basis: observed_durations`. It uses only step durations this run already observed: provisioning, warmups, turns, and answer checks. It stays `unknown`, with a reason, until each remaining kind of step was timed once, and it never covers waiting for a person. |
+
+`GET /api/v1/optimization/campaigns/{id}` also returns `spend`: spend so far, estimated as each
+candidate's sourced hourly quote, divided by its quoted maximum replica count, times how long its
+replicas existed. The quote is the first one that authorized the candidate's servers. The value is
+labelled `estimated from quoted rate` and is not an invoice. It is `unknown`, never zero, when a
+setup held servers without a recorded quote (any candidate provisioned by an earlier control plane)
+or when its servers cannot be attributed yet, such as an evolution candidate whose revision is
+still being created. `cap_usd` is the approved cap.
+
+`infercrane optimize watch` and the console's run page show the same values: the setup and turn the
+run is on, time elapsed, the estimate of time left, spend against the cap, and each turn's measured
+output tokens per second as it finishes.
 
 ### Get told when a run needs you
 
@@ -549,14 +583,16 @@ campaign may promote only a `guard_passed` candidate and delegates the traffic m
 normal guarded rollout workflow. Approval expiry is checked before mutation, while a retry after a
 completed activation remains a successful no-op.
 
-A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, with no
-endpoint of its own. Candidates are measured directly against their replicas, so they never appear
-on the endpoint list, during the run or after it. The only endpoint a new-endpoint campaign creates
-is the one activation publishes for the winner. Cleanup deletes the deployments of the other
-candidates. It never touches the activated endpoint, the winner's deployment, or an endpoint you
-created. Candidates provisioned by a control plane released before this behavior published an
-endpoint under the candidate deployment name, and cleanup leaves it without a backend. Remove such
-an endpoint with `infercrane endpoint delete <endpoint>-opt-<candidate> --yes`.
+A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, and is
+measured directly against its replicas. Converge publishes no endpoint for it. The database still
+gives every new deployment an endpoint record of the same name, so the endpoint list
+(`GET /api/v1/endpoints`, the console's Home and Endpoints pages, and `infercrane endpoint list`)
+leaves out the record of every new-endpoint candidate, during the run and after it, including
+candidates of earlier runs. The only endpoint a new-endpoint campaign adds to that list is the one
+activation publishes for the winner. Cleanup deletes the deployments of the other candidates. It
+never touches the activated endpoint, the winner's deployment, or an endpoint you created.
+Candidate deployments still appear under dedicated deployments while their servers exist, because
+they are billed resources.
 
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable
@@ -648,9 +684,12 @@ one at a time, control first. A candidate that reaches the barrier waits there w
 is provisioned, so a deployment that converges between execution attempts is recorded on the next
 attempt. A winner stays in the ranking after it becomes `qualified` (or `guarding` for an
 evolution), so ranking the candidates after it reproduces the same evaluation. Inference Lab then
-compares only the exact same workload shape and the exact deployed model artifact
-(`repository@revision`), even when the campaign was created from a catalog name. Candidates that serve different artifacts cannot share
-one ranking and fail closed. Proposal order cannot choose the winner. Missing sourced cost, mismatched
+compares only the exact same workload shape, and each candidate's evidence must name the exact
+model artifact (`repository@revision`) that candidate deployed, even when the campaign was created
+from a catalog name. A quantized setup serves its own artifact and competes only when it was built
+from the control's model (see [When a quantized setup can win](#when-a-quantized-setup-can-win)).
+A proposal whose candidates serve unrelated models is refused when the campaign is created, with
+`invalid_optimization_proposal`. Proposal order cannot choose the winner. Missing sourced cost, mismatched
 workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
 `rejected`. For evolution campaigns, the selected candidate still has to pass
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
@@ -695,6 +734,29 @@ covers the evidence format, eval sets, and the signing key.
 Agreement with the control is not task accuracy: it shows the candidate answers like your current
 setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
 your prompts, or attach your own evaluator's signed results.
+
+### When a quantized setup can win
+
+A quantized setup, such as a publisher's FP8 or NVFP4 checkpoint, serves different model files than
+your current setup. It can win a campaign when its answers hold and it is measurably better:
+
+- **It is built from the control's model.** The checkpoint records the model it was built from.
+  Ranking compares it with the control only when that is the control's repository and, for `exact`
+  lineage, the control's revision. When the publisher names only the base repository, the lineage is
+  `publisher_declared` and the source revision stays unknown. A checkpoint of another model or
+  another revision is refused when the campaign is created.
+- **The control serves the unmodified model.** The control's answers are the reference for every
+  answer check, so a quantized setup is never the control.
+- **Its answers pass the same check as every other setup.** A precision change changes the model's
+  numbers, so there is no exemption: the built-in check compares its answers with the control's, or
+  your signed evaluation decides. A quantized setup the check blocks ends `rejected` with
+  `quality_gate_rejected` and is never ranked, however fast it measured.
+- **It beats the control by more than the measurement noise** on the same workload, like any other
+  setup.
+
+The persisted ranking lists the quantized artifacts it admitted under `derived_model_identities` in
+its input, and names each quantized row's artifact (`model_identity`) and lineage
+(`artifact_lineage`: `exact` or `publisher_declared`). Unmodified rows keep their earlier shape.
 
 ### How a campaign measures candidates
 
@@ -842,6 +904,28 @@ Research abstracts are shown to the model as untrusted reference data and record
 They are never performance evidence. The first reviewed pack covers residual-add + RMSNorm in
 Triton; other operators fail closed until a pack exists.
 
+### Read lab runs
+
+List your organization's lab runs, newest first. The viewer role is enough. `campaign_id` limits
+the list to one campaign, and `limit` sets the page size from 1 to 100 (default 20):
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/optimization/accelerator-lab/runs?campaign_id=CAMPAIGN_ID&limit=20" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+Each run carries its operation status and progress, the target and policy from the request, and the
+recorded result: profile hotspots, planned candidates, and each experiment's build, qualification,
+and kernel research attempts. `result_state` is `pending` until the worker records a result, and
+`unreadable` when the stored result does not decode or has another schema version. The read copies
+what the worker stored. A hotspot duration or invocation count the profiler did not record is null,
+not zero.
+
+Artifacts appear only as content digests, never as locations or sizes. The read never returns
+literature references, credentials, tenant IDs, lease owners, or idempotency keys, and a URI inside
+an error message becomes `[uri redacted]`. A lab run is an experiment on the target GPU: a qualified
+kernel still needs Release Guard and explicit promotion before it serves traffic.
+
 ## Plan an optimized artifact
 
 Builders run outside InferCrane. The common path produces a strict immutable plan:
@@ -940,7 +1024,9 @@ Every entry is an **unmeasured candidate**, not an InferCrane performance claim.
 claim that it transformed the publisher artifact or that the artifact is faster on a target GPU.
 Exact runtime and accelerator compatibility, correctness, semantic quality, workload performance,
 and cost evidence remain mandatory before Release Guard can accept a candidate. A publisher
-checkpoint that fails any gate is retained as negative evidence rather than promoted.
+checkpoint that fails any gate is retained as negative evidence rather than promoted. One that is
+measured faster than the unmodified model, with answers that pass the check against it, can win the
+campaign; see [When a quantized setup can win](#when-a-quantized-setup-can-win).
 
 ### What each entry records
 
@@ -975,6 +1061,10 @@ A catalog entry seeds a proposal candidate only when every condition holds:
   unmerged engine pull request keeps the build off that engine until a reviewer records the release
   that contains the change.
 - For `exact` lineage, the campaign pins the stated base revision.
+
+The unmodified setup each checkpoint is compared with serves the revision you pinned. A reviewed
+recipe's revision is used only when you pin none, so one proposal never mixes two revisions of a
+model.
 
 The catalog records the blockers for every other entry. `GET /api/v1/catalog/hugging-face/models`
 lists each base model's publisher builds under `publisher_builds`, including AMD and Intel builds

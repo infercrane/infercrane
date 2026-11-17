@@ -437,6 +437,7 @@ infercrane optimize create llama-3.1-8b-instruct \
   --target-deployment llama-production
 infercrane optimize inspect CAMPAIGN_ID
 infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
+infercrane optimize watch CAMPAIGN_ID
 infercrane optimize results CAMPAIGN_ID
 infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
 infercrane operation watch ACTIVATION_OPERATION_ID
@@ -451,6 +452,13 @@ infrastructure. The default `new_endpoint` intent stops at human activation afte
 promotion. `optimize activate` is the explicit boundary in both cases: it marks the qualified new
 deployment active, or delegates an evolution to the existing guarded rollout operation. Retrying
 the command adopts the same durable operation; InferCrane never promotes from the optimizer loop.
+
+`optimize watch` follows a run live and `optimize results` prints the same summary once: each setup
+by name, the current setup first, which setup and measured turn the run is on, time elapsed, the
+control plane's estimate of time left, spend so far against the cap (estimated from the quoted
+rate), the measured comparison, the answer checks, and the decision with the exact `activate`
+command. `inspect` is the full record, with every candidate's name next to its ID. See
+[Follow a run live](/features/optimization#follow-a-run-live).
 
 Every candidate's answers are checked before ranking. By default InferCrane runs its built-in answer
 check against the campaign control. `--eval-set sha256:DIGEST` replaces the built-in prompts with an

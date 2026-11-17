@@ -169,3 +169,31 @@ func TestEvaluateRanksRepeatedRunsWhoseMeasuredOutputsDiffer(t *testing.T) {
 		t.Fatal("a different run count must remain a different workload")
 	}
 }
+
+func TestEvaluateComparesOnlyDerivedArtifactsTheCallerAdmits(t *testing.T) {
+	row := func(id, model string, ttft float64) domain.BenchmarkResult {
+		return domain.BenchmarkResult{ID: id, ModelIdentity: model, RequestCount: 10, TTFTP95MS: number(ttft), WorkloadJSON: `{"profile":"interactive"}`, CostMetadataJSON: `{"available":false}`}
+	}
+	rows := []domain.BenchmarkResult{row("base", "model@commit", 300), row("fp8", "model-fp8@build", 200), row("other", "other@commit", 100)}
+	result, err := Evaluate(Input{ModelIdentity: "model@commit", DerivedModelIdentities: []string{"model-fp8@build"}}, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidates []Candidate
+	if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || candidates[0].EvidenceID != "fp8" || !candidates[0].Selected || candidates[0].ModelIdentity != "model-fp8@build" || candidates[1].ModelIdentity != "" {
+		t.Fatalf("derived artifact was not compared with its base, or an unrelated model was: %#v", candidates)
+	}
+	if !strings.Contains(result.InputJSON, `"derived_model_identities":["model-fp8@build"]`) {
+		t.Fatalf("evaluation input does not record the admitted artifact: %s", result.InputJSON)
+	}
+	plain, err := Evaluate(Input{ModelIdentity: "model@commit"}, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.ResultsJSON, "fp8") || strings.Contains(plain.InputJSON, "derived_model_identities") || strings.Contains(plain.ResultsJSON, "model_identity") {
+		t.Fatalf("an evaluation without derived artifacts changed shape: input=%s results=%s", plain.InputJSON, plain.ResultsJSON)
+	}
+}
