@@ -2,7 +2,9 @@ package optimizationreport
 
 import (
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -381,6 +383,13 @@ func setupFields(setup Setup) []ViewField {
 		args = strings.Join(setup.Args, " ")
 	}
 	fields = append(fields, ViewField{"Args", args})
+	if len(setup.Env) > 0 {
+		settings := make([]string, 0, len(setup.Env))
+		for _, name := range slices.Sorted(maps.Keys(setup.Env)) {
+			settings = append(settings, name+"="+setup.Env[name])
+		}
+		fields = append(fields, ViewField{"Engine settings", strings.Join(settings, " ")})
+	}
 	if setup.Image != "" {
 		fields = append(fields, ViewField{"Image", setup.Image})
 	}

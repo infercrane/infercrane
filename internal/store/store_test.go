@@ -2109,3 +2109,36 @@ func openStore(t *testing.T, ctx context.Context) *Store {
 	})
 	return s
 }
+
+func TestRevisionsPersistOnlyReviewedEngineEnvironment(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "engine-env-" + time.Now().UTC().Format("150405.000000000")
+	if _, _, _, err := s.SubmitCloudDeployment(ctx, domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1}, domain.Operation{Kind: "deployment.converge", IdempotencyKey: "create-" + name, RequestJSON: `{"name":"` + name + `","model":"Qwen/Qwen3-8B","model_revision":"commit","cloud":"runpod","provider_adapter":"runpod-pods","gpu":"MI300X","runtime":"vllm","runtime_version":"0.22.1","runtime_args":[],"runtime_env":{"VLLM_ROCM_USE_AITER":"1"}}`}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := s.Revision(ctx, "global", name, resolved.Deployment.ActiveRevisionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(active.SpecJSON), &persisted); err != nil || persisted.RuntimeEnv["VLLM_ROCM_USE_AITER"] != "1" || len(persisted.RuntimeEnv) != 1 {
+		t.Fatalf("active revision spec=%s err=%v", active.SpecJSON, err)
+	}
+	candidate := func(env string) string {
+		return `{"model":"Qwen/Qwen3-8B","model_revision":"commit","runtime":"vllm","runtime_version":"0.22.1","cloud":"runpod","provider_adapter":"runpod-pods","gpu":"MI300X","compute_mode":"elastic","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"runtime_env":` + env + `}`
+	}
+	off, err := s.CreateCandidateRevision(ctx, "global", name, candidate(`{"VLLM_ROCM_USE_AITER":"0"}`))
+	if err != nil || !strings.Contains(off.SpecJSON, `"runtime_env": {"VLLM_ROCM_USE_AITER": "0"}`) && !strings.Contains(off.SpecJSON, `"runtime_env":{"VLLM_ROCM_USE_AITER":"0"}`) {
+		t.Fatalf("candidate=%s err=%v", off.SpecJSON, err)
+	}
+	for _, env := range []string{`{"HF_TOKEN":"hf_pasted"}`, `{"VLLM_ROCM_USE_AITER":"true"}`} {
+		if _, err = s.CreateCandidateRevision(ctx, "global", name, candidate(env)); err == nil || !strings.Contains(err.Error(), "runtime env") || strings.Contains(err.Error(), "hf_pasted") {
+			t.Fatalf("candidate env %s err=%v", env, err)
+		}
+	}
+}

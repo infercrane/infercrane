@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
+	"github.com/infercrane/infercrane/internal/provideridentity"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const (
@@ -126,7 +129,11 @@ type rankedCandidate struct {
 func applyDiagnosis(proposal Proposal) (Proposal, error) {
 	request := proposal.Input
 	diagnosis := *request.Diagnosis
-	choices := planTechniques(diagnosis, request.Objective)
+	facts := planContext{objective: request.Objective, gpu: request.GPU}
+	if len(proposal.Candidates) > 0 {
+		facts.engine, facts.version = proposal.Candidates[0].Deployment.Runtime.Engine, proposal.Candidates[0].Deployment.Runtime.Version
+	}
+	choices := planTechniques(diagnosis, facts)
 	plan := &DiagnosisPlan{RulesVersion: DiagnosisRulesVersion, Endpoint: diagnosis.Endpoint, PrimaryBottleneck: diagnosis.PrimaryBottleneck, Techniques: []PlannedTechnique{}, NeededEvidence: []string{}}
 	proposal.Diagnosis = plan
 	planned := make([]PlannedTechnique, len(choices))
@@ -188,7 +195,12 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		if usable[choice.technique.id] == nil || covered[choice.technique.id] {
 			continue
 		}
-		args, reason := deriveArgs(control, choice.technique, diagnosis, request)
+		args, env, reason := control.Deployment.Runtime.Args, map[string]string(nil), ""
+		if choice.technique.env != nil {
+			env, reason = deriveEnv(control, choice.technique, request)
+		} else {
+			args, reason = deriveArgs(control, choice.technique, diagnosis, request)
+		}
 		if reason != "" {
 			if skipped[choice.technique.id] == "" {
 				skipped[choice.technique.id] = reason
@@ -196,7 +208,7 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 			continue
 		}
 		delete(skipped, choice.technique.id)
-		derived, err := diagnosisCandidate(control, choice.technique, args, request)
+		derived, err := diagnosisCandidate(control, choice.technique, args, env, request)
 		if err != nil {
 			return Proposal{}, err
 		}
@@ -382,6 +394,16 @@ func sameArtifact(candidate, control Candidate) bool {
 // its recorded provenance rather than its name.
 func classifyCandidate(candidate Candidate) []string {
 	var out []string
+	for _, id := range techniqueOrder {
+		variables := techniques[id].env[candidate.Deployment.Runtime.Engine]
+		applies := len(variables) > 0
+		for _, variable := range variables {
+			applies = applies && candidate.Deployment.Runtime.Env[variable.name] == variable.value
+		}
+		if applies {
+			out = append(out, id)
+		}
+	}
 	if seed := candidate.ArtifactSeed; seed != nil {
 		scheme := strings.ToLower(seed.Algorithm)
 		switch {
@@ -483,6 +505,59 @@ func deriveArgs(control Candidate, technique technique, diagnosis Diagnosis, req
 	return derived, ""
 }
 
+// deriveEnv returns the starting setup's engine environment with the
+// technique's switches set, or why they cannot be set. Each switch must be
+// reviewed for the engine, its version, and the accelerator's platform
+// (support.EngineEnvironment), and a switch already at the value the setup
+// runs with, its own setting or else the engine's recorded default, is a
+// no-op that is not planned.
+func deriveEnv(control Candidate, technique technique, request Request) (map[string]string, string) {
+	engine, version := control.Deployment.Runtime.Engine, control.Deployment.Runtime.Version
+	if _, builtIn := reviewedEngineVersions[engine]; !builtIn || !control.Deployment.Runtime.Workload.Empty() {
+		return nil, "The starting setup runs a pinned custom image; InferCrane changes its settings only through setups reviewed for that image."
+	}
+	if !control.Deployment.Serving.Empty() {
+		return nil, "The starting setup is a Dynamo serving graph; its runtime changes go through the serving topology, not engine settings."
+	}
+	variables := technique.env[engine]
+	if len(variables) == 0 {
+		return nil, fmt.Sprintf("No reviewed %s setting applies this technique yet.", engineName(engine))
+	}
+	accelerator, reviewed := provideridentity.LookupAccelerator(request.GPU)
+	if !reviewed {
+		return nil, request.GPU + " is not an accelerator InferCrane has reviewed this setting for."
+	}
+	env := maps.Clone(control.Deployment.Runtime.Env)
+	if env == nil {
+		env = map[string]string{}
+	}
+	changed, setByControl := false, false
+	for _, variable := range variables {
+		reviewedVariable, ok := support.LookupEngineEnvironment(engine, version, accelerator.Platform, variable.name)
+		if !ok {
+			return nil, fmt.Sprintf("This setting is not reviewed for %s %s on %s.", engineName(engine), version, request.GPU)
+		}
+		current, set := env[variable.name]
+		if !set {
+			current = reviewedVariable.Default
+		}
+		if current == variable.value {
+			setByControl = setByControl || set
+			continue
+		}
+		env[variable.name] = variable.value
+		changed = true
+	}
+	switch {
+	case changed:
+		return env, ""
+	case setByControl:
+		return nil, "The starting setup already uses this change."
+	default:
+		return nil, fmt.Sprintf("This is already %s %s's default on %s, so the setup would equal the starting setup.", engineName(engine), version, request.GPU)
+	}
+}
+
 func engineName(engine string) string {
 	switch engine {
 	case "vllm":
@@ -538,7 +613,7 @@ func withoutFlags(current, flags []string) []string {
 
 // diagnosisCandidate copies the starting setup and applies one technique's
 // flags. The copy keeps every required evidence item of the starting setup.
-func diagnosisCandidate(control Candidate, technique technique, args []string, request Request) (Candidate, error) {
+func diagnosisCandidate(control Candidate, technique technique, args []string, env map[string]string, request Request) (Candidate, error) {
 	encoded, err := json.Marshal(control)
 	if err != nil {
 		return Candidate{}, err
@@ -554,6 +629,9 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, r
 	candidate.Source = SourceInfo{Name: diagnosisPlannerSource, Version: DiagnosisRulesVersion, EvidenceClass: "configuration-unverified", UpstreamProject: engine}
 	candidate.Deployment.Name = safeName(control.Deployment.Name + "-" + technique.id)
 	candidate.Deployment.Runtime.Args = args
+	if env != nil {
+		candidate.Deployment.Runtime.Env = env
+	}
 	// The copy is no longer the untuned baseline, so baseline-only claims go.
 	features := []Feature{}
 	for _, feature := range candidate.Features {
@@ -568,13 +646,20 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, r
 			limitations = append(limitations, limitation)
 		}
 	}
-	candidate.Limitations = append(limitations, "This setup changes runtime flags the endpoint's diagnosis chose; the diagnosis explains why it is worth measuring, not that it is faster.")
+	if technique.env != nil {
+		candidate.Limitations = append(limitations, "This setup changes engine settings the endpoint's diagnosis chose; the diagnosis explains why it is worth measuring, not that it is faster.")
+	} else {
+		candidate.Limitations = append(limitations, "This setup changes runtime flags the endpoint's diagnosis chose; the diagnosis explains why it is worth measuring, not that it is faster.")
+	}
 	candidate.RequiredEvidence = append(candidate.RequiredEvidence, "paired measurement against the starting setup on the same traffic")
 	if technique.changesPrecision {
 		candidate.RequiredEvidence = append(candidate.RequiredEvidence, "answer quality check against the starting setup because this setup changes numeric precision")
 	}
 	if technique.speculative {
 		candidate.RequiredEvidence = append(candidate.RequiredEvidence, "output parity and speculative acceptance evidence")
+	}
+	if technique.changesKernels {
+		candidate.RequiredEvidence = append(candidate.RequiredEvidence, "answer quality check against the starting setup because this setup swaps the GPU kernels that compute each layer")
 	}
 	identity, err := json.Marshal(struct {
 		Source     SourceInfo      `json:"source"`

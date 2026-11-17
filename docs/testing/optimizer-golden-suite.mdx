@@ -198,10 +198,13 @@ A task fails when any of these differ from the expectation:
 | `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
 | `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
 
-Current result: 26 of 26 plans as reviewed, rule set `diagnosis-technique-rules-v3`. Version 2
+Current result: 31 of 31 plans as reviewed, rule set `diagnosis-technique-rules-v4`. Version 2
 widened the FP8 gate to the reviewed AMD Instinct GPUs; two MI300X tasks check that the same
 diagnosis chooses the same plan there and that RunPod's MI300X name resolves to its 192 GB memory.
 Version 3 reads the trace analysis of a GPU profile capture; six `gpu_trace` tasks check it.
+Version 4 adds AMD's AITER kernels for vLLM on reviewed AMD Instinct GPUs
+(`accelerator.kernels_off_by_default`); five `accelerator_kernels` tasks check where it is chosen
+and where it must not be, and the two earlier MI300X tasks now also forbid it.
 
 | Task | Diagnosis | Expected setups after the control |
 | --- | --- | --- |
@@ -229,6 +232,11 @@ Version 3 reads the trace analysis of a GPU profile capture; six `gpu_trace` tas
 | `h100-trace-memory-bound-gemm-fp8-weights-first` | Trace: 90% of matrix-multiply time memory-bound, 74% covered | FP8 weights |
 | `h100-trace-roofline-few-shapes-no-change` | Trace: memory-bound verdict on 18% of matrix-multiply time | Nothing: too little of the multiply time has shapes |
 | `h100-trace-attention-heavy-long-context` | Trace: attention 38% of kernel time, 9,000-token contexts | FP8 KV cache, FP8 weights |
+| `mi300x-decode-aiter-kernels-first` | 64 running, 1,500-token contexts, MI300X | AMD AITER kernels, FP8 weights |
+| `mi355x-long-prompts-aiter-then-bigger-chunks` | 6,000-token prompts, MI355X | AMD AITER kernels, bigger prompt chunks |
+| `mi300x-short-prompts-no-aiter` | First-token bound, 300-token prompts, MI300X | Nothing; asks for engine metrics |
+| `h100-decode-never-aiter` | The MI300X decode diagnosis on H100 | FP8 weights only |
+| `mi300x-sglang-decode-no-aiter-switch` | The MI300X decode diagnosis on SGLang | FP8 weights only |
 
 The `gpu_trace` tasks are written by hand from the trace analysis rules. They are not recorded
 captures: no real GPU trace has been planned from yet.
@@ -244,9 +252,10 @@ To add a planning task, write the diagnosis from recorded readiness output, deci
 the rule table before you run the planner, and record the reason in `why`. Categories are
 `kv_pressure`, `queueing`, `host_bound`, `prefill`, `prefix_reuse`, `decode_low_concurrency`,
 `decode_high_concurrency`, `gpu_profile`, `gpu_trace`, `not_ready`, `reliability`,
-`recorded_gpu_run`, `publisher_checkpoint`, and `pinned_image_setups`, and the test fails if any of
-them loses its last task. A change to a rule, priority, or flag value must bump the rule set version
-(now `diagnosis-technique-rules-v3`) and explain each changed expectation in its task's `why`.
+`recorded_gpu_run`, `publisher_checkpoint`, `pinned_image_setups`, and `accelerator_kernels`, and
+the test fails if any of them loses its last task. A change to a rule, priority, or flag value must
+bump the rule set version (now `diagnosis-technique-rules-v4`) and explain each changed expectation
+in its task's `why`.
 
 ## Limits
 

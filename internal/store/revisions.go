@@ -89,6 +89,12 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 		}
 		normalized.Port = normalized.Workload.Port
 	}
+	if len(normalized.RuntimeEnv) > 0 && normalized.ComputeMode == "existing" {
+		return domain.DeploymentRevision{}, errors.New("runtime env needs provisioned compute; an existing endpoint's environment is not InferCrane's to set")
+	}
+	if err := support.ValidateRuntimeEnv(normalized.Runtime, normalized.RuntimeVersion, normalized.GPU, normalized.Workload, normalized.RuntimeEnv); err != nil {
+		return domain.DeploymentRevision{}, fmt.Errorf("runtime env: %w", err)
+	}
 	if normalized.RoutingStrategy == "" {
 		normalized.RoutingStrategy = "round-robin"
 	}
