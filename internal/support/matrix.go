@@ -28,6 +28,24 @@ func NormalizeWorkload(runtime string, workload runtimecontract.Workload) runtim
 	return workload
 }
 
+// ServedWorkload is the runtime contract a replica actually serves. A
+// built-in runtime revision may leave its workload empty; provisioning then
+// fills in that runtime's default contract (see integration.RuntimeProfile).
+// Readers that need the contract's paths, such as the metrics scrape during
+// measurement, must use this rather than the stored, possibly empty draft.
+func ServedWorkload(runtime string, workload runtimecontract.Workload) runtimecontract.Workload {
+	if !workload.Empty() {
+		return workload
+	}
+	switch strings.TrimSpace(runtime) {
+	case "", DefaultRuntime:
+		return VLLMWorkload()
+	case "sglang":
+		return SGLangWorkload()
+	}
+	return workload
+}
+
 const (
 	DefaultRuntime = "vllm"
 	// DefaultRuntimeVersion is the default vLLM runtime qualified by the public

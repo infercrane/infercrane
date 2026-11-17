@@ -793,7 +793,8 @@ func optimizationCampaignReportSchema() map[string]any {
 		"price_source":           text,
 	})
 	nullableSetup := map[string]any{"oneOf": []any{setup, map[string]any{"type": "null"}}}
-	comparison := object([]string{"metric", "change_percent", "noise_floor_percent", "decision"}, map[string]any{"metric": text, "change_percent": number, "noise_floor_percent": number, "decision": decision})
+	comparison := object([]string{"metric", "change_percent", "noise_floor_percent", "decision"}, map[string]any{"metric": text, "change_percent": number, "noise_floor_percent": number, "decision": decision,
+		"basis": map[string]any{"type": "string", "enum": []string{"interleaved_control", "drifted_control_runs"}, "description": "Set on a regression: drifted_control_runs is read from runs whose control drifted and can show a setup is worse, never better."}})
 	return object([]string{"schema_version", "algorithm_version", "campaign_id", "model_identity", "objective", "intent", "campaign_state", "finished", "simulated_accelerator", "outcome", "metrics", "quality", "noise", "monthly", "workload", "candidates", "bottleneck", "appendix", "unknown", "report_digest"}, map[string]any{
 		"schema_version": map[string]any{"type": "string", "const": "infercrane.optimization-report/v1"}, "algorithm_version": text,
 		"campaign_id": text, "model_identity": text, "objective": text, "intent": text, "campaign_state": text, "finished": boolean,
@@ -826,6 +827,7 @@ func optimizationCampaignReportSchema() map[string]any {
 			"id": text, "label": text, "role": map[string]any{"type": "string", "enum": []string{"baseline", "baseline_kept", "winner", "candidate"}}, "state": text, "failure_code": text,
 			"output_tokens_per_second": nullable, "requests_per_second": nullable, "ttft_p95_ms": nullable, "tpot_p95_ms": nullable, "latency_p95_ms": nullable, "cost_per_million_output_tokens": nullable,
 			"versus_baseline": map[string]any{"oneOf": []any{comparison, map[string]any{"type": "null"}}}, "reason": text,
+			"regressions": map[string]any{"type": "array", "items": comparison, "description": "Headline outcomes (throughput, p95 time to first token, p95 latency) on which the setup measured worse than the baseline in its own window."},
 		})},
 		"bottleneck": object([]string{"state", "source", "gpu_telemetry", "signals"}, map[string]any{
 			"state": map[string]any{"type": "string", "enum": []string{"measured", "unknown"}}, "source": text, "gpu_telemetry": text, "reason": text,

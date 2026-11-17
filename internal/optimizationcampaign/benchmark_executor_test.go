@@ -3,6 +3,7 @@ package optimizationcampaign
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 type benchmarkStoreFixture struct {
@@ -95,5 +97,40 @@ func TestBenchmarkExecutorRejectsMutableRouteAndMissingDirectCandidate(t *testin
 	executor := BenchmarkExecutor{Store: executorStore, Runner: &aiperfFixture{}, Costs: freshCost(now), Backends: map[string]BenchmarkBackend{"aws-ec2": {APIKey: "secret"}}, Now: func() time.Time { return now }}
 	if _, err := executor.Run(t.Context(), store.campaign, candidate, profile); err == nil {
 		t.Fatal("mutable deployment route was accepted without an exact healthy candidate endpoint")
+	}
+}
+
+// The 2026-11-17 RTX 4090 run measured vLLM on a SkyPilot (Vast) replica.
+// Its draft carried no workload because vLLM is built in, so measurement
+// told AIPerf not to scrape /metrics and the report had no engine signals.
+// The laptop harness never hit this because its custom image declares the
+// metrics path explicitly.
+func TestBenchmarkExecutorScrapesEngineMetricsForBuiltInRuntimeOnSkyPilot(t *testing.T) {
+	now := time.Now().UTC()
+	measure := func(engine string, workload runtimecontract.Workload) benchmark.Config {
+		t.Helper()
+		draft := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: "qwen-rtx-optimized"}
+		draft.Model.ID, draft.Model.Revision = "Qwen/Qwen3-0.6B", "c1899de289a04d12100db370d81485cdf75e47ca"
+		draft.Runtime.Engine, draft.Runtime.Version, draft.Runtime.Workload = engine, "0.22.1", workload
+		draft.Compute.Mode, draft.Provider.Cloud, draft.Provider.Adapter = "elastic", "vast", "skypilot-vast"
+		draft.Resources.GPU, draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = "RTX4090", 1, 1
+		draftJSON, _ := json.Marshal(draft)
+		campaign := domain.OptimizationCampaign{ID: "campaign", TenantID: "tenant", ProposalJSON: `{}`}
+		candidate := domain.OptimizationCandidateRun{ID: "candidate", TenantID: "tenant", CampaignID: campaign.ID, DeploymentName: "qwen-rtx-optimized-opt-1", RevisionID: "revision-1", DeploymentSpecJSON: string(draftJSON)}
+		store := &benchmarkStoreFixture{resolved: domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment", Name: candidate.DeploymentName}}, revisions: []domain.DeploymentRevision{{ID: candidate.RevisionID}}, replicas: []domain.Replica{{RevisionID: candidate.RevisionID, Endpoint: "http://203.0.113.7:41235", Provider: "skypilot-vast", Health: "healthy", LifecycleState: "ready"}}, artifact: domain.ModelArtifact{ID: "artifact", Repository: draft.Model.ID, ModelIdentity: draft.Model.ID + "@" + draft.Model.Revision}}
+		runner := &aiperfFixture{}
+		executor := BenchmarkExecutor{Store: store, Runner: runner, Costs: costAuthorityFixture{quote: CostQuote{HourlyUSD: 0.328, Source: "https://console.vast.ai/api/v0/bundles/#offer-1", ObservedAt: now.Add(-time.Minute), ValidUntil: now.Add(time.Hour)}}, Backends: map[string]BenchmarkBackend{"skypilot-vast": {APIKey: "worker-secret", APIKeyEnv: "INFERCRANE_WORKER_API_KEY"}}, AIPerfBinary: "aiperf", Now: func() time.Time { return now }}
+		profile, _ := performanceprofile.Get("interactive")
+		if _, err := executor.Run(t.Context(), campaign, candidate, profile); err != nil {
+			t.Fatal(err)
+		}
+		return runner.config
+	}
+	if config := measure("vllm", runtimecontract.Workload{}); !config.ServerMetrics || config.Endpoint != "http://203.0.113.7:41235" {
+		t.Fatalf("built-in vLLM on SkyPilot was measured without its /metrics scrape: %+v", config)
+	}
+	custom := runtimecontract.Workload{Image: "example/server@sha256:" + strings.Repeat("a", 64), Command: []string{"serve"}, Protocol: "openai", Port: 8080, ReadinessPath: "/health", ModelsPath: "/v1/models", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 10}
+	if config := measure("custom-oci", custom); config.ServerMetrics {
+		t.Fatal("a custom image that declares no metrics path was scraped")
 	}
 }

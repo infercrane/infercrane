@@ -426,6 +426,37 @@ func TestAssembleKeepsMissingAndIncomparableInputsUnknown(t *testing.T) {
 			t.Fatalf("bottleneck = %+v", report.Bottleneck)
 		}
 		assertUnknown(t, report, "bottleneck")
+		// Nothing was asked of the engine, so the engine is not blamed. This
+		// is what the 2026-11-17 RTX 4090 run's evidence looked like.
+		if report.Bottleneck.Reason != "the serving engine's metrics were not scraped while it was measured" {
+			t.Fatalf("reason = %q", report.Bottleneck.Reason)
+		}
+	})
+	t.Run("engine metrics requested but not collected", func(t *testing.T) {
+		f := winnerFixture()
+		measured := interleaved()
+		measured.ServerMetricsRequested, measured.Control.ServerMetrics = true, true
+		for index := range measured.Runs {
+			measured.Runs[index].ServerMetrics = &benchmark.ServerMetrics{Reason: "AIPerf wrote no server-metrics export; the runtime metrics endpoint may be unreachable"}
+		}
+		f.arms[1].measured = measured
+		report := Assemble(f.evidence())
+		if report.Bottleneck.State != BasisUnknown || report.Bottleneck.Reason != "the serving engine's metrics were not collected: AIPerf wrote no server-metrics export; the runtime metrics endpoint may be unreachable" {
+			t.Fatalf("bottleneck = %+v", report.Bottleneck)
+		}
+	})
+	t.Run("engine metrics scraped without known signals", func(t *testing.T) {
+		f := winnerFixture()
+		measured := interleaved()
+		measured.ServerMetricsRequested = true
+		for index := range measured.Runs {
+			measured.Runs[index].ServerMetrics = nil
+		}
+		f.arms[1].measured = measured
+		report := Assemble(f.evidence())
+		if report.Bottleneck.Reason != "the serving engine reported no cache, queue, or preemption metrics while measured" {
+			t.Fatalf("bottleneck = %+v", report.Bottleneck)
+		}
 	})
 }
 
@@ -580,5 +611,62 @@ func TestAssembleReadsTheBuiltinAnswerCheckWithItsWatchBand(t *testing.T) {
 	}
 	if customer := Assemble(winnerFixture().evidence()).Quality; customer.Source != domain.QualityEvidenceSourceCustomer || customer.Basis != BasisCampaignGate {
 		t.Fatalf("customer evidence quality = %+v", customer)
+	}
+}
+
+// gpuRunFixture is the 2026-11-17 RTX 4090 campaign as it was persisted: the
+// control was kept, n-gram speculation was ranked in a window whose control
+// drifted and labelled "no real difference", and FP8 KV was measured slower.
+func gpuRunFixture() fixture {
+	run := func(arm string, tps, ttft, latency float64) optimizationcampaign.RunSummary {
+		return optimizationcampaign.RunSummary{Arm: arm, Requests: 121, OutputTokenThroughput: &tps, TTFTP95MS: &ttft, LatencyP95MS: &latency}
+	}
+	drifted := &optimizationcampaign.MeasuredEvidence{Method: optimizationcampaign.MeasurementMethod,
+		Control: optimizationcampaign.ControlEvidence{Role: optimizationcampaign.ControlRoleInvalid, CandidateID: "control", Runs: 4, MaxDrift: 0.069, DriftLimit: 0.05, Reason: "control output throughput drifted 6.9% between adjacent runs, above the 5% limit"},
+		Runs: []optimizationcampaign.RunSummary{
+			run("control", 250, 310, 740), run("candidate", 186, 270, 1150),
+			run("control", 240, 320, 750), run("candidate", 190, 280, 1160),
+			run("control", 256, 312, 745), run("candidate", 188, 275, 1149),
+			run("control", 238, 318, 742),
+		}}
+	fp8 := &optimizationcampaign.MeasuredEvidence{Method: optimizationcampaign.MeasurementMethod,
+		Control: optimizationcampaign.ControlEvidence{Role: optimizationcampaign.ControlRoleBracketed, CandidateID: "control", Runs: 4, MaxDrift: 0.013, DriftLimit: 0.05},
+		Comparison: map[string]optimizationcampaign.MetricComparison{
+			"output_token_throughput": {HigherIsBetter: true, ControlMean: 246, CandidateMean: 184.5, Delta: -0.25, NoiseFloor: 0.017, Decision: optimizationcampaign.DecisionRegressed},
+			"ttft_p95_ms":             {ControlMean: 297, CandidateMean: 339, Delta: 0.141, NoiseFloor: 0.051, Decision: optimizationcampaign.DecisionRegressed},
+		}}
+	return fixture{intent: optimizationcampaign.IntentNewEndpoint, state: optimizationcampaign.CampaignQualified, objective: "interactive", source: optimizer.WorkloadSourceCustomerObserved,
+		replay: replayTrace(tokensOf(120)),
+		arms: []armFixture{
+			{id: "control", proposalID: "proposal-control", state: optimizationcampaign.CandidateQualified, rank: 1, engine: "vllm", gpu: "RTX4090", gpus: 1, maxReplicas: 1, hourly: hourly(0.328), tps: 246, rps: 2.06, ttft: 315,
+				measured: &optimizationcampaign.MeasuredEvidence{Method: optimizationcampaign.MeasurementMethod, Control: optimizationcampaign.ControlEvidence{Role: optimizationcampaign.ControlRoleCandidate, CandidateID: "control"}}, quality: signedQuality("quality-control", "rev-control", "1", 1, true)},
+			{id: "ngram", proposalID: "proposal-ngram", state: optimizationcampaign.CandidateRejected, failure: optimizationcampaign.FailureNoMeasurableDifference, rank: 2, engine: "vllm", args: []string{"--speculative-config", `{"method": "ngram"}`}, gpu: "RTX4090", gpus: 1, maxReplicas: 1, hourly: hourly(0.328), tps: 188, rps: 1.6, ttft: 275, measured: drifted},
+			{id: "fp8", proposalID: "proposal-fp8", state: optimizationcampaign.CandidateRejected, failure: "measured_candidate_superseded", rank: 3, engine: "vllm", args: []string{"--kv-cache-dtype", "fp8"}, gpu: "RTX4090", gpus: 1, maxReplicas: 1, hourly: hourly(0.328), tps: 193, rps: 1.6, ttft: 339, measured: fp8},
+		}}
+}
+
+func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T) {
+	report := Assemble(gpuRunFixture().evidence())
+	if report.Outcome.Kind != OutcomeBaselineKept {
+		t.Fatalf("outcome = %+v", report.Outcome)
+	}
+	text := Text(report)
+	for _, want := range []string{
+		"vllm, default settings [current setup, kept] · kept · nothing to activate",
+		"· rejected · throughput got worse by 24% (noise ±7.3%), latency got worse by 55% (noise ±6.9%)",
+		"· rejected · throughput got worse by 25% (noise ±1.7%), first-token time got worse by 14% (noise ±5.1%)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("report lacks %q:\n%s", want, text)
+		}
+	}
+	for _, wrong := range []string{"winner, ready to activate", "no real difference from your current setup", "another setup measured better"} {
+		if strings.Contains(text, wrong) {
+			t.Fatalf("report still says %q:\n%s", wrong, text)
+		}
+	}
+	ngram := report.Candidates[1]
+	if len(ngram.Regressions) != 2 || ngram.Regressions[0].Basis != optimizationcampaign.RegressionBasisDriftedControl || ngram.VersusBaseline != nil {
+		t.Fatalf("ngram = %+v", ngram)
 	}
 }

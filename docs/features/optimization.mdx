@@ -231,10 +231,14 @@ To follow a campaign live, run `infercrane optimize watch CAMPAIGN_ID`. It shows
 where each setup is (starting a server, measuring against your current setup, checking answer
 quality), what was measured (throughput, p95 time to first token, p95 latency, and cost per million
 tokens when the price is sourced), how each setup compared with the current one including the
-measurement noise floor, each setup's answer check, and the decision with the exact `activate`
-command when a setup qualifies. When a setup waits on you, for your eval set or your signed
-evaluation, it prints the exact command that unblocks it. It only reads the control API; `--once`
-prints one plain snapshot for scripts and logs.
+measurement noise floor, each setup's answer check, and the decision. When a setup beat your
+current setup, the decision prints the exact `activate` command. When nothing did, your current setup
+is kept: the control is marked `kept · nothing to activate`, for a new endpoint no endpoint is
+published, for an evolution the endpoint keeps serving its current revision, and the one step left
+is `infercrane optimize cancel CAMPAIGN_ID`, which removes the measurement servers now instead of
+when the approval ends. `infercrane inbox` shows the same step. When a setup waits on you, for your
+eval set or your signed evaluation, it prints the exact command that unblocks it. It only reads the
+control API; `--once` prints one plain snapshot for scripts and logs.
 
 ### Get told when a run needs you
 
@@ -400,6 +404,14 @@ source window, absent AIPerf binary, or approval below the worst-case execution 
 before provider mutation. Operators must refresh price evidence rather than treating this static
 example as current pricing.
 
+When the row is missing or stale, approval names it, for example `no fresh vast price for 1 × RTX 4090
+(region global, 1 replica)`, says what was tried, and, for a feed on a schedule, when that feed
+fetches the row next. The Vast offer feed refreshes four GPUs per sweep, so after a control-plane
+restart most GPUs have no row for several sweeps. Approval therefore fetches the requested Vast GPU
+on demand, with one request per sweep interval so the feed stays inside Vast's request window. A
+second GPU in the same interval waits for the schedule, and the message says until when. Vast rows
+cover one GPU on one replica only.
+
 A row like the one above is advisory: it can rank plans, but it cannot authorize spend, because a
 hand-entered price is not a provider quote. Execution needs a fresh quote from a reviewed provider
 price collector, or, for capacity you own or contract, an explicit rate card on a `kubernetes` row:
@@ -542,8 +554,19 @@ mean, spread, candidate mean, delta, floor, and decision for throughput, latency
 
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric. If none
-does, the control is kept. A candidate inside the noise floor, or never shown to beat the control, is
-superseded with `measured_no_measurable_difference`. If the control itself does not meet the
+does, the control is kept. Each losing candidate is superseded with a code that says why:
+
+| Code | Meaning |
+|---|---|
+| `measured_candidate_regressed` | Worse than the control by more than the noise floor on the objective, or on throughput, p95 time to first token, or p95 latency in its own window |
+| `measured_no_measurable_difference` | Inside the noise floor on the objective and not measurably worse on any of those outcomes |
+| `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted, and not shown worse |
+| `measured_candidate_superseded` | Measurably better than the control, but another candidate ranked higher |
+
+A window the control invalidated only by drifting still holds complete, clean runs of both setups.
+They can show a candidate is worse, with a noise floor no smaller than the drift; they never show it
+is better. The report and `infercrane optimize watch` name the outcomes, for example `throughput got
+worse by 24% (noise ±7.3%)`. If the control itself does not meet the
 constraints, Lab's choice stands and no gain over the control is claimed. Cost efficiency compares output
 throughput per sourced hourly cost. A candidate that could not be measured beside a serving control is
 compared through both arms' 95% intervals, which is weaker evidence because the arms ran at
@@ -552,8 +575,12 @@ records each candidate's control decision, its basis, and the final selection.
 
 **Runtime metrics.** When a candidate's runtime contract declares a `/metrics` path, AIPerf scrapes it
 during each run, and InferCrane keeps a bounded summary of cache use, prefix-cache hits, preemption,
-queueing, and speculative acceptance. Runtimes without a declared path record no runtime metrics, and
-GPU telemetry is `not_collected`.
+queueing, and speculative acceptance. A built-in vLLM or SGLang setup without its own workload uses
+that runtime's default contract, which declares `/metrics`, on every provider, SkyPilot clouds
+included. Custom images without a declared path record no runtime metrics, and GPU telemetry is
+`not_collected`. When the report has no engine signals it says whether the metrics were not scraped,
+scraped without a usable result (with AIPerf's reason), or scraped without any cache, queue, or
+preemption metric.
 
 This method sends nine AIPerf invocations per non-control candidate instead of one, so measurement
 takes several times longer. The approval window must cover it. Campaign ranking does not use the

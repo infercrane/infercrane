@@ -36,6 +36,11 @@ Production composition binds each runtime inspector to its validated `RuntimePro
 and reconciliation resolve that immutable binding by runtime identity; an adapter cannot execute
 under a different runtime's capability claims, and an unregistered runtime remains unroutable.
 
+A built-in runtime (vLLM, SGLang) revision may store no workload. Provisioning then serves the
+runtime profile's default workload, and every reader of the contract's paths, such as the metrics
+scrape during optimization measurement, resolves the same default (`support.ServedWorkload`) rather
+than the empty stored value. A test keeps the two in step.
+
 ## Custom OCI workloads
 
 InferCrane may accept an immutable OCI image plus explicit protocol, port, health, telemetry and

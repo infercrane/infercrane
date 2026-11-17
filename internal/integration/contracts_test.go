@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 func TestRegistryProducesDeterministicHonestSnapshot(t *testing.T) {
@@ -377,5 +380,25 @@ func TestSGLangQualificationCitesItsOnlyRecordedRealRun(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", evidence))
 	if !cited || err != nil || !strings.Contains(string(body), "SGLang 0.5.12 | 5/5") {
 		t.Fatalf("SGLang qualification does not match the recorded run: cited=%v err=%v", cited, err)
+	}
+}
+
+// Measurement reads support.ServedWorkload to decide whether to scrape a
+// replica's metrics; provisioning fills the registry's default workload. The
+// two must name the same contract for every built-in runtime.
+func TestServedWorkloadMatchesRegisteredRuntimeDefaults(t *testing.T) {
+	registry, err := PortableCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{support.DefaultRuntime, "sglang", "custom-oci"} {
+		profile, err := registry.Runtime(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		served := support.ServedWorkload(name, runtimecontract.Workload{})
+		if served.Image != profile.DefaultWorkload.Image || served.MetricsPath != profile.DefaultWorkload.MetricsPath || served.Port != profile.DefaultWorkload.Port {
+			t.Fatalf("%s: measurement contract %#v differs from the provisioned default %#v", name, served, profile.DefaultWorkload)
+		}
 	}
 }

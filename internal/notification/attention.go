@@ -20,7 +20,8 @@ type Attention struct {
 }
 
 // CampaignAttention lists what the campaign needs now. A run waiting for
-// approval, a winner waiting for rollout, an approval about to end, setups
+// approval, a winner waiting for rollout, a kept setup whose measurement
+// servers still run, an approval about to end, setups
 // waiting on the customer for answer quality (qualityWait, from QualityWait),
 // and a run that failed recently each need a person. A finished run with
 // nothing to roll out needs nothing.
@@ -33,6 +34,15 @@ func CampaignAttention(campaign domain.OptimizationCampaign, now time.Time, qual
 	switch {
 	case campaign.State == optimizationcampaign.CampaignAwaitingApproval:
 		items = append(items, Attention{Severity: "warning", Code: "optimization_approval_needed", Summary: fmt.Sprintf("The %s run is ready and needs your spend approval to start.", model), Next: "infercrane optimize approve " + campaign.ID + " --max-cost-usd AMOUNT --expires-in 1h", UpdatedAt: campaign.UpdatedAt})
+	case AwaitingRollout(campaign.State) && optimizationcampaign.ControlKept(campaign):
+		// Nothing beat the current setup, so there is nothing to roll out.
+		// The kept setup's measurement server still runs until the approval
+		// ends; removing it is the only step left.
+		summary := fmt.Sprintf("The %s run kept your current setup; its measurement servers keep running until you remove them.", model)
+		if campaign.ApprovalExpiresAt != nil {
+			summary = fmt.Sprintf("The %s run kept your current setup; its measurement servers keep running until its approval ends at %s.", model, clock(*campaign.ApprovalExpiresAt))
+		}
+		items = append(items, Attention{Severity: "warning", Code: "optimization_measurement_servers_running", Summary: summary, Next: "infercrane optimize cancel " + campaign.ID, UpdatedAt: campaign.UpdatedAt})
 	case AwaitingRollout(campaign.State):
 		severity, summary := "warning", fmt.Sprintf("The %s run has a result waiting for your decision.", model)
 		if campaign.ApprovalExpiresAt != nil {

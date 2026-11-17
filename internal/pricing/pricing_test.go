@@ -140,3 +140,59 @@ func TestDynamicCatalogKeepsFreshAuthoritativeManualOverride(t *testing.T) {
 		t.Fatalf("fresh account contract did not remain authoritative: %#v err=%v", estimate, err)
 	}
 }
+
+func TestWarmingProviderFetchesOnlyWhatIsMissingAndNamesTheRow(t *testing.T) {
+	now := time.Date(2026, 11, 17, 2, 0, 0, 0, time.UTC)
+	request := Request{Cloud: "vast", Region: "global", GPU: "RTX 4090", GPUCount: 1, Replicas: 1}
+	fresh := Estimate{Currency: "USD", Hourly: 0.33, Source: "vast-offer", CostScope: CostScopeInstanceTotal, Authority: PriceAuthorityProviderAPI, ObservedAt: now, StaleAfter: time.Hour}
+	catalog := NewDynamicCatalog(nil)
+	warms := 0
+	provider := WarmingProvider{Delegate: catalog, Now: func() time.Time { return now }, Warmers: map[string]Warmer{"vast": func(context.Context, Request) WarmResult {
+		warms++
+		catalog.ReplaceProviderGPU("vast", "RTX 4090", map[Request]Estimate{request: fresh})
+		return WarmResult{Feed: "the Vast offer feed", Fetched: true}
+	}}}
+	if estimate, err := provider.Estimate(context.Background(), request); err != nil || estimate.Source != "vast-offer" || warms != 1 {
+		t.Fatalf("estimate=%+v err=%v warms=%d", estimate, err, warms)
+	}
+	if _, err := provider.Estimate(context.Background(), request); err != nil || warms != 1 {
+		t.Fatalf("a fresh row was fetched again: err=%v warms=%d", err, warms)
+	}
+
+	// A stale row is refreshed like a missing one.
+	stale := fresh
+	stale.ObservedAt = now.Add(-2 * time.Hour)
+	catalog.ReplaceProviderGPU("vast", "RTX 4090", map[Request]Estimate{request: stale})
+	if _, err := provider.Estimate(context.Background(), request); err != nil || warms != 2 {
+		t.Fatalf("stale row: err=%v warms=%d", err, warms)
+	}
+
+	// A row no feed refreshes is named, and stays retryable.
+	_, err := provider.Estimate(context.Background(), Request{Cloud: "aws", Region: "us-east-1", GPU: "NVIDIA L40S", GPUCount: 1, Replicas: 2})
+	var missing *MissingPriceError
+	if !errors.As(err, &missing) || !errors.Is(err, ErrUnavailable) || err.Error() != "no fresh aws price for 1 × NVIDIA L40S (region us-east-1, 2 replicas); no provider feed refreshes this row" {
+		t.Fatalf("err=%v", err)
+	}
+
+	// A fetch that cannot produce the row says why and when the schedule runs.
+	next := now.Add(5 * time.Minute)
+	provider.Warmers["vast"] = func(context.Context, Request) WarmResult {
+		return WarmResult{Feed: "the Vast offer feed", NextRefreshAt: next, Detail: "a Vast price refresh is running now; retry in a minute"}
+	}
+	_, err = provider.Estimate(context.Background(), Request{Cloud: "vast", Region: "global", GPU: "L4", GPUCount: 1, Replicas: 1})
+	if err == nil || err.Error() != "no fresh vast price for 1 × L4 (region global, 1 replica); a Vast price refresh is running now; retry in a minute; the Vast offer feed fetches it next at about 2026-11-17 02:05 UTC" {
+		t.Fatalf("err=%v", err)
+	}
+
+	// Errors other than a missing price are not hidden behind a fetch.
+	broken := WarmingProvider{Delegate: failingProvider{errors.New("catalog offline")}, Warmers: provider.Warmers}
+	if _, err := broken.Estimate(context.Background(), request); err == nil || err.Error() != "catalog offline" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+type failingProvider struct{ err error }
+
+func (f failingProvider) Estimate(context.Context, Request) (Estimate, error) {
+	return Estimate{}, f.err
+}

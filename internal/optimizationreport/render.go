@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
 
@@ -22,6 +23,8 @@ var stateWords = map[string]string{
 
 var reasonWords = map[string]string{
 	"measured_no_measurable_difference":      "no real difference from your current setup",
+	"measured_candidate_regressed":           "worse than your current setup",
+	"measured_comparison_unavailable":        "not compared reliably with your current setup",
 	"measured_candidate_superseded":          "another setup measured better",
 	"measured_candidate_outside_constraints": "missed your speed or cost limits",
 	"measured_ranking_inconclusive":          "results were not comparable",
@@ -263,7 +266,7 @@ func measurementLines(r Report) []string {
 }
 
 func candidateView(candidate CandidateResult) viewCandidate {
-	result := viewCandidate{Label: candidate.Label, Status: statusWords(candidate.State, candidate.FailureCode)}
+	result := viewCandidate{Label: candidate.Label, Status: candidateStatus(candidate)}
 	switch candidate.Role {
 	case "baseline":
 		result.Role = "current setup"
@@ -372,6 +375,32 @@ func unknownReason(r Report, field string) string {
 	}
 	return "missing input"
 }
+
+// measuredLoss lists the ranking codes whose words a measured regression
+// replaces. A setup that lost to the baseline and measured worse on an
+// outcome says which one, including runs ranked before the gate named it.
+var measuredLoss = map[string]bool{
+	optimizationcampaign.FailureNoMeasurableDifference: true, optimizationcampaign.FailureRegressed: true,
+	optimizationcampaign.FailureComparisonUnavailable: true, "measured_candidate_superseded": true,
+}
+
+func candidateStatus(candidate CandidateResult) string {
+	if candidate.Role == "baseline_kept" && (candidate.State == optimizationcampaign.CandidateQualified || candidate.State == optimizationcampaign.CandidateGuardPassed) {
+		return keptWords
+	}
+	if measuredLoss[candidate.FailureCode] && len(candidate.Regressions) > 0 {
+		regressions := make([]optimizationcampaign.Regression, 0, len(candidate.Regressions))
+		for _, regression := range candidate.Regressions {
+			regressions = append(regressions, optimizationcampaign.Regression{Metric: regression.Metric, Delta: regression.ChangePercent / 100, NoiseFloor: regression.NoiseFloorPercent / 100, Basis: regression.Basis})
+		}
+		return statusWords(candidate.State, "") + " · " + optimizationcampaign.DescribeRegressions(regressions)
+	}
+	return statusWords(candidate.State, candidate.FailureCode)
+}
+
+// keptWords describe a baseline the campaign kept. It is not a winner, and
+// activating it changes nothing.
+const keptWords = "kept · nothing to activate"
 
 func statusWords(state, failure string) string {
 	text := stateWords[state]

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func watchSpec(engine string, args ...string) json.RawMessage {
@@ -43,7 +44,7 @@ func TestWatchLabelAndStatusUsePlainWords(t *testing.T) {
 	if got := watchLabel(watchCandidate{ID: "0123456789abcdef", DeploymentSpec: json.RawMessage(`{}`)}); !strings.HasPrefix(got, "setup ") {
 		t.Fatalf("label without a spec = %q", got)
 	}
-	status := watchStatus(watchCandidate{State: "rejected", FailureCode: "measured_no_measurable_difference"})
+	status := watchStatus(watchCandidate{State: "rejected", FailureCode: "measured_no_measurable_difference"}, watchMeasurement{}, false)
 	if status != "rejected · no real difference from your current setup" {
 		t.Fatalf("status = %q", status)
 	}
@@ -67,9 +68,15 @@ func TestRenderOptimizeWatchStatesTheDecision(t *testing.T) {
 	candidate := watchCandidate{ID: "candidate", Rank: 2, State: "rejected", FailureCode: "measured_no_measurable_difference", DeploymentSpec: watchSpec("custom-oci", "--parallel", "8")}
 	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-1", ModelIdentity: "Qwen/Qwen3-0.6B", State: "qualified", Candidates: []watchCandidate{candidate, control}}, measurements: map[string]watchMeasurement{}}
 	text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false)
-	for _, want := range []string{"winner, ready to activate", "no real difference from your current setup", "Keep your current setup", "results appear as each setup finishes measuring"} {
+	for _, want := range []string{"kept your current setup", "kept · nothing to activate", "no real difference from your current setup", "Keep your current setup", "Nothing to activate: no new endpoint is published.", "infercrane optimize cancel campaign-1 removes the measurement servers now", "results appear as each setup finishes measuring"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("watch view lacks %q:\n%s", want, text)
+		}
+	}
+	// A kept control is not a winner and has nothing to activate.
+	for _, wrong := range []string{"winner, ready to activate", "optimize activate", "optimized endpoint"} {
+		if strings.Contains(text, wrong) {
+			t.Fatalf("watch view says %q for a kept control:\n%s", wrong, text)
 		}
 	}
 	if strings.Index(text, "default settings") > strings.Index(text, "--parallel 8") {
@@ -80,6 +87,13 @@ func TestRenderOptimizeWatchStatesTheDecision(t *testing.T) {
 	snapshot.campaign.Candidates = []watchCandidate{control, candidate}
 	if text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false); !strings.Contains(text, "Roll out “custom image, --parallel 8”") || !strings.Contains(text, "optimize activate campaign-1 --candidate candidate") {
 		t.Fatalf("a measured winner was not offered for activation:\n%s", text)
+	}
+
+	// A control activated anyway is live, but never "measured better".
+	control.State, candidate.State = "promoted", "cleaned"
+	snapshot.campaign.Candidates, snapshot.campaign.State = []watchCandidate{control, candidate}, "promoted"
+	if text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false); !strings.Contains(text, "“custom image, default settings” is live.") || strings.Contains(text, "measured better") {
+		t.Fatalf("an activated control was described as a measured win:\n%s", text)
 	}
 
 	snapshot.campaign.State = "measuring"
@@ -123,7 +137,65 @@ func TestRenderOptimizeWatchShowsTheAnswerCheck(t *testing.T) {
 	if strings.Contains(text, "Runs after this setup is measured") {
 		t.Fatalf("a pending answer check was listed:\n%s", text)
 	}
-	if status := watchStatus(watchCandidate{State: "validating", Quality: &watchQuality{State: "checking"}}); status != "checking answers against your current setup" {
+	if status := watchStatus(watchCandidate{State: "validating", Quality: &watchQuality{State: "checking"}}, watchMeasurement{}, false); status != "checking answers against your current setup" {
 		t.Fatalf("checking status = %q", status)
+	}
+}
+
+// The 2026-11-17 RTX 4090 run as the watch saw it: speculation was ranked in
+// a window whose control drifted and kept the old "no real difference" code.
+func TestRenderOptimizeWatchNamesTheMetricASetupLostOn(t *testing.T) {
+	run := func(arm string, tps, ttft, latency float64) map[string]any {
+		return map[string]any{"arm": arm, "requests": 121, "failed": 0, "duration_seconds": 60, "output_token_throughput": tps, "ttft_p95_ms": ttft, "latency_p95_ms": latency}
+	}
+	measured := map[string]any{"method": "interleaved", "control": map[string]any{"role": "invalid", "candidate_id": "control", "runs": 4, "max_adjacent_output_throughput_drift": 0.069, "drift_limit": 0.05, "reason": "control output throughput drifted 6.9% between adjacent runs, above the 5% limit"},
+		"runs": []any{run("control", 250, 310, 740), run("candidate", 186, 270, 1150), run("control", 240, 320, 750), run("candidate", 190, 280, 1160), run("control", 256, 312, 745), run("candidate", 188, 275, 1149), run("control", 238, 318, 742)}}
+	workload, _ := json.Marshal(map[string]any{"measured": measured})
+	row, _ := json.Marshal(map[string]any{"id": "bench-ngram", "output_token_throughput": 188.0, "ttft_p95_ms": 275.0, "latency_p95_ms": 1153.0, "workload": string(workload)})
+	measurement, ok := parseWatchBenchmark(row, "bench-ngram")
+	if !ok || len(measurement.Regressions) != 2 {
+		t.Fatalf("measurement = %+v", measurement)
+	}
+	ngram := watchCandidate{ID: "ngram", Rank: 2, State: "rejected", FailureCode: "measured_no_measurable_difference", DeploymentSpec: watchSpec("vllm", "--speculative-config", `{"method":"ngram"}`)}
+	control := watchCandidate{ID: "control", Rank: 1, State: "qualified", DeploymentSpec: watchSpec("vllm")}
+	expires := time.Date(2026, 11, 17, 4, 10, 0, 0, time.UTC)
+	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-1", ModelIdentity: "Qwen/Qwen3-0.6B", Intent: "new_endpoint", State: "qualified", ApprovalExpiresAt: &expires, Candidates: []watchCandidate{control, ngram}}, measurements: map[string]watchMeasurement{"ngram": measurement}}
+	text := renderOptimizeWatch(snapshot, newUIStyles(true), 120, false)
+	for _, want := range []string{
+		"rejected · throughput got worse by 24% (noise ±7.3%), latency got worse by 55% (noise ±6.9%)",
+		"otherwise they are removed when the approval ends at 2026-11-17 04:10 UTC",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("watch view lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "no real difference") {
+		t.Fatalf("a setup measured worse was called no real difference:\n%s", text)
+	}
+}
+
+func TestRenderOptimizeWatchDecisionFollowsEvolutionIntent(t *testing.T) {
+	control := watchCandidate{ID: "control", Rank: 1, State: "guard_passed", DeploymentSpec: watchSpec("vllm")}
+	candidate := watchCandidate{ID: "candidate", Rank: 2, State: "rejected", FailureCode: "measured_candidate_regressed", DeploymentSpec: watchSpec("vllm", "--kv-cache-dtype", "fp8")}
+	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-2", ModelIdentity: "Qwen/Qwen3-0.6B", Intent: "evolve_endpoint", TargetDeployment: "qwen-chat", State: "guard_passed", Candidates: []watchCandidate{control, candidate}}, measurements: map[string]watchMeasurement{}}
+	text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false)
+	for _, want := range []string{"kept · nothing to activate", "worse than your current setup", "Nothing to activate: qwen-chat keeps serving its current revision.", "infercrane optimize cancel campaign-2"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("watch view lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "optimize activate") {
+		t.Fatalf("a kept evolution control was offered for activation:\n%s", text)
+	}
+	// An evolution winner waits after the safety check, not qualification.
+	control.State, candidate.State, candidate.FailureCode = "rejected", "guard_passed", ""
+	snapshot.campaign.Candidates = []watchCandidate{control, candidate}
+	if text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false); !strings.Contains(text, "optimize activate campaign-2 --candidate candidate") {
+		t.Fatalf("an evolution winner was not offered for activation:\n%s", text)
+	}
+	candidate.State = "promoted"
+	snapshot.campaign.Candidates, snapshot.campaign.State = []watchCandidate{control, candidate}, "promoted"
+	if text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false); !strings.Contains(text, "is live") || strings.Contains(text, "optimize activate") {
+		t.Fatalf("an activated winner was offered for activation again:\n%s", text)
 	}
 }

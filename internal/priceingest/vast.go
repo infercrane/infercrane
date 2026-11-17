@@ -45,6 +45,10 @@ var defaultVastGPUs = []string{
 //
 // These rows are price observations only. A launch probe still owns account,
 // quota, stock, and deployability decisions.
+//
+// A full rotation takes several sweeps, so right after a restart most GPUs
+// have no row yet. Warm fetches one requested GPU on demand, spending the
+// request each sweep leaves free.
 type VastFeed struct {
 	APIKey           string
 	BaseURL          string
@@ -53,10 +57,19 @@ type VastFeed struct {
 	Now              func() time.Time
 	GPUQueries       []string
 	ShardsPerRefresh int
+	// Interval is the scheduled sweep cadence. It dates the next scheduled
+	// fetch of a GPU and spaces on-demand fetches; zero leaves the next fetch
+	// unknown and allows one on-demand fetch per minute.
+	Interval time.Duration
 
-	mu     sync.Mutex
-	cursor int
+	mu        sync.Mutex
+	cursor    int
+	lastSweep time.Time
+	lastWarm  time.Time
 }
+
+// vastFeedName is how errors name this feed to the person approving spend.
+const vastFeedName = "the Vast offer feed"
 
 func (f *VastFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog) error {
 	if catalog == nil {
@@ -65,26 +78,14 @@ func (f *VastFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog)
 	if f == nil {
 		return errors.New("Vast price feed is nil")
 	}
-	gpus := append([]string(nil), f.GPUQueries...)
-	if len(gpus) == 0 {
-		gpus = append(gpus, defaultVastGPUs...)
-	}
-	shards := f.ShardsPerRefresh
-	if shards <= 0 {
-		shards = defaultVastShardsPerSweep
-	}
-	if shards > defaultVastShardsPerSweep {
-		shards = defaultVastShardsPerSweep
-	}
-	if shards > len(gpus) {
-		shards = len(gpus)
-	}
+	gpus, shards := f.gpus(), f.shards()
 
 	// A feed instance owns one cursor and one request budget. Serializing refresh
 	// calls prevents a startup refresh and timer refresh from sharing the same
 	// five-call window.
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	defer func() { f.lastSweep = f.now() }()
 	if f.cursor >= len(gpus) {
 		f.cursor = 0
 	}
@@ -117,6 +118,108 @@ func (f *VastFeed) Refresh(ctx context.Context, catalog *pricing.DynamicCatalog)
 		return fmt.Errorf("Vast staged refresh had failed shards: %w", errors.Join(failures...))
 	}
 	return nil
+}
+
+func (f *VastFeed) gpus() []string {
+	gpus := append([]string(nil), f.GPUQueries...)
+	if len(gpus) == 0 {
+		gpus = append(gpus, defaultVastGPUs...)
+	}
+	return gpus
+}
+
+func (f *VastFeed) shards() int {
+	shards := f.ShardsPerRefresh
+	if shards <= 0 || shards > defaultVastShardsPerSweep {
+		shards = defaultVastShardsPerSweep
+	}
+	if gpus := len(f.gpus()); shards > gpus {
+		shards = gpus
+	}
+	return shards
+}
+
+func (f *VastFeed) now() time.Time {
+	if f.Now != nil {
+		return f.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// Warm fetches one GPU's lowest verified one-GPU offer now, outside the
+// rotation, so a spend approval for that GPU does not wait for the cursor.
+// It spends one request, the headroom every sweep leaves, and runs at most
+// once per Interval across the feed, so warms and sweeps together stay inside
+// Vast's five calls per window. It never waits behind a running sweep.
+func (f *VastFeed) Warm(ctx context.Context, catalog *pricing.DynamicCatalog, request pricing.Request) pricing.WarmResult {
+	result := pricing.WarmResult{Feed: vastFeedName}
+	if f == nil || catalog == nil {
+		result.Feed, result.Detail = "", "the Vast offer feed is not configured"
+		return result
+	}
+	if request.GPUCount > 1 || request.Replicas > 1 {
+		// The feed publishes one-GPU, one-replica rows only, and Vast bills
+		// marketplace replicas separately, so no fetch can produce this row.
+		result.Feed, result.Detail = "", "the Vast offer feed prices one GPU on one replica only"
+		return result
+	}
+	gpu := request.GPU
+	gpus := f.gpus()
+	index := -1
+	for candidate, name := range gpus {
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(gpu)) {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		result.Feed, result.Detail = "", "the Vast offer feed does not price "+gpu
+		return result
+	}
+	name := strings.TrimSpace(gpus[index])
+	if !f.mu.TryLock() {
+		result.Detail = "a Vast price refresh is running now; retry in a minute"
+		return result
+	}
+	defer f.mu.Unlock()
+	result.NextRefreshAt = f.nextScheduledFetch(index, len(gpus))
+	now := f.now()
+	spacing := f.Interval
+	if spacing <= 0 {
+		spacing = time.Minute
+	}
+	if !f.lastWarm.IsZero() && now.Sub(f.lastWarm) < spacing {
+		result.Detail = "an on-demand Vast price fetch already ran at " + f.lastWarm.UTC().Format("15:04:05 UTC") + ", and Vast allows few requests per window"
+		return result
+	}
+	f.lastWarm = now
+	budget := 1
+	prices, err := f.fetchGPU(ctx, name, &budget)
+	if err != nil {
+		result.Detail = "fetching it now failed (" + err.Error() + ")"
+		return result
+	}
+	catalog.ReplaceProviderGPU("vast", name, prices)
+	result.Fetched = true
+	if len(prices) == 0 {
+		result.Detail = "fetched just now, Vast has no rentable verified one-GPU " + name + " offer"
+	}
+	return result
+}
+
+// nextScheduledFetch dates the sweep whose shards reach index, counted from
+// the last sweep. It is zero before the first sweep or without an Interval;
+// a failed sweep backs off, so it is a lower bound. Callers hold f.mu.
+func (f *VastFeed) nextScheduledFetch(index, total int) time.Time {
+	if f.Interval <= 0 || f.lastSweep.IsZero() || total == 0 {
+		return time.Time{}
+	}
+	cursor := f.cursor
+	if cursor >= total {
+		cursor = 0
+	}
+	ahead := (index - cursor + total) % total
+	return f.lastSweep.Add(time.Duration(ahead/f.shards()+1) * f.Interval)
 }
 
 func (f *VastFeed) fetchGPU(ctx context.Context, gpu string, attemptBudget *int) (map[pricing.Request]pricing.Estimate, error) {

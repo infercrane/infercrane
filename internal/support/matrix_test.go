@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 func TestVLLMWorkloadPinsImageAndResolvedModelRevision(t *testing.T) {
@@ -86,5 +88,24 @@ func TestValidateProviderAdmitsOnlyDeclaredSkyPilotAdapters(t *testing.T) {
 	}
 	if err := matrix.ValidateProvider(DefaultRuntime, "aws", ElasticMode, ""); err != nil {
 		t.Fatalf("qualified cloud rejected: %v", err)
+	}
+}
+
+func TestServedWorkloadIsTheBuiltInDefaultForAnEmptyDraft(t *testing.T) {
+	for _, runtime := range []string{"", "vllm"} {
+		if served := ServedWorkload(runtime, runtimecontract.Workload{}); served.MetricsPath != "/metrics" || served.Image != VLLMWorkload().Image {
+			t.Fatalf("runtime %q served %#v", runtime, served)
+		}
+	}
+	if served := ServedWorkload("sglang", runtimecontract.Workload{}); served.Image != SGLangWorkload().Image {
+		t.Fatalf("sglang served %#v", served)
+	}
+	// A custom image declares its own contract; an empty one has no paths.
+	if served := ServedWorkload("custom-oci", runtimecontract.Workload{}); !served.Empty() {
+		t.Fatalf("custom-oci served %#v", served)
+	}
+	declared := runtimecontract.Workload{Image: "example/server@sha256:abc", Protocol: "openai", MetricsPath: ""}
+	if served := ServedWorkload("vllm", declared); served.Image != declared.Image || served.MetricsPath != "" {
+		t.Fatalf("an explicit workload was replaced: %#v", served)
 	}
 }

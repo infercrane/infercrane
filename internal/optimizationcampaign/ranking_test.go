@@ -188,7 +188,7 @@ func TestRankMeasuredCampaignKeepsControlWhenWinIsInsideNoiseFloor(t *testing.T)
 		reason     string
 	}{
 		"inside-noise":           {comparison: MetricComparison{ControlMean: 220, CandidateMean: 214, Delta: -6.0 / 220, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}, code: FailureNoMeasurableDifference, reason: "no measurable difference from the control"},
-		"same-window-regression": {comparison: MetricComparison{ControlMean: 130, CandidateMean: 140, Delta: 10.0 / 130, NoiseFloor: 0.03, Decision: DecisionRegressed}, reason: "worse than the control"},
+		"same-window-regression": {comparison: MetricComparison{ControlMean: 130, CandidateMean: 140, Delta: 10.0 / 130, NoiseFloor: 0.03, Decision: DecisionRegressed}, code: FailureRegressed, reason: "worse than the control"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			campaign, benchmarks := rankingFixture(t, "interactive", nil)
@@ -276,8 +276,68 @@ func TestRankMeasuredCampaignNeverWinsOnAnInvalidInterleavedComparison(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Decisions["candidate-a"] != RankSelect || result.FailureCodes["candidate-b"] != FailureNoMeasurableDifference || !strings.Contains(result.Reasons["candidate-b"], "interleaved comparison was invalid") {
+	// Incomparable evidence stays unknown: it is not "no difference".
+	if result.Decisions["candidate-a"] != RankSelect || result.FailureCodes["candidate-b"] != FailureComparisonUnavailable || !strings.Contains(result.Reasons["candidate-b"], "interleaved comparison was invalid") {
 		t.Fatalf("an invalid window produced a win: decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
+	}
+}
+
+// The 2026-11-17 RTX 4090 run: n-gram speculation measured 188 tok/s against
+// the control's 246 and p95 latency 1153 ms against 744, but the control's
+// throughput drifted 6.9% in that window, so the comparison was invalid and
+// the setup was labelled "no real difference". The drifted window's runs
+// still show it was worse; they never show it was better (its first token was
+// faster).
+func TestRankMeasuredCampaignNamesRegressionsSeenInADriftedControlWindow(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	base := `{"profile":"interactive","request_count":121,"random_seed":17}`
+	run := func(arm string, tps, ttft, latency float64) RunSummary {
+		return RunSummary{Arm: arm, Requests: 121, OutputTokenThroughput: &tps, TTFTP95MS: &ttft, LatencyP95MS: &latency}
+	}
+	measured := MeasuredEvidence{Method: MeasurementMethod,
+		Control: ControlEvidence{Role: ControlRoleInvalid, CandidateID: "candidate-a", Runs: 4, MaxDrift: 0.069, DriftLimit: 0.05, Reason: "control output throughput drifted 6.9% between adjacent runs, above the 5% limit"},
+		Runs: []RunSummary{
+			run("control", 250, 310, 740), run("candidate", 186, 270, 1150),
+			run("control", 240, 320, 750), run("candidate", 190, 280, 1160),
+			run("control", 256, 312, 745), run("candidate", 188, 275, 1149),
+			run("control", 238, 318, 742),
+		},
+	}
+	benchmarks[0].WorkloadJSON = measuredWorkload(t, base, MeasuredEvidence{Method: MeasurementMethod, Control: ControlEvidence{Role: ControlRoleCandidate, CandidateID: "candidate-a"}}, nil)
+	benchmarks[1].WorkloadJSON = measuredWorkload(t, base, measured, nil)
+	result, err := RankMeasuredCampaign(campaign, benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decisions["candidate-a"] != RankSelect || result.Decisions["candidate-b"] != RankSupersede || result.FailureCodes["candidate-b"] != FailureRegressed {
+		t.Fatalf("decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
+	}
+	reason := result.Reasons["candidate-b"]
+	for _, want := range []string{"worse than the control", "output_token_throughput changed -23.6%", "latency_p95_ms changed +54.9%", "in runs whose control drifted", "interleaved comparison was invalid"} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("reason %q lacks %q", reason, want)
+		}
+	}
+	if strings.Contains(reason, "ttft_p95_ms changed") {
+		t.Fatalf("a drifted window claimed a first-token result: %q", reason)
+	}
+	regressions := MeasuredRegressions(&measured)
+	if got := DescribeRegressions(regressions); !strings.HasPrefix(got, "throughput got worse by 24% (noise ±") || !strings.Contains(got, ", latency got worse by 55% (noise ±") {
+		t.Fatalf("customer words = %q", got)
+	}
+}
+
+// A window invalidated by a broken control, not by drift, holds runs that
+// prove nothing, so no regression is read from it.
+func TestMeasuredRegressionsIgnoreAControlThatFailed(t *testing.T) {
+	tps, slow := 250.0, 100.0
+	evidence := MeasuredEvidence{Control: ControlEvidence{Role: ControlRoleInvalid, CandidateID: "control", Runs: 1, DriftLimit: 0.05, Reason: "control run failed: timeout"},
+		Runs: []RunSummary{{Arm: "control", OutputTokenThroughput: &tps}, {Arm: "candidate", OutputTokenThroughput: &slow}, {Arm: "candidate", OutputTokenThroughput: &slow}}}
+	if regressions := MeasuredRegressions(&evidence); len(regressions) != 0 {
+		t.Fatalf("regressions = %+v", regressions)
+	}
+	if regressions := MeasuredRegressions(nil); regressions != nil {
+		t.Fatalf("regressions = %+v", regressions)
 	}
 }
 
@@ -307,7 +367,11 @@ func TestRankMeasuredCampaignComparesIntervalsWhenControlWasNotInterleaved(t *te
 			if result.Decisions[test.winner] != RankSelect {
 				t.Fatalf("decisions=%v reasons=%v", result.Decisions, result.Reasons)
 			}
-			if test.winner == "candidate-a" && (result.FailureCodes["candidate-b"] != FailureNoMeasurableDifference || !strings.Contains(result.Reasons["candidate-b"], "not serving")) {
+			code := FailureNoMeasurableDifference
+			if name == "missing" {
+				code = FailureComparisonUnavailable
+			}
+			if test.winner == "candidate-a" && (result.FailureCodes["candidate-b"] != code || !strings.Contains(result.Reasons["candidate-b"], "not serving")) {
 				t.Fatalf("an unproven candidate did not record why the control was kept: codes=%v reasons=%v", result.FailureCodes, result.Reasons)
 			}
 		})
@@ -437,5 +501,22 @@ func TestRankMeasuredCampaignRejectsMixedModelArtifacts(t *testing.T) {
 	proposal.Candidates[1].Deployment.Model.Revision = strings.Repeat("c", 40)
 	if _, err := measuredArtifactIdentity(proposal); err == nil {
 		t.Fatal("candidates serving different artifacts produced one measured identity")
+	}
+}
+
+// Inside the noise on the objective is not "no difference" when the same
+// window shows the setup measurably slower on throughput.
+func TestRankMeasuredCampaignNamesAHeadlineRegressionOutsideTheObjective(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	benchmarks[1].WorkloadJSON = interleaved(t, map[string]MetricComparison{
+		"ttft_p95_ms":             {ControlMean: 315, CandidateMean: 300, Delta: -15.0 / 315, NoiseFloor: 0.08, Decision: DecisionNoMeasurableDifference},
+		"output_token_throughput": {HigherIsBetter: true, ControlMean: 246, CandidateMean: 184, Delta: -0.25, NoiseFloor: 0.017, Decision: DecisionRegressed},
+	})
+	result, err := RankMeasuredCampaign(campaign, benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decisions["candidate-a"] != RankSelect || result.FailureCodes["candidate-b"] != FailureRegressed || !strings.Contains(result.Reasons["candidate-b"], "output_token_throughput changed -25.0% against a 1.7% noise floor") {
+		t.Fatalf("decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
 	}
 }

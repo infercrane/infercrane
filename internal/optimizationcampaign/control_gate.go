@@ -94,6 +94,13 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 	for _, row := range rows {
 		candidateID := evidenceToCandidate[row.EvidenceID]
 		assessment := gate.assessments[candidateID]
+		// A setup inside the noise on the objective, or not comparable on it,
+		// can still be measurably worse on another headline outcome. That is
+		// the reason it lost, so it is named rather than "no difference".
+		var regressions []Regression
+		if measured := decodeRankingWorkload(benchmarks[row.EvidenceID].WorkloadJSON).Measured; measured != nil && measured.Control.CandidateID == control.ID {
+			regressions = MeasuredRegressions(measured)
+		}
 		switch {
 		case candidateID == gate.selected && candidateID == control.ID:
 			gate.reasons[candidateID] = "control kept: no candidate beat it by more than the measurement noise"
@@ -106,13 +113,17 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 		case assessment.Decision == DecisionImproved:
 			gate.reasons[candidateID] = "measurably better than the control, but a better-ranked candidate also was: " + assessment.Reason
 		case assessment.Decision == DecisionRegressed:
+			gate.codes[candidateID] = FailureRegressed
 			gate.reasons[candidateID] = "worse than the control: " + assessment.Reason
+		case len(regressions) > 0:
+			gate.codes[candidateID] = FailureRegressed
+			gate.reasons[candidateID] = "worse than the control: " + regressionReason(regressions) + "; on the objective, " + assessment.Reason
 		case assessment.Decision == DecisionNoMeasurableDifference:
 			gate.codes[candidateID] = FailureNoMeasurableDifference
 			gate.reasons[candidateID] = "no measurable difference from the control: " + assessment.Reason
 		default:
-			gate.codes[candidateID] = FailureNoMeasurableDifference
-			gate.reasons[candidateID] = "not shown to beat the control: " + assessment.Reason
+			gate.codes[candidateID] = FailureComparisonUnavailable
+			gate.reasons[candidateID] = "not compared reliably with the control: " + assessment.Reason
 		}
 	}
 	return gate
