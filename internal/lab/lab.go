@@ -33,6 +33,12 @@ type Input struct {
 	Region          string   `json:"region,omitempty"`
 	MaxGPUCount     *int     `json:"max_gpu_count,omitempty"`
 	WorkloadDigest  string   `json:"workload_digest,omitempty"`
+	// DerivedModelIdentities are artifacts, such as quantized checkpoints, that
+	// the caller proved were built from ModelIdentity. Their rows compete with
+	// the base model's on the same workload. Lineage is not quality evidence:
+	// the caller must admit only rows whose answers already passed a check
+	// against the base model.
+	DerivedModelIdentities []string `json:"derived_model_identities,omitempty"`
 }
 
 type Candidate struct {
@@ -62,6 +68,9 @@ type Candidate struct {
 	Selected           bool            `json:"selected"`
 	ObjectiveValue     *float64        `json:"objective_value,omitempty"`
 	SelectionReason    string          `json:"selection_reason,omitempty"`
+	// ModelIdentity is set only on a row that served one of the input's
+	// derived artifacts instead of its base model.
+	ModelIdentity string `json:"model_identity,omitempty"`
 }
 
 func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluation, error) {
@@ -73,11 +82,15 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		return domain.LabEvaluation{}, err
 	}
 	digest := sha256.Sum256(inputJSON)
+	admitted := map[string]struct{}{input.ModelIdentity: {}}
+	for _, identity := range input.DerivedModelIdentities {
+		admitted[identity] = struct{}{}
+	}
 	candidates := make([]Candidate, 0, len(evidence))
 	for _, row := range evidence {
 		workloadDigest := digestJSON(row.WorkloadJSON)
 		workloadProfile := profileJSON(row.WorkloadJSON)
-		if row.ModelIdentity != input.ModelIdentity || input.WorkloadDigest != "" && workloadDigest != input.WorkloadDigest || input.WorkloadProfile != "" && workloadProfile != input.WorkloadProfile {
+		if _, ok := admitted[row.ModelIdentity]; !ok || input.WorkloadDigest != "" && workloadDigest != input.WorkloadDigest || input.WorkloadProfile != "" && workloadProfile != input.WorkloadProfile {
 			continue
 		}
 		errorRate := 0.0
@@ -89,6 +102,9 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 			cost = json.RawMessage(`{"available":false}`)
 		}
 		candidate := Candidate{EvidenceClass: "measured", EvidenceID: row.ID, Deployment: row.DeploymentName, Revision: row.RevisionID, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, ComputeMode: row.ComputeMode, RequestCount: row.RequestCount, TTFTP95MS: row.TTFTP95MS, TPOTP95MS: row.TPOTP95MS, OutputTokensSecond: row.OutputTokenThroughput, Goodput: row.Goodput, ErrorRate: errorRate, Cost: cost, WorkloadDigest: workloadDigest, WorkloadProfile: workloadProfile}
+		if row.ModelIdentity != input.ModelIdentity {
+			candidate.ModelIdentity = row.ModelIdentity
+		}
 		candidate.MeetsSLO, candidate.ConstraintReasons = evaluateConstraints(input, candidate)
 		candidate.ObjectiveValue = objectiveValue(input.Objective, candidate)
 		candidates = append(candidates, candidate)

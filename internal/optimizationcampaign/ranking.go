@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/lab"
@@ -51,7 +50,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	if campaign.ModelIdentity != proposal.Input.ModelIdentity || campaign.Objective != proposal.Input.Objective || campaign.InputDigest != proposal.InputDigest {
 		return MeasuredRanking{}, errors.New("campaign identity does not match its immutable proposal")
 	}
-	artifactIdentity, err := measuredArtifactIdentity(proposal)
+	lineage, err := optimizer.ProposalLineage(proposal)
 	if err != nil {
 		return MeasuredRanking{}, err
 	}
@@ -66,6 +65,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	evidenceToCandidate := make(map[string]string, len(campaign.Candidates))
 	decisions := make(map[string]string, len(campaign.Candidates))
 	reasons := make(map[string]string, len(campaign.Candidates))
+	derivedLineage := map[string]string{}
 	for _, candidate := range campaign.Candidates {
 		if !atMeasuredRankingBarrier(candidate.State) {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s has not reached the measured ranking barrier", candidate.ID)
@@ -84,27 +84,35 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 		if !ok {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark evidence is unavailable", candidate.ID)
 		}
-		if row.RevisionID != candidate.RevisionID || row.ModelIdentity != artifactIdentity {
+		// Each row must record the exact artifact its own proposal candidate
+		// serves, so a derived artifact's evidence cannot stand in for the
+		// base model's or the reverse.
+		artifact, ok := lineage.Candidates[candidate.ProposalCandidateID]
+		if !ok || row.RevisionID != candidate.RevisionID || row.ModelIdentity != artifact.Identity {
 			return MeasuredRanking{}, fmt.Errorf("candidate %s benchmark identity does not match campaign and revision", candidate.ID)
 		}
 		selectedEvidence = append(selectedEvidence, row)
 		evidenceToCandidate[row.ID] = candidate.ID
+		if artifact.Lineage != optimizer.LineageBase {
+			derivedLineage[candidate.ID] = artifact.Lineage
+		}
 	}
 	if len(selectedEvidence) == 0 {
 		return MeasuredRanking{}, errors.New("campaign has no measured candidates to rank")
 	}
 
 	evaluation, err := lab.Evaluate(lab.Input{
-		ModelIdentity:   artifactIdentity,
-		Objective:       proposal.Input.Objective,
-		WorkloadProfile: proposal.Input.WorkloadProfile,
-		MaxTTFTP95MS:    proposal.Input.MaxTTFTP95MS,
-		MaxTPOTP95MS:    proposal.Input.MaxTPOTP95MS,
-		MaxErrorRate:    proposal.Input.MaxErrorRate,
-		MinGoodput:      proposal.Input.MinGoodput,
-		MinOutputTPS:    proposal.Input.MinOutputTokensSecond,
-		MaxHourlyCost:   proposal.Input.MaxHourlyCost,
-		Region:          proposal.Input.Region,
+		ModelIdentity:          lineage.Base,
+		DerivedModelIdentities: lineage.Derived(),
+		Objective:              proposal.Input.Objective,
+		WorkloadProfile:        proposal.Input.WorkloadProfile,
+		MaxTTFTP95MS:           proposal.Input.MaxTTFTP95MS,
+		MaxTPOTP95MS:           proposal.Input.MaxTPOTP95MS,
+		MaxErrorRate:           proposal.Input.MaxErrorRate,
+		MinGoodput:             proposal.Input.MinGoodput,
+		MinOutputTPS:           proposal.Input.MinOutputTokensSecond,
+		MaxHourlyCost:          proposal.Input.MaxHourlyCost,
+		Region:                 proposal.Input.Region,
 	}, selectedEvidence)
 	if err != nil {
 		return MeasuredRanking{}, err
@@ -173,7 +181,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			}
 		}
 	}
-	annotated, err := annotateEvaluation(evaluation, rows, evidenceToCandidate, gate, decisions, reasons)
+	annotated, err := annotateEvaluation(evaluation, rows, evidenceToCandidate, derivedLineage, gate, decisions, reasons)
 	if err != nil {
 		return MeasuredRanking{}, err
 	}
@@ -192,29 +200,4 @@ func atMeasuredRankingBarrier(state string) bool {
 	default:
 		return false
 	}
-}
-
-// measuredArtifactIdentity is the identity benchmarks record for the deployed
-// artifact: the exact repository and immutable revision every candidate
-// serves. The campaign's requested model may be a catalog alias or omit the
-// revision, so it cannot be compared with measured rows directly. Campaigns
-// whose candidates serve different artifacts are not rankable by one Lab
-// evaluation and fail closed.
-func measuredArtifactIdentity(proposal optimizer.Proposal) (string, error) {
-	identity := ""
-	for _, candidate := range proposal.Candidates {
-		model, revision := strings.TrimSpace(candidate.Deployment.Model.ID), strings.TrimSpace(candidate.Deployment.Model.Revision)
-		if model == "" || revision == "" {
-			return "", fmt.Errorf("proposal candidate %s lacks an exact model artifact", candidate.ID)
-		}
-		next := model + "@" + revision
-		if identity != "" && next != identity {
-			return "", errors.New("campaign candidates serve different model artifacts; one measured ranking cannot compare them")
-		}
-		identity = next
-	}
-	if identity == "" {
-		return "", errors.New("campaign proposal has no candidates")
-	}
-	return identity, nil
 }

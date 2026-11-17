@@ -2,6 +2,7 @@ package optimizationcampaign
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -204,6 +205,7 @@ func TestRankMeasuredCampaignKeepsPublicPriorScreeningInconclusive(t *testing.T)
 	campaign.ModelIdentity = proposal.Input.ModelIdentity
 	for index := range benchmarks {
 		benchmarks[index].WorkloadJSON = `{"profile":"public-interactive","request_count":100,"random_seed":17}`
+		campaign.Candidates[index].ProposalCandidateID = proposal.Candidates[index].ID
 	}
 	result, err := RankMeasuredCampaign(campaign, benchmarks)
 	if err != nil {
@@ -539,8 +541,13 @@ func TestRankMeasuredCampaignRejectsMixedModelArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal.Candidates[1].Deployment.Model.Revision = strings.Repeat("c", 40)
-	if _, err := measuredArtifactIdentity(proposal); err == nil {
-		t.Fatal("candidates serving different artifacts produced one measured identity")
+	encoded, err := json.Marshal(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign.ProposalJSON = string(encoded)
+	if _, err = RankMeasuredCampaign(campaign, nil); !errors.Is(err, optimizer.ErrDifferentBaseModel) {
+		t.Fatalf("unmodified candidates serving different artifacts were ranked together: %v", err)
 	}
 }
 

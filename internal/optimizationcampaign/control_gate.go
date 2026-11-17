@@ -269,13 +269,17 @@ type annotatedRow struct {
 	lab.Candidate
 	CandidateID      string `json:"candidate_id"`
 	CampaignDecision string `json:"campaign_decision,omitempty"`
+	// ArtifactLineage is set only on a row that served an artifact derived
+	// from the control's model, such as a quantized checkpoint: exact, or
+	// publisher_declared when the source revision is unknown.
+	ArtifactLineage string `json:"artifact_lineage,omitempty"`
 	ControlAssessment
 }
 
 // annotateEvaluation persists the gate beside Lab's rows. Selection follows
 // the campaign decision, so a reader never sees Lab's point-estimate winner
 // marked selected after the gate kept the control.
-func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, evidenceToCandidate map[string]string, gate controlGate, decisions, reasons map[string]string) (domain.LabEvaluation, error) {
+func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, evidenceToCandidate, derivedLineage map[string]string, gate controlGate, decisions, reasons map[string]string) (domain.LabEvaluation, error) {
 	annotated := make([]annotatedRow, 0, len(rows))
 	for _, row := range rows {
 		candidateID := evidenceToCandidate[row.EvidenceID]
@@ -283,7 +287,7 @@ func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, e
 		if reason := reasons[candidateID]; reason != "" && row.Comparable {
 			row.SelectionReason = reason
 		}
-		annotated = append(annotated, annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ControlAssessment: gate.assessments[candidateID]})
+		annotated = append(annotated, annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ArtifactLineage: derivedLineage[candidateID], ControlAssessment: gate.assessments[candidateID]})
 	}
 	encoded, err := json.Marshal(annotated)
 	if err != nil {
