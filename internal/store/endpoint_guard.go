@@ -208,7 +208,7 @@ func (s *Store) EndpointReleaseGuardEvaluations(ctx context.Context, tenant, nam
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT g.id,g.tenant_id,g.endpoint_id,g.active_serving_plan_id,g.candidate_serving_plan_id,g.decision,g.reason_codes_json::text,g.metrics_json::text,g.policy_json::text,g.created_at FROM endpoint_release_guard_evaluations g JOIN endpoints e ON e.id=g.endpoint_id WHERE e.tenant_id=? AND e.name=? ORDER BY g.created_at DESC LIMIT ?`, tenant, name, limit)
+	rows, err := s.QueryContext(ctx, `SELECT g.id,g.tenant_id,g.endpoint_id,g.active_serving_plan_id,g.candidate_serving_plan_id,g.decision,g.reason_codes_json::text,g.metrics_json::text,g.policy_json::text,g.created_at FROM endpoint_release_guard_evaluations g JOIN endpoints e ON e.id=g.endpoint_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted' ORDER BY g.created_at DESC LIMIT ?`, tenant, name, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (s *Store) EndpointReleaseGuardEvaluations(ctx context.Context, tenant, nam
 
 func (s *Store) EndpointReleaseGuardAccepted(ctx context.Context, tenant, name, candidatePlanID string) (bool, error) {
 	var decision, currentActive, currentCandidate, evaluatedActive string
-	err := s.QueryRowContext(ctx, `SELECT g.decision,e.active_serving_plan_id,e.candidate_serving_plan_id,g.active_serving_plan_id FROM endpoints e JOIN endpoint_release_guard_evaluations g ON g.endpoint_id=e.id AND g.candidate_serving_plan_id=? WHERE e.tenant_id=? AND e.name=? ORDER BY g.created_at DESC LIMIT 1`, candidatePlanID, tenant, name).Scan(&decision, &currentActive, &currentCandidate, &evaluatedActive)
+	err := s.QueryRowContext(ctx, `SELECT g.decision,e.active_serving_plan_id,e.candidate_serving_plan_id,g.active_serving_plan_id FROM endpoints e JOIN endpoint_release_guard_evaluations g ON g.endpoint_id=e.id AND g.candidate_serving_plan_id=? WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted' ORDER BY g.created_at DESC LIMIT 1`, candidatePlanID, tenant, name).Scan(&decision, &currentActive, &currentCandidate, &evaluatedActive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

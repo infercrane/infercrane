@@ -118,7 +118,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	defer func() { _ = tx.Rollback() }()
 	if operationID != "" {
-		row := tx.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.created_by_operation_id=?`, tenant, deploymentName, operationID)
+		row := tx.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` AND r.created_by_operation_id=?`, tenant, deploymentName, operationID)
 		existing, lookupErr := scanRevision(row)
 		if lookupErr == nil {
 			if !sameJSON(existing.SpecJSON, specJSON) {
@@ -173,7 +173,7 @@ func (s *Store) Revisions(ctx context.Context, tenant, deploymentName string) ([
 	if tenant == "" {
 		tenant = "global"
 	}
-	rows, err := s.QueryContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY r.revision_number DESC`, tenant, deploymentName)
+	rows, err := s.QueryContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY r.revision_number DESC`, tenant, deploymentName)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (s *Store) Revision(ctx context.Context, tenant, deploymentName, revisionID
 	if tenant == "" {
 		tenant = "global"
 	}
-	revision, err := scanRevision(s.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.id=?`, tenant, deploymentName, revisionID))
+	revision, err := scanRevision(s.QueryRowContext(ctx, `SELECT `+revisionColumns+` FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` AND r.id=?`, tenant, deploymentName, revisionID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return revision, ErrNotFound
 	}
@@ -209,7 +209,7 @@ func (s *Store) PreviousRevisionID(ctx context.Context, tenant, deploymentName, 
 		tenant = "global"
 	}
 	var id string
-	err := s.QueryRowContext(ctx, `SELECT r.id FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND r.id!=? AND r.status='superseded' ORDER BY r.completed_at DESC NULLS LAST,r.revision_number DESC LIMIT 1`, tenant, deploymentName, activeRevisionID).Scan(&id)
+	err := s.QueryRowContext(ctx, `SELECT r.id FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` AND r.id!=? AND r.status='superseded' ORDER BY r.completed_at DESC NULLS LAST,r.revision_number DESC LIMIT 1`, tenant, deploymentName, activeRevisionID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}

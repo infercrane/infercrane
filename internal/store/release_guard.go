@@ -297,7 +297,7 @@ func (s *Store) ReleaseGuardEvaluations(ctx context.Context, tenant, deploymentN
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT e.id,e.deployment_id,e.active_revision_id,e.candidate_revision_id,e.decision,e.reason_codes_json::text,e.metrics_json::text,e.policy_json::text,e.created_at FROM release_guard_evaluations e JOIN deployments d ON d.id=e.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY e.created_at DESC LIMIT ?`, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT e.id,e.deployment_id,e.active_revision_id,e.candidate_revision_id,e.decision,e.reason_codes_json::text,e.metrics_json::text,e.policy_json::text,e.created_at FROM release_guard_evaluations e JOIN deployments d ON d.id=e.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY e.created_at DESC LIMIT ?`, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func (s *Store) ReleaseGuardEvaluations(ctx context.Context, tenant, deploymentN
 
 func (s *Store) ReleaseGuardAccepted(ctx context.Context, tenant, deploymentName, candidateID string) (bool, error) {
 	var decision, currentCandidate, activeID, evaluatedActive string
-	err := s.QueryRowContext(ctx, `SELECT e.decision,COALESCE(d.candidate_revision_id,''),d.active_revision_id,e.active_revision_id FROM deployments d JOIN release_guard_evaluations e ON e.deployment_id=d.id AND e.candidate_revision_id=? WHERE d.tenant_id=? AND d.name=? ORDER BY e.created_at DESC LIMIT 1`, candidateID, tenant, deploymentName).Scan(&decision, &currentCandidate, &activeID, &evaluatedActive)
+	err := s.QueryRowContext(ctx, `SELECT e.decision,COALESCE(d.candidate_revision_id,''),d.active_revision_id,e.active_revision_id FROM deployments d JOIN release_guard_evaluations e ON e.deployment_id=d.id AND e.candidate_revision_id=? WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY e.created_at DESC LIMIT 1`, candidateID, tenant, deploymentName).Scan(&decision, &currentCandidate, &activeID, &evaluatedActive)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

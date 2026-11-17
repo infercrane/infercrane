@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT b.id,b.tenant_id,b.deployment_id,b.deployment_name,b.revision_id,COALESCE(b.model_artifact_id,''),b.model_identity,b.runtime,b.runtime_version,b.runtime_config_json::text,b.provider,b.region,b.gpu,b.gpu_count,b.compute_mode,b.tool,b.tool_version,b.workload_json::text,b.reproduction_command,b.request_count,b.succeeded,b.failed,b.duration_seconds,b.request_throughput,b.output_token_throughput,b.ttft_p50_ms,b.ttft_p95_ms,b.tpot_p50_ms,b.tpot_p95_ms,b.latency_p50_ms,b.latency_p95_ms,b.goodput,b.gpu_utilization,b.cost_metadata_json::text,b.created_at FROM benchmark_results b JOIN deployments d ON d.id=b.deployment_id WHERE b.tenant_id=? AND d.name=? ORDER BY b.created_at DESC LIMIT ?`, tenant, name, limit)
+	rows, err := s.QueryContext(ctx, `SELECT b.id,b.tenant_id,b.deployment_id,b.deployment_name,b.revision_id,COALESCE(b.model_artifact_id,''),b.model_identity,b.runtime,b.runtime_version,b.runtime_config_json::text,b.provider,b.region,b.gpu,b.gpu_count,b.compute_mode,b.tool,b.tool_version,b.workload_json::text,b.reproduction_command,b.request_count,b.succeeded,b.failed,b.duration_seconds,b.request_throughput,b.output_token_throughput,b.ttft_p50_ms,b.ttft_p95_ms,b.tpot_p50_ms,b.tpot_p95_ms,b.latency_p50_ms,b.latency_p95_ms,b.goodput,b.gpu_utilization,b.cost_metadata_json::text,b.created_at FROM benchmark_results b JOIN deployments d ON d.id=b.deployment_id WHERE b.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY b.created_at DESC LIMIT ?`, tenant, name, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +146,7 @@ func (s *Store) CreateDeploymentForTenant(ctx context.Context, tenant string, de
 	_, err = tx.ExecContext(ctx, `INSERT INTO deployments(id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,tenant_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, deployment.ID, deployment.Name, deployment.Model, deployment.Runtime, deployment.RoutingStrategy, deployment.DesiredState, deployment.ObservedState, deployment.MinReplicas, deployment.MaxReplicas, deployment.AutoscalingEnabled, tenant, stamp, stamp)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return domain.Deployment{}, fmt.Errorf("%w: deployment already exists", ErrConflict)
+			return domain.Deployment{}, deploymentNameConflict(err, deployment.Name)
 		}
 		return domain.Deployment{}, err
 	}
@@ -348,8 +349,11 @@ func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name stri
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var id, desired, observed string
-	if err := tx.QueryRowContext(ctx, `SELECT id,desired_state,observed_state FROM deployments WHERE tenant_id=? AND name=?`, tenant, name).Scan(&id, &desired, &observed); errors.Is(err, sql.ErrNoRows) {
+	// A deployment that finished deleting no longer owns its name, so a retry
+	// after completion finds nothing and succeeds without touching a newer
+	// deployment of the same name.
+	var id string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM deployments WHERE tenant_id=? AND name=? AND `+liveDeployment+` FOR UPDATE`, tenant, name).Scan(&id); errors.Is(err, sql.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return err
@@ -363,24 +367,71 @@ func (s *Store) DeleteDeploymentForTenant(ctx context.Context, tenant, name stri
 	if _, err := tx.ExecContext(ctx, `DELETE FROM deployment_compute_connections WHERE tenant_id=? AND deployment_id=?`, tenant, id); err != nil {
 		return err
 	}
-	if desired == "deleted" && observed == "deleted" {
-		return tx.Commit()
-	}
 	stamp := now()
 	if _, err := tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleted',updated_at=? WHERE id=?`, stamp, id); err != nil {
+		return err
+	}
+	retired, err := retireOwnedEndpointsTx(ctx, tx, tenant, id, stamp)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"retired_endpoints": retired})
+	if err != nil {
 		return err
 	}
 	eventID, err := newID()
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, eventID, id, "deployment_deleted", "Deployment "+name+" deleted", "{}", stamp); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO deployment_events(id,deployment_id,event_type,summary,payload_json,created_at) VALUES(?,?,?,?,?::jsonb,?)`, eventID, id, "deployment_deleted", "Deployment "+name+" deleted", string(payload), stamp); err != nil {
 		return err
 	}
 	if err := finalizeManagedDeploymentSpendTx(ctx, tx, tenant, name, stamp); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// retireOwnedEndpointsTx deletes the endpoints InferCrane created for a
+// deployment that has just been deleted, as long as nothing else is bound to
+// them. Such an endpoint can never serve again: a deployment deployed again
+// under the same name gets a new ID and its own endpoint. An owned endpoint
+// that an operator gave another backend is left for the operator to decide.
+func retireOwnedEndpointsTx(ctx context.Context, tx *tx, tenant, deploymentID, stamp string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `UPDATE endpoints e SET desired_state='deleted',observed_state='deleted',updated_at=?
+		WHERE e.tenant_id=? AND e.owner_deployment_id=? AND e.desired_state<>'deleted'
+		AND NOT EXISTS (SELECT 1 FROM backend_bindings b WHERE b.endpoint_id=e.id AND (b.kind<>'deployment' OR b.deployment_id<>?))
+		RETURNING e.name`, stamp, tenant, deploymentID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	retired := []string{}
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		retired = append(retired, name)
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Strings(retired)
+	for _, name := range retired {
+		auditID, idErr := newID()
+		if idErr != nil {
+			return nil, idErr
+		}
+		payload, _ := json.Marshal(map[string]string{"reason": "owner_deployment_deleted", "deployment_id": deploymentID})
+		if _, err = tx.ExecContext(ctx, `INSERT INTO audit_events(id,tenant_id,actor,action,resource_type,resource_name,outcome,request_id,payload_json,created_at) VALUES(?,?,'system','endpoint.delete','endpoint',?,'succeeded',NULL,?::jsonb,?)`, auditID, tenant, name, string(payload), stamp); err != nil {
+			return nil, err
+		}
+	}
+	return retired, nil
 }
 
 func finalizeManagedDeploymentSpendTx(ctx context.Context, tx *tx, tenant, name, stamp string) error {
@@ -432,7 +483,9 @@ func (s *Store) SetTargetHealth(ctx context.Context, id, health string) error {
 	return err
 }
 func (s *Store) SetDeploymentState(ctx context.Context, id, state string) error {
-	_, err := s.ExecContext(ctx, `UPDATE deployments SET observed_state=?,updated_at=? WHERE id=?`, state, now(), id)
+	// Health observations never overwrite a deletion in progress or a deleted
+	// deployment: a deleted row that read healthy again would take its name back.
+	_, err := s.ExecContext(ctx, `UPDATE deployments SET observed_state=?,updated_at=? WHERE id=? AND desired_state<>'deleted'`, state, now(), id)
 	return err
 }
 func (s *Store) Event(ctx context.Context, deploymentID, targetID, eventType, summary, payload string) error {

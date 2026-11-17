@@ -85,7 +85,8 @@ func (s *Store) PublishDeploymentEndpoint(ctx context.Context, tenant, endpointN
 	}
 	digest := sha256.Sum256(planBody)
 	planDigest := "sha256:" + hex.EncodeToString(digest[:])
-	if _, err = tx.ExecContext(ctx, `INSERT INTO endpoints(id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,created_at,updated_at) VALUES(?,?,?,?,?,'serving','pending',?,?)`, endpointID, tenant, logicalModelID, environmentID, endpointName, stamp, stamp); err != nil {
+	// The endpoint is created for this deployment, so it is deleted with it.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO endpoints(id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,owner_deployment_id,created_at,updated_at) VALUES(?,?,?,?,?,'serving','pending',?,?,?)`, endpointID, tenant, logicalModelID, environmentID, endpointName, deploymentID, stamp, stamp); err != nil {
 		if isUniqueViolation(err) {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				return domain.ResolvedEndpoint{}, rollbackErr

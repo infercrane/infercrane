@@ -50,7 +50,7 @@ func (s *Store) ReleaseGuardMonitor(ctx context.Context, tenant, deploymentName,
 	}
 	var value domain.ReleaseGuardMonitor
 	var deadline, created, updated string
-	err := s.QueryRowContext(ctx, `SELECT m.id,m.tenant_id,m.deployment_id,m.promoted_revision_id,m.rollback_revision_id,m.status,COALESCE(m.evaluation_id,''),m.reason,m.policy_json::text,m.deadline,m.created_at,m.updated_at FROM release_guard_monitors m JOIN deployments d ON d.id=m.deployment_id WHERE m.tenant_id=? AND d.name=? AND m.promoted_revision_id=?`, tenant, deploymentName, promotedRevisionID).Scan(&value.ID, &value.TenantID, &value.DeploymentID, &value.PromotedRevisionID, &value.RollbackRevisionID, &value.Status, &value.EvaluationID, &value.Reason, &value.PolicyJSON, &deadline, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT m.id,m.tenant_id,m.deployment_id,m.promoted_revision_id,m.rollback_revision_id,m.status,COALESCE(m.evaluation_id,''),m.reason,m.policy_json::text,m.deadline,m.created_at,m.updated_at FROM release_guard_monitors m JOIN deployments d ON d.id=m.deployment_id WHERE m.tenant_id=? AND d.name=? AND `+liveDeploymentD+` AND m.promoted_revision_id=?`, tenant, deploymentName, promotedRevisionID).Scan(&value.ID, &value.TenantID, &value.DeploymentID, &value.PromotedRevisionID, &value.RollbackRevisionID, &value.Status, &value.EvaluationID, &value.Reason, &value.PolicyJSON, &deadline, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return value, ErrNotFound
 	}

@@ -76,6 +76,11 @@ matched to one durable replica intent - or absence is proven by the owning provi
 
 Delete first withdraws desired routing, then drains and removes external resources. Restarting midway resumes cleanup. Completion requires provider absence, removed targets and replicas, and a deployment tombstone. Operators should still verify provider inventory after paid acceptance tests.
 
+Cancelling a deployment's first deploy while it runs uses the same cleanup. It removes any capacity
+the deploy started and finishes with the same tombstone, so the name is released exactly as after a
+delete. A deploy cancelled before any work started leaves the deployment in place; delete it to
+release the name.
+
 ## Delete without losing recovery state
 
 Preview the exact effect before mutation. Confirm explicitly, give the request a stable retry key,
@@ -103,6 +108,11 @@ matching durable provider ownership. Also check external fallback, async jobs, a
 retained release evidence required by your policy. InferCrane will not guess how an application
 should replace a deleted endpoint dependency.
 
+The endpoint InferCrane created for the deployment (its own name, or the `endpoint_name` it
+published) is deleted together with the deployment, because nothing else can serve it. If you bound
+another backend to that endpoint, InferCrane keeps it and leaves the replacement plan to you.
+Endpoints you created and bound yourself are never deleted with a deployment.
+
 If the terminal disconnects, do not submit a new intent with a new key. Reattach with the operation
 ID returned by `delete`, or inspect the persisted deployment events. After completion, verify both
 InferCrane state and the provider boundary:
@@ -116,3 +126,15 @@ The deployment must be absent from the first result and no run-owned orphan may 
 second. For a paid or real-cluster operation, independently inspect the provider inventory too.
 Provider deletion is not proven solely by a missing database row. Never erase PostgreSQL or use
 `--keep-resources` while cleanup is unresolved unless you intentionally accept external ownership.
+
+## Deploy a deleted name again
+
+Once a delete, or the cleanup after a cancelled first deploy, has finished, the same name can be
+deployed again. The new deployment gets a new ID, a new endpoint, and, for a managed deployment, a
+new prepaid hold. The deleted deployment keeps its events, revisions, evidence, and settled hold
+under its old ID, so history from the two deployments is never mixed.
+
+A name stays taken while its deletion is still running. Submitting it again returns a conflict that
+says the deletion is in progress; wait for the delete operation to finish. A name is also taken while
+another live endpoint uses it, for example one you created yourself or one InferCrane kept because
+you bound another backend to it. Delete that endpoint or choose another deployment name.

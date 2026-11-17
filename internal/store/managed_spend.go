@@ -14,7 +14,10 @@ func managedSpendReservationByResourceTx(ctx context.Context, tx *tx, tenant, re
 	var actual sql.NullInt64
 	var activated sql.NullTime
 	var created, updated time.Time
-	query := `SELECT id,tenant_id,resource_type,resource_name,provider,state,currency,supplier_hourly_microusd,retail_hourly_microusd,reserved_microusd,actual_microusd,gross_margin_bps,runtime_limit_seconds,cleanup_allowance_seconds,pricing_json::text,resolution,expires_at,activated_at,created_at,updated_at FROM managed_spend_reservations WHERE tenant_id=? AND resource_type=? AND resource_name=?`
+	// A deployment name deployed again has one hold per deployment. The open
+	// hold, if any, belongs to the current deployment; otherwise the newest
+	// settled or released hold is the most recent history.
+	query := `SELECT id,tenant_id,resource_type,resource_name,provider,state,currency,supplier_hourly_microusd,retail_hourly_microusd,reserved_microusd,actual_microusd,gross_margin_bps,runtime_limit_seconds,cleanup_allowance_seconds,pricing_json::text,resolution,expires_at,activated_at,created_at,updated_at FROM managed_spend_reservations WHERE tenant_id=? AND resource_type=? AND resource_name=? ORDER BY (state IN ('reserved','pending_reconciliation')) DESC,created_at DESC,id DESC LIMIT 1`
 	if forUpdate {
 		query += ` FOR UPDATE`
 	}

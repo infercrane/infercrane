@@ -47,7 +47,7 @@ func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upst
 
 	var existing domain.AdoptedWorkload
 	var existingURL, existingModel string
-	err = tx.QueryRowContext(ctx, `SELECT a.id,a.tenant_id,a.endpoint_id,a.binding_id,a.target_id,a.ownership_mode,a.source,a.immutable_identity,a.created_at,a.updated_at,t.url,t.upstream_model_name FROM adopted_workloads a JOIN endpoints e ON e.id=a.endpoint_id JOIN targets t ON t.id=a.target_id WHERE a.tenant_id=? AND e.name=?`, tenant, name).Scan(&existing.ID, &existing.TenantID, &existing.EndpointID, &existing.BindingID, &existing.TargetID, &existing.OwnershipMode, &existing.Source, &existing.ImmutableIdentity, &existing.CreatedAt, &existing.UpdatedAt, &existingURL, &existingModel)
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.tenant_id,a.endpoint_id,a.binding_id,a.target_id,a.ownership_mode,a.source,a.immutable_identity,a.created_at,a.updated_at,t.url,t.upstream_model_name FROM adopted_workloads a JOIN endpoints e ON e.id=a.endpoint_id JOIN targets t ON t.id=a.target_id WHERE a.tenant_id=? AND e.name=? AND e.desired_state<>'deleted'`, tenant, name).Scan(&existing.ID, &existing.TenantID, &existing.EndpointID, &existing.BindingID, &existing.TargetID, &existing.OwnershipMode, &existing.Source, &existing.ImmutableIdentity, &existing.CreatedAt, &existing.UpdatedAt, &existingURL, &existingModel)
 	if err == nil {
 		if existing.OwnershipMode != ownership || existing.Source != source || existing.ImmutableIdentity != identity || existingURL != normalizedURL || existingModel != upstreamModel {
 			return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, fmt.Errorf("%w: endpoint is already adopted with different immutable identity or ownership", ErrConflict)
@@ -171,7 +171,7 @@ func (s *Store) PromoteAdoptionOwnership(ctx context.Context, tenant, name, owne
 	}
 	defer tx.Rollback()
 	var item domain.AdoptedWorkload
-	err = tx.QueryRowContext(ctx, `SELECT a.id,a.tenant_id,a.endpoint_id,a.binding_id,a.target_id,a.ownership_mode,a.source,a.immutable_identity,a.created_at,a.updated_at FROM adopted_workloads a JOIN endpoints e ON e.id=a.endpoint_id WHERE a.tenant_id=? AND e.name=? FOR UPDATE`, tenant, name).Scan(&item.ID, &item.TenantID, &item.EndpointID, &item.BindingID, &item.TargetID, &item.OwnershipMode, &item.Source, &item.ImmutableIdentity, &item.CreatedAt, &item.UpdatedAt)
+	err = tx.QueryRowContext(ctx, `SELECT a.id,a.tenant_id,a.endpoint_id,a.binding_id,a.target_id,a.ownership_mode,a.source,a.immutable_identity,a.created_at,a.updated_at FROM adopted_workloads a JOIN endpoints e ON e.id=a.endpoint_id WHERE a.tenant_id=? AND e.name=? AND e.desired_state<>'deleted' FOR UPDATE`, tenant, name).Scan(&item.ID, &item.TenantID, &item.EndpointID, &item.BindingID, &item.TargetID, &item.OwnershipMode, &item.Source, &item.ImmutableIdentity, &item.CreatedAt, &item.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.AdoptedWorkload{}, ErrNotFound
 	}

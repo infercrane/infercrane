@@ -57,8 +57,9 @@ and validity evidence.
 ## Atomicity and recovery
 
 Wallet reservation, deployment intent, and lifecycle operation are one database transaction.
-Idempotency keys cannot create duplicate holds. Deletion settlement and wallet release are also one
-transaction and are safe to retry.
+Idempotency keys cannot create duplicate holds. A deployment name has at most one open hold; a
+name deployed again after deletion gets a new hold, and the settled one stays as history. Deletion
+settlement and wallet release are also one transaction and are safe to retry.
 
 The background expiry worker finds:
 

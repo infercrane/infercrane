@@ -262,7 +262,7 @@ func prohibitedSandboxMetadataKey(value any) string {
 }
 
 func (s *Store) TrainingArtifactHandoffs(ctx context.Context, tenant, deploymentName string) ([]domain.TrainingArtifactHandoff, error) {
-	rows, err := s.QueryContext(ctx, `SELECT h.id,h.tenant_id,h.deployment_id,h.revision_id,h.model_artifact_id,h.provider,h.external_run_id,h.repository,h.immutable_revision,h.artifact_digest,h.base_model_identity,h.method,h.framework,h.framework_version,h.dataset_fingerprint,h.payload_digest,h.signature,h.public_key,h.algorithm,h.key_id,h.created_at FROM training_artifact_handoffs h JOIN deployments d ON d.id=h.deployment_id WHERE h.tenant_id=? AND d.name=? ORDER BY h.created_at DESC,h.id DESC`, tenant, deploymentName)
+	rows, err := s.QueryContext(ctx, `SELECT h.id,h.tenant_id,h.deployment_id,h.revision_id,h.model_artifact_id,h.provider,h.external_run_id,h.repository,h.immutable_revision,h.artifact_digest,h.base_model_identity,h.method,h.framework,h.framework_version,h.dataset_fingerprint,h.payload_digest,h.signature,h.public_key,h.algorithm,h.key_id,h.created_at FROM training_artifact_handoffs h JOIN deployments d ON d.id=h.deployment_id WHERE h.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY h.created_at DESC,h.id DESC`, tenant, deploymentName)
 	if err != nil {
 		return nil, err
 	}

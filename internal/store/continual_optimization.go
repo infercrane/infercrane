@@ -37,7 +37,7 @@ func (s *Store) SetContinualOptimizationPolicy(ctx context.Context, tenant, depl
 func (s *Store) ContinualOptimizationPolicy(ctx context.Context, tenant, deployment string) (domain.ContinualOptimizationPolicyRecord, error) {
 	var row domain.ContinualOptimizationPolicyRecord
 	var created, updated time.Time
-	err := s.QueryRowContext(ctx, `SELECT p.tenant_id,p.deployment_id,d.name,p.policy_json::text,p.generation,p.created_at,p.updated_at FROM continual_optimization_policies p JOIN deployments d ON d.id=p.deployment_id AND d.tenant_id=p.tenant_id WHERE p.tenant_id=? AND d.name=?`, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.PolicyJSON, &row.Generation, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT p.tenant_id,p.deployment_id,d.name,p.policy_json::text,p.generation,p.created_at,p.updated_at FROM continual_optimization_policies p JOIN deployments d ON d.id=p.deployment_id AND d.tenant_id=p.tenant_id WHERE p.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.PolicyJSON, &row.Generation, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
@@ -50,7 +50,7 @@ func (s *Store) ContinualOptimizationState(ctx context.Context, tenant, deployme
 	var baseline, digest, latest sql.NullString
 	var last sql.NullTime
 	var created, updated time.Time
-	err := s.QueryRowContext(ctx, `SELECT st.tenant_id,st.deployment_id,d.name,st.baseline_json::text,st.baseline_digest,st.last_experiment_at,st.latest_decision_id,st.generation,st.created_at,st.updated_at FROM continual_optimization_states st JOIN deployments d ON d.id=st.deployment_id AND d.tenant_id=st.tenant_id WHERE st.tenant_id=? AND d.name=?`, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &baseline, &digest, &last, &latest, &row.Generation, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT st.tenant_id,st.deployment_id,d.name,st.baseline_json::text,st.baseline_digest,st.last_experiment_at,st.latest_decision_id,st.generation,st.created_at,st.updated_at FROM continual_optimization_states st JOIN deployments d ON d.id=st.deployment_id AND d.tenant_id=st.tenant_id WHERE st.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &baseline, &digest, &last, &latest, &row.Generation, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
