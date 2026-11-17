@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
@@ -144,6 +145,11 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	if spec.GPUCount < 1 || spec.GPUCount > 1024 {
 		return ProviderHandle{}, errors.New("GPU count must be between 1 and 1024")
+	}
+	// SkyPilot reaches its node over SSH, and InferCrane builds SSH-capable
+	// runtime images only for the CUDA platform.
+	if platform := provideridentity.AcceleratorPlatform(spec.GPU); platform != provideridentity.PlatformCUDA {
+		return ProviderHandle{}, fmt.Errorf("%w: SkyPilot launches run the %s platform only; %s needs %s, which runs through runpod-pods or kubernetes", ErrInvalidReplicaSpec, provideridentity.PlatformCUDA, spec.GPU, platform)
 	}
 	if !spec.Workload.Empty() {
 		if err := spec.Workload.Validate(); err != nil {

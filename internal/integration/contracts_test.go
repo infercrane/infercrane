@@ -384,8 +384,8 @@ func TestSGLangQualificationCitesItsOnlyRecordedRealRun(t *testing.T) {
 }
 
 // Measurement reads support.ServedWorkload to decide whether to scrape a
-// replica's metrics; provisioning fills the registry's default workload. The
-// two must name the same contract for every built-in runtime.
+// replica's metrics; provisioning fills the registry's workload for the GPU.
+// The two must name the same contract for every built-in runtime and GPU.
 func TestServedWorkloadMatchesRegisteredRuntimeDefaults(t *testing.T) {
 	registry, err := PortableCatalog()
 	if err != nil {
@@ -396,9 +396,90 @@ func TestServedWorkloadMatchesRegisteredRuntimeDefaults(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		served := support.ServedWorkload(name, runtimecontract.Workload{})
-		if served.Image != profile.DefaultWorkload.Image || served.MetricsPath != profile.DefaultWorkload.MetricsPath || served.Port != profile.DefaultWorkload.Port {
-			t.Fatalf("%s: measurement contract %#v differs from the provisioned default %#v", name, served, profile.DefaultWorkload)
+		for _, gpu := range []string{"", "H100", "MI300X", "AMD Instinct MI325X OAM", "MI355X"} {
+			provisioned, err := profile.WorkloadFor(gpu)
+			if err != nil {
+				t.Fatalf("%s on %q: %v", name, gpu, err)
+			}
+			served := support.ServedWorkload(name, gpu, runtimecontract.Workload{})
+			if served.Image != provisioned.Image || served.MetricsPath != provisioned.MetricsPath || served.Port != provisioned.Port {
+				t.Fatalf("%s on %q: measurement contract %#v differs from the provisioned workload %#v", name, gpu, served, provisioned)
+			}
 		}
+	}
+}
+
+func TestBuiltInRuntimesRecordEveryPinnedPlatformImage(t *testing.T) {
+	registry, err := KubernetesCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{support.DefaultRuntime, "sglang"} {
+		profile, err := registry.Runtime(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var platforms []string
+		for _, image := range profile.Images {
+			platforms = append(platforms, image.Platform)
+			if image.EngineVersion != profile.EngineVersion {
+				t.Fatalf("%s %s image runs engine %s, profile %s", name, image.Platform, image.EngineVersion, profile.EngineVersion)
+			}
+		}
+		if strings.Join(platforms, ",") != "cuda,rocm-gfx942,rocm-gfx950" || profile.DefaultWorkload.Image != profile.Images[0].Image {
+			t.Fatalf("%s platforms=%v default=%q", name, platforms, profile.DefaultWorkload.Image)
+		}
+		// No real AMD run exists, so no platform image may claim one.
+		for _, qualification := range profile.Qualification {
+			if qualification.State == QualificationReal {
+				t.Fatalf("%s claims real qualification: %+v", name, qualification)
+			}
+		}
+		rocm, err := profile.WorkloadFor("MI300X")
+		if err != nil || !strings.Contains(rocm.Image, "rocm") || strings.Join(rocm.Command, " ") != strings.Join(profile.DefaultWorkload.Command, " ") {
+			t.Fatalf("%s MI300X workload=%#v err=%v", name, rocm, err)
+		}
+	}
+}
+
+func TestRuntimeProfileRejectsInconsistentPlatformImages(t *testing.T) {
+	base := RuntimeProfile{Runtime: "vllm", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai", DefaultWorkload: support.VLLMWorkload()}
+	images := func() []support.RuntimeImage {
+		var out []support.RuntimeImage
+		for _, image := range support.RuntimeImages() {
+			if image.Runtime == "vllm" {
+				out = append(out, image)
+			}
+		}
+		return out
+	}
+	valid := base
+	valid.Images = images()
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*RuntimeProfile){
+		"wrong engine":       func(p *RuntimeProfile) { p.Images[1].EngineVersion = "0.99.0" },
+		"duplicate platform": func(p *RuntimeProfile) { p.Images[2].Platform = p.Images[1].Platform },
+		"tag only":           func(p *RuntimeProfile) { p.Images[1].Image = "vllm/vllm-openai-rocm:v0.22.1" },
+		"no CUDA default":    func(p *RuntimeProfile) { p.Images = p.Images[1:] },
+		"other runtime":      func(p *RuntimeProfile) { p.Images[1].Runtime = "sglang" },
+		"no default":         func(p *RuntimeProfile) { p.DefaultWorkload = runtimecontract.Workload{} },
+	} {
+		profile := base
+		profile.Images = images()
+		mutate(&profile)
+		if err := profile.Validate(); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+	// A platform without an image is refused, never served the CUDA image.
+	cudaOnly := base
+	cudaOnly.Images = images()[:1]
+	if _, err := cudaOnly.WorkloadFor("MI300X"); err == nil || !strings.Contains(err.Error(), "rocm-gfx942") {
+		t.Fatalf("missing platform err=%v", err)
+	}
+	if workload, err := cudaOnly.WorkloadFor("H100"); err != nil || workload.Image != support.VLLMWorkload().Image {
+		t.Fatalf("CUDA workload=%#v err=%v", workload, err)
 	}
 }

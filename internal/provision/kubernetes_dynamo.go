@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 )
@@ -353,6 +354,9 @@ func (k KubernetesDynamo) validate(spec ReplicaSpec) error {
 	}
 	if !spec.Workload.Empty() {
 		return errors.New("Dynamo graph uses its qualified runtime image and does not accept a portable workload override")
+	}
+	if platform := provideridentity.AcceleratorPlatform(spec.GPU); platform != provideridentity.PlatformCUDA {
+		return fmt.Errorf("Dynamo graph runtime images are qualified on the %s platform only; %s needs %s", provideridentity.PlatformCUDA, spec.GPU, platform)
 	}
 	if err := spec.Serving.Validate(spec.Runtime, spec.Cloud, "kubernetes-dynamo", 1, 1); err != nil {
 		return err

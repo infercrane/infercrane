@@ -104,6 +104,15 @@ func TestKubernetesDynamoFailureDominatesStaleReadyCondition(t *testing.T) {
 	}
 }
 
+func TestKubernetesDynamoRefusesAMDGPUsBeforeApplying(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	spec := testDynamoSpec()
+	spec.GPU = "MI300X"
+	if _, err := testDynamoProvider(fixture).EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "rocm-gfx942") || fixture.ApplyCalls != 0 {
+		t.Fatalf("Dynamo accepted an AMD GPU: err=%v apply=%d", err, fixture.ApplyCalls)
+	}
+}
+
 func TestKubernetesDynamoRejectsChangedIntentForSameDurableKey(t *testing.T) {
 	fixture := providerfixture.NewKubernetesCLI()
 	provider := testDynamoProvider(fixture)

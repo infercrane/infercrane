@@ -70,6 +70,7 @@ var Routes = []Route{
 	{"DELETE", "/compute/connections/{id}", "deleteComputeConnection", "Compute", "Delete an unused tenant compute connection", "", "Empty", 204, false},
 	{"POST", "/managed-deployment-quotes", "quoteManagedDeployment", "Compute", "Quote a time-boxed prepaid InferCrane Cloud deployment", "ManagedDeploymentQuoteRequest", "ManagedDeploymentQuoteEnvelope", 200, false},
 	{"GET", "/catalog/gpu-prices", "listGPUPrices", "Compute", "List timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
+	{"GET", "/catalog/accelerators", "listAccelerators", "Compute", "List reviewed accelerators outside the default CUDA platform, the runtime image pinned for each platform, and where each platform may run", "", "Object", 200, false},
 	{"GET", "/public/catalog/gpu-prices", "listPublicGPUPrices", "Compute", "List public timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
 	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},

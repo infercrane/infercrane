@@ -31,7 +31,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
-	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
+	{use: "telemetry collect dcgm|amd DEPLOYMENT [flags]", short: "Collect bounded GPU evidence from DCGM or AMD's exporter through the control plane", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version [flags]", short: "Print the InferCrane version", group: "start"},
@@ -248,12 +248,13 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "open":
 		boolFlag("no-browser", "print the URL instead of opening a browser")
 	case "telemetry":
-		stringFlag("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
-		stringFlag("file", "", "read a saved DCGM Prometheus snapshot instead of a URL")
+		stringFlag("url", "", "exporter Prometheus metrics URL (dcgm: http://127.0.0.1:9400/metrics, amd: http://127.0.0.1:5000/metrics)")
+		stringFlag("file", "", "read a saved exporter Prometheus snapshot instead of a URL")
 		stringFlag("selector", "", "comma-separated exact Prometheus label selectors")
 		stringFlag("replica", "", "InferCrane replica identity represented by this snapshot")
-		stringFlag("source", "dcgm_exporter", "bounded evidence source identity")
-		stringFlag("utilization-unit", "percent", "legacy DCGM_FI_DEV_GPU_UTIL input unit: percent or ratio")
+		stringFlag("source", "", "bounded evidence source identity (dcgm_exporter or amd_device_metrics_exporter)")
+		stringFlag("utilization-unit", "percent", "dcgm only: legacy DCGM_FI_DEV_GPU_UTIL input unit, percent or ratio")
+		stringFlag("metric-prefix", "", "amd only: the exporter's MetricsFieldPrefix, if it sets one")
 		stringFlag("nvlink-peak-gbps", "0", "declared per-GPU, per-direction NVLink peak in GB/s; enables NVLink saturation")
 		stringFlag("pcie-peak-gbps", "0", "declared per-GPU, per-direction PCIe peak in GB/s; enables PCIe saturation")
 		stringFlag("ttl", "2m", "maximum time this snapshot may be presented as fresh")

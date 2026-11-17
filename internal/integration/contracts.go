@@ -10,8 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const (
@@ -106,6 +108,29 @@ type RuntimeProfile struct {
 	Capabilities    []Capability             `json:"capabilities"`
 	Qualification   []Qualification          `json:"qualification"`
 	DefaultWorkload runtimecontract.Workload `json:"default_workload,omitzero"`
+	// Images are the runtime's pinned builds per accelerator platform. A
+	// built-in runtime serves the image for the GPU's platform and refuses a
+	// GPU whose platform it has no image for.
+	Images []support.RuntimeImage `json:"images,omitempty"`
+}
+
+// WorkloadFor is the contract a replica on this GPU serves: the default
+// workload with the image pinned for the GPU's accelerator platform. A runtime
+// without per-platform images serves its default workload on every GPU.
+func (p RuntimeProfile) WorkloadFor(gpu string) (runtimecontract.Workload, error) {
+	if len(p.Images) == 0 {
+		return p.DefaultWorkload, nil
+	}
+	platform := provideridentity.AcceleratorPlatform(gpu)
+	for _, image := range p.Images {
+		if image.Platform == platform {
+			workload := p.DefaultWorkload
+			workload.Command = append([]string(nil), workload.Command...)
+			workload.Image = image.Image
+			return workload, nil
+		}
+	}
+	return runtimecontract.Workload{}, fmt.Errorf("runtime %q has no pinned image for %s (platform %s)", p.Runtime, gpu, platform)
 }
 
 // ProtocolCapabilities projects independently qualified protocol behavior
@@ -457,6 +482,27 @@ func (p RuntimeProfile) Validate() error {
 			return fmt.Errorf("runtime %q default workload: %w", p.Runtime, err)
 		}
 	}
+	seen := map[string]struct{}{}
+	for _, image := range p.Images {
+		if p.DefaultWorkload.Empty() {
+			return fmt.Errorf("runtime %q declares images without a default workload", p.Runtime)
+		}
+		if image.Runtime != p.Runtime || image.EngineVersion != p.EngineVersion || image.Platform == "" {
+			return fmt.Errorf("runtime %q image for platform %q does not match the runtime and engine version", p.Runtime, image.Platform)
+		}
+		if _, duplicate := seen[image.Platform]; duplicate {
+			return fmt.Errorf("runtime %q declares platform %q more than once", p.Runtime, image.Platform)
+		}
+		seen[image.Platform] = struct{}{}
+		if err := runtimecontract.ValidateImage(image.Image); err != nil {
+			return fmt.Errorf("runtime %q image for platform %q: %w", p.Runtime, image.Platform, err)
+		}
+	}
+	if len(p.Images) > 0 {
+		if _, ok := seen[provideridentity.PlatformCUDA]; !ok || p.DefaultWorkload.Image != p.Images[0].Image {
+			return fmt.Errorf("runtime %q default workload must be its first, CUDA image", p.Runtime)
+		}
+	}
 	return validateEvidence(p.Runtime, p.Capabilities, p.Qualification)
 }
 
@@ -515,6 +561,10 @@ func normalizeRuntime(profile RuntimeProfile) RuntimeProfile {
 	profile.Capabilities = append([]Capability(nil), profile.Capabilities...)
 	profile.Qualification = append([]Qualification(nil), profile.Qualification...)
 	profile.DefaultWorkload.Command = append([]string(nil), profile.DefaultWorkload.Command...)
+	profile.Images = append([]support.RuntimeImage(nil), profile.Images...)
+	for index := range profile.Images {
+		profile.Images[index].Targets = append([]string(nil), profile.Images[index].Targets...)
+	}
 	sort.Slice(profile.Capabilities, func(i, j int) bool { return profile.Capabilities[i].Name < profile.Capabilities[j].Name })
 	return profile
 }

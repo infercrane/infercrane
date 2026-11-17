@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -26,16 +27,21 @@ var acceleratorMemoryGiB = map[string]int{
 	"a100": 40, "a10040gb": 40, "a10080gb": 80, "a100sxm4": 40, "a800": 80,
 	"l40s": 48, "l40": 48, "l4": 24, "a10g": 24, "a10": 24, "a6000": 48, "rtxa6000": 48, "rtx6000ada": 48,
 	"rtx4090": 24, "rtx5090": 32, "t4": 16, "v100": 16,
-	"mi300x": 192, "mi325x": 256, "mi355x": 288,
 }
 
 var memorySuffix = regexp.MustCompile(`([0-9]+)gb$`)
 
 // acceleratorMemoryClass applies vLLM 0.22.1's rule for batch defaults:
 // 70 GiB or more of device memory, except A100, gets the larger defaults.
+// The rule reads the device's memory and name on every platform, ROCm
+// included (EngineArgs.get_batch_defaults), so a reviewed AMD accelerator's
+// memory decides its class the same way.
 func acceleratorMemoryClass(gpu string) (string, bool) {
 	name := normalizedAccelerator(gpu)
 	memory, known := acceleratorMemoryGiB[name]
+	if accelerator, reviewed := provideridentity.LookupAccelerator(gpu); reviewed {
+		memory, known = accelerator.MemoryGiB, true
+	}
 	if !known {
 		if match := memorySuffix.FindStringSubmatch(name); match != nil {
 			var parsed int

@@ -104,6 +104,15 @@ func TestEnsureUsesPinnedRuntimeImageByDefault(t *testing.T) {
 	}
 }
 
+func TestEnsureRefusesAMDGPUsBeforeLaunching(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	provider := SkyPilot{APIKey: "secret", Runner: runner}
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "amd-r0", Model: "model", Cloud: "runpod", GPU: "MI300X"})
+	if !errors.Is(err, ErrInvalidReplicaSpec) || !strings.Contains(err.Error(), "runpod-pods or kubernetes") || runner.launchTask != "" {
+		t.Fatalf("SkyPilot accepted an AMD GPU: err=%v task=%q", err, runner.launchTask)
+	}
+}
+
 func TestEnsureUsesProviderNeutralImageOutsideRunPod(t *testing.T) {
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}

@@ -94,6 +94,17 @@ func GPUTypeID(provider, gpu string) string {
 	if provider != "runpod" {
 		return gpu
 	}
+	// RunPod names AMD GPUs by product and form factor; its MI350X offer is
+	// listed as "AMD Instinct MI350 OAM". RunPod lists no MI325X or MI355X.
+	if accelerator, ok := LookupAccelerator(gpu); ok {
+		switch accelerator.Name {
+		case "MI300X":
+			return "AMD Instinct MI300X OAM"
+		case "MI350X":
+			return "AMD Instinct MI350 OAM"
+		}
+		return gpu
+	}
 	switch normalized {
 	case "L40S", "NVIDIA L40S":
 		return "NVIDIA L40S"

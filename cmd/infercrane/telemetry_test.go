@@ -103,3 +103,42 @@ DCGM_FI_PROF_NVLINK_TX_BYTES{gpu="1",modelName="NVIDIA H100 80GB HBM3"} 12000000
 		t.Fatalf("saturation=%v devices=%v err=%v", saturation, devices, err)
 	}
 }
+
+func TestTelemetryCollectAMDImportsTheExporterSnapshot(t *testing.T) {
+	exporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "gpu_gfx_activity{serial_number=\"s1\",pod=\"qwen-0\"} 64\ngpu_package_power{serial_number=\"s1\",pod=\"qwen-0\"} 512\ngpu_gfx_activity{serial_number=\"s2\",pod=\"other\"} 99\n")
+	}))
+	defer exporter.Close()
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Source       string `json:"source"`
+			Measurements []struct {
+				Name  string  `json:"name"`
+				Value float64 `json:"value"`
+			} `json:"measurements"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || r.URL.Path != "/api/v1/deployments/qwen-mi300x/measurements" || body.Source != "amd_device_metrics_exporter" || len(body.Measurements) != 3 {
+			t.Fatalf("path=%s body=%+v err=%v", r.URL.Path, body, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"name":"gpu_utilization","value":64,"unit":"percent","sample_count":1}],"content_recorded":false}`)
+	}))
+	defer control.Close()
+	output, err := captureStdout(t, func() error {
+		return telemetryCommand(context.Background(), config.Config{ControlURL: control.URL, APIKey: "secret"}, []string{"collect", "amd", "qwen-mi300x", "--url", exporter.URL + "/metrics", "--selector", "pod=qwen-0"})
+	})
+	if err != nil || !strings.Contains(output, "amd_device_metrics_exporter") {
+		t.Fatalf("output=%q err=%v", output, err)
+	}
+	// NVIDIA-only flags are not accepted for the AMD exporter, and an unknown
+	// collector is refused.
+	cfg := config.Config{ControlURL: "http://127.0.0.1:1", APIKey: "secret"}
+	for _, args := range [][]string{
+		{"collect", "amd", "prod", "--nvlink-peak-gbps", "450", "--file", "missing"},
+		{"collect", "rocm-smi", "prod"},
+	} {
+		if err := telemetryCommand(context.Background(), cfg, args); err == nil {
+			t.Fatalf("%v was accepted", args)
+		}
+	}
+}

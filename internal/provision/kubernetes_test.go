@@ -9,6 +9,7 @@ import (
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/testtools/providerfixture"
 )
 
@@ -71,6 +72,47 @@ func TestKubernetesPortableWorkloadUsesExactTopologyAndExecutableArgv(t *testing
 		if !strings.Contains(string(encoded), expected) {
 			t.Fatalf("manifest missing %q: %s", expected, encoded)
 		}
+	}
+}
+
+func TestKubernetesAMDDevicePluginSchedulesAMDGPUsWithTheirROCmImage(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	provider.GPUResource, provider.GPUProductLabel = "amd.com/gpu", "amd.com/gpu.product-name"
+	spec := testKubernetesSpec()
+	// The AMD node labeller writes the sysfs product name with spaces as
+	// underscores; that label value is the GPU the replica asks for.
+	spec.GPU, spec.Runtime = "AMD_Instinct_MI300X_OAM", "vllm"
+	spec.Workload, _ = support.RuntimeWorkload("vllm", "rocm-gfx942")
+	if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(fixture.Objects)
+	for _, expected := range []string{`"amd.com/gpu":"1"`, `"amd.com/gpu.product-name":"AMD_Instinct_MI300X_OAM"`, `"image":"vllm/vllm-openai-rocm@sha256:368b2992`, `"command":["vllm"]`} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("manifest missing %q: %s", expected, encoded)
+		}
+	}
+	for _, test := range []struct{ resource, gpu string }{
+		{"nvidia.com/gpu", "MI300X"},
+		{"nvidia.com/gpu", "AMD_Instinct_MI355X"},
+		{"amd.com/gpu", "NVIDIA-L40S"},
+	} {
+		fixture := providerfixture.NewKubernetesCLI()
+		provider := testKubernetesProvider(fixture, "deployment")
+		provider.GPUResource = test.resource
+		spec := testKubernetesSpec()
+		spec.GPU = test.gpu
+		if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KUBERNETES_GPU_RESOURCE") || fixture.ApplyCalls != 0 {
+			t.Fatalf("%s on %s: err=%v apply=%d", test.gpu, test.resource, err, fixture.ApplyCalls)
+		}
+	}
+	// A resource whose platform is not known, such as a MIG slice, is not
+	// second-guessed.
+	mig := testKubernetesProvider(providerfixture.NewKubernetesCLI(), "deployment")
+	mig.GPUResource = "nvidia.com/mig-1g.10gb"
+	if _, err := mig.EnsureReplica(context.Background(), testKubernetesSpec()); err != nil {
+		t.Fatal(err)
 	}
 }
 

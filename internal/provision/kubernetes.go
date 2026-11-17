@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -381,6 +382,13 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 	}
 	if spec.GPUCount < 0 || spec.GPUCount > 1024 {
 		return errors.New("Kubernetes GPU count must be between 1 and 1024")
+	}
+	// The configured device-plugin resource decides which GPUs the cluster
+	// can schedule. An AMD GPU requested through nvidia.com/gpu, or an NVIDIA
+	// one through amd.com/gpu, would never schedule or would start the wrong
+	// image, so it is refused before anything is applied.
+	if expected := provideridentity.ExpectedDeviceResource(spec.GPU); provideridentity.KnownDeviceResource(k.GPUResource) && expected != strings.TrimSpace(k.GPUResource) {
+		return fmt.Errorf("Kubernetes GPU %q is exposed by %s, but this cluster is configured for %s (INFERCRANE_KUBERNETES_GPU_RESOURCE)", spec.GPU, expected, k.GPUResource)
 	}
 	if k.artifactPolicy() == "required" && !artifactCacheRuntimeSupported(spec) {
 		return errors.New("Kubernetes artifact cache is qualified only for vLLM and SGLang workloads")

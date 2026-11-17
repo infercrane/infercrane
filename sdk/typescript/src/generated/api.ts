@@ -218,6 +218,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  listAccelerators(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/accelerators';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   listPublicGPUPrices(): Promise<ObjectList> {
     const requestPath = '/public/catalog/gpu-prices';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;

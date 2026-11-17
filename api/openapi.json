@@ -11030,6 +11030,42 @@
         ]
       }
     },
+    "/api/v1/catalog/accelerators": {
+      "get": {
+        "operationId": "listAccelerators",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List reviewed accelerators outside the default CUDA platform, the runtime image pinned for each platform, and where each platform may run",
+        "tags": [
+          "Compute"
+        ]
+      }
+    },
     "/api/v1/catalog/gpu-prices": {
       "get": {
         "operationId": "listGPUPrices",

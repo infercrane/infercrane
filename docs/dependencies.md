@@ -3,7 +3,10 @@
 | Project | Purpose | License | Integration |
 |---|---|---|---|
 | [vLLM Router 0.1.15](https://github.com/vllm-project/router) | Request routing | Apache-2.0 | Pinned upstream process packaged in the production image |
-| [vLLM](https://github.com/vllm-project/vllm) | Inference runtime | Apache-2.0 | External worker runtime |
+| [vLLM](https://github.com/vllm-project/vllm) | Inference runtime | Apache-2.0 | External worker runtime; CUDA image `vllm/vllm-openai` and ROCm image `vllm/vllm-openai-rocm`, both pinned by digest and pulled by the provider |
+| [SGLang](https://github.com/sgl-project/sglang) | Inference runtime | Apache-2.0 | External worker runtime; CUDA and ROCm (`-rocm720-mi30x`, `-mi35x`) images of `lmsysorg/sglang`, pinned by digest and pulled by the provider |
+| [AMD GPU device plugin and node labeller](https://github.com/ROCm/k8s-device-plugin) | Exposes AMD GPUs to Kubernetes as `amd.com/gpu` and labels nodes with `amd.com/gpu.product-name` | Apache-2.0 | Operator-installed in their cluster; optional; never installed by InferCrane |
+| [AMD Device Metrics Exporter](https://github.com/ROCm/device-metrics-exporter) | AMD GPU telemetry read by `infercrane telemetry collect amd` | Apache-2.0 | Operator-run Prometheus endpoint; optional; only its text output is parsed |
 | [SkyPilot](https://github.com/skypilot-org/skypilot) | GPU provisioning | Apache-2.0 | External CLI |
 | [AWS CLI v2](https://github.com/aws/aws-cli) | Narrow EC2 BYOC API and STS boundary | Apache-2.0 | External CLI; optional |
 | [kubectl](https://github.com/kubernetes/kubectl) | Namespaced Kubernetes API boundary and server-side apply | Apache-2.0 | External CLI; optional |
@@ -18,7 +21,9 @@
 | [Terraform Plugin Testing](https://github.com/hashicorp/terraform-plugin-testing) | Real protocol CRUD/import acceptance | MPL-2.0 | Development-only provider test dependency |
 | [Terraform CLI](https://github.com/hashicorp/terraform) | Protocol acceptance runner | BSL-1.1 for current releases | Downloaded, checksum-verified development tool; never linked, embedded, or redistributed |
 
-InferCrane does not fork or embed vLLM, vLLM Router, or SkyPilot. Release automation must pin
+InferCrane does not fork or embed vLLM, vLLM Router, SGLang, or SkyPilot. The ROCm runtime images
+bundle ROCm and AMD's AITER kernels (MIT) under their own licenses; InferCrane does not build or
+redistribute them. Release automation must pin
 external tool versions and audit module/container transitive licenses and vulnerabilities.
 The Python SDK has no runtime dependency. The TypeScript SDK has no runtime dependency; TypeScript
 and Node type declarations are development-only build dependencies.
