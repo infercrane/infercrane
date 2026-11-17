@@ -1,0 +1,223 @@
+---
+title: InferCrane agent
+description: How the outbound-only agent observes model servers on a customer's own machines, what it may do, what never leaves the machine, and how candidate runs will use it.
+---
+
+# InferCrane agent
+
+The InferCrane agent is one process that runs beside a customer's model server: on a laptop, a
+workstation, an on-prem rack, any Kubernetes cluster, or any cloud. It only dials out, over HTTPS,
+so the control plane can observe a server it cannot reach: a server behind NAT, on loopback, or in
+a private network. This page is the authoritative design. The quickstart is
+[Run on this machine](/run-on-this-machine).
+
+The agent is part of the open-source core (Apache-2.0). It ships in the `infercrane` CLI binary as
+`infercrane agent`, and any control plane, hosted or self-hosted, accepts agents.
+
+```text
+customer machine                                    InferCrane control plane
+┌────────────────────────────────────────┐          ┌──────────────────────────────┐
+│ app ──► local gateway (optional) ──┐   │          │ /api/v1/agent/sync           │
+│                                    ▼   │  HTTPS   │   agent key only             │
+│ vLLM · SGLang · llama.cpp ◄── infercrane agent ───►│   same parser as a scrape    │
+│ Ollama · LM Studio   (probe, /metrics)  │ outbound │   target_measurements        │
+│ nvidia-smi · sysctl · sysfs             │   only   │   request_records (shapes)   │
+└────────────────────────────────────────┘          └──────────────────────────────┘
+       nothing listens for the control plane            never dials the agent's servers
+```
+
+## What slice 1 does
+
+| Capability | State |
+|---|---|
+| Find vLLM, SGLang, llama.cpp, Ollama, and LM Studio on ports 8000, 30000, 8080, 11434, 1234, or any `--server URL` | Implemented |
+| Read engine and version (`/version`, `/server_info`, `/props`, Ollama `/api/version`), models (`/v1/models`), the loaded model (Ollama `/api/ps`, LM Studio `/api/v0/models`), and health | Implemented |
+| Send an API key to the servers named with `--server` (`--token-env`, `--auth-header-env`); never to InferCrane, and never to a server found on a default port | Implemented |
+| Register each healthy server as an observe-only endpoint | Implemented |
+| Relay engine metrics so Observe, readiness, and bottleneck diagnosis work | Implemented for vLLM, SGLang, llama.cpp |
+| Record content-free request shapes through the optional local gateway | Implemented |
+| Report NVIDIA GPUs (`nvidia-smi`, which reads NVML), Apple Silicon, and AMD GPUs with unknowns named | Implemented; Apple and AMD telemetry is not collected |
+| Run candidate setups on the same hardware | Designed below; not implemented |
+
+Ollama and LM Studio expose no engine metrics. Their queue, cache, and per-token internals stay
+unknown, and the agent says so instead of estimating them.
+
+## Trust model
+
+### The control plane never dials an agent's servers
+
+A server registered by an agent becomes a target with `agent_id` set. The control plane treats that
+target as unreachable from itself:
+
+- The reconciler's adopted-target probe skips it. Health comes only from the agent's reports.
+- Endpoint compilation never publishes a route to it, whatever its ownership says.
+- `deploy --targets` and the apply path cannot bind it.
+- Promotion to `traffic-managed` is refused. Traffic for such a server goes through the agent's
+  local gateway, on the customer's machine.
+- `infercrane connect` reuses a target by URL only when no agent owns it, so two machines that both
+  serve `http://127.0.0.1:8000` stay two targets.
+
+If its agent has not reported a server for three minutes, the server is marked unhealthy, because
+nothing knows it is healthy. A revoked agent's servers are marked unhealthy at once.
+
+A server is identified by its host and port. If the server at that address now serves a different
+model, its health, metrics, and traffic are refused for the old endpoint, which is marked unhealthy
+with the reason, instead of landing on the wrong endpoint. If an agent's endpoint is deleted, the
+running agent registers the server again on its next pass.
+
+### The agent key
+
+An agent key is a principal of kind `agent`. It is minted in one of two ways and shown once:
+
+- `infercrane agent run`, when the CLI is signed in (`infercrane login`) and no agent key is saved
+  for this context. The CLI asks for a key with its own sign-in, saves it in the OS keychain (or a
+  separate `0600` file), and never uses the CLI's own key in the agent loop.
+- `POST /api/v1/agents` (or `infercrane agent create NAME`), for a machine where nobody signs in.
+  Pass the key in `INFERCRANE_AGENT_KEY`.
+
+Creating or revoking an agent requires the `deploy` action. Only the key's SHA-256 digest is
+stored, as for every credential. Agent keys do not expire; revoke and replace them instead.
+
+An agent key may:
+
+- call `POST /api/v1/agent/sync` and `POST /api/v1/agent/servers`, and nothing else;
+- register up to 32 servers as observe-only endpoints in its own workspace, each with its own
+  logical model (it cannot attach to a model another endpoint uses);
+- report health, hardware, filtered engine metrics, and request shapes for its own servers.
+
+An agent key may not call any other control-plane route (HTTP 403), invoke inference on the
+gateway (HTTP 403), read other agents' servers, deploy, promote, delete, or read workspace data.
+Relayed evidence for a server key that this agent did not register is rejected.
+
+### What leaves the machine
+
+| Sent to the control plane | Never sent |
+|---|---|
+| OS, architecture, accelerator vendor, name, count, memory, driver, and the fields that could not be read | Prompts, completions, tool calls, and message content |
+| Server address as the agent reaches it, engine, version, model names, loaded model, health | Request and response headers, and the API key of any server it reads |
+| Engine metrics, filtered on the machine to the families InferCrane parses | Any other metric family or label the server exposes |
+| With the local gateway only: per-request start time, latency, time to first byte, status, streaming flag, token counts, model name, and keyed hashes of the system prompt and session ID | The hashing key |
+
+The agent filters a scrape with the same family list the control plane's parser reads, so an
+unrelated metric (and any label it carries) is dropped before the request is built. Request hashes
+use HMAC-SHA256 with a random 256-bit secret created on the machine the first time the agent runs
+and kept beside its saved key (`agent-credentials.json`, mode `0600`). The secret is independent of
+the agent key and is never sent, so neither the control plane nor anything that sees the agent's
+requests can derive it or test a guessed prompt against a hash. Hashes only tell whether two
+requests shared a system prompt or a session, and they stay comparable when the agent key is
+rotated.
+
+Strings read from a local server (versions, details, model names) are stripped of control
+characters and cut on a character boundary before they are sent; a model ID that is not clean text
+is left out rather than altered.
+
+## Protocol
+
+The agent makes every call; the control plane answers. There is no inbound port, no tunnel, and
+no long-lived connection that a proxy or load balancer has to keep open.
+
+| Call | When | Body |
+|---|---|---|
+| `POST /api/v1/agent/sync` | At start, then every poll interval (default 15 s; the control plane may advise 5–60 s) | Protocol version, agent version, hardware, servers and health, metric relays, request shapes |
+| `POST /api/v1/agent/servers` | When a new healthy server appears | Server key, endpoint name, model, engine, address |
+
+- Bodies are gzip-compressed JSON, at most 8 MiB after decompression. Unknown fields are ignored
+  so a newer agent can add fields within one protocol version (`infercrane.agent/v1`).
+- The agent honours `HTTPS_PROXY` and the CLI's TLS settings
+  (`INFERCRANE_CLIENT_TLS_CA_FILE`, client certificates). It sends its key only over HTTPS, except
+  to a control plane on the same machine.
+- The control plane validates each server report, metric relay, and request shape on its own and
+  returns the ones it refused in `rejected`; one bad item never fails the sync or the heartbeat. If
+  a whole sync is refused as invalid (HTTP 4xx), the agent drops that batch's evidence instead of
+  resending it, so a bad item cannot block it forever. Other failures are retried with backoff up to
+  five minutes. Undelivered request shapes stay in a bounded buffer (10,000; the oldest are dropped
+  and counted). The agent keeps each sync under 6 MiB of scrapes, sending baselines and then whole
+  relays in a later sync.
+- A key minted a moment ago may not be in every replica's credential snapshot yet; the agent retries
+  an unknown key for ten seconds at start, and treats it as fatal after that.
+- Request shapes carry an agent-generated ID, so a retried sync records each request once. The
+  control plane corrects the agent's clock skew from the sync's `sent_at`.
+
+Polling was chosen over a stream because it works through every corporate proxy, needs no sticky
+sessions across control-plane replicas, and survives restarts on either side. Each sync is
+stateless on the control plane (see the next section), so any replica can answer it.
+
+### Relayed metrics are treated like scraped metrics
+
+The control plane's own collector compares the current scrape of an engine with the oldest scrape
+of the same engine process in the last five minutes. The agent keeps the same window locally and
+sends both texts in one relay: the current scrape and that baseline. The control plane parses both
+with `metrics.ParseEngine`, checks they come from one engine process, and derives measurements with
+`metrics.EngineMeasurements`, exactly as for a scrape it made itself. Rows carry the same names,
+units, sources (`vllm_metrics`, …), and 90-second validity, keyed by the target in
+`target_measurements` instead of a deployment revision. Monitoring and readiness read
+deployment-bound and target-bound rows through the endpoint's bindings, with no engine, runtime, or
+provider branch. A scrape older than its validity window is rejected, not stored as current.
+
+## Traffic
+
+By default the agent sees no traffic: requests go straight from the application to the server.
+The endpoint, the CLI, and the agent detail API all say so ("traffic not visible: requests go
+straight to the server").
+
+`--gateway 127.0.0.1:4000` starts a pass-through in front of one server. The application points at
+the gateway instead of the server. Every request and response passes through unchanged, including
+the application's own `Authorization` header; the agent never adds the server key it holds. For
+`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/responses`, the gateway reads
+the model name, the streaming flag, and token usage on the machine, and records only the shape listed
+above. Give it a loopback address; any other address exposes the gateway, and the server behind it,
+to the network.
+
+## Upgrade and revocation
+
+- **Upgrade.** Every sync reports the agent version. A control plane may set a minimum version and
+  then answers older agents with HTTP 426; the agent stops and prints the install command. A newer
+  recommended version is shown as advice only. The agent never updates itself: upgrades go through
+  the package that installed it (release binary, Homebrew, container image), so what runs on a
+  customer's machine is always a build the customer chose.
+- **Revocation.** `DELETE /api/v1/agents/{id}`, `infercrane agent revoke NAME`, or the dashboard
+  disables the agent's principal, marks the agent revoked, and marks its servers unhealthy. The
+  agent routes re-check the agent's row on every request, so the next sync gets HTTP 401: the code
+  is `agent_revoked`, or `agent_unauthenticated` once the credential snapshot has dropped the key
+  (within about a second). The agent then stops, its local gateway included, and sends nothing more.
+  A health report from a sync that raced the revocation is not applied. Revocation therefore takes effect within
+  one poll. The endpoints remain, so their history stays readable.
+- **Rotation.** Create a new agent key, restart the agent with it, then revoke the old agent.
+
+## Candidate runs (next slice)
+
+Optimizing on the customer's own GPUs means running candidate setups where the server runs. The
+agent will do this only for an engine it launched itself, never for a process it merely observes:
+
+```bash
+infercrane agent run --launch -- vllm serve Qwen/Qwen3-8B --port 8000
+```
+
+1. **Commands.** The control plane queues bounded commands for one agent (`run_candidate`,
+   `restore`, `stop`). The agent fetches them with a long poll
+   (`GET /api/v1/agent/commands?wait=25s`, still outbound) and acknowledges each with its result.
+   A command names the engine version and a bounded argument list checked against a local allowlist
+   of flags; it can never carry a shell command or an image the customer did not approve.
+2. **Taking turns on one GPU.** The agent drains the local gateway (new requests wait, bounded),
+   stops the engine, starts it with the candidate flags, warms it up, measures it, and restores the
+   original setup. The control (current setup) is measured before and after each candidate, with
+   the same-setup noise check from the optimization engine. Each turn costs a restart, so turns run
+   only in a window the customer approves.
+3. **Side by side on two or more GPUs.** The agent starts the candidate on a free GPU
+   (`CUDA_VISIBLE_DEVICES`, another port) next to the current setup, and the local gateway mirrors or
+   splits traffic between them. Mirrored responses are compared on the machine and discarded.
+4. **Workload and quality.** Load is generated on the machine from the recorded traffic shape or
+   from an eval set the customer keeps there. The answer check also runs on the machine; only
+   scores, timings, and token counts go up.
+5. **Rollout.** A winning setup is applied only after approval, by restarting the launched engine
+   with the new flags; rollback restarts it with the previous flags.
+
+## Limits
+
+- Health and metrics are as fresh as the last sync (15 s by default; scrapes every 30 s).
+- One agent observes one model per server. A server that lists several models and has none loaded
+  needs `--model`.
+- Apple Silicon and AMD GPUs are reported as detected, with GPU telemetry unknown. Intel GPUs are not
+  reported.
+- Kubernetes installs (a Helm chart with the agent as a sidecar or DaemonSet) and AWS self-serve
+  connections are the next slice of this plan.

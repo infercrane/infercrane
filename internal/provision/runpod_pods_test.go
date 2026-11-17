@@ -12,6 +12,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 func TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload(t *testing.T) {
@@ -183,6 +184,47 @@ func TestRunPodPodsGlobalRegionOmitsPlacementAndAdoptsConcreteDatacenter(t *test
 	second, err := provider.EnsureReplica(context.Background(), spec)
 	if err != nil || second != first || createCalls != 1 {
 		t.Fatalf("adopt provider-selected datacenter: first=%#v second=%#v creates=%d err=%v", first, second, createCalls, err)
+	}
+}
+
+func TestRunPodPodsLaunchesMI300XWithRunPodsAMDTypeAndTheROCmImage(t *testing.T) {
+	workload, _ := support.RuntimeWorkload("vllm", "rocm-gfx942")
+	var pods []runPodRecord
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(pods)
+			return
+		}
+		var body struct {
+			Name             string
+			ImageName        string
+			GPUTypeIDs       []string `json:"gpuTypeIds"`
+			GPUCount         int
+			CloudType        string `json:"cloudType"`
+			DockerEntrypoint []string
+			DockerStartCmd   []string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.GPUTypeIDs) != 1 || body.GPUTypeIDs[0] != "AMD Instinct MI300X OAM" || body.ImageName != workload.Image || body.CloudType != "SECURE" || body.DockerEntrypoint[0] != "vllm" {
+			t.Fatalf("unexpected MI300X create body: %#v", body)
+		}
+		record := runPodRecord{ID: "pod-amd", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd}
+		record.Machine.GPUTypeID = "AMD Instinct MI300X OAM"
+		pods = []runPodRecord{record}
+		_ = json.NewEncoder(w).Encode(record)
+	}))
+	defer server.Close()
+	provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}
+	spec := ReplicaSpec{ExternalKey: "amd", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", GPU: "MI300X", GPUCount: 1, Workload: workload}
+	first, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("create MI300X pod: %v", err)
+	}
+	// Replay adopts the pod RunPod reports under its own AMD type name.
+	if second, err := provider.EnsureReplica(context.Background(), spec); err != nil || second != first {
+		t.Fatalf("adopt MI300X pod: handle=%#v err=%v", second, err)
 	}
 }
 

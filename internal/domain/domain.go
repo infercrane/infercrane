@@ -16,7 +16,10 @@ var ErrInsufficientCredits = errors.New("insufficient prepaid credits")
 type Target struct {
 	ID, Name, URL, Provider, Runtime, Health           string
 	UpstreamModel, ProviderResourceID, ProviderDetails string
-	CreatedAt, UpdatedAt                               time.Time
+	// AgentID is set when the target is reached only through an InferCrane
+	// agent. The control plane never dials such a target's URL.
+	AgentID              string
+	CreatedAt, UpdatedAt time.Time
 }
 
 // ProviderConnection is reusable, tenant-scoped configuration for an

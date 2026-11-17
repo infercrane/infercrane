@@ -67,6 +67,15 @@ export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='prefer'
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
 
+### AMD Instinct GPUs
+
+For a cluster with AMD's GPU device plugin and node labeller, set
+`INFERCRANE_KUBERNETES_GPU_RESOURCE='amd.com/gpu'` and
+`INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='amd.com/gpu.product-name'`, and use the node's label value
+(for example `AMD_Instinct_MI300X_OAM`) as the spec's GPU. vLLM and SGLang replicas then start their
+pinned ROCm images. A GPU whose device plugin does not match the configured resource is refused before
+anything is applied. See [AMD Instinct GPUs](/integrations/amd-instinct).
+
 ## Pre-pull the immutable runtime image
 
 The default image policy is `prefer`, which renders `imagePullPolicy: IfNotPresent`. For a

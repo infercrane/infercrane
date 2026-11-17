@@ -96,7 +96,7 @@ func (r *CloudRequest) Validate() error {
 			r.RuntimeVersion = support.SGLangRuntimeVersion
 		}
 	}
-	r.Workload = support.NormalizeWorkload(r.Runtime, r.Workload)
+	r.Workload = support.NormalizeWorkload(r.Runtime, r.GPU, r.Workload)
 	if !r.Workload.Empty() {
 		if providedPort != 0 && providedPort != r.Workload.Port {
 			return errors.New("port conflicts with workload.port")
@@ -186,7 +186,10 @@ func (r *CloudRequest) Validate() error {
 		}
 	}
 	// An operator-declared SkyPilot cloud is admitted only by its exact adapter identity.
-	return support.V1().ValidateProvider(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter)
+	if err := support.V1().ValidateProvider(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter); err != nil {
+		return err
+	}
+	return support.V1().ValidateAccelerator(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter, r.GPU)
 }
 
 type DeleteRequest struct {
@@ -455,7 +458,11 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("runtime_backend_unavailable", err)
 		}
 		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
-			request.Workload = runtimeBackend.Profile.DefaultWorkload
+			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU)
+			if workloadErr != nil {
+				return "", operations.Permanent("runtime_platform_unsupported", workloadErr)
+			}
+			request.Workload = workload
 			request.Port = request.Workload.Port
 		}
 		if request.RevisionID == "" {
@@ -709,7 +716,11 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("runtime_backend_unavailable", runtimeErr)
 		}
 		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
-			request.Workload = runtimeBackend.Profile.DefaultWorkload
+			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU)
+			if workloadErr != nil {
+				return "", operations.Permanent("runtime_platform_unsupported", workloadErr)
+			}
+			request.Workload = workload
 			request.Port = request.Workload.Port
 		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)

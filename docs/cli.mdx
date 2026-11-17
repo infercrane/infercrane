@@ -252,7 +252,8 @@ infercrane discover local --output json
 ```
 
 Discovery reports its evidence source and limitations. It does not infer runtime compatibility,
-model fit, or performance from a device name alone.
+model fit, or performance from a device name alone. `infercrane agent detect` also reports Apple
+Silicon and AMD GPUs, with their unknown fields named, and the model servers on this machine.
 
 ### Run the control plane
 
@@ -301,17 +302,23 @@ Guard, and events. `--diagnose` explicitly persists a fresh deterministic Doctor
 A field the control plane has not recorded prints as `none` (for example, no staged candidate plan)
 or `unknown`. JSON keeps the raw values and reports an unstaged candidate as `"candidate_plan": null`.
 
-### `telemetry collect dcgm`
+### `telemetry collect dcgm|amd`
 
 ```bash
 infercrane telemetry collect dcgm coder-production \
   --url http://127.0.0.1:9400/metrics \
   --selector deployment=coder-production \
   --replica replica-03 --ttl 2m
+
+infercrane telemetry collect amd qwen3-8b-mi300x \
+  --url http://127.0.0.1:5000/metrics \
+  --selector pod=qwen3-8b-mi300x-0
 ```
 
-The command parses a bounded, documented subset of DCGM Prometheus metrics locally and sends
-normalized content-free evidence through the authenticated control API. Use `--file SNAPSHOT` for
+`dcgm` reads NVIDIA's dcgm-exporter and `amd` reads the AMD Device Metrics Exporter (default port
+5000; `--metric-prefix` if it sets one). The command parses a bounded, documented subset of the
+exporter's Prometheus metrics locally and sends normalized content-free evidence through the
+authenticated control API. Use `--file SNAPSHOT` for
 offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
 TTL; arbitrary Prometheus metrics are not accepted.
 
@@ -629,7 +636,19 @@ infercrane apply examples/infercrane.yaml \
 | `--wait` | false | mutations | Follow durable progress to a terminal state |
 | `--wait-timeout` | unlimited | waited mutations | Stop the local wait after a Go duration such as `20m`; the operation continues |
 | `--idempotency-key` | generated | mutations | Stable safe-retry identity |
+| `--compute-connection` | none | elastic | Deploy on your own RunPod account: the name or ID of a verified compute connection (add one in the dashboard under Settings → Connections) |
+| `--infercrane-cloud` | false | elastic | Deploy on InferCrane Cloud, paid from prepaid credits |
+| `--stop-after` | `1h` | `--infercrane-cloud` | Stop the deployment after this long, in whole minutes from `15m` to `24h` |
 | `--output` | `human` | all | `human` or `json` |
+
+The two self-serve destinations of a hosted workspace are `--infercrane-cloud` and
+`--compute-connection NAME`; they cannot be combined with each other, `--targets`, `--backend`, or
+`--compute serverless`.
+
+```bash
+infercrane deploy Qwen/Qwen3-8B --infercrane-cloud --stop-after 6h
+infercrane deploy Qwen/Qwen3-8B --compute-connection my-runpod --gpu L40S
+```
 
 A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
 Custom OCI uses the YAML form because its runtime contract is part of the immutable revision.
@@ -791,6 +810,11 @@ infercrane connect https://vllm.internal/v1 --as coder-production --type vllm
 
 Use `--model` when the endpoint exposes more than one physical model. Use `--manage-traffic` only
 when the endpoint has been qualified and should immediately enter the InferCrane logical route.
+For a server started with an API key, `--token-env VAR` sends the key held in `VAR` once; the control
+plane stores it encrypted and uses it for discovery and health checks (this needs
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane). `connect` refuses a loopback URL when
+the control plane runs elsewhere, because the control plane would probe its own machine; use the
+agent for that server.
 The advanced ownership-compatible command remains available:
 
 ```bash
@@ -804,6 +828,42 @@ infercrane adopt promote coder-production --ownership traffic-managed
 
 Use `traffic-managed` only when InferCrane should publish the healthy existing target. Neither mode
 transfers provider lifecycle ownership. See [Adopt and diagnose](/features/adoption-diagnostics).
+
+## Connect servers on this machine
+
+`infercrane agent` observes model servers the control plane cannot reach (on a laptop, behind NAT,
+or in a private network) through an outbound-only agent. See
+[Run on this machine](/run-on-this-machine) and [InferCrane agent](/architecture/agent).
+
+```bash
+infercrane agent detect
+infercrane agent run
+infercrane agent run --server http://127.0.0.1:8000 --token-env VLLM_API_KEY --as qwen-local
+infercrane agent run --gateway 127.0.0.1:4000
+infercrane agent run --once --output json
+infercrane agent create rack-12
+infercrane agent list
+infercrane agent revoke rack-12
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--server` | ports 8000, 30000, 8080, 11434, 1234 on loopback | A server URL; repeatable |
+| `--no-detect` | false | Observe only the `--server` URLs |
+| `--token-env` | none | Variable holding the API key of the `--server` servers, sent to them only as a bearer token; needs `--server` |
+| `--auth-header-env` | none | Variable holding the full `Authorization` header for the `--server` servers; needs `--server` |
+| `--model` | the loaded or only model | Model to observe when a server lists several |
+| `--as` | derived from the model | Endpoint name, when one server is observed |
+| `--gateway` | off | Listen address of the local pass-through that records request shapes |
+| `--gateway-server` | the only observed server | Server the gateway forwards to |
+| `--name` | this host's name | Agent name when `agent run` creates a key with your sign-in |
+| `--key-env` | `INFERCRANE_AGENT_KEY` | Variable holding an agent key |
+| `--once` | false | Detect, register, sync once, and exit; `--output json` needs it |
+
+`agent detect` sends nothing. `agent run` uses the key in `INFERCRANE_AGENT_KEY`, then a key saved by an
+earlier run, and otherwise creates one with the CLI's own sign-in and saves it in the OS keychain (or
+`agent-credentials.json`, mode `0600`, next to the CLI config). It sends that key only over HTTPS,
+except to a control plane on the same machine. A revoked agent stops at its next sync.
 
 ## Existing targets and routing
 

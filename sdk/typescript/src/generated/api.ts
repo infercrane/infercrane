@@ -223,6 +223,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  listAccelerators(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/accelerators';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   listPublicGPUPrices(): Promise<ObjectList> {
     const requestPath = '/public/catalog/gpu-prices';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
@@ -266,6 +271,36 @@ export class ControlApi {
   createEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = '/endpoints';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createAgent(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agents';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listAgents(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agents';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getAgent(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  revokeAgent(id: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  syncAgent(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agent/sync';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  registerAgentServer(body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agent/servers';
+    return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
   adoptEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {

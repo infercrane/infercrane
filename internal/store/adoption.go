@@ -17,6 +17,13 @@ import (
 // identity. It never creates a Deployment and therefore never claims provider
 // lifecycle ownership.
 func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upstreamModel, rawURL, source, ownership, runtimeName string) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error) {
+	return s.AdoptEndpointWithCredential(ctx, tenant, name, modelName, upstreamModel, rawURL, source, ownership, runtimeName, nil)
+}
+
+// AdoptEndpointWithCredential adopts like AdoptEndpoint and stores an optional
+// sealed bearer credential for the server. Only ciphertext reaches storage. A
+// repeated adoption with the same identity replaces the stored credential.
+func (s *Store) AdoptEndpointWithCredential(ctx context.Context, tenant, name, modelName, upstreamModel, rawURL, source, ownership, runtimeName string, credential *domain.SealedCredential) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error) {
 	if tenant == "" || !validEndpointName(name) || !validEndpointName(modelName) {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, errors.New("tenant, endpoint name, and logical model are required")
 	}
@@ -52,6 +59,11 @@ func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upst
 		if existing.OwnershipMode != ownership || existing.Source != source || existing.ImmutableIdentity != identity || existingURL != normalizedURL || existingModel != upstreamModel {
 			return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, fmt.Errorf("%w: endpoint is already adopted with different immutable identity or ownership", ErrConflict)
 		}
+		if credential != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE adopted_workloads SET upstream_credential_ciphertext=?,upstream_credential_nonce=?,updated_at=? WHERE id=? AND tenant_id=?`, credential.Ciphertext, credential.Nonce, now(), existing.ID, tenant); err != nil {
+				return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
+			}
+		}
 		if err = tx.Commit(); err != nil {
 			return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
 		}
@@ -62,43 +74,14 @@ func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upst
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
 	}
 
-	var environmentID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID); errors.Is(err, sql.ErrNoRows) {
-		environmentID, err = newID()
-		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO environments(id,tenant_id,name,policy_json,created_at,updated_at) VALUES(?,?,'production','{}'::jsonb,?,?) ON CONFLICT(tenant_id,name) DO NOTHING`, environmentID, tenant, now(), now())
-		}
-		if err == nil {
-			err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID)
-		}
-	}
-	if err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, fmt.Errorf("production environment: %w", err)
-	}
-	var modelID string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM logical_models WHERE tenant_id=? AND name=?`, tenant, modelName).Scan(&modelID)
-	if errors.Is(err, sql.ErrNoRows) {
-		modelID, err = newID()
-		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO logical_models(id,tenant_id,name,description,created_at,updated_at) VALUES(?,?,?,?,?,?)`, modelID, tenant, modelName, "Adopted workload identity", now(), now())
-		}
-	}
-	if err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
-	}
-
-	endpointID, _ := newID()
-	targetID, _ := newID()
-	bindingID, _ := newID()
-	planID, _ := newID()
-	adoptionID, _ := newID()
-	if endpointID == "" || targetID == "" || bindingID == "" || planID == "" || adoptionID == "" {
+	targetID, err := newID()
+	if err != nil || targetID == "" {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, errors.New("generate adoption identities")
 	}
 	stamp := now()
 	targetName := name + "-adopted"
 	var registeredID, registeredRuntime, registeredModel string
-	targetErr := tx.QueryRowContext(ctx, `SELECT id,runtime,COALESCE(upstream_model_name,'') FROM targets WHERE tenant_id=? AND url=?`, tenant, normalizedURL).Scan(&registeredID, &registeredRuntime, &registeredModel)
+	targetErr := tx.QueryRowContext(ctx, `SELECT id,runtime,COALESCE(upstream_model_name,'') FROM targets WHERE tenant_id=? AND url=? AND agent_id IS NULL`, tenant, normalizedURL).Scan(&registeredID, &registeredRuntime, &registeredModel)
 	if targetErr == nil {
 		if registeredRuntime != runtimeName || (registeredModel != "" && registeredModel != upstreamModel) {
 			return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, fmt.Errorf("%w: target URL is registered with incompatible runtime or model", ErrConflict)
@@ -119,31 +102,82 @@ func (s *Store) AdoptEndpoint(ctx context.Context, tenant, name, modelName, upst
 	} else {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, targetErr
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO endpoints(id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,created_at,updated_at) VALUES(?,?,?,?,?,'serving','pending',?,?)`, endpointID, tenant, modelID, environmentID, name, stamp, stamp); err != nil {
+	adoption, err := insertAdoptedEndpointTx(ctx, tx, tenant, name, modelName, targetID, ownership, source, identity, stamp)
+	if err != nil {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,target_id,config_json,created_at,updated_at) VALUES(?,?,?,?,'external',?,?,'{}'::jsonb,?,?)`, bindingID, tenant, endpointID, "primary", ownership, targetID, stamp, stamp); err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
-	}
-	planJSON := fmt.Sprintf(`{"routing_policy":"manual","bindings":[{"binding_id":"%s","priority":0,"weight":100}]}`, bindingID)
-	planDigest := sha256.Sum256([]byte(planJSON))
-	if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plans(id,tenant_id,endpoint_id,version,routing_policy,spec_json,spec_digest,created_at) VALUES(?,?,?,1,'manual',?::jsonb,?,?)`, planID, tenant, endpointID, planJSON, "sha256:"+hex.EncodeToString(planDigest[:]), stamp); err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plan_bindings(serving_plan_id,binding_id,priority,weight) VALUES(?,?,0,100)`, planID, bindingID); err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE endpoints SET active_serving_plan_id=? WHERE id=?`, planID, endpointID); err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO adopted_workloads(id,tenant_id,endpoint_id,binding_id,target_id,ownership_mode,source,immutable_identity,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, adoptionID, tenant, endpointID, bindingID, targetID, ownership, source, identity, stamp, stamp); err != nil {
-		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
+	if credential != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE adopted_workloads SET upstream_credential_ciphertext=?,upstream_credential_nonce=? WHERE id=? AND tenant_id=?`, credential.Ciphertext, credential.Nonce, adoption.ID, tenant); err != nil {
+			return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return domain.ResolvedEndpoint{}, domain.AdoptedWorkload{}, err
 	}
 	resolved, err := s.ResolveEndpointForTenant(ctx, tenant, name)
-	return resolved, domain.AdoptedWorkload{ID: adoptionID, TenantID: tenant, EndpointID: endpointID, BindingID: bindingID, TargetID: targetID, OwnershipMode: ownership, Source: source, ImmutableIdentity: identity, CreatedAt: parseTime(stamp), UpdatedAt: parseTime(stamp)}, err
+	return resolved, adoption, err
+}
+
+// insertAdoptedEndpointTx creates the endpoint, its single binding to an
+// existing target, a manual serving plan, and the adoption record. It never
+// creates a Deployment, so no provider lifecycle is claimed.
+func insertAdoptedEndpointTx(ctx context.Context, tx *tx, tenant, name, modelName, targetID, ownership, source, identity, stamp string) (domain.AdoptedWorkload, error) {
+	var environmentID string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		environmentID, err = newID()
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO environments(id,tenant_id,name,policy_json,created_at,updated_at) VALUES(?,?,'production','{}'::jsonb,?,?) ON CONFLICT(tenant_id,name) DO NOTHING`, environmentID, tenant, stamp, stamp)
+		}
+		if err == nil {
+			err = tx.QueryRowContext(ctx, `SELECT id FROM environments WHERE tenant_id=? AND name='production'`, tenant).Scan(&environmentID)
+		}
+	}
+	if err != nil {
+		return domain.AdoptedWorkload{}, fmt.Errorf("production environment: %w", err)
+	}
+	var modelID string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM logical_models WHERE tenant_id=? AND name=?`, tenant, modelName).Scan(&modelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		modelID, err = newID()
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO logical_models(id,tenant_id,name,description,created_at,updated_at) VALUES(?,?,?,?,?,?)`, modelID, tenant, modelName, "Adopted workload identity", stamp, stamp)
+		}
+	}
+	if err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	endpointID, _ := newID()
+	bindingID, _ := newID()
+	planID, _ := newID()
+	adoptionID, _ := newID()
+	if endpointID == "" || bindingID == "" || planID == "" || adoptionID == "" {
+		return domain.AdoptedWorkload{}, errors.New("generate adoption identities")
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO endpoints(id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,created_at,updated_at) VALUES(?,?,?,?,?,'serving','pending',?,?)`, endpointID, tenant, modelID, environmentID, name, stamp, stamp); err != nil {
+		if isUniqueViolation(err) {
+			return domain.AdoptedWorkload{}, fmt.Errorf("%w: endpoint %s already exists", ErrConflict, name)
+		}
+		return domain.AdoptedWorkload{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,target_id,config_json,created_at,updated_at) VALUES(?,?,?,?,'external',?,?,'{}'::jsonb,?,?)`, bindingID, tenant, endpointID, "primary", ownership, targetID, stamp, stamp); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	planJSON := fmt.Sprintf(`{"routing_policy":"manual","bindings":[{"binding_id":"%s","priority":0,"weight":100}]}`, bindingID)
+	planDigest := sha256.Sum256([]byte(planJSON))
+	if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plans(id,tenant_id,endpoint_id,version,routing_policy,spec_json,spec_digest,created_at) VALUES(?,?,?,1,'manual',?::jsonb,?,?)`, planID, tenant, endpointID, planJSON, "sha256:"+hex.EncodeToString(planDigest[:]), stamp); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO serving_plan_bindings(serving_plan_id,binding_id,priority,weight) VALUES(?,?,0,100)`, planID, bindingID); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE endpoints SET active_serving_plan_id=? WHERE id=?`, planID, endpointID); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO adopted_workloads(id,tenant_id,endpoint_id,binding_id,target_id,ownership_mode,source,immutable_identity,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, adoptionID, tenant, endpointID, bindingID, targetID, ownership, source, identity, stamp, stamp); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	return domain.AdoptedWorkload{ID: adoptionID, TenantID: tenant, EndpointID: endpointID, BindingID: bindingID, TargetID: targetID, OwnershipMode: ownership, Source: source, ImmutableIdentity: identity, CreatedAt: parseTime(stamp), UpdatedAt: parseTime(stamp)}, nil
 }
 
 func normalizeAdoptionURL(raw string) (string, error) {
@@ -186,6 +220,16 @@ func (s *Store) PromoteAdoptionOwnership(ctx context.Context, tenant, name, owne
 	}
 	if item.OwnershipMode != "observe-only" {
 		return domain.AdoptedWorkload{}, fmt.Errorf("%w: unsupported adoption ownership transition", ErrConflict)
+	}
+	var throughAgent bool
+	if err = tx.QueryRowContext(ctx, `SELECT agent_id IS NOT NULL FROM targets WHERE id=? AND tenant_id=?`, item.TargetID, tenant).Scan(&throughAgent); err != nil {
+		return domain.AdoptedWorkload{}, err
+	}
+	if throughAgent {
+		// The control plane cannot reach a server that only an agent sees, so
+		// it cannot route its traffic. The agent's local gateway is the
+		// traffic path for such a server.
+		return domain.AdoptedWorkload{}, fmt.Errorf("%w: this server is observed through an InferCrane agent and stays observe-only; send traffic through the agent's local gateway instead", ErrConflict)
 	}
 	stamp := now()
 	if _, err = tx.ExecContext(ctx, `UPDATE adopted_workloads SET ownership_mode=?,updated_at=? WHERE id=? AND tenant_id=?`, ownership, stamp, item.ID, tenant); err != nil {

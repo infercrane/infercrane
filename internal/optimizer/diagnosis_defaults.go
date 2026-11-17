@@ -20,6 +20,9 @@ var reviewedEngineVersions = map[string]string{"vllm": support.DefaultRuntimeVer
 
 // acceleratorMemoryClass applies vLLM 0.22.1's rule for batch defaults:
 // 70 GiB or more of device memory, except A100, gets the larger defaults.
+// The rule reads the device's memory and name on every platform, ROCm
+// included (EngineArgs.get_batch_defaults), so a reviewed AMD accelerator's
+// memory decides its class the same way.
 func acceleratorMemoryClass(gpu string) (string, bool) {
 	memory, known := provideridentity.AcceleratorMemoryGiB(gpu)
 	if !known {

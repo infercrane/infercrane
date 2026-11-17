@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 type fakeCloudStore struct {
@@ -218,6 +219,49 @@ func TestConvergePreservesNonVLLMRuntimeWhenPublishingTargets(t *testing.T) {
 	}
 	if store.appliedRuntime != "sglang" || store.target.Runtime != "sglang" {
 		t.Fatalf("applied runtime=%q target runtime=%q", store.appliedRuntime, store.target.Runtime)
+	}
+}
+
+func TestConvergeServesTheImagePinnedForTheGPUPlatform(t *testing.T) {
+	registry, err := integration.KubernetesCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := registry.Runtime(support.DefaultRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	converge := func(t *testing.T, profile integration.RuntimeProfile, gpu string) (*fakeReplicaProvider, error) {
+		t.Helper()
+		store := &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "qwen", Model: "Qwen/Qwen3-8B", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}}
+		provider := &fakeReplicaProvider{observation: provision.Observation{Exists: true, State: "ready", Endpoint: "http://gpu:8000", Details: `{}`}}
+		backends, err := NewReplicaBackends(ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "vllm", Profile: testElasticProfile("runpod-pods", "runpod"), Provider: provider})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtimes, err := integration.NewRuntimeBackends(integration.RuntimeBackend{Profile: profile, Inspector: fakeInspector{ready: true}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation := domain.Operation{ID: "operation-1", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: `{"deployment_id":"deployment-1","name":"qwen","model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"` + gpu + `","tenant_id":"global","min_replicas":1,"max_replicas":1}`}
+		_, err = CloudHandlersWithBackendsAndDrain(store, backends, runtimes, &fakeDrainTracker{current: true})[ConvergeKind](context.Background(), operation)
+		return provider, err
+	}
+	for gpu, platform := range map[string]string{"MI300X": "rocm-gfx942", "AMD Instinct MI300X OAM": "rocm-gfx942", "MI350X": "rocm-gfx950", "L40S": "cuda"} {
+		provider, err := converge(t, profile, gpu)
+		want, _ := support.RuntimeWorkload("vllm", platform)
+		if err != nil || provider.lastSpec.Workload.Image != want.Image || provider.lastSpec.Port != want.Port {
+			t.Fatalf("%s: image=%q want %q err=%v", gpu, provider.lastSpec.Workload.Image, want.Image, err)
+		}
+	}
+	// A runtime without an image for the GPU's platform fails permanently and
+	// never starts the CUDA image on an AMD GPU.
+	cudaOnly := profile
+	cudaOnly.Images = profile.Images[:1]
+	provider, err := converge(t, cudaOnly, "MI300X")
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "runtime_platform_unsupported" || failure.Retryable || provider.ensureCalls != 0 {
+		t.Fatalf("failure=%+v ensure_calls=%d err=%v", failure, provider.ensureCalls, err)
 	}
 }
 

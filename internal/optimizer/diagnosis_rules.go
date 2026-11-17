@@ -16,7 +16,7 @@ import (
 // DiagnosisRulesVersion identifies the rule set that maps a diagnosis to the
 // techniques worth measuring. A change to a rule, priority, gate, or flag
 // value changes this version.
-const DiagnosisRulesVersion = "diagnosis-technique-rules-v1"
+const DiagnosisRulesVersion = "diagnosis-technique-rules-v2"
 
 // Techniques the diagnosis rule set can choose. A technique is one change to
 // the starting setup; its candidate is measured against that setup.
@@ -514,9 +514,15 @@ func millisecondsWords(value float64) string {
 }
 
 // nativeFP8Accelerator reports whether the GPU runs FP8 math in hardware:
-// NVIDIA Ada, Hopper, and Blackwell. An unrecognized name is treated as not
-// supported, so an FP8 setup is skipped rather than guessed.
+// NVIDIA Ada, Hopper, and Blackwell, and the reviewed AMD Instinct CDNA 3 and
+// CDNA 4 accelerators, where the pinned vLLM and SGLang images run FP8
+// weights and an FP8 KV cache (sources in provideridentity). An unrecognized
+// name is treated as not supported, so an FP8 setup is skipped rather than
+// guessed.
 func nativeFP8Accelerator(gpu string) bool {
+	if accelerator, reviewed := provideridentity.LookupAccelerator(gpu); reviewed {
+		return accelerator.NativeFP8
+	}
 	if checkpointcatalog.AcceleratorArchitecture(gpu) != "" {
 		return true
 	}

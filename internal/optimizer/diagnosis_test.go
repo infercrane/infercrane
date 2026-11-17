@@ -349,7 +349,7 @@ func TestDiagnosisReEnablesATechniqueTheStartingSetupTurnedOff(t *testing.T) {
 func TestDiagnosisCandidatesPassDeploymentSpecValidation(t *testing.T) {
 	directory := t.TempDir()
 	high := testDiagnosis(optimizationreadiness.BottleneckDecode, map[string]float64{optimizationreadiness.SignalRunningPerReplica: 64})
-	for name, request := range map[string]Request{"kv": genericRequest("H100", preemptionDiagnosis()), "decode": genericRequest("H100", high), "host": genericRequest("H100", testDiagnosis(optimizationreadiness.BottleneckHostScheduler, nil, DiagnosisFinding{Rule: optimizationreadiness.RuleHostBound, Signal: metrics.MeasurementGPUSMActive, Observed: 30, Comparison: "<", Threshold: 50, Unit: "percent"}))} {
+	for name, request := range map[string]Request{"kv": genericRequest("H100", preemptionDiagnosis()), "kv-mi300x": genericRequest("MI300X", preemptionDiagnosis()), "decode": genericRequest("H100", high), "host": genericRequest("H100", testDiagnosis(optimizationreadiness.BottleneckHostScheduler, nil, DiagnosisFinding{Rule: optimizationreadiness.RuleHostBound, Signal: metrics.MeasurementGPUSMActive, Observed: 30, Comparison: "<", Threshold: 50, Unit: "percent"}))} {
 		proposal, err := catalogSource(t).Propose(context.Background(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -367,6 +367,46 @@ func TestDiagnosisCandidatesPassDeploymentSpecValidation(t *testing.T) {
 				t.Fatalf("%s %s failed spec validation: %v", name, candidate.Deployment.Name, err)
 			}
 		}
+	}
+}
+
+func TestDiagnosisPlansAMDInstinctGPUsFromTheirReviewedIdentity(t *testing.T) {
+	// Every spelling of an MI300X resolves to 192 GB, so vLLM 0.22.1's large
+	// batch defaults apply and restating them is a no-op, as on an H100.
+	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "AMD_Instinct_MI300X_OAM", "MI325X", "MI355X"} {
+		if class, known := acceleratorMemoryClass(gpu); !known || class != memoryLarge {
+			t.Fatalf("%s memory class=%q known=%t", gpu, class, known)
+		}
+		if _, why := withoutNoOps("vllm", "0.22.1", gpu, []runtimeArg{{"--max-num-seqs", "1024"}, {"--max-num-batched-tokens", "8192"}}); !strings.Contains(why, "already vLLM 0.22.1's defaults") {
+			t.Fatalf("%s kept a default: %q", gpu, why)
+		}
+		if !nativeFP8Accelerator(gpu) {
+			t.Fatalf("%s is not treated as running FP8 in hardware", gpu)
+		}
+	}
+	for _, gpu := range []string{"MI250X", "MI300A"} {
+		if nativeFP8Accelerator(gpu) {
+			t.Fatalf("unreviewed %s was treated as running FP8", gpu)
+		}
+		if _, known := acceleratorMemoryClass(gpu); known {
+			t.Fatalf("unreviewed %s has a memory class", gpu)
+		}
+	}
+	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("AMD Instinct MI300X OAM", preemptionDiagnosis()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kv []string
+	for _, candidate := range proposal.Candidates {
+		if candidate.Reason != nil && candidate.Reason.Technique == TechniqueFP8KVCache {
+			kv = candidate.Deployment.Runtime.Args
+		}
+	}
+	if !strings.Contains(strings.Join(kv, " "), "--kv-cache-dtype fp8") {
+		t.Fatalf("no FP8 KV cache setup on MI300X: %+v", proposal.Diagnosis)
+	}
+	if proposal.Diagnosis == nil || proposal.Diagnosis.RulesVersion != "diagnosis-technique-rules-v2" {
+		t.Fatalf("rules version=%+v", proposal.Diagnosis)
 	}
 }
 

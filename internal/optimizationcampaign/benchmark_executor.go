@@ -194,7 +194,7 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	// exposes one; without it, runtime metrics stay unknown. A built-in
 	// runtime's draft carries no workload, so read the contract the replica
 	// was provisioned with, not the empty draft.
-	served := support.ServedWorkload(draft.Runtime.Engine, draft.Runtime.Workload)
+	served := support.ServedWorkload(draft.Runtime.Engine, draft.Resources.GPU, draft.Runtime.Workload)
 	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 

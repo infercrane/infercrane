@@ -71,6 +71,7 @@ var Routes = []Route{
 	{"DELETE", "/compute/connections/{id}", "deleteComputeConnection", "Compute", "Delete an unused tenant compute connection", "", "Empty", 204, false},
 	{"POST", "/managed-deployment-quotes", "quoteManagedDeployment", "Compute", "Quote a time-boxed prepaid InferCrane Cloud deployment", "ManagedDeploymentQuoteRequest", "ManagedDeploymentQuoteEnvelope", 200, false},
 	{"GET", "/catalog/gpu-prices", "listGPUPrices", "Compute", "List timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
+	{"GET", "/catalog/accelerators", "listAccelerators", "Compute", "List reviewed accelerators outside the default CUDA platform, the runtime image pinned for each platform, and where each platform may run", "", "Object", 200, false},
 	{"GET", "/public/catalog/gpu-prices", "listPublicGPUPrices", "Compute", "List public timestamped GPU price observations without claiming stock", "", "ObjectList", 200, false},
 	{"GET", "/system/instances", "listControlPlaneInstances", "System", "List live control-plane instances and protocol compatibility", "", "ObjectList", 200, false},
 	{"GET", "/environments", "listEnvironments", "Endpoints", "List endpoint environments", "", "ObjectList", 200, false},
@@ -80,6 +81,12 @@ var Routes = []Route{
 	{"POST", "/logical-models", "createLogicalModel", "Endpoints", "Create a logical model identity", "LogicalModelCreate", "Object", 201, false},
 	{"GET", "/endpoints", "listEndpoints", "Endpoints", "List stable application endpoints", "", "ObjectList", 200, false},
 	{"POST", "/endpoints", "createEndpoint", "Endpoints", "Create a stable application endpoint", "EndpointCreate", "Object", 201, false},
+	{"POST", "/agents", "createAgent", "Agents", "Create an InferCrane agent key for one machine; the key is returned once and can call only the agent API", "AgentCreate", "AgentCreated", 201, false},
+	{"GET", "/agents", "listAgents", "Agents", "List InferCrane agents with their last report and connection state", "", "AgentList", 200, false},
+	{"GET", "/agents/{id}", "getAgent", "Agents", "Inspect one agent and the servers observed through it", "", "AgentDetail", 200, false},
+	{"DELETE", "/agents/{id}", "revokeAgent", "Agents", "Revoke an agent; it stops at its next sync and its servers are marked unhealthy", "", "AgentEnvelope", 200, true},
+	{"POST", "/agent/sync", "syncAgent", "Agents", "Agent key only: report hardware, servers, health, filtered engine metrics, and content-free request shapes", "AgentSyncRequest", "AgentSyncResponse", 200, false},
+	{"POST", "/agent/servers", "registerAgentServer", "Agents", "Agent key only: observe one local server as an observe-only endpoint", "AgentServerRegistration", "AgentServerRegistrationResponse", 201, true},
 	{"POST", "/adoptions/endpoints", "adoptEndpoint", "Adoption", "Adopt an existing inference endpoint without transferring lifecycle ownership", "EndpointAdoption", "Object", 201, false},
 	{"PUT", "/adoptions/endpoints/{name}/ownership", "promoteAdoptionOwnership", "Adoption", "Explicitly promote an adopted endpoint to traffic-managed ownership", "AdoptionOwnership", "Object", 200, false},
 	{"GET", "/requests/{id}", "inspectRequest", "Diagnostics", "Inspect persisted request metadata without content", "", "Object", 200, false},
@@ -502,7 +509,7 @@ func schemas() map[string]any {
 		"EnvironmentPromotionRequest":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"source_endpoint", "destination_endpoint", "idempotency_key"}, "properties": map[string]any{"source_endpoint": map[string]any{"type": "string", "minLength": 1}, "destination_endpoint": map[string]any{"type": "string", "minLength": 1}, "idempotency_key": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}}},
 		"LogicalModelCreate":                          map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "description": map[string]any{"type": "string", "maxLength": 4096}}},
 		"EndpointCreate":                              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "logical_model", "environment"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "environment": map[string]any{"type": "string"}}},
-		"EndpointAdoption":                            map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "logical_model", "source", "ownership_mode", "runtime"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "upstream_model": map[string]any{"type": "string"}, "url": map[string]any{"type": "string", "format": "uri", "description": "Required unless provider_connection supplies the private endpoint."}, "provider_connection": map[string]any{"type": "string", "description": "Tenant-scoped server-side credential and endpoint reference used for authenticated discovery."}, "source": map[string]any{"type": "string", "enum": []string{"vllm", "openai-compatible"}}, "ownership_mode": map[string]any{"type": "string", "enum": []string{"observe-only", "traffic-managed"}}, "runtime": map[string]any{"type": "string"}, "discover": map[string]any{"type": "boolean", "description": "Ask the control plane to verify /v1/models and resolve the selected model before adoption."}, "connector": map[string]any{"type": "string", "enum": []string{"auto", "vllm", "litellm", "openai-compatible"}}}},
+		"EndpointAdoption":                            map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "logical_model", "source", "ownership_mode", "runtime"}, "properties": map[string]any{"upstream_credential": map[string]any{"type": "string", "minLength": 1, "maxLength": 4096, "writeOnly": true, "description": "Write-only bearer token for the server, used for discovery and health checks. Requires discover. Stored encrypted with the tenant credential key; refused with upstream_credential_unavailable when none is configured."}, "name": map[string]any{"type": "string"}, "logical_model": map[string]any{"type": "string"}, "upstream_model": map[string]any{"type": "string"}, "url": map[string]any{"type": "string", "format": "uri", "description": "Required unless provider_connection supplies the private endpoint."}, "provider_connection": map[string]any{"type": "string", "description": "Tenant-scoped server-side credential and endpoint reference used for authenticated discovery."}, "source": map[string]any{"type": "string", "enum": []string{"vllm", "openai-compatible"}}, "ownership_mode": map[string]any{"type": "string", "enum": []string{"observe-only", "traffic-managed"}}, "runtime": map[string]any{"type": "string"}, "discover": map[string]any{"type": "boolean", "description": "Ask the control plane to verify /v1/models and resolve the selected model before adoption."}, "connector": map[string]any{"type": "string", "enum": []string{"auto", "vllm", "litellm", "openai-compatible"}}}},
 		"MeasurementEvidence":                         measurementEvidenceSchema(),
 		"MonitoringSummary":                           monitoringSummarySchema(),
 		"MonitoringBucket":                            monitoringBucketSchema(),
@@ -612,6 +619,9 @@ func schemas() map[string]any {
 		result[name] = schema
 	}
 	for name, schema := range notificationSchemas() {
+		result[name] = schema
+	}
+	for name, schema := range agentSchemas() {
 		result[name] = schema
 	}
 	for name, schema := range acceleratorLabRunSchemas() {

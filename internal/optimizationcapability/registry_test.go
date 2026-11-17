@@ -37,6 +37,36 @@ func TestV1CompilesOnlyQualifiedExactTuples(t *testing.T) {
 	}
 }
 
+func TestV1CompilesSchedulerMechanismsOnReviewedAMDAccelerators(t *testing.T) {
+	registry, err := V1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "AMD_Instinct_MI325X_OAM", "MI355X"} {
+		for _, request := range []Request{
+			{Mechanism: ContinuousBatching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: gpu},
+			{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: gpu},
+			{Mechanism: ChunkedPrefill, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: gpu, Parameters: map[string]string{"max_num_batched_tokens": "8192"}},
+			{Mechanism: ContinuousBatching, Runtime: "sglang", RuntimeVersion: support.SGLangRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: gpu},
+		} {
+			if _, err := registry.Compile(request); err != nil {
+				t.Fatalf("%s %s on %s: %v", request.Runtime, request.Mechanism, gpu, err)
+			}
+		}
+	}
+	// Kernel- and precision-level descriptors are not widened to AMD, and an
+	// unreviewed AMD name matches nothing.
+	for _, request := range []Request{
+		{Mechanism: KVCachePrecision, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: "MI300X", Parameters: map[string]string{"dtype": "fp8_e4m3"}},
+		{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: "MI250X"},
+		{Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Model: "Qwen/Qwen3-8B", ArtifactPrecision: "bf16", Accelerator: "amd.com/gpu"},
+	} {
+		if _, err := registry.Compile(request); err == nil {
+			t.Fatalf("expected fail-closed rejection for %+v", request)
+		}
+	}
+}
+
 func TestRegistryRejectsAmbiguousAndWildcardDescriptors(t *testing.T) {
 	descriptor := Descriptor{ID: "one", Mechanism: PrefixCaching, Runtime: "vllm", RuntimeVersion: "1", Models: []string{"org/model"}, ArtifactPrecisions: []string{"bf16"}, Accelerators: []string{"H100"}, Compiler: "runtime-owned", State: LocalQualified, Evidence: "test", Upstream: "https://example.test", License: "apache-2.0"}
 	if _, err := New(descriptor, descriptor); err == nil {
