@@ -144,14 +144,16 @@ never proposed on an MI300X.
 A build can seed a setup when every catalog gate passes and the pinned ROCm image of one of its
 reviewed runtimes is at least the engine version its model card states. A build whose card needs a
 newer engine stays in the catalog with that reason, for example `vllm needs 0.28.0 or newer,
-pinned 0.22.1`. Today:
+pinned 0.22.1`.
 
-- LLM Compressor builds (W4A16, W8A8) run on vLLM and can seed a setup on a matching GPU. In the
-  catalog reviewed on 2026-11-12, every AMD LLM Compressor build states a newer vLLM than 0.22.1,
-  so none seeds a setup yet.
+The catalog reviewed on 2026-11-17 lists 46 AMD builds, each recorded as runnable: 27 on `gfx942`
+and `gfx950`, and 19 on `gfx950` only. None seeds a setup yet:
+
+- LLM Compressor builds (W4A16, W8A8) run on vLLM and can seed a setup on a matching GPU. All 18
+  AMD LLM Compressor builds state vLLM 0.26.0 to 0.31.0, newer than the pinned 0.22.1.
 - Quark builds (MXFP4, PTPC-FP8, INT4) stay catalog-only: Quark is not yet a tool whose
-  checkpoints can seed a setup.
-- DFlash speculators stay catalog-only, as on NVIDIA.
+  checkpoints can seed a setup. There are 27.
+- DFlash speculators stay catalog-only, as on NVIDIA. There is one.
 
 A seeded build is unmeasured like every other candidate. It is compared with the unmodified model
 on the same GPU before it can win.

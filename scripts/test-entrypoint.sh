@@ -80,6 +80,23 @@ INFERCRANE_BREZEL_SANDBOX_TOKEN='brezel-test-token' INFERCRANE_SKYPILOT_API=disa
     test -z "${INFERCRANE_BREZEL_SANDBOX_TOKEN:-}"
   '
 
+env -u INFERCRANE_PASSPORT_SIGNING_KEY_FILE INFERCRANE_PASSPORT_SIGNING_KEY='passport-test-key' \
+  INFERCRANE_SKYPILOT_API=disabled \
+  sh "$root/scripts/entrypoint.sh" sh -c '
+    test -r "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE"
+    test "$(stat -c %a "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE" 2>/dev/null || stat -f %Lp "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE")" = 600
+    test "$(cat "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE")" = passport-test-key
+    test -z "${INFERCRANE_PASSPORT_SIGNING_KEY:-}"
+    rm -f "$INFERCRANE_PASSPORT_SIGNING_KEY_FILE"
+  '
+if INFERCRANE_PASSPORT_SIGNING_KEY='passport-test-key' INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$fixture/passport-key" \
+  INFERCRANE_SKYPILOT_API=disabled sh "$root/scripts/entrypoint.sh" infercrane version \
+  >"$fixture/out" 2>"$fixture/error"; then
+  echo 'entrypoint accepted both a passport signing key and a key file' >&2
+  exit 1
+fi
+grep -q 'not both' "$fixture/error"
+
 cat >"$fixture/bin/sky" <<'SKY'
 #!/bin/sh
 printf 'sky:%s\n' "$*" >>"$ENTRYPOINT_TEST_LOG"
