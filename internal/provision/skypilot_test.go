@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"errors"
+	"github.com/infercrane/infercrane/internal/support"
 	"os"
 	"strings"
 	"testing"
@@ -129,6 +130,26 @@ func TestVastServesAndIsObservedOnItsOnlyForwardedPort(t *testing.T) {
 	}
 	if SkyPilotServicePort("aws") != 0 {
 		t.Fatal("only clouds with a single forwarded port pin the service port")
+	}
+
+	// The default vLLM contract takes ${PORT}, so it moves to 8080 too.
+	runner = &fakeSkyRunner{}
+	provider.Runner = runner
+	if _, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "vast", GPU: "RTX4090", Workload: support.VLLMWorkload()}); err != nil {
+		t.Fatalf("vLLM workload on Vast rejected: %v", err)
+	}
+	if !strings.Contains(runner.launchTask, "'--port' '8080'") {
+		t.Fatalf("vLLM workload must serve on 8080: %s", runner.launchTask)
+	}
+
+	// A workload with a hard-coded port cannot be reached on Vast.
+	fixed := support.VLLMWorkload()
+	fixed.Command = []string{"server", "--port", "9000"}
+	fixed.Port = 9000
+	runner = &fakeSkyRunner{}
+	provider.Runner = runner
+	if _, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "vast", GPU: "RTX4090", Workload: fixed}); !errors.Is(err, ErrInvalidReplicaSpec) || runner.launches != 0 {
+		t.Fatalf("fixed-port workload err=%v launches=%d", err, runner.launches)
 	}
 }
 

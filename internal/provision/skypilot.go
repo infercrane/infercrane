@@ -155,7 +155,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		spec.Port = 8000
 	}
 	if s.ServicePort != 0 && spec.Port != s.ServicePort {
-		if !spec.Workload.Empty() {
+		// A workload whose command takes ${PORT} can move to the forwarded port;
+		// one with a fixed port would start a server nobody can reach.
+		if !spec.Workload.Empty() && !takesPort(spec.Workload.Command) {
 			return ProviderHandle{}, fmt.Errorf("%w: %s exposes only container port %d; the workload listens on %d", ErrInvalidReplicaSpec, spec.Cloud, s.ServicePort, spec.Port)
 		}
 		spec.Port = s.ServicePort
@@ -342,6 +344,15 @@ func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	// supported hf_xet/HTTP transfer path instead of failing before model load.
 	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; VLLM_API_KEY="$INFERCRANE_WORKER_API_KEY" exec vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
 }
+func takesPort(command []string) bool {
+	for _, value := range command {
+		if strings.Contains(value, "${PORT}") {
+			return true
+		}
+	}
+	return false
+}
+
 func workloadCommand(command []string, model, revision string, port int, runtimeArgs []string) string {
 	values := append(append([]string(nil), command...), runtimeArgs...)
 	for i, value := range values {
