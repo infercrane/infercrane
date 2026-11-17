@@ -589,9 +589,10 @@ compute, host, and interconnect rules and returns the technique families worth
 measuring for the diagnosed bottleneck
 ([thresholds](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)).
 A proposal that names `diagnosis_endpoint` closes the loop: the control plane
-reads that assessment and a recent GPU profile summary, binds them into the
-proposal input digest, and the planner's typed rule set
-(`diagnosis-technique-rules-v2` in `internal/optimizer`) keeps only the
+reads that assessment and a recent GPU profile summary (kernel shares, plus the
+fired findings of a v2 capture's trace analysis with their measured values and
+thresholds), binds them into the proposal input digest, and the planner's typed
+rule set (`diagnosis-technique-rules-v3` in `internal/optimizer`) keeps only the
 starting point and the one-change setups its rules choose, ordered by expected
 benefit with the reason recorded on each. Flags equal to the engine's resolved
 default are dropped, and when no rule applies only the starting point is

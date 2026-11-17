@@ -87,7 +87,75 @@ type GPUProfileSummary struct {
 	CapturedAt    time.Time          `json:"captured_at"`
 	KernelSeconds float64            `json:"kernel_seconds"`
 	Shares        map[string]float64 `json:"shares"`
+	// Trace is what the analysis of the capture's engine trace measured. It
+	// is absent for a call-stack-only (v1) capture and for an analysis
+	// algorithm the planner has not reviewed.
+	Trace *GPUTraceSummary `json:"trace,omitempty"`
 }
+
+// GPUTraceSummary is the part of a trace analysis a plan reads: the analysis
+// rules that fired, each with its measured value and threshold, and the
+// measured values those rules rest on. A value the trace could not measure is
+// absent, never zero.
+type GPUTraceSummary struct {
+	AlgorithmVersion string             `json:"algorithm_version"`
+	Bottleneck       string             `json:"bottleneck"`
+	Devices          int                `json:"devices"`
+	WindowMS         float64            `json:"window_ms"`
+	Findings         []GPUTraceFinding  `json:"findings"`
+	Measurements     map[string]float64 `json:"measurements"`
+}
+
+// GPUTraceFinding is one trace analysis rule that fired.
+type GPUTraceFinding struct {
+	Rule       string  `json:"rule"`
+	Observed   float64 `json:"observed"`
+	Comparison string  `json:"comparison"`
+	Threshold  float64 `json:"threshold"`
+	Unit       string  `json:"unit"`
+}
+
+// Trace analysis rules the planner reads, from gpu-trace-analysis-v1.
+const (
+	TraceRuleIdleHostBound        = "gpu.idle_host_bound"
+	TraceRuleLaunchBoundKernels   = "gpu.launch_bound_kernels"
+	TraceRuleCommunicationExposed = "gpu.communication_exposed"
+	TraceRuleMemoryBoundGEMM      = "gpu.memory_bound_gemm"
+	TraceRuleComputeBoundGEMM     = "gpu.compute_bound_gemm"
+	TraceRuleAttentionHeavy       = "gpu.attention_heavy"
+	TraceRuleDecodeDominant       = "gpu.decode_dominant"
+)
+
+// Trace measurements a summary carries when the trace measured them. Shares
+// are 0..1; durations are in the unit their name ends with.
+const (
+	TraceIdleShare            = "idle_share"
+	TraceIdleHostWaitShare    = "idle_host_wait_share"
+	TraceLaunchDelayP50US     = "launch_delay_p50_us"
+	TraceShortKernelShare     = "short_kernel_share"
+	TraceGraphLaunchShare     = "graph_launch_share"
+	TraceOverlappedShare      = "communication_overlapped_share"
+	TraceRooflineCoveredShare = "roofline_covered_share"
+	TraceDecodeShare          = "decode_share"
+	TraceStepP50MS            = "step_p50_ms"
+	TraceStepP95MS            = "step_p95_ms"
+)
+
+// reviewedTraceAlgorithms are the trace analysis versions whose rules and
+// thresholds the planner was written against. Another version is left out.
+var reviewedTraceAlgorithms = map[string]bool{gpuprofile.AnalysisAlgorithm: true}
+
+var (
+	traceShareMeasurements = map[string]bool{
+		TraceIdleShare: true, TraceIdleHostWaitShare: true, TraceShortKernelShare: true, TraceGraphLaunchShare: true,
+		TraceOverlappedShare: true, TraceRooflineCoveredShare: true, TraceDecodeShare: true,
+	}
+	traceDurationMeasurements = map[string]bool{TraceLaunchDelayP50US: true, TraceStepP50MS: true, TraceStepP95MS: true}
+	traceBottlenecks          = map[string]bool{
+		gpuprofile.BottleneckHostLaunch: true, gpuprofile.BottleneckCommunication: true, gpuprofile.BottleneckMemoryBandwidth: true,
+		gpuprofile.BottleneckCompute: true, gpuprofile.BottleneckAttention: true, gpuprofile.BottleneckBusy: true, gpuprofile.BottleneckUnknown: true,
+	}
+)
 
 // DiagnosisFromAssessment keeps the parts of a readiness assessment a planner
 // uses: state, primary bottleneck, fired findings, and available signal values.
@@ -142,7 +210,55 @@ func SummarizeGPUProfile(profile gpuprofile.Profile, now time.Time, maxAge time.
 	for _, class := range kernelClasses {
 		summary.Shares[class] = round(float64(byClass[class])/float64(total), 4)
 	}
+	summary.Trace = summarizeTrace(profile)
 	return summary
+}
+
+// summarizeTrace keeps the fired rules and the measured values of a v2
+// capture's trace analysis. It returns nil for a v1 capture, an analysis that
+// fails validation, or an algorithm the planner has not reviewed.
+func summarizeTrace(profile gpuprofile.Profile) *GPUTraceSummary {
+	analysis := profile.Analysis
+	if profile.SchemaVersion != gpuprofile.SchemaVersionV2 || analysis == nil || !reviewedTraceAlgorithms[analysis.AlgorithmVersion] || gpuprofile.ValidateAnalysis(*analysis) != nil {
+		return nil
+	}
+	trace := &GPUTraceSummary{
+		AlgorithmVersion: analysis.AlgorithmVersion, Bottleneck: analysis.Verdict.Bottleneck, Devices: analysis.Trace.Devices,
+		WindowMS: round(analysis.Trace.WindowMS, 3), Findings: []GPUTraceFinding{}, Measurements: map[string]float64{},
+	}
+	seen := map[string]bool{}
+	for _, finding := range analysis.Findings {
+		if seen[finding.Rule] || !diagnosisName.MatchString(finding.Rule) {
+			continue
+		}
+		seen[finding.Rule] = true
+		trace.Findings = append(trace.Findings, GPUTraceFinding{Rule: finding.Rule, Observed: finding.Observed, Comparison: finding.Comparison, Threshold: finding.Threshold, Unit: finding.Unit})
+	}
+	measure := func(name string, value *float64, places int) {
+		if value != nil && finite(*value) {
+			trace.Measurements[name] = round(*value, places)
+		}
+	}
+	idle := analysis.Utilization.IdleShare
+	measure(TraceIdleShare, &idle, 4)
+	measure(TraceIdleHostWaitShare, analysis.Idle.HostWaitShare, 4)
+	measure(TraceLaunchDelayP50US, analysis.Launch.LaunchDelayP50US, 1)
+	measure(TraceShortKernelShare, analysis.Launch.ShortKernelShare, 4)
+	if analysis.Trace.LaunchesRecorded && analysis.Launch.Launches > 0 {
+		graphs := float64(analysis.Launch.GraphLaunches) / float64(analysis.Launch.Launches)
+		measure(TraceGraphLaunchShare, &graphs, 4)
+	}
+	measure(TraceOverlappedShare, analysis.Overlap.OverlappedShare, 4)
+	if analysis.Roofline.Position != "unknown" {
+		measure(TraceRooflineCoveredShare, analysis.Roofline.CoveredShare, 4)
+	}
+	if analysis.Phases.Source != "unknown" {
+		decode := analysis.Phases.Decode.Share
+		measure(TraceDecodeShare, &decode, 4)
+	}
+	measure(TraceStepP50MS, analysis.Steps.P50MS, 3)
+	measure(TraceStepP95MS, analysis.Steps.P95MS, 3)
+	return trace
 }
 
 // KernelClass groups a GPU kernel by its name into attention, GEMM,
@@ -166,6 +282,16 @@ func normalizeDiagnosis(diagnosis Diagnosis) Diagnosis {
 	if diagnosis.GPUProfile != nil {
 		profile := *diagnosis.GPUProfile
 		profile.CapturedAt = profile.CapturedAt.UTC().Truncate(time.Second)
+		if profile.Trace != nil {
+			trace := *profile.Trace
+			if trace.Findings == nil {
+				trace.Findings = []GPUTraceFinding{}
+			}
+			if trace.Measurements == nil {
+				trace.Measurements = map[string]float64{}
+			}
+			profile.Trace = &trace
+		}
 		diagnosis.GPUProfile = &profile
 	}
 	return diagnosis
@@ -209,6 +335,34 @@ func validateDiagnosis(diagnosis Diagnosis) error {
 				return errors.New("diagnosis GPU profile share is malformed")
 			}
 		}
+		if profile.Trace != nil {
+			return validateTraceSummary(*profile.Trace)
+		}
+	}
+	return nil
+}
+
+func validateTraceSummary(trace GPUTraceSummary) error {
+	if !reviewedTraceAlgorithms[trace.AlgorithmVersion] || !traceBottlenecks[trace.Bottleneck] || trace.Devices < 1 || trace.Devices > gpuprofile.MaxGPUs || !finite(trace.WindowMS) || trace.WindowMS <= 0 {
+		return errors.New("diagnosis GPU trace summary is malformed")
+	}
+	if len(trace.Findings) > gpuprofile.MaxFindings || len(trace.Measurements) > len(traceShareMeasurements)+len(traceDurationMeasurements) {
+		return fmt.Errorf("diagnosis GPU trace summary is limited to %d findings and the known measurements", gpuprofile.MaxFindings)
+	}
+	seen := map[string]bool{}
+	for _, finding := range trace.Findings {
+		if seen[finding.Rule] || !diagnosisName.MatchString(finding.Rule) || !diagnosisComparisons[finding.Comparison] || finding.Unit == "" || len(finding.Unit) > 32 || !finite(finding.Observed) || !finite(finding.Threshold) {
+			return errors.New("diagnosis GPU trace finding is malformed")
+		}
+		seen[finding.Rule] = true
+	}
+	for name, value := range trace.Measurements {
+		switch {
+		case traceShareMeasurements[name] && finite(value) && value >= 0 && value <= 1:
+		case traceDurationMeasurements[name] && finite(value) && value >= 0:
+		default:
+			return errors.New("diagnosis GPU trace measurement is unknown or out of range")
+		}
 	}
 	return nil
 }
@@ -233,6 +387,34 @@ func (d Diagnosis) kernelShare(class string) (float64, bool) {
 	}
 	value, ok := d.GPUProfile.Shares[class]
 	return value, ok
+}
+
+// trace returns the capture's trace analysis summary, or nil for a v1
+// capture or no capture.
+func (d Diagnosis) trace() *GPUTraceSummary {
+	if d.GPUProfile == nil {
+		return nil
+	}
+	return d.GPUProfile.Trace
+}
+
+func (d Diagnosis) traceFinding(rule string) (GPUTraceFinding, bool) {
+	if trace := d.trace(); trace != nil {
+		for _, finding := range trace.Findings {
+			if finding.Rule == rule {
+				return finding, true
+			}
+		}
+	}
+	return GPUTraceFinding{}, false
+}
+
+func (d Diagnosis) traceMeasurement(name string) (float64, bool) {
+	if trace := d.trace(); trace != nil {
+		value, ok := trace.Measurements[name]
+		return value, ok
+	}
+	return 0, false
 }
 
 func finite(value float64) bool {

@@ -16,7 +16,7 @@ import (
 // DiagnosisRulesVersion identifies the rule set that maps a diagnosis to the
 // techniques worth measuring. A change to a rule, priority, gate, or flag
 // value changes this version.
-const DiagnosisRulesVersion = "diagnosis-technique-rules-v2"
+const DiagnosisRulesVersion = "diagnosis-technique-rules-v3"
 
 // Techniques the diagnosis rule set can choose. A technique is one change to
 // the starting setup; its candidate is measured against that setup.
@@ -35,6 +35,7 @@ const (
 	TechniqueAPIServers       = "api-server-processes"
 	TechniqueStreamInterval   = "stream-interval"
 	TechniqueCUDAGraphs       = "cuda-graphs"
+	TechniqueAsyncScheduling  = "async-scheduling"
 	TechniqueParallelism      = "parallelism-layout"
 	TechniqueSpeculationTune  = "speculation-length"
 	TechniqueRightSizing      = "right-sizing"
@@ -71,6 +72,13 @@ const (
 	// and lower weight precision are not proposed.
 	speculationMinimumBillions = 1.0
 	precisionMinimumBillions   = 1.5
+	// rooflineCoverageFloor is the share of matrix-multiply time a trace must
+	// have placed on the roofline before its memory- or compute-bound verdict
+	// chooses anything.
+	rooflineCoverageFloor = 0.5
+	// captureHeadroom sizes a larger CUDA graph capture a quarter above the
+	// observed concurrency, so batches a little above it still use graphs.
+	captureHeadroom = 1.25
 )
 
 type runtimeArg struct{ flag, value string }
@@ -102,7 +110,7 @@ type technique struct {
 var techniqueOrder = []string{
 	TechniqueFP8KVCache, TechniqueBatchBudget, TechniquePrefixCache, TechniquePrefixScheduling, TechniqueSpeculativeMTP,
 	TechniqueSpeculativeDraft, TechniqueFP8Weights, TechniqueInt4Weights, TechniqueLargePrefill, TechniqueKVSequenceCap,
-	TechniqueAPIServers, TechniqueStreamInterval, TechniqueCUDAGraphs, TechniquePrefixRouting, TechniqueParallelism,
+	TechniqueAPIServers, TechniqueStreamInterval, TechniqueCUDAGraphs, TechniqueAsyncScheduling, TechniquePrefixRouting, TechniqueParallelism,
 	TechniqueSpeculationTune, TechniqueRightSizing,
 }
 
@@ -143,8 +151,13 @@ var techniques = map[string]technique{
 		args: map[string][]runtimeArg{"vllm": {{"--api-server-count", "2"}}}},
 	TechniqueStreamInterval: {id: TechniqueStreamInterval, label: "Stream tokens in small groups",
 		args: map[string][]runtimeArg{"vllm": {{"--stream-interval", "2"}}}},
+	// CUDA graphs are on by default; a candidate either turns them back on or,
+	// on vLLM, captures graphs for the larger batches the server runs.
 	TechniqueCUDAGraphs: {id: TechniqueCUDAGraphs, label: "CUDA graphs sized to your batches",
-		outOfScope: "vLLM and SGLang already capture CUDA graphs by default; capture sized to your batches is offered only on reviewed pinned images."},
+		disables: map[string][]string{"vllm": {"--enforce-eager"}, "sglang": {"--disable-cuda-graph"}}},
+	TechniqueAsyncScheduling: {id: TechniqueAsyncScheduling, label: "Prepare the next step while the GPU runs this one",
+		defaultOn: map[string]bool{"vllm": true, "sglang": true},
+		disables:  map[string][]string{"vllm": {"--no-async-scheduling"}, "sglang": {"--disable-overlap-schedule"}}},
 	TechniqueParallelism: {id: TechniqueParallelism, label: "Fewer GPUs per server",
 		outOfScope: "Changing how many GPUs each server uses changes the hardware, so it is planned as a separate run."},
 	TechniqueSpeculationTune: {id: TechniqueSpeculationTune, label: "Shorter speculation",
@@ -358,15 +371,21 @@ func diagnosisOutcomes(d Diagnosis, objective string) []ruleOutcome {
 		why := fmt.Sprintf("Matrix-multiply kernels took %s of sampled GPU time in the profile, so smaller weights speed up the largest share of work.", percentWords(share*100))
 		add(ruleOutcome{rule: RuleProfileGEMMHeavy, evidence: profileEvidence(KernelClassGEMM, share, gemmHeavyShare), picks: []techniquePick{{TechniqueFP8Weights, 70, why}, {TechniqueInt4Weights, 68, why}}})
 	}
-	if share, ok := d.kernelShare(KernelClassAttention); ok && share >= attentionHeavyShare && longContext {
+	// A trace analysis of the same capture measures attention and exposed
+	// communication directly, so its findings replace these share rules.
+	_, overlapMeasured := d.traceMeasurement(TraceOverlappedShare)
+	if share, ok := d.kernelShare(KernelClassAttention); ok && share >= attentionHeavyShare && longContext && d.trace() == nil {
 		add(ruleOutcome{rule: RuleProfileAttentionHeavy, evidence: profileEvidence(KernelClassAttention, share, attentionHeavyShare), picks: []techniquePick{
 			{TechniqueFP8KVCache, 70, fmt.Sprintf("Attention kernels took %s of sampled GPU time in the profile on long contexts, so an FP8 KV cache halves the bytes they read.", percentWords(share*100))},
 		}})
 	}
-	if share, ok := d.kernelShare(KernelClassCommunication); ok && share >= communicationHeavyShare {
+	if share, ok := d.kernelShare(KernelClassCommunication); ok && share >= communicationHeavyShare && !overlapMeasured {
 		add(ruleOutcome{rule: RuleProfileCommunicationBig, evidence: profileEvidence(KernelClassCommunication, share, communicationHeavyShare), picks: []techniquePick{
 			{TechniqueParallelism, 60, fmt.Sprintf("GPU-to-GPU communication took %s of sampled GPU time in the profile.", percentWords(share*100))},
 		}})
+	}
+	for _, outcome := range traceOutcomes(d, longContext) {
+		add(outcome)
 	}
 	if finding, ok := d.finding(optimizationreadiness.RuleInterconnectBound); ok {
 		add(ruleOutcome{rule: finding.Rule, evidence: findingEvidence(finding), picks: []techniquePick{
@@ -379,6 +398,86 @@ func diagnosisOutcomes(d Diagnosis, objective string) []ruleOutcome {
 		}})
 	}
 	return out
+}
+
+// traceOutcomes reads the findings of the capture's trace analysis. Each
+// rule cites the analysis' own measured value and threshold. Findings that
+// describe where time went without naming a change (idle time of unknown
+// cause, long idle gaps, decode-dominant kernel time) choose nothing.
+func traceOutcomes(d Diagnosis, longContext bool) []ruleOutcome {
+	var out []ruleOutcome
+	if finding, ok := d.traceFinding(TraceRuleIdleHostBound); ok {
+		cause := fmt.Sprintf("The GPU trace shows the GPU idle %s of the time waiting for the server's CPU to launch work (limit %s)", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))
+		out = append(out, ruleOutcome{rule: finding.Rule, evidence: traceEvidence(d, finding, TraceIdleHostWaitShare, TraceLaunchDelayP50US, TraceGraphLaunchShare), picks: []techniquePick{
+			{TechniqueCUDAGraphs, 90, cause + ", so CUDA graphs that cover your batches launch each step's kernels at once."},
+			{TechniqueAsyncScheduling, 88, cause + ", so preparing the next step while the GPU runs this one hides that wait."},
+		}})
+	}
+	if finding, ok := d.traceFinding(TraceRuleLaunchBoundKernels); ok {
+		out = append(out, ruleOutcome{rule: finding.Rule, evidence: traceEvidence(d, finding, TraceLaunchDelayP50US, TraceGraphLaunchShare), picks: []techniquePick{
+			{TechniqueCUDAGraphs, 88, fmt.Sprintf("In the GPU trace, %s of kernels finished faster than the CPU took to launch them (limit %s), so CUDA graphs that cover your batches replace those launches with one.", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))},
+		}})
+	}
+	if finding, ok := d.traceFinding(TraceRuleCommunicationExposed); ok {
+		out = append(out, ruleOutcome{rule: finding.Rule, evidence: traceEvidence(d, finding, TraceOverlappedShare), picks: []techniquePick{
+			{TechniqueParallelism, 75, fmt.Sprintf("In the GPU trace, communication between GPUs held the GPU %s of the time with no compute running under it (limit %s), so spreading the model over more GPUs would add to it; fewer GPUs per server is the lever.", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))},
+		}})
+	}
+	// A roofline verdict covers only matrix multiplies whose shapes the trace
+	// recorded, so it chooses nothing until it covers most of their time.
+	if coverage, ok := d.traceMeasurement(TraceRooflineCoveredShare); ok && coverage >= rooflineCoverageFloor {
+		if finding, ok := d.traceFinding(TraceRuleMemoryBoundGEMM); ok {
+			why := fmt.Sprintf("In the GPU trace, %s of matrix-multiply time waited on memory rather than math (limit %s), so smaller weights move fewer bytes per step.", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))
+			out = append(out, ruleOutcome{rule: finding.Rule, evidence: append(traceEvidence(d, finding), coverageEvidence(coverage)), picks: []techniquePick{{TechniqueFP8Weights, 80, why}, {TechniqueInt4Weights, 78, why}}})
+		}
+		if finding, ok := d.traceFinding(TraceRuleComputeBoundGEMM); ok {
+			out = append(out, ruleOutcome{rule: finding.Rule, evidence: append(traceEvidence(d, finding), coverageEvidence(coverage)), picks: []techniquePick{
+				{TechniqueFP8Weights, 75, fmt.Sprintf("In the GPU trace, %s of matrix-multiply time was limited by math rather than memory (limit %s), so FP8 math, which does more work per cycle, is the lever.", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))},
+			}})
+		}
+	}
+	if finding, ok := d.traceFinding(TraceRuleAttentionHeavy); ok && longContext {
+		out = append(out, ruleOutcome{rule: finding.Rule, evidence: traceEvidence(d, finding), picks: []techniquePick{
+			{TechniqueFP8KVCache, 70, fmt.Sprintf("In the GPU trace, attention took %s of kernel time (limit %s) on long contexts, so an FP8 KV cache halves the bytes it reads.", percentWords(finding.Observed*100), percentWords(finding.Threshold*100))},
+		}})
+	}
+	return out
+}
+
+// traceSignals names the measured quantity behind each trace finding the
+// planner reads.
+var traceSignals = map[string]string{
+	TraceRuleIdleHostBound:        "gpu_trace_host_wait_share",
+	TraceRuleLaunchBoundKernels:   "gpu_trace_short_kernel_share",
+	TraceRuleCommunicationExposed: "gpu_trace_exposed_communication_share",
+	TraceRuleMemoryBoundGEMM:      "gpu_trace_memory_bound_gemm_share",
+	TraceRuleComputeBoundGEMM:     "gpu_trace_compute_bound_gemm_share",
+	TraceRuleAttentionHeavy:       "gpu_trace_attention_share",
+}
+
+// traceEvidence cites a trace finding and the supporting measurements the
+// trace recorded; a measurement it did not record is left out.
+func traceEvidence(d Diagnosis, finding GPUTraceFinding, supporting ...string) []ReasonEvidence {
+	threshold := finding.Threshold
+	evidence := []ReasonEvidence{{Signal: traceSignals[finding.Rule], Observed: finding.Observed, Comparison: finding.Comparison, Threshold: &threshold, Unit: finding.Unit}}
+	for _, name := range supporting {
+		if value, ok := d.traceMeasurement(name); ok {
+			unit := "ratio"
+			switch {
+			case strings.HasSuffix(name, "_us"):
+				unit = "us"
+			case strings.HasSuffix(name, "_ms"):
+				unit = "ms"
+			}
+			evidence = append(evidence, ReasonEvidence{Signal: "gpu_trace_" + name, Observed: value, Unit: unit})
+		}
+	}
+	return evidence
+}
+
+func coverageEvidence(coverage float64) ReasonEvidence {
+	threshold := rooflineCoverageFloor
+	return ReasonEvidence{Signal: "gpu_trace_" + TraceRooflineCoveredShare, Observed: coverage, Comparison: ">=", Threshold: &threshold, Unit: "ratio"}
 }
 
 func queueOutcome(d Diagnosis) *ruleOutcome {
