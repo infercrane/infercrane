@@ -461,6 +461,16 @@ quality, and Release Guard records each candidate recorded, by their IDs, so a f
 its measured results after cleanup deletes the candidate deployments, and after their names are
 deployed again. A referenced record that does not exist leaves its field `unknown`.
 
+The report also keeps the campaign's decision after cleanup. Cleanup marks every setup `cleaned`,
+cancelling marks waiting setups `cancelled`, and the proposal rank is only the planner's order, so the
+report reads the decision from the ranking each setup recorded when it was ranked. A setup counts as
+chosen only when its own ranking selected it, it was measured, its answers did not fail, no later
+check failed it, and, for an evolution, Release Guard accepted it. A kept current setup still reads
+"Keep your current setup". A chosen setup that nobody activated is named as the best setup found but
+not rolled out, with whether its server was removed because the approval ended or because the run
+was cancelled; the report never says it went live. When nothing qualified, the outcome cards lead with
+your current setup's measured values.
+
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:
 

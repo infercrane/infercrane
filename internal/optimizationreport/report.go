@@ -296,6 +296,10 @@ type Evidence struct {
 	Benchmarks   map[string]domain.BenchmarkResult
 	Quality      map[string]domain.QualityEvidence
 	ReleaseGuard map[string]domain.ReleaseGuardEvaluation
+	// Rankings are the persisted campaign rankings the candidates recorded,
+	// keyed by Lab evaluation ID. They still say what a finished campaign
+	// selected after cleanup rewrote every candidate state.
+	Rankings map[string]domain.LabEvaluation
 	// Replay is the customer trace the campaign replayed, when it is bound to
 	// one and was found. ReplayReason says why it is absent.
 	Replay       *domain.ReplayTrace
@@ -331,6 +335,9 @@ func Assemble(e Evidence) Report {
 		baseline = arms[control.ID]
 	}
 	winner = selectWinner(campaign, arms)
+	if winner == nil && report.Finished {
+		winner = decidedBeforeCleanup(campaign, arms, e)
+	}
 
 	for _, current := range arms {
 		if current.draftOK && acceleratorClass(acceleratorOf(current)) == AcceleratorSimulated {
@@ -351,7 +358,7 @@ func Assemble(e Evidence) Report {
 	report.Candidates = candidateResults(campaign, campaign.Objective, baseline, winner, arms)
 	report.Bottleneck = bottleneck(kind, baseline, winner)
 	report.Appendix = appendix(campaign, proposal, proposalOK, baseline, winner, e)
-	report.Outcome.Headline = headline(report)
+	report.Outcome.Headline = headline(report, released(campaign, winner))
 	report.Unknown = unknownFields(report)
 	report.ReportDigest = digest(report)
 	return report
@@ -424,6 +431,83 @@ func selectWinner(campaign domain.OptimizationCampaign, arms map[string]*arm) *a
 		}
 	}
 	return waiting
+}
+
+// decidedBeforeCleanup recovers the setup a finished campaign chose when no
+// candidate is live or waiting any more. Cleanup and cancellation rewrite
+// every candidate to cleaned or cancelled, and the proposal rank is only the
+// planner's order, so neither says what qualified. What survives is the
+// ranking each candidate recorded when it was decided. A candidate counts as
+// chosen only when its own persisted ranking selected it, it was measured, its
+// answers did not fail, no gate failed it afterwards, and, for an evolution,
+// Release Guard accepted it. Anything less leaves the campaign without a
+// winner. Should several qualify, the lowest proposal rank wins, so the
+// result never depends on row order.
+func decidedBeforeCleanup(campaign domain.OptimizationCampaign, arms map[string]*arm, e Evidence) *arm {
+	runs := append([]domain.OptimizationCandidateRun(nil), campaign.Candidates...)
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Rank < runs[j].Rank })
+	for _, run := range runs {
+		if qualifiedBeforeCleanup(campaign, run, arms[run.ID], e) {
+			return arms[run.ID]
+		}
+	}
+	return nil
+}
+
+// releasedWithoutFailure are the failure codes a qualified candidate gets when
+// it is let go without any gate failing it: none when the operator cancelled
+// the run, its approval ending before activation, or execution cancellation.
+var releasedWithoutFailure = map[string]bool{"": true, "approval_expired_before_activation": true, "execution_cancelled": true}
+
+func qualifiedBeforeCleanup(campaign domain.OptimizationCampaign, run domain.OptimizationCandidateRun, current *arm, e Evidence) bool {
+	switch run.State {
+	case optimizationcampaign.CandidateCleaned, optimizationcampaign.CandidateCancelled, optimizationcampaign.CandidateFailed:
+	default:
+		return false
+	}
+	if current == nil || current.bench == nil || run.QualityEvidenceID == "" || !releasedWithoutFailure[run.FailureCode] {
+		return false
+	}
+	if answers, found := e.Quality[run.QualityEvidenceID]; found && !answers.Passed {
+		return false
+	}
+	ranking, found := e.Rankings[run.LabEvaluationID]
+	if run.LabEvaluationID == "" || !found {
+		return false
+	}
+	decisions, err := optimizationcampaign.RankingDecisions(ranking)
+	if err != nil || decisions[run.ID] != optimizationcampaign.RankSelect {
+		return false
+	}
+	if campaign.Intent != optimizationcampaign.IntentEvolveEndpoint {
+		return true
+	}
+	evaluation, found := e.ReleaseGuard[run.ReleaseGuardEvaluationID]
+	decision := strings.ToUpper(strings.TrimSpace(evaluation.Decision))
+	return run.ReleaseGuardEvaluationID != "" && found && (decision == "ACCEPT" || decision == "PASS")
+}
+
+// released says how a chosen setup that never went live was let go, for the
+// headline. It is empty while the setup is live or still waiting.
+func released(campaign domain.OptimizationCampaign, winner *arm) string {
+	if winner == nil {
+		return ""
+	}
+	removed := "its server is being removed"
+	switch winner.run.State {
+	case optimizationcampaign.CandidateQualified, optimizationcampaign.CandidateGuardPassed, optimizationcampaign.CandidatePromoted, optimizationcampaign.CandidateObserved:
+		return ""
+	case optimizationcampaign.CandidateCleaned:
+		removed = "its server was removed"
+	}
+	switch {
+	case winner.run.FailureCode == "approval_expired_before_activation":
+		return removed + " because the approval ended"
+	case campaign.CancelRequested || winner.run.FailureCode == "execution_cancelled":
+		return removed + " because the run was cancelled"
+	default:
+		return removed
+	}
 }
 
 func outcome(campaign domain.OptimizationCampaign, baseline, winner *arm, done bool) Outcome {
@@ -1273,7 +1357,9 @@ func acceleratorClass(accelerator string) string {
 	return AcceleratorGPU
 }
 
-func headline(report Report) string {
+// headline states the outcome in one sentence. released, when set, says how
+// a chosen setup that was never rolled out was let go.
+func headline(report Report, released string) string {
 	outcome := report.Outcome
 	switch outcome.Kind {
 	case OutcomeCancelled:
@@ -1294,14 +1380,19 @@ func headline(report Report) string {
 	if outcome.Activated {
 		subject, previous = "“"+outcome.WinnerLabel+"” is live", "your previous setup"
 	}
+	var claim string
 	switch {
 	case improved && !regressed:
-		return subject + ": it measured better than " + previous + " on the same traffic."
+		claim = "it measured better than " + previous + " on the same traffic"
 	case improved:
-		return subject + ": it measured better than " + previous + " on some outcomes and worse on others."
+		claim = "it measured better than " + previous + " on some outcomes and worse on others"
 	default:
-		return subject + ": it qualified, but no gain over " + previous + " is established."
+		claim = "it qualified, but no gain over " + previous + " is established"
 	}
+	if released != "" && !outcome.Activated {
+		return "“" + outcome.WinnerLabel + "” was the best setup found but was not rolled out: " + claim + "; " + released + "."
+	}
+	return subject + ": " + claim + "."
 }
 
 func unknownFields(report Report) []string {

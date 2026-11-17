@@ -87,6 +87,11 @@ func (f *fakeStore) ReleaseGuardEvaluationsByIDs(_ context.Context, tenant strin
 	return byID(f.evidence.ReleaseGuard, domain.ReleaseGuardEvaluation{ID: "unrelated"}, tenant == f.owner, ids), nil
 }
 
+func (f *fakeStore) LabEvaluationsByIDs(_ context.Context, tenant string, ids []string) (map[string]domain.LabEvaluation, error) {
+	f.ask(tenant, "ranking", ids)
+	return byID(f.evidence.Rankings, domain.LabEvaluation{ID: "unrelated"}, tenant == f.owner, ids), nil
+}
+
 func (f *fakeStore) ReplayTraceByDigest(_ context.Context, tenant, digest string) (domain.ReplayTrace, error) {
 	f.record(tenant)
 	if f.replayErr != nil {
@@ -142,13 +147,13 @@ func TestLoadReadsEvidenceByTheRecordedIDs(t *testing.T) {
 	}
 	want := map[string][]string{}
 	for _, run := range expected.Campaign.Candidates {
-		for kind, id := range map[string]string{"benchmark": run.BenchmarkID, "quality": run.QualityEvidenceID, "release_guard": run.ReleaseGuardEvaluationID} {
+		for kind, id := range map[string]string{"benchmark": run.BenchmarkID, "quality": run.QualityEvidenceID, "release_guard": run.ReleaseGuardEvaluationID, "ranking": run.LabEvaluationID} {
 			if id != "" {
 				want[kind] = append(want[kind], id)
 			}
 		}
 	}
-	for _, kind := range []string{"benchmark", "quality", "release_guard"} {
+	for _, kind := range []string{"benchmark", "quality", "release_guard", "ranking"} {
 		got, wanted := append([]string(nil), store.requested[kind]...), append([]string(nil), want[kind]...)
 		slices.Sort(got)
 		slices.Sort(wanted)
