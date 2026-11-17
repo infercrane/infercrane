@@ -1656,6 +1656,11 @@ func TestOptimizationCampaignRequiresImmutableProposalAndExplicitBoundedApproval
 	if response.Code != http.StatusAccepted || store.campaign.State != optimizationcampaign.CampaignApproved || !strings.Contains(response.Body.String(), `"execution":"queued"`) || store.operation.Kind != optimizationcampaign.ExecuteKind {
 		t.Fatalf("approval status=%d body=%s campaign=%+v", response.Code, response.Body.String(), store.campaign)
 	}
+	// $10 per setup at $2/h for one hour leaves $8: two replacement reserves
+	// of one billing hour each.
+	if !strings.Contains(response.Body.String(), `"machine_replacements_covered":2`) {
+		t.Fatalf("approval must say how many lost machines per setup the cap covers: %s", response.Body.String())
+	}
 
 	store.campaign.State = optimizationcampaign.CampaignQualified
 	store.campaign.Candidates[0].State = optimizationcampaign.CandidateQualified

@@ -932,10 +932,11 @@ func optimizationCampaignCandidateSchema() map[string]any {
 		"quality":    ref("OptimizationCandidateQuality"),
 		"reason":     ref("OptimizationCandidateReason"),
 		"created_at": timestamp, "updated_at": timestamp,
-		"label":            map[string]any{"type": "string", "description": "What the setup changes, in plain words: the description written into the proposal when it has one, else the recognized serving flags (for example \"Speculative decoding (n-gram)\"), else \"<engine> defaults\". It describes configuration, never performance."},
-		"control":          map[string]any{"type": "boolean", "description": "True for the campaign control, the current setup every other candidate is measured against."},
-		"state_entered_at": map[string]any{"type": "object", "additionalProperties": timestamp, "description": "First time the candidate entered each state, keyed by state. States the candidate never reached, or that a control plane released before this field never timed, are absent."},
-		"measurement":      map[string]any{"oneOf": []any{ref("OptimizationCandidateMeasurement"), map[string]any{"type": "null"}}},
+		"label":                map[string]any{"type": "string", "description": "What the setup changes, in plain words: the description written into the proposal when it has one, else the recognized serving flags (for example \"Speculative decoding (n-gram)\"), else \"<engine> defaults\". It describes configuration, never performance."},
+		"control":              map[string]any{"type": "boolean", "description": "True for the campaign control, the current setup every other candidate is measured against."},
+		"state_entered_at":     map[string]any{"type": "object", "additionalProperties": timestamp, "description": "First time the candidate entered each state, keyed by state. States the candidate never reached, or that a control plane released before this field never timed, are absent."},
+		"measurement":          map[string]any{"oneOf": []any{ref("OptimizationCandidateMeasurement"), map[string]any{"type": "null"}}},
+		"machine_replacements": map[string]any{"type": "integer", "minimum": 0, "description": "Machines of this setup that were lost mid-run and replaced. A run replaces at most two per setup, and only while the approved cap covers it. A control plane released before this field omits it."},
 	}}
 }
 

@@ -8829,6 +8829,11 @@
             "description": "What the setup changes, in plain words: the description written into the proposal when it has one, else the recognized serving flags (for example \"Speculative decoding (n-gram)\"), else \"\u003cengine\u003e defaults\". It describes configuration, never performance.",
             "type": "string"
           },
+          "machine_replacements": {
+            "description": "Machines of this setup that were lost mid-run and replaced. A run replaces at most two per setup, and only while the approved cap covers it. A control plane released before this field omits it.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "measurement": {
             "oneOf": [
               {

@@ -102,6 +102,9 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 		}
 		return ProvisionResult{}, operations.Retryable("optimization_replay_lookup_failed", err)
 	}
+	if err = stoppedForLostControl(campaign, candidate); err != nil {
+		return ProvisionResult{}, err
+	}
 	if err = d.authorizeCost(ctx, candidate, draft, budget); err != nil {
 		return ProvisionResult{}, err
 	}
@@ -137,8 +140,28 @@ func (d CompositeDriver) Measure(ctx context.Context, candidateID string, candid
 	if d.Benchmark == nil {
 		return MeasurementResult{}, operations.Permanent("optimization_benchmark_unavailable", errors.New("durable candidate benchmark executor is not configured"))
 	}
+	if err = stoppedForLostControl(campaign, candidate); err != nil {
+		return MeasurementResult{}, err
+	}
+	// A measurement that stopped at a lost or failing machine resumes only
+	// after that machine is recovered. Recovery runs its child operations
+	// across attempts; each attempt continues where the last one stopped.
+	if checkpoint, ok := DecodeMeasurementCheckpoint(candidate.MeasurementCheckpointJSON); ok && checkpoint.Pending() != nil {
+		if err = d.recoverInterruption(ctx, campaign, candidate, &checkpoint, budget); err != nil {
+			return MeasurementResult{}, err
+		}
+		encoded, _ := json.Marshal(checkpoint)
+		candidate.MeasurementCheckpointJSON = string(encoded)
+	}
 	benchmark, err := d.Benchmark.Run(ctx, campaign, candidate, profile)
 	if err != nil {
+		var interrupted *MeasurementInterruptedError
+		if errors.As(err, &interrupted) {
+			// The checkpoint names the interruption; the next attempt
+			// recovers the machine. When the checkpoint was not stored, the
+			// next attempt resumes from the previous one.
+			return MeasurementResult{}, operations.Retryable("optimization_measurement_interrupted", err)
+		}
 		var failure operations.Failure
 		if errors.As(err, &failure) {
 			return MeasurementResult{}, failure

@@ -990,6 +990,11 @@ type OptimizationCandidateRun struct {
 	// authorized the candidate's provider mutation. All three are display
 	// evidence written by the campaign worker; no decision reads them.
 	StateEnteredAtJSON, MeasurementProgressJSON, CostQuoteJSON string
+	// MeasurementCheckpointJSON holds a measuring candidate's completed
+	// paired turns and any interruption being recovered; the worker resumes
+	// from it. MachineReplacementsJSON lists this setup's lost machines that
+	// were replaced. Both are decision evidence written by the worker.
+	MeasurementCheckpointJSON, MachineReplacementsJSON string
 }
 
 // ReplicaSpan is when one replica existed. DeletedAt is nil while the replica

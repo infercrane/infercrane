@@ -84,6 +84,10 @@ func FailureReason(code string) string {
 		return "the spend approval ended before the run finished"
 	case "approval_expired_before_activation":
 		return "the approval ended before the result was rolled out"
+	case "optimization_control_lost":
+		return "the current setup's server was lost and could not be replaced, so the run stopped inside its cost cap"
+	case "optimization_machine_lost_repeatedly", "optimization_replacement_not_covered", "optimization_machine_replacement_failed":
+		return "a measured server was lost and could not be replaced inside the cost cap"
 	}
 	return strings.ReplaceAll(code, "_", " ")
 }

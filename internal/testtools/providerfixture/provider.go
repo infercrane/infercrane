@@ -121,6 +121,42 @@ func (e *Elastic) ObserveReplica(_ context.Context, handle provision.ProviderHan
 	return observation, nil
 }
 
+// Lose makes the machine created for externalKey disappear from the
+// provider's inventory, as when a provider reclaims or loses it. It reports
+// whether such a machine existed.
+func (e *Elastic) Lose(externalKey string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id := e.Handle(externalKey).ResourceID
+	_, exists := e.resources[id]
+	delete(e.resources, id)
+	return exists
+}
+
+// SetState changes what the provider reports for the machine created for
+// externalKey: "failed" for a machine that stopped but is still listed,
+// "starting" for one the provider restarts in place, "ready" to bring it
+// back. It reports whether such a machine exists.
+func (e *Elastic) SetState(externalKey, state string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id := e.Handle(externalKey).ResourceID
+	observation, exists := e.resources[id]
+	if exists {
+		observation.State = state
+		e.resources[id] = observation
+	}
+	return exists
+}
+
+// Exists reports whether the provider lists a machine for externalKey.
+func (e *Elastic) Exists(externalKey string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, exists := e.resources[e.Handle(externalKey).ResourceID]
+	return exists
+}
+
 func (e *Elastic) DeleteReplica(_ context.Context, handle provision.ProviderHandle) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

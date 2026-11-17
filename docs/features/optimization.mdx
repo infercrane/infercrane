@@ -428,7 +428,8 @@ A run takes hours, so every read of a run says where it is without guessing. Eac
 | `label` | What the setup changes, in plain words. A description written into the proposal wins, such as "Speculative decoding (n-gram)". Otherwise the label is built from the serving flags InferCrane recognizes, such as "FP8 KV cache, prefill chunks of 2,048 tokens", and a setup with none is "vLLM defaults". An unrecognized flag is shown as written, never guessed. Labels describe configuration, never performance. |
 | `control` | `true` for the current setup every other setup is measured against. |
 | `state_entered_at` | When the setup first entered each state. A state it never reached is absent. |
-| `measurement` | The live measurement while and after the setup measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. `turns_planned` drops when the control stops answering mid-measurement. `null` before measuring starts. |
+| `measurement` | The live measurement while and after the setup measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. After an interruption the failed invocation stays in the record and the resumed segment's warmups and turns are added to `turns_planned` (see [When a measured server is lost](#when-a-measured-server-is-lost)). `null` before measuring starts. |
+| `machine_replacements` | How many of this setup's servers were lost mid-run and replaced. |
 
 The run's `progress` summarizes it:
 
@@ -875,9 +876,11 @@ are the mean of its three runs, with Student-t 95% intervals in `confidence_95`.
 includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
 serving, every other candidate is measured interleaved with it, as control, candidate, control,
 candidate, control, candidate, control. The control and candidate share a time window, not a GPU, so
-differences between their nodes are not removed. Control runs that fail, or whose output throughput
-differs by more than 5% between adjacent runs, make that comparison invalid; the candidate's own
-measurement is kept, and its result against the control is unknown. A failure to look the control up
+differences between their nodes are not removed. Control runs whose output throughput differs by more
+than 5% between adjacent runs make that comparison invalid; the candidate's own measurement is kept,
+and its result against the control is unknown. A control or candidate run that fails stops the
+measurement so the server can be checked and replaced (see
+[When a measured server is lost](#when-a-measured-server-is-lost)). A failure to look the control up
 is retried rather than recorded as a measurement without one.
 
 **Noise floor.** For each metric the noise floor is the larger of the control-to-control spread and
@@ -919,6 +922,64 @@ This method sends nine AIPerf invocations per non-control candidate instead of o
 takes several times longer. The approval window must cover it. Campaign ranking does not use the
 [multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
 limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
+
+### When a measured server is lost
+
+A run takes hours, and a server can disappear in that time: the provider reclaims or loses the
+machine, or its runtime stops answering. A run survives that without losing the work already done or
+weakening the comparison.
+
+**Completed pairs are kept.** Each candidate run counts only together with the control runs directly
+before and after it, from the same stretch of measuring. After every complete pair, the candidate's
+measurement is saved on its run record. When an AIPerf invocation fails, measuring stops. Every
+complete pair is kept, the unfinished pair is dropped, and the interruption is recorded with the arm,
+the server, and how many finished runs were dropped.
+
+**Only a server that is really lost is replaced.** InferCrane asks the provider and the runtime
+about the server that failed. A server the provider reports ready and whose runtime still serves the
+model is left alone, and one the provider is restarting in place is waited for. Otherwise the server
+is deleted, the provider is checked until it no longer lists it, and only then is the setup's exact
+revision provisioned again, through the same path that provisioned it first. The replacement gets a
+new provider identity; the lost server's record is kept for audit and for the spend estimate. The
+control's server is replaced the same way, so a lost control no longer makes every later comparison
+unknown.
+
+**Measuring resumes at the next pair.** Both servers are warmed again, and the next segment starts
+with a control run, so every pair after the restart is again bracketed by control runs from its own
+window. Each segment's invocations get fresh seeds and prompt-block namespaces. The drift check
+runs over every adjacent pair of control runs, including the pair across the restart, so a
+replacement control that serves more than 5% differently invalidates the comparison instead of
+passing silently. A replaced candidate server that serves differently widens the candidate's 95%
+interval and with it the noise floor. The workload's `measured.segments` and
+`measured.interruptions` record each stretch of measuring, each interruption, and how it was
+recovered: `machine_serving`, `machine_replaced`, or `provider_managed` for serverless workers, which
+their provider replaces itself.
+
+**Spend stays inside the cap.** A replacement starts only after the lost server is gone, so two
+servers of one setup never bill at the same time, and the approval already covers each setup's
+servers until the approval ends. What the window does not cover is a provider's minimum charge for
+starting a server. InferCrane has no sourced minimum billing period for any provider, so each
+replacement reserves one full hour at the quoted rate. Before every replacement the setup's spend is
+authorized again with a fresh sourced quote: its share of the cap must cover its servers from approval
+until the approval ends, plus one hour for this and each earlier replacement. Approval returns
+`machine_replacements_covered`, the number of lost servers per setup the cap covers, from 0 to 2.
+
+**The run stops cleanly when it cannot recover.** A setup that stops is marked `failed` and its
+servers are removed; nothing waits for the approval to end.
+
+| Code | Meaning |
+|---|---|
+| `optimization_machine_lost_repeatedly` | A third server of this setup was lost. A run replaces at most two per setup. |
+| `optimization_replacement_not_covered` | The cap does not cover another replacement at the current sourced price. |
+| `optimization_machine_replacement_failed` | The replacement server could not be provisioned. |
+| `optimization_measurement_interrupted_repeatedly` | Measuring stopped a fifth time, whether or not a server was lost. |
+| `optimization_control_lost` | The control's server was lost and could not be replaced. No later setup can be compared, so every remaining setup fails with this code before it provisions or spends. Setups already measured keep their evidence and are ranked as usual. The control keeps its place in the ranking; a server it still holds is removed with it when the run ends. |
+
+**Interruptible capacity is not used.** Optimization runs only on capacity billed at its regular
+rate. Spend authority needs a sourced price, and InferCrane has no sourced interruptible (spot) price
+for any provider it runs on. RunPod, which runs InferCrane-managed test servers, no longer offers
+spot pods. Every measurement's cost evidence, and every result in dollars per million tokens, uses
+the price the setup would be served at.
 
 ## Generate a custom kernel
 
