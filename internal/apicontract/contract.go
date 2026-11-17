@@ -741,6 +741,11 @@ func optimizationCampaignSchema() map[string]any {
 		"approved_by": text, "approved_at": nullableTimestamp, "cancel_requested": map[string]any{"type": "boolean"}, "failure_code": text,
 		"created_at": timestamp, "updated_at": timestamp, "candidates": map[string]any{"type": "array", "items": ref("OptimizationCampaignCandidate")}, "proof_boundary": text,
 		"warnings": map[string]any{"type": "array", "items": text, "description": "Warnings recorded on the immutable proposal, such as skipped experiments or unmeasured arms. Empty when the proposal recorded none; absent when the stored proposal cannot be read. Warnings are not performance evidence."},
+		"workload": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"source", "fingerprint", "profile"}, "description": "The load the immutable proposal bound this campaign to. Absent when the stored proposal cannot be read or recorded no workload source. It states what the campaign replays, not what was measured.", "properties": map[string]any{
+			"source":      map[string]any{"type": "string", "enum": []string{"reviewed_default", "public_prior", "customer_observed"}, "description": "customer_observed replays the customer's recorded content-free Replay; public_prior uses the public workload prior; reviewed_default uses a reviewed synthetic profile."},
+			"fingerprint": map[string]any{"type": "string", "description": "For customer_observed, the bound Replay shape digest. For public_prior, the public prior's digest. Empty for reviewed_default."},
+			"profile":     map[string]any{"type": "string", "description": "Workload profile recorded on the proposal."},
+		}},
 	}}
 }
 
