@@ -108,6 +108,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  checkHuggingFaceModel(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/hugging-face/check';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   planIntent(body: JsonValue): Promise<IntentPlanEnvelope> {
     const requestPath = '/planning/intents';
     return this.transport.request('POST', requestPath, { body }) as Promise<IntentPlanEnvelope>;
@@ -603,6 +608,11 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<OperationEnvelope>;
   }
 
+  listAcceleratorLabRuns(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/accelerator-lab/runs';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   listOptimizationCampaigns(): Promise<ObjectList> {
     const requestPath = '/optimization/campaigns';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
@@ -635,6 +645,16 @@ export class ControlApi {
 
   cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createOptimizationCandidateChatCompletion(id: string, candidate_id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/candidates/${encodeURIComponent(candidate_id)}/chat/completions`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createPlaygroundChatCompletion(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/playground/chat/completions';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 

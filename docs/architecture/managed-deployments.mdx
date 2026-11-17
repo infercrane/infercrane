@@ -1,6 +1,6 @@
 ---
 title: Managed deployments
-description: The prepaid commercial and lifecycle boundary for InferCrane-operated GPU deployments.
+description: What you pay, what is held up front, and what is metered when InferCrane operates a GPU deployment for you.
 ---
 
 # Managed deployments
@@ -18,7 +18,7 @@ be greater than or equal to the current hold.
 1. Choose a model and serving goal.
 2. Select **InferCrane Cloud · prepaid** and a 1, 6, or 24 hour runtime window.
 3. InferCrane checks a current exact provider price and launch evidence.
-4. Review the retail hourly rate, authorization hold, available credit, and any shortfall.
+4. Review the hourly rate, authorization hold, available credit, and any shortfall.
 5. Add credit when needed, then approve the deployment.
 6. InferCrane atomically reserves credit and queues one durable deployment operation.
 7. The runtime clock starts only when the stable endpoint is activated.
@@ -29,30 +29,38 @@ The UI never labels a hold as spend or an estimate as an invoice. Failed launch 
 billable action. A failed pre-activation operation enters the same durable cleanup path; the hold is
 released only after no live provider replica remains.
 
-## Commercial policy
+## What you pay
 
-The current MVP supports one elastic RunPod GPU per managed deployment. RunPod is an internal supply
-implementation; the customer product is InferCrane Cloud. The server computes price from a current,
-complete provider observation and applies the operator-owned policy. Browser input cannot set the
-supplier rate or gross margin.
+The current MVP supports one elastic RunPod GPU per managed deployment. The GPU is created with the
+control plane's own RunPod credential, not a customer credential, and the product you buy is
+InferCrane Cloud. The server sets the hourly rate from a current, complete provider price
+observation. A browser request cannot set or change the rate.
 
-Defaults:
+| Term | Meaning |
+| --- | --- |
+| Hourly rate | InferCrane's price for one hour of the deployment. The deployment review shows it before you approve. |
+| Hold | Prepaid credit reserved when you approve: the hourly rate for the runtime window plus the cleanup allowance. A hold is not a charge. |
+| Cleanup allowance | Ten minutes by default, held on top of the runtime window for the time provider cleanup can take. |
+| Metered runtime | The time from endpoint activation until provider resources are deleted, charged at the hourly rate. Cleanup time after the runtime limit counts, up to the cleanup allowance. |
+| Runtime window | One hour by default and 24 hours at most. |
 
-| Policy | Default |
-| --- | ---: |
-| Minimum gross margin | 40% |
-| Cleanup allowance held | 10 minutes |
-| Default runtime window | 1 hour |
-| Maximum runtime window | 24 hours |
+For example, at a rate of `$0.70/hour`, a one-hour deployment holds `$0.816667`: one hour of
+runtime plus the ten-minute cleanup allowance. The hold is not the final charge. The charge never
+exceeds the hold, and unused credit returns to the available wallet after provider deletion
+succeeds. A deployment that never activates is not charged.
 
-For example, a current supplier rate of `$0.42/hour` produces a minimum retail price of
-`$0.70/hour` at a 40% gross margin. A one-hour deployment holds `$0.816667`, including the ten-minute
-cleanup allowance. The hold is not the final charge. Settlement is capped by the hold, and unused
-credit returns to the available wallet after provider deletion succeeds.
+The quote returns the hourly rate, the hold, the runtime limit, the cleanup allowance, the GPU and
+its placement, and the time until which the quote is valid. Provider credentials and provider
+resource identifiers stay server-side.
 
-Supplier cost, margin, procurement source, provider credentials, and internal resource identifiers
-remain server-side. The customer quote returns only retail price, hold, runtime, public placement,
-and validity evidence.
+### Why the rate differs from the GPU price catalog
+
+The GPU price catalog lists each provider's public price for a GPU. It is the reference for BYOC,
+where you pay the provider directly and provider charges never pass through InferCrane.
+
+The InferCrane Cloud rate is a different price: what InferCrane charges to provision, serve, and
+delete the deployment for you. Expect it to be higher than the provider's listed price for the
+same GPU. The deployment review shows the exact rate and hold before anything is charged.
 
 ## Atomicity and recovery
 
@@ -91,5 +99,5 @@ wallet credit pays for managed GPU exposure; BYOC provider charges never pass th
 
 This is not an unlimited production cluster contract. The initial self-serve product supports one
 GPU, one replica, elastic serving, and a maximum 24-hour window. Longer-running or multi-GPU
-deployments remain BYOC or sales-assisted until reconciliation, capacity commitments, support SLOs,
-and margin evidence are qualified.
+deployments remain BYOC or sales-assisted until reconciliation, capacity commitments, and support
+SLOs are qualified.

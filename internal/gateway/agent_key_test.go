@@ -26,4 +26,10 @@ func TestAgentKeysCannotInvokeInference(t *testing.T) {
 			t.Fatalf("%s %s: %d %s", request.Method, request.URL.Path, response.Code, response.Body.String())
 		}
 	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"coder","messages":[]}`))
+	response := httptest.NewRecorder()
+	(&Gateway{Routes: directory}).ServeChatAs(response, request, principal)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("ServeChatAs accepted an agent principal: %d %s", response.Code, response.Body.String())
+	}
 }

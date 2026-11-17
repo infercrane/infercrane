@@ -47,6 +47,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
+	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
@@ -341,6 +342,10 @@ type API struct {
 	// HuggingFaceSearch answers live searches of the public Hugging Face
 	// models API. Nil disables the search route with a typed 503.
 	HuggingFaceSearch *huggingfacesearch.Searcher
+	// ModelCheck reads Hugging Face model metadata for models outside the
+	// reviewed catalog. Nil means the operator left Hugging Face metadata
+	// access off; planning then says so instead of checking.
+	ModelCheck *modelcheck.Resolver
 	// Secrets resolves tenant-owned credential references only at the final
 	// network boundary. Resolved values must never enter API responses.
 	Secrets        secrets.Resolver
@@ -353,6 +358,12 @@ type API struct {
 	ProductVersion        string
 	GatewayInstanceID     string
 	OptimizationCosts     optimizationcampaign.CostAuthority
+	// Inference serves a chat completion for an authenticated principal on
+	// the gateway's own path; nil disables POST /playground/chat/completions.
+	Inference PlaygroundInference
+	// CandidatePrompts sends bounded single prompts to a decided campaign
+	// candidate; nil disables the candidate chat route.
+	CandidatePrompts      *CandidatePrompts
 	AcceleratorLabEnabled bool
 	AcceleratorLabCatalog acceleratorlab.CapabilityCatalog
 	AdmissionState        interface {
@@ -509,6 +520,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/models", a.auth(authz.Read, a.huggingFaceCatalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/search", a.auth(authz.Read, a.huggingFaceSearch))
+	mux.HandleFunc("GET /api/v1/catalog/hugging-face/check", a.auth(authz.Read, a.checkHuggingFaceModel))
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
@@ -577,6 +589,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/kernel-opportunities", a.auth(authz.Read, a.kernelOpportunities))
 	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/capabilities", a.auth(authz.Read, a.acceleratorLabCapabilities))
 	mux.HandleFunc("POST /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Deploy, a.runAcceleratorLab))
+	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Read, a.acceleratorLabRuns))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -584,6 +597,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
+	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions", a.auth(authz.Read, a.optimizationCandidateChat))
+	mux.HandleFunc("POST /api/v1/playground/chat/completions", a.auth(authz.Read, a.playgroundChat))
 	mux.HandleFunc("GET /api/v1/notifications/subscriptions", a.auth(authz.Read, a.notificationSubscriptions))
 	mux.HandleFunc("POST /api/v1/notifications/subscriptions", a.auth(authz.ManageSecrets, a.createNotificationSubscription))
 	mux.HandleFunc("PATCH /api/v1/notifications/subscriptions/{id}", a.auth(authz.ManageSecrets, a.updateNotificationSubscription))
@@ -875,7 +890,17 @@ func (a API) planIntent(w http.ResponseWriter, r *http.Request) {
 	if a.GPUPriceCatalog != nil {
 		prices = a.GPUPriceCatalog.Snapshot()
 	}
-	plan, err := (intentplan.Planner{Recipes: curatedrecipe.All(), Compatibility: a.Integrations.Compatibility, Providers: providers, Prices: prices}).Plan(request)
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	unreviewed, failure := a.unreviewedForPlan(r.Context(), actor.TenantID, request)
+	if failure != nil {
+		status := failure.Status
+		if status == http.StatusBadRequest {
+			status = http.StatusUnprocessableEntity
+		}
+		writeError(w, status, failure.Code, failure.Message)
+		return
+	}
+	plan, err := (intentplan.Planner{Recipes: curatedrecipe.All(), Compatibility: a.Integrations.Compatibility, Providers: providers, Prices: prices, Unreviewed: unreviewed}).Plan(request)
 	if errors.Is(err, intentplan.ErrInvalidRequest) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_intent", err.Error())
 		return
@@ -1024,6 +1049,9 @@ func customerQualificationNote(qualification string) string {
 type optimizationProposalBody struct {
 	optimizer.Request
 	DiagnosisEndpoint string `json:"diagnosis_endpoint,omitempty"`
+	// ModelSecretReferenceID names the tenant's saved Hugging Face token so
+	// a gated model outside the reviewed catalog can be checked.
+	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty"`
 }
 
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
@@ -1081,6 +1109,10 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.ProviderAdapter = connection.Adapter
+	}
+	if failure := a.checkUncatalogedProposal(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, &request, strings.TrimSpace(body.ModelSecretReferenceID)); failure != nil {
+		writeError(w, failure.Status, failure.Code, failure.Message)
+		return
 	}
 	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations).Propose(r.Context(), request)
 	if err != nil {
@@ -1695,14 +1727,14 @@ func (a API) runAcceleratorLab(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(validated)
 	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{
-		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: validated.CampaignID,
+		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID,
 		IdempotencyKey: "accelerator-lab:" + digest, RequestJSON: string(encoded), MaxAttempts: 20,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "accelerator_lab_enqueue_failed", "accelerator qualification could not be queued")
 		return
 	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: "optimization_campaign", ResourceName: validated.CampaignID, Outcome: "queued"})
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID, Outcome: "queued"})
 	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "input_digest": digest, "provider_mutation": false, "automatic_promotion": false})
 }
 

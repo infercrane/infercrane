@@ -176,4 +176,13 @@ pipeline filter, and a fixed `User-Agent`, never a Hugging Face token or tenant 
 policy blocks that destination, the search returns a typed `hugging_face_search_unavailable` error
 and nothing else changes. See [Search Hugging Face](/features/model-catalog#search-hugging-face).
 
+When the operator sets `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`, the control plane also reads
+model info, `config.json`, and the safetensors summary from `huggingface.co` to check a model outside
+the reviewed catalog (planning, `GET /api/v1/catalog/hugging-face/check`, and optimization
+proposals). It is off by default. For a gated or private model, the workspace's saved Hugging Face
+token reference is resolved at that read and sent only as an `Authorization` header to the same host:
+redirects to another host are refused, and the token is never logged, cached, stored, or returned.
+Reads made with a token are cached per workspace and credential. See
+[Check any model automatically](/features/model-catalog#check-any-model-automatically).
+
 Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities through the repository's private GitHub security-advisory flow; do not open a public issue.

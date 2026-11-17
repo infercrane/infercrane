@@ -475,12 +475,12 @@ func agentListCommand(ctx context.Context, cfg config.Config, args []string) err
 				lastSeen = relativeTime(time.Now(), parsed)
 			}
 		}
-		fmt.Fprintf(writer, "%v\t%v\t%v\t%s\t%d\n", item["name"], item["connection"], valueOr(item["agent_version"], "unknown"), lastSeen, len(servers))
+		fmt.Fprintf(writer, "%v\t%v\t%v\t%s\t%d\n", item["name"], item["connection"], anyOr(item["agent_version"], "unknown"), lastSeen, len(servers))
 	}
 	return writer.Flush()
 }
 
-func valueOr(value any, fallback string) any {
+func anyOr(value any, fallback string) any {
 	if value == nil {
 		return fallback
 	}

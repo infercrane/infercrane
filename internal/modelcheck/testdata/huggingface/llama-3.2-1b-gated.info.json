@@ -1,0 +1,68 @@
+{
+ "_id": "66eaedefece5ee215637cc82",
+ "id": "meta-llama/Llama-3.2-1B-Instruct",
+ "sha": "9213176726f574b556790deb65791e0c5aa438b6",
+ "pipeline_tag": "text-generation",
+ "cardData": {
+  "library_name": "transformers",
+  "pipeline_tag": "text-generation",
+  "license": "llama3.2"
+ },
+ "gated": "manual",
+ "private": false,
+ "config": {
+  "architectures": [
+   "LlamaForCausalLM"
+  ],
+  "model_type": "llama"
+ },
+ "tags": [
+  "transformers",
+  "safetensors",
+  "llama",
+  "text-generation",
+  "facebook",
+  "meta",
+  "pytorch",
+  "llama-3",
+  "conversational",
+  "en",
+  "de",
+  "fr",
+  "it",
+  "pt",
+  "hi",
+  "es",
+  "th",
+  "arxiv:2204.05149",
+  "arxiv:2405.16406",
+  "license:llama3.2",
+  "eval-results",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "deploy:sagemaker",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "generation_config.json"
+  },
+  {
+   "rfilename": "model.safetensors"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  }
+ ],
+ "safetensors": {
+  "parameters": {
+   "BF16": 1235814400
+  },
+  "total": 1235814400
+ }
+}

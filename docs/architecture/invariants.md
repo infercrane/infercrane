@@ -11,6 +11,9 @@ plan, and an update to this document in the same pull request.
 - The gateway rewrites only the model alias and preserves streaming semantics.
 - Server write timeouts remain disabled for long-lived inference streams.
 - Retries are not duplicated between gateway and router.
+- A control-plane route may hand a principal it has already authenticated to the gateway
+  (`POST /api/v1/playground/chat/completions`). Authentication for `/v1/*` is unchanged, and
+  routing the handed-over request reads no PostgreSQL.
 
 ## Control plane
 

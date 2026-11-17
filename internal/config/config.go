@@ -37,31 +37,36 @@ type Config struct {
 	StripePriceIDs                                                                                                        map[int64]string
 	StripeLivemode                                                                                                        bool
 	ManagedDeploymentsEnabled                                                                                             bool
-	ManagedSandbox                                                                                                        managedbilling.SandboxPolicy
-	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret               string
-	SkyPilotAPI                                                                                                           string
-	SkyPilotProviders                                                                                                     []SkyPilotProvider
-	RunPodContainerDiskGiB                                                                                                int
-	RunPodNetworkVolumes                                                                                                  map[string]string
-	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                                  string
-	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                             string
-	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                           string
-	AWSSubnetIDs, AWSSecurityGroupIDs                                                                                     []string
-	AWSArtifactSnapshots                                                                                                  map[string]string
-	AWSGPUCount, AWSRootVolumeGiB, AWSGP3IOPS, AWSGP3Throughput, AWSArtifactVolumeInitializationRate                      int
-	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                             string
-	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                                string
-	GCPArtifactDisks                                                                                                      map[string]string
-	GCPBootDiskGiB                                                                                                        int
-	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                               string
-	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                          string
-	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy           string
-	KubernetesArtifactPVCs                                                                                                map[string]string
-	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion                  string
-	DynamoModelSecretName                                                                                                 string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                               int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                              time.Duration
-	OptimizationPrices                                                                                                    []OptimizationPrice
+	// HuggingFaceMetadataEnabled lets the control plane read Hugging Face
+	// model metadata (model info, config.json, safetensors summary) to check
+	// models outside the reviewed catalog. Off by default; never used on the
+	// inference request path.
+	HuggingFaceMetadataEnabled                                                                                  bool
+	ManagedSandbox                                                                                              managedbilling.SandboxPolicy
+	RunPodAPIKey, RunPodServerlessTemplateID, RunPodRESTURL, RunPodArtifactCachePolicy, RunPodHFTokenSecret     string
+	SkyPilotAPI                                                                                                 string
+	SkyPilotProviders                                                                                           []SkyPilotProvider
+	RunPodContainerDiskGiB                                                                                      int
+	RunPodNetworkVolumes                                                                                        map[string]string
+	AWSRoleARN, AWSExternalID, AWSRegion, AWSSubnetID, AWSAMIID, AWSInstanceType, AWSGPU                        string
+	AWSInstanceProfileARN, AWSWorkerSecretARN, AWSImageDigest                                                   string
+	AWSImageCachePolicy, AWSArtifactCachePolicy                                                                 string
+	AWSSubnetIDs, AWSSecurityGroupIDs                                                                           []string
+	AWSArtifactSnapshots                                                                                        map[string]string
+	AWSGPUCount, AWSRootVolumeGiB, AWSGP3IOPS, AWSGP3Throughput, AWSArtifactVolumeInitializationRate            int
+	GCPProject, GCPZone, GCPSubnet, GCPMachineType, GCPGPU, GCPServiceAccount                                   string
+	GCPVMImage, GCPContainerImage, GCPWorkerSecret, GCPArtifactCachePolicy                                      string
+	GCPArtifactDisks                                                                                            map[string]string
+	GCPBootDiskGiB                                                                                              int
+	KubernetesContext, KubernetesNamespace, KubernetesWorkloadAPI, KubernetesServiceAccount                     string
+	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                string
+	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy string
+	KubernetesArtifactPVCs                                                                                      map[string]string
+	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion        string
+	DynamoModelSecretName                                                                                       string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                     int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                    time.Duration
+	OptimizationPrices                                                                                          []OptimizationPrice
 
 	// ConsoleURL is the dashboard origin. On the server it is advertised to
 	// `infercrane login`; in the CLI it builds dashboard links.
@@ -458,6 +463,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	huggingFaceMetadataEnabled, err := envBool("INFERCRANE_HUGGING_FACE_METADATA_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	managedSandboxesEnabled, err := envBool("INFERCRANE_MANAGED_SANDBOXES_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -550,6 +559,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripePriceIDs:                      stripePriceIDs,
 		StripeLivemode:                      stripeLivemode,
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
+		HuggingFaceMetadataEnabled:          huggingFaceMetadataEnabled,
 		OperatorComputeTenants:              splitCSV(env("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "")),
 		ManagedSandbox:                      managedSandboxPolicy,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),

@@ -157,8 +157,6 @@
               "testing/competitive-benchmark-methodology",
               "testing/open-weight-optimization-poc",
               "testing/optimizer-golden-suite",
-              "testing/chutes-public-workload-poc",
-              "testing/modal-qwen3-0.6b-h100-poc",
               "testing/aws-real-evidence",
               "testing/runpod-glm53-real-evidence",
               "testing/runpod-qwen-real-evidence",

@@ -1,6 +1,863 @@
 {
   "components": {
     "schemas": {
+      "AcceleratorLabRun": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "candidate_id": {
+            "description": "Empty when the stored request cannot be read.",
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Durable operation ID.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_state": {
+            "description": "pending: the worker has not recorded a result. unreadable: the stored result does not decode or has another schema version.",
+            "enum": [
+              "pending",
+              "recorded",
+              "unreadable"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "Durable operation status as stored.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "candidate_id",
+          "status",
+          "progress",
+          "message",
+          "error_code",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "target",
+          "policy",
+          "result_state",
+          "result"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunExperiment": {
+        "additionalProperties": false,
+        "properties": {
+          "build": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "artifact_digests": {
+                    "description": "Content digests of the built artifacts. Their storage locations are not exposed.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "builder": {
+                    "type": "string"
+                  },
+                  "builder_version": {
+                    "type": "string"
+                  },
+                  "checks": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "receipt_digest": {
+                    "type": "string"
+                  },
+                  "source_digest": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "builder",
+                  "builder_version",
+                  "source_digest",
+                  "status",
+                  "checks",
+                  "receipt_digest",
+                  "artifact_digests"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidate_id": {
+            "type": "string"
+          },
+          "failure_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generated": {
+            "description": "True when the experiment's source was generated rather than supplied.",
+            "type": "boolean"
+          },
+          "operator_family": {
+            "type": "string"
+          },
+          "qualification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasons": {
+            "description": "URIs inside a reason are replaced with [uri redacted].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "research": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunResearch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "type": "string"
+              },
+              "implementation_id": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "implementation_id",
+              "revision",
+              "license",
+              "backend"
+            ],
+            "type": "object"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "operator_family",
+          "state",
+          "failure_code",
+          "reasons",
+          "source",
+          "generated",
+          "build",
+          "qualification",
+          "research"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunList": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AcceleratorLabRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "boundary"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_generated_kernels": {
+            "type": "boolean"
+          },
+          "max_cost_usd": {
+            "type": "number"
+          },
+          "max_memory_regression_percent": {
+            "type": "number"
+          },
+          "min_amdahl_ceiling": {
+            "type": "number"
+          },
+          "min_hotspot_fraction": {
+            "type": "number"
+          },
+          "min_kernel_speedup": {
+            "type": "number"
+          },
+          "require_hidden_shapes": {
+            "type": "boolean"
+          },
+          "require_quality": {
+            "type": "boolean"
+          },
+          "require_sanitizer": {
+            "type": "boolean"
+          },
+          "require_serving_replay": {
+            "type": "boolean"
+          },
+          "target_end_to_end_speedup": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "max_cost_usd",
+          "min_hotspot_fraction",
+          "min_amdahl_ceiling",
+          "target_end_to_end_speedup",
+          "min_kernel_speedup",
+          "max_memory_regression_percent",
+          "require_hidden_shapes",
+          "require_sanitizer",
+          "require_serving_replay",
+          "require_quality",
+          "allow_generated_kernels"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmark_evidence_id": {
+            "type": "string"
+          },
+          "build_artifact_digest": {
+            "type": "string"
+          },
+          "correctness_passed": {
+            "type": "boolean"
+          },
+          "cost_regression_percent": {
+            "type": "number"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "end_to_end_speedup": {
+            "type": "number"
+          },
+          "hardware": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "type": "string"
+              },
+              "compute_capability": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "vendor",
+              "accelerator",
+              "compute_capability"
+            ],
+            "type": "object"
+          },
+          "hidden_shapes_passed": {
+            "type": "boolean"
+          },
+          "kernel_speedup": {
+            "type": "number"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "memory_regression_percent": {
+            "type": "number"
+          },
+          "profiler_artifact_digest": {
+            "type": "string"
+          },
+          "quality_evidence_id": {
+            "type": "string"
+          },
+          "quality_passed": {
+            "type": "boolean"
+          },
+          "runtime_image_digest": {
+            "type": "string"
+          },
+          "sanitizer_passed": {
+            "type": "boolean"
+          },
+          "serving_replay_measured": {
+            "type": "boolean"
+          },
+          "workload_digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correctness_passed",
+          "hidden_shapes_passed",
+          "sanitizer_passed",
+          "quality_passed",
+          "serving_replay_measured",
+          "kernel_speedup",
+          "end_to_end_speedup",
+          "memory_regression_percent",
+          "cost_regression_percent",
+          "build_artifact_digest",
+          "profiler_artifact_digest",
+          "benchmark_evidence_id",
+          "quality_evidence_id",
+          "measured_at",
+          "hardware",
+          "runtime_image_digest",
+          "workload_digest",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunResearch": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend": {
+                  "type": "string"
+                },
+                "baseline_median_us": {
+                  "type": "number"
+                },
+                "candidate_median_us": {
+                  "type": "number"
+                },
+                "completed_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "correctness": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "determinism": {
+                      "type": "boolean"
+                    },
+                    "edge_cases": {
+                      "type": "boolean"
+                    },
+                    "numerical_stability": {
+                      "type": "boolean"
+                    },
+                    "sanitizer": {
+                      "type": "boolean"
+                    },
+                    "shape_sweep": {
+                      "type": "boolean"
+                    },
+                    "smoke": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "smoke",
+                    "shape_sweep",
+                    "numerical_stability",
+                    "determinism",
+                    "edge_cases",
+                    "sanitizer"
+                  ],
+                  "type": "object"
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "end_to_end_speedup": {
+                  "type": "number"
+                },
+                "iteration": {
+                  "type": "integer"
+                },
+                "kernel_speedup": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "iteration",
+                "source_revision",
+                "backend",
+                "correctness",
+                "baseline_median_us",
+                "candidate_median_us",
+                "kernel_speedup",
+                "end_to_end_speedup",
+                "decision",
+                "reason",
+                "completed_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "best_end_to_end_speedup": {
+            "type": "number"
+          },
+          "best_kernel_speedup": {
+            "type": "number"
+          },
+          "best_source_revision": {
+            "type": "string"
+          },
+          "receipt_digest": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "best_source_revision",
+          "best_kernel_speedup",
+          "best_end_to_end_speedup",
+          "receipt_digest",
+          "attempts"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "evidence_state": {
+            "type": "string"
+          },
+          "experiments": {
+            "items": {
+              "$ref": "#/components/schemas/AcceleratorLabRunExperiment"
+            },
+            "type": "array"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "plan": {
+            "additionalProperties": false,
+            "properties": {
+              "algorithm_version": {
+                "type": "string"
+              },
+              "candidates": {
+                "items": {
+                  "additionalProperties": true,
+                  "description": "The kernel planner's candidate as recorded.",
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "registry_version": {
+                "type": "string"
+              },
+              "rejected": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "hotspot_id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hotspot_id",
+                    "reason"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "selection_boundary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "algorithm_version",
+              "registry_version",
+              "selection_boundary",
+              "candidates",
+              "rejected"
+            ],
+            "type": "object"
+          },
+          "profile": {
+            "additionalProperties": false,
+            "properties": {
+              "artifact_digest": {
+                "type": "string"
+              },
+              "captured_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "hotspots": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device_time_fraction": {
+                      "type": "number"
+                    },
+                    "dtypes": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "family": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "invocations": {
+                      "description": "Null when the profiler did not record it.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "mean_duration_us": {
+                      "description": "Null when the profiler did not record it.",
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "shapes": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "family",
+                    "device_time_fraction",
+                    "mean_duration_us",
+                    "invocations",
+                    "shapes",
+                    "dtypes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "runtime_image_digest": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "tool_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tool",
+              "tool_version",
+              "captured_at",
+              "runtime_image_digest",
+              "artifact_digest",
+              "hotspots"
+            ],
+            "type": "object"
+          },
+          "schema_version": {
+            "const": "infercrane.accelerator-lab-result/v1",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "winner_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schema_version",
+          "input_digest",
+          "state",
+          "evidence_state",
+          "winner_id",
+          "cost_usd",
+          "profile",
+          "plan",
+          "experiments",
+          "limitations"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "hardware": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "type": "string"
+              },
+              "compute_capability": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "vendor",
+              "accelerator",
+              "compute_capability"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "runtime": {
+            "additionalProperties": false,
+            "properties": {
+              "image_digest": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "image_digest"
+            ],
+            "type": "object"
+          },
+          "topology": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerators": {
+                "type": "integer"
+              },
+              "decode_replicas": {
+                "type": "integer"
+              },
+              "expert_parallel": {
+                "type": "integer"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "nodes": {
+                "type": "integer"
+              },
+              "pipeline_parallel": {
+                "type": "integer"
+              },
+              "prefill_replicas": {
+                "type": "integer"
+              },
+              "tensor_parallel": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "mode",
+              "nodes",
+              "accelerators",
+              "tensor_parallel",
+              "pipeline_parallel",
+              "expert_parallel"
+            ],
+            "type": "object"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "batch_size": {
+                "type": "integer"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "input_tokens": {
+                "type": "integer"
+              },
+              "modality": {
+                "type": "string"
+              },
+              "output_tokens": {
+                "type": "integer"
+              },
+              "phase": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "modality",
+              "phase",
+              "batch_size",
+              "concurrency",
+              "input_tokens",
+              "output_tokens"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "model",
+          "runtime",
+          "hardware",
+          "topology",
+          "workload"
+        ],
+        "type": "object"
+      },
       "AdmissionMonitoring": {
         "additionalProperties": false,
         "properties": {
@@ -3226,6 +4083,9 @@
           "model": {
             "$ref": "#/components/schemas/IntentPlanModel"
           },
+          "model_check": {
+            "$ref": "#/components/schemas/ModelCheck"
+          },
           "mutation": {
             "const": "none",
             "type": "string"
@@ -3235,9 +4095,11 @@
             "type": "string"
           },
           "status": {
+            "description": "unsupported: the automatic check found the model cannot run on the pinned runtimes; missing_choices names the reason and the nearest reviewed models.",
             "enum": [
               "ready",
-              "needs_input"
+              "needs_input",
+              "unsupported"
             ],
             "type": "string"
           },
@@ -3560,6 +4422,14 @@
           "repository": {
             "type": "string"
           },
+          "review": {
+            "description": "reviewed: a reviewed catalog entry. checked_automatically: not reviewed; its setup comes from the automatic check in model_check.",
+            "enum": [
+              "reviewed",
+              "checked_automatically"
+            ],
+            "type": "string"
+          },
           "revision": {
             "type": "string"
           },
@@ -3574,6 +4444,7 @@
           }
         },
         "required": [
+          "review",
           "name",
           "display_name",
           "repository",
@@ -3702,6 +4573,18 @@
             ],
             "type": "string"
           },
+          "concurrency": {
+            "description": "Concurrent requests an unreviewed model's GPU is sized for. Defaults to 8.",
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "context_tokens": {
+            "description": "Tokens per request an unreviewed model's GPU is sized for. Defaults to 8192.",
+            "maximum": 1048576,
+            "minimum": 256,
+            "type": "integer"
+          },
           "gpu": {
             "maxLength": 128,
             "type": "string"
@@ -3711,7 +4594,18 @@
             "type": "string"
           },
           "model": {
+            "description": "Reviewed catalog name or Hugging Face repository. A repository outside the reviewed catalog is checked automatically when the operator enabled Hugging Face metadata access.",
             "maxLength": 256,
+            "type": "string"
+          },
+          "model_revision": {
+            "description": "Branch, tag, or commit of an unreviewed model; the plan pins the commit it read. Reviewed models always use their reviewed commit.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "model_secret_reference_id": {
+            "description": "Saved Hugging Face token reference for gated or private models. The token never enters the plan.",
+            "maxLength": 255,
             "type": "string"
           },
           "objective": {
@@ -4892,6 +5786,539 @@
           "outcome",
           "evidence_reference",
           "observed_at"
+        ],
+        "type": "object"
+      },
+      "ModelCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "additionalProperties": false,
+            "properties": {
+              "gated": {
+                "type": "boolean"
+              },
+              "gated_mode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "private": {
+                "type": "boolean"
+              },
+              "state": {
+                "enum": [
+                  "public",
+                  "token_used",
+                  "token_required"
+                ],
+                "type": "string"
+              },
+              "token_used": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "state",
+              "gated",
+              "gated_mode",
+              "private",
+              "token_used"
+            ],
+            "type": "object"
+          },
+          "architecture": {
+            "additionalProperties": false,
+            "properties": {
+              "custom_code": {
+                "type": "boolean"
+              },
+              "model_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtime_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sources": {
+                "description": "The committed runtime registry snapshots the check read.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "runtime": {
+                      "type": "string"
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "runtime",
+                    "version",
+                    "commit",
+                    "source_url"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "state": {
+                "enum": [
+                  "supported",
+                  "unsupported",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "name",
+              "model_type",
+              "runtime",
+              "runtime_version",
+              "reason",
+              "custom_code",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "checks": {
+            "description": "What was checked, one line each, for people.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "name": {
+                  "enum": [
+                    "architecture",
+                    "weights",
+                    "quantization",
+                    "memory",
+                    "license",
+                    "access",
+                    "custom_code"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "info"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "state",
+                "label",
+                "detail"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "config": {
+            "additionalProperties": false,
+            "properties": {
+              "attention_heads": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "context_length": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dtype": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "head_dim": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "hidden_size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_cache_bytes_per_token": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_heads": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "layers": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "read",
+                  "token_required",
+                  "not_found",
+                  "invalid"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "digest",
+              "layers",
+              "hidden_size",
+              "attention_heads",
+              "kv_heads",
+              "head_dim",
+              "context_length",
+              "dtype",
+              "kv_cache_bytes_per_token"
+            ],
+            "type": "object"
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "memory": {
+            "additionalProperties": false,
+            "properties": {
+              "assumptions": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "considered_gpus": {
+                "description": "GPUs with a current price observation that the fit considered.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "context_tokens": {
+                "type": "integer"
+              },
+              "gpu": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "gpu_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "gpu_memory_gib": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_cache_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "layouts": {
+                "description": "Every priced GPU type the model fits, with the fewest GPUs that hold it; fewest GPUs, then smallest GPU, first.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "gpu": {
+                      "type": "string"
+                    },
+                    "gpu_count": {
+                      "type": "integer"
+                    },
+                    "gpu_memory_gib": {
+                      "type": "integer"
+                    },
+                    "per_gpu_required_bytes": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "gpu",
+                    "gpu_count",
+                    "gpu_memory_gib",
+                    "per_gpu_required_bytes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "required_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "fits",
+                  "does_not_fit",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "weights_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "reason",
+              "gpu",
+              "gpu_count",
+              "gpu_memory_gib",
+              "context_tokens",
+              "concurrency",
+              "weights_bytes",
+              "kv_cache_bytes",
+              "required_bytes",
+              "layouts",
+              "assumptions",
+              "considered_gpus"
+            ],
+            "type": "object"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "pipeline_tag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "requested_revision": {
+            "type": "string"
+          },
+          "reviewed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "The immutable commit the check read.",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "infercrane.model-check/v1",
+            "type": "string"
+          },
+          "source": {
+            "const": "hugging-face",
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "task": {
+            "enum": [
+              "chat",
+              "embeddings",
+              ""
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "description": "supported: the architecture is in a pinned runtime's registry, the model fits a priced GPU layout, and it can be read. unsupported: one of those is known to fail. unknown: something could not be read.",
+            "enum": [
+              "supported",
+              "unsupported",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": false,
+            "properties": {
+              "dtypes": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              "format": {
+                "enum": [
+                  "safetensors",
+                  "gguf",
+                  "pytorch",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "parameters": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "quantization": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "read",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "stored_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "format",
+              "parameters",
+              "stored_bytes",
+              "dtypes",
+              "quantization",
+              "reason"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "repository",
+          "requested_revision",
+          "revision",
+          "source",
+          "source_url",
+          "checked_at",
+          "reviewed",
+          "performance_claims",
+          "verdict",
+          "reason",
+          "task",
+          "pipeline_tag",
+          "license",
+          "access",
+          "architecture",
+          "weights",
+          "config",
+          "memory",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "ModelCheckEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/ModelCheck"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "reviewed_model": {
+            "description": "Reviewed catalog name for this repository, when one exists. Prefer the reviewed setup.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "check",
+          "reviewed_model",
+          "performance_claims"
         ],
         "type": "object"
       },
@@ -7667,6 +9094,12 @@
             "minimum": 0,
             "type": "number"
           },
+          "max_model_len": {
+            "description": "Context bound for untuned baselines of models outside the reviewed catalog. When Hugging Face metadata access is on and it is omitted, the server sets it to the length the model was checked for. Reviewed profiles keep their own arguments.",
+            "maximum": 1048576,
+            "minimum": 256,
+            "type": "integer"
+          },
           "max_tpot_p95_ms": {
             "minimum": 0,
             "type": "number"
@@ -7707,6 +9140,11 @@
           },
           "model_revision": {
             "pattern": "^[a-fA-F0-9]{40,64}$",
+            "type": "string"
+          },
+          "model_secret_reference_id": {
+            "description": "Saved Hugging Face token reference used to check a gated model outside the reviewed catalog. The token never enters the proposal.",
+            "maxLength": 255,
             "type": "string"
           },
           "objective": {
@@ -11172,6 +12610,97 @@
         "summary": "List timestamped GPU price observations without claiming stock",
         "tags": [
           "Compute"
+        ]
+      }
+    },
+    "/api/v1/catalog/hugging-face/check": {
+      "get": {
+        "operationId": "checkHuggingFaceModel",
+        "parameters": [
+          {
+            "description": "Exact owner/name Hugging Face repository.",
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "maxLength": 193,
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Branch, tag, or commit. Defaults to main; the check always reports the commit it read.",
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace's saved Hugging Face token reference, for gated or private models. The token is never returned.",
+            "in": "query",
+            "name": "model_secret_reference_id",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tokens per request the GPU is sized for. Defaults to 8192, capped at the model's declared context length.",
+            "in": "query",
+            "name": "context_tokens",
+            "required": false,
+            "schema": {
+              "maximum": 1048576,
+              "minimum": 256,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Concurrent requests the GPU is sized for. Defaults to 8.",
+            "in": "query",
+            "name": "concurrency",
+            "required": false,
+            "schema": {
+              "maximum": 1024,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCheckEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Check automatically whether an unreviewed Hugging Face model runs on the pinned runtimes and which GPUs it fits; not a performance claim",
+        "tags": [
+          "Model catalog"
         ]
       }
     },
@@ -16772,6 +18301,64 @@
       }
     },
     "/api/v1/optimization/accelerator-lab/runs": {
+      "get": {
+        "operationId": "listAcceleratorLabRuns",
+        "parameters": [
+          {
+            "description": "Exact campaign ID. Omit to list runs from every campaign.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum runs returned, newest first.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceleratorLabRunList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the organization's Accelerator Lab runs, newest first, with their target, policy, and recorded evidence",
+        "tags": [
+          "Inference optimization"
+        ]
+      },
       "post": {
         "operationId": "runAcceleratorLab",
         "parameters": [
@@ -17134,6 +18721,72 @@
           }
         ],
         "summary": "Cancel future campaign work and require cleanup",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions": {
+      "post": {
+        "operationId": "createOptimizationCandidateChatCompletion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one chat completion to the exact revision of a decided candidate; refused while the run is still measuring it, never recorded as a request trace",
         "tags": [
           "Inference optimization"
         ]
@@ -17667,6 +19320,52 @@
         "summary": "Compile bounded user intent into an editable reviewed configuration",
         "tags": [
           "Planning"
+        ]
+      }
+    },
+    "/api/v1/playground/chat/completions": {
+      "post": {
+        "operationId": "createPlaygroundChatCompletion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one chat completion to an endpoint as the authenticated control-plane principal, on the same routing, admission, quota, billing and recording path as /v1/chat/completions",
+        "tags": [
+          "Inference"
         ]
       }
     },

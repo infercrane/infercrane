@@ -49,6 +49,25 @@
 The route reads no tenant state, never touches PostgreSQL, and is not on the inference request path.
 Results do not enter the reviewed catalog, the checkpoint catalog, or optimization proposals.
 
+## Automatic model check
+
+Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
+
+1. A planning request (`POST /api/v1/planning/intents`), a check (`GET
+   /api/v1/catalog/hugging-face/check`), or an optimization proposal names a Hugging Face repository
+   that is not a reviewed model.
+2. When a `model_secret_reference_id` is named, the control API loads that tenant's secret reference
+   and resolves the token through the configured secret resolver.
+3. `internal/modelcheck` pins the revision to a commit with one model-info request, then reads
+   `config.json` at that commit: two HTTPS requests under one 8-second deadline and an 8-request
+   concurrency bound, redirects followed only on the same host. Results are cached in memory by
+   commit; reads made with a token are cached under the tenant and credential.
+4. The check compares the architecture with the committed runtime registry snapshot, sizes the GPU
+   from the price catalog already in memory, and returns. The planner itself never reads the
+   network.
+
+Nothing is written to PostgreSQL, and the inference request path is not involved.
+
 ## Provisioning
 
 The durable workflow resolves a registered provider backend by cloud, runtime, and persisted adapter

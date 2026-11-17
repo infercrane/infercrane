@@ -1,0 +1,72 @@
+{
+ "_id": "66e98a3db0adbd1a248a240d",
+ "id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+ "sha": "b25037543e9394b818fdfca67ab2a00ecc7dd641",
+ "pipeline_tag": "text-generation",
+ "cardData": {
+  "library_name": "transformers",
+  "license": "apache-2.0",
+  "license_link": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ/blob/main/LICENSE",
+  "pipeline_tag": "text-generation"
+ },
+ "gated": false,
+ "private": false,
+ "config": {
+  "architectures": [
+   "Qwen2ForCausalLM"
+  ],
+  "model_type": "qwen2",
+  "quantization_config": {
+   "bits": 4,
+   "quant_method": "awq"
+  }
+ },
+ "tags": [
+  "transformers",
+  "safetensors",
+  "qwen2",
+  "text-generation",
+  "chat",
+  "conversational",
+  "en",
+  "arxiv:2309.00071",
+  "arxiv:2407.10671",
+  "base_model:Qwen/Qwen2.5-7B-Instruct",
+  "base_model:quantized:Qwen/Qwen2.5-7B-Instruct",
+  "license:apache-2.0",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "4-bit",
+  "awq",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "generation_config.json"
+  },
+  {
+   "rfilename": "model-00001-of-00002.safetensors"
+  },
+  {
+   "rfilename": "model-00002-of-00002.safetensors"
+  },
+  {
+   "rfilename": "model.safetensors.index.json"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  }
+ ],
+ "safetensors": {
+  "parameters": {
+   "I32": 6525288448,
+   "F16": 1090328064
+  },
+  "total": 7615616512
+ }
+}

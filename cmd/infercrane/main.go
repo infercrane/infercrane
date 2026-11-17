@@ -58,6 +58,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedsandbox"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
+	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/notification"
 	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/operations"
@@ -453,6 +454,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "recipes":
 		return recipesCommand(ctx, cfg, args[1:])
 	case "models":
+		if len(args) > 1 && args[1] == "check" {
+			return modelsCheckCommand(ctx, cfg, args[2:])
+		}
 		return modelsCommand(args[1:])
 	case "lab":
 		return labCommand(ctx, cfg, args[1:])
@@ -1320,7 +1324,7 @@ func modelsCommand(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 || (inspect && query == "") {
-		return errors.New("usage: infercrane models [QUERY] | infercrane models inspect NAME [--output human|json]")
+		return errors.New("usage: infercrane models [QUERY] | infercrane models inspect NAME | infercrane models check OWNER/NAME [--output human|json]")
 	}
 	if inspect {
 		entry, found := curatedrecipe.Get(query)
@@ -1357,7 +1361,7 @@ func modelsCommand(args []string) error {
 		return printJSON(map[string]any{"data": entries, "performance_claims": false})
 	}
 	if len(entries) == 0 {
-		fmt.Println("No reviewed model starting points match. Use `infercrane workload init --model REPOSITORY` for an explicit model.")
+		fmt.Println("No reviewed model starting points match. Check any open Hugging Face model with `infercrane models check OWNER/NAME`.")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -4715,6 +4719,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
 	}
 	controlAPI.HuggingFaceSearch = huggingFaceSearch
+	if cfg.HuggingFaceMetadataEnabled {
+		modelCheck, modelCheckErr := modelcheck.New(modelcheck.ResolverOptions{})
+		if modelCheckErr != nil {
+			return fmt.Errorf("configure Hugging Face model checks: %w", modelCheckErr)
+		}
+		controlAPI.ModelCheck = modelCheck
+	}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {
@@ -4898,6 +4909,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range optimizationcampaign.ActivationHandlers(s, rec.RefreshEndpoints, nil) {
 		handlers[kind] = handler
 	}
+	// The gateway exists before the control API's handler so the dashboard's
+	// playground route can hand an authenticated member to the gateway's own
+	// inference path. Its remaining fields are bound below, before it serves.
+	inferenceGateway := &gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports, OpenRouterModelAliases: cfg.OpenRouterModelAliases}
+	controlAPI.Inference, controlAPI.CandidatePrompts = inferenceGateway, controlapi.NewCandidatePrompts()
 	control := controlAPI.Handler()
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry, Logger: logger}
 	go func() {
@@ -4942,7 +4958,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			return fmt.Errorf("configure OpenRouter provider catalog: %w", err)
 		}
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports, OpenRouterCatalog: openRouterCatalog, OpenRouterModelAliases: cfg.OpenRouterModelAliases}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	inferenceGateway.Ready, inferenceGateway.Control, inferenceGateway.Telemetry, inferenceGateway.OpenRouterCatalog = databaseReadiness.Check, control, gatewayTelemetry, openRouterCatalog
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: inferenceGateway.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)

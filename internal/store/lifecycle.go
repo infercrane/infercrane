@@ -66,6 +66,29 @@ func (s *Store) OperationsForTenant(ctx context.Context, tenant string, before t
 	}
 	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
 	args = append(args, limit)
+	return s.queryOperations(ctx, query, args...)
+}
+
+// OperationsOfKind lists one tenant's operations of one kind on one resource
+// type, newest first. An empty resourceName lists every resource of that type;
+// otherwise it is an exact match. The tenant, resource type, and resource name
+// lead idx_operations_resource, so a campaign filter reads one index range.
+func (s *Store) OperationsOfKind(ctx context.Context, tenant, kind, resourceType, resourceName string, limit int) ([]domain.Operation, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	query := `SELECT ` + operationColumns + ` FROM operations WHERE tenant_id=? AND resource_type=? AND kind=?`
+	args := []any{tenant, resourceType, kind}
+	if resourceName != "" {
+		query += ` AND resource_name=?`
+		args = append(args, resourceName)
+	}
+	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
+	args = append(args, limit)
+	return s.queryOperations(ctx, query, args...)
+}
+
+func (s *Store) queryOperations(ctx context.Context, query string, args ...any) ([]domain.Operation, error) {
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

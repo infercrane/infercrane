@@ -95,6 +95,10 @@ class ControlAPI:
         request_path = "/catalog/hugging-face/search"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def check_hugging_face_model(self) -> dict[str, Any]:
+        request_path = "/catalog/hugging-face/check"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         request_path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))
@@ -491,6 +495,10 @@ class ControlAPI:
         request_path = "/optimization/accelerator-lab/runs"
         return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
+    def list_accelerator_lab_runs(self) -> dict[str, Any]:
+        request_path = "/optimization/accelerator-lab/runs"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def list_optimization_campaigns(self) -> ObjectList:
         request_path = "/optimization/campaigns"
         return cast(ObjectList, self._transport.request("GET", request_path))
@@ -517,6 +525,14 @@ class ControlAPI:
 
     def cancel_optimization_campaign(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def create_optimization_candidate_chat_completion(self, id: str, candidate_id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/candidates/{quote(candidate_id, safe='')}/chat/completions"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def create_playground_chat_completion(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/playground/chat/completions"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
     def list_notification_subscriptions(self) -> dict[str, Any]:
