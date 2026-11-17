@@ -108,7 +108,7 @@ func (s *Store) CostEvidenceForDeployment(ctx context.Context, tenant, deploymen
 	if limit < 1 || limit > 1000 {
 		limit = 256
 	}
-	rows, err := s.QueryContext(ctx, `SELECT c.id,c.tenant_id,c.deployment_id,d.name,c.revision_id,c.source,c.scope,c.resource,c.currency,c.billing_unit,c.evidence_class,c.amount,c.window_start,c.window_end,c.observed_at,c.valid_until,c.created_at FROM cost_evidence c JOIN deployments d ON d.id=c.deployment_id AND d.tenant_id=c.tenant_id WHERE c.tenant_id=? AND (d.id=? OR d.name=?) AND c.window_end>=? AND c.window_start<=? ORDER BY c.observed_at DESC,c.id LIMIT ?`, tenant, deploymentName, deploymentName, start.UTC(), end.UTC(), limit)
+	rows, err := s.QueryContext(ctx, `SELECT c.id,c.tenant_id,c.deployment_id,d.name,c.revision_id,c.source,c.scope,c.resource,c.currency,c.billing_unit,c.evidence_class,c.amount,c.window_start,c.window_end,c.observed_at,c.valid_until,c.created_at FROM cost_evidence c JOIN deployments d ON d.id=c.deployment_id AND d.tenant_id=c.tenant_id WHERE c.tenant_id=? AND (d.id=? OR (d.name=? AND `+liveDeploymentD+`)) AND c.window_end>=? AND c.window_start<=? ORDER BY c.observed_at DESC,c.id LIMIT ?`, tenant, deploymentName, deploymentName, start.UTC(), end.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}

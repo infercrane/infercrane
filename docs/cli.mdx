@@ -901,7 +901,7 @@ infercrane delete qwen-prod \
 infercrane orphans
 ```
 
-`--plan` is side-effect-free. `--yes` is required for mutation. After a paid test, also verify the provider inventory reaches zero.
+`--plan` is side-effect-free. `--yes` is required for mutation. After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
 
 ## Tenant administration
 

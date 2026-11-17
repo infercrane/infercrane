@@ -2264,7 +2264,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
 	if *planOnly {
-		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence"}
+		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence", "delete the endpoint InferCrane created for the deployment unless another backend is bound to it", "release the deployment name so it can be deployed again"}
 		if *output == "json" {
 			encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "actions": actions}, "", "  ")
 			fmt.Println(string(encoded))

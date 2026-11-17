@@ -25,6 +25,12 @@ Existing v1 deployment aliases are migrated automatically to a `production` envi
 model, a lifecycle-managed binding, and a one-binding active plan of the same name. Each new
 deployment gets the same set. Its logical model has an empty description.
 
+That endpoint belongs to the deployment, as does an endpoint a deploy publishes under its
+`endpoint_name`. When the deployment is deleted, or its first deploy is cancelled, InferCrane deletes
+these endpoints too, unless you bound another backend to one of them. Endpoints you create yourself
+are never deleted with a deployment. A deleted endpoint's name can be used again, and a deployment
+deployed again under the same name reuses that name's logical model.
+
 ## Create an endpoint
 
 ```bash

@@ -46,8 +46,11 @@ func (s *Store) ApplyDeploymentForTenant(ctx context.Context, tenant string, dep
 		return domain.Deployment{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	// A deployment that is being deleted or was deleted is never revived here.
+	// Deleted names are deployed again as a new deployment; a name whose
+	// deletion is still in progress is refused by the insert as a conflict.
 	var id string
-	err = tx.QueryRowContext(ctx, `SELECT id FROM deployments WHERE name=? AND tenant_id=? FOR UPDATE`, deployment.Name, tenant).Scan(&id)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM deployments WHERE name=? AND tenant_id=? AND desired_state<>'deleted' FOR UPDATE`, deployment.Name, tenant).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
 		return s.CreateDeploymentForTenant(ctx, tenant, deployment, targetNames)

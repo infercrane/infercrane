@@ -1112,7 +1112,7 @@ func TestDeletePlanHonorsJSONWithoutControlPlaneMutation(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &plan); err != nil {
 		t.Fatalf("output is not one JSON document: %q: %v", output, err)
 	}
-	if requests != 0 || plan.Deployment != "qwen-prod" || len(plan.Actions) != 2 {
+	if requests != 0 || plan.Deployment != "qwen-prod" || len(plan.Actions) != 4 || !strings.Contains(plan.Actions[2], "endpoint") || !strings.Contains(plan.Actions[3], "deployed again") {
 		t.Fatalf("requests=%d plan=%#v", requests, plan)
 	}
 }

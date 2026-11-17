@@ -32,7 +32,7 @@ func (s *Store) FinOpsReports(ctx context.Context, tenant, name string, limit in
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT f.id,f.tenant_id,f.deployment_id,f.deployment_name,f.window_start,f.window_end,f.currency,f.status,f.known_cost,f.estimated_avoidable_cost,f.summary_json::text,f.evidence_json::text,f.input_digest,f.created_at FROM finops_reports f JOIN deployments d ON d.id=f.deployment_id WHERE f.tenant_id=? AND d.name=? ORDER BY f.created_at DESC LIMIT ?`, tenant, name, limit)
+	rows, err := s.QueryContext(ctx, `SELECT f.id,f.tenant_id,f.deployment_id,f.deployment_name,f.window_start,f.window_end,f.currency,f.status,f.known_cost,f.estimated_avoidable_cost,f.summary_json::text,f.evidence_json::text,f.input_digest,f.created_at FROM finops_reports f JOIN deployments d ON d.id=f.deployment_id WHERE f.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY f.created_at DESC LIMIT ?`, tenant, name, limit)
 	if err != nil {
 		return nil, err
 	}

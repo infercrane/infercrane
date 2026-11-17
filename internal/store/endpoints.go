@@ -384,7 +384,7 @@ func (s *Store) SetEndpointPlan(ctx context.Context, tenant, name, planID, slot 
 	}
 	defer tx.Rollback()
 	var endpointID, activePlanID, candidatePlanID string
-	if err = tx.QueryRowContext(ctx, `SELECT id,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,'') FROM endpoints WHERE tenant_id=? AND name=? FOR UPDATE`, tenant, name).Scan(&endpointID, &activePlanID, &candidatePlanID); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRowContext(ctx, `SELECT id,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,'') FROM endpoints WHERE tenant_id=? AND name=? AND desired_state<>'deleted' FOR UPDATE`, tenant, name).Scan(&endpointID, &activePlanID, &candidatePlanID); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -449,8 +449,10 @@ func (s *Store) StageEnvironmentPromotion(ctx context.Context, tenant, sourceNam
 	err = tx.QueryRowContext(ctx, `SELECT id,tenant_id,source_endpoint_id,source_plan_id,destination_endpoint_id,destination_plan_id,idempotency_key,created_at FROM environment_promotions WHERE tenant_id=? AND idempotency_key=?`, tenant, idempotencyKey).Scan(&existing.ID, &existing.TenantID, &existing.SourceEndpointID, &existing.SourcePlanID, &existing.DestinationEndpointID, &existing.DestinationPlanID, &existing.IdempotencyKey, &existingCreated)
 	if err == nil {
 		existing.CreatedAt = parseTime(existingCreated)
+		// A deleted endpoint keeps its history row, so a name can match more than
+		// one row. Prefer the live endpoint, then the newest deleted one.
 		var sourceID, destinationID string
-		if lookupErr := tx.QueryRowContext(ctx, `SELECT (SELECT id FROM endpoints WHERE tenant_id=? AND name=?),(SELECT id FROM endpoints WHERE tenant_id=? AND name=?)`, tenant, sourceName, tenant, destinationName).Scan(&sourceID, &destinationID); lookupErr != nil {
+		if lookupErr := tx.QueryRowContext(ctx, `SELECT (SELECT id FROM endpoints WHERE tenant_id=? AND name=? ORDER BY (desired_state<>'deleted') DESC,created_at DESC,id DESC LIMIT 1),(SELECT id FROM endpoints WHERE tenant_id=? AND name=? ORDER BY (desired_state<>'deleted') DESC,created_at DESC,id DESC LIMIT 1)`, tenant, sourceName, tenant, destinationName).Scan(&sourceID, &destinationID); lookupErr != nil {
 			return domain.EnvironmentPromotion{}, false, lookupErr
 		}
 		if existing.SourceEndpointID != sourceID || existing.DestinationEndpointID != destinationID {

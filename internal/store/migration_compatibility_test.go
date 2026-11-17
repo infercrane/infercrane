@@ -281,6 +281,26 @@ func TestDeploymentLogicalModelDescriptionOmitsInternalWording(t *testing.T) {
 	if err = previous.QueryRowContext(ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure('infercrane_create_legacy_endpoint()')`).Scan(&previousSource); err != nil {
 		t.Fatal(err)
 	}
+	// Apply 079 alone so its trigger change is compared before a later
+	// migration replaces the same function for its own reason.
+	for _, migration := range embeddedMigrations(t) {
+		if !strings.HasPrefix(migration.name, "079_") {
+			continue
+		}
+		if _, err = previous.ExecContext(ctx, string(migration.body)); err != nil {
+			t.Fatalf("apply migration %s: %v", migration.name, err)
+		}
+		if _, err = previous.ExecContext(ctx, `INSERT INTO schema_migrations(version,checksum) VALUES($1,$2)`, migration.name, migration.checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var source string
+	if err = previous.QueryRowContext(ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure('infercrane_create_legacy_endpoint()')`).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(previousSource, "'"+internalDescription+"'", "''", 1); want == previousSource || source != want {
+		t.Fatalf("trigger function changed beyond its description:\n%s", source)
+	}
 	if err = previous.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -290,13 +310,6 @@ func TestDeploymentLogicalModelDescriptionOmitsInternalWording(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	var source string
-	if err = upgraded.QueryRowContext(ctx, `SELECT prosrc FROM pg_proc WHERE oid=to_regprocedure('infercrane_create_legacy_endpoint()')`).Scan(&source); err != nil {
-		t.Fatal(err)
-	}
-	if want := strings.Replace(previousSource, "'"+internalDescription+"'", "''", 1); want == previousSource || source != want {
-		t.Fatalf("trigger function changed beyond its description:\n%s", source)
-	}
 	existing, err := upgraded.ResolveEndpointForTenant(ctx, "global", "existing")
 	if err != nil || existing.LogicalModel.Description != "" {
 		t.Fatalf("existing logical model=%#v err=%v", existing.LogicalModel, err)

@@ -32,7 +32,7 @@ func (s *Store) SetSLOPolicy(ctx context.Context, tenant, deploymentName string,
 func (s *Store) SLOPolicy(ctx context.Context, tenant, deploymentName string) (domain.SLOPolicy, error) {
 	var out domain.SLOPolicy
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.max_ttft_p95_ms,p.max_latency_p95_ms,p.max_error_rate,p.min_output_tokens_second,p.max_hourly_cost,p.created_at,p.updated_at FROM deployment_slo_policies p JOIN deployments d ON d.id=p.deployment_id AND d.tenant_id=p.tenant_id WHERE p.tenant_id=? AND d.name=?`, tenant, deploymentName).Scan(&out.DeploymentID, &out.MaxTTFTP95MS, &out.MaxLatencyP95MS, &out.MaxErrorRate, &out.MinOutputTokensSecond, &out.MaxHourlyCost, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT p.deployment_id,p.max_ttft_p95_ms,p.max_latency_p95_ms,p.max_error_rate,p.min_output_tokens_second,p.max_hourly_cost,p.created_at,p.updated_at FROM deployment_slo_policies p JOIN deployments d ON d.id=p.deployment_id AND d.tenant_id=p.tenant_id WHERE p.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, deploymentName).Scan(&out.DeploymentID, &out.MaxTTFTP95MS, &out.MaxLatencyP95MS, &out.MaxErrorRate, &out.MinOutputTokensSecond, &out.MaxHourlyCost, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.SLOPolicy{}, ErrNotFound
 	}
@@ -44,7 +44,7 @@ func (s *Store) SLOPolicy(ctx context.Context, tenant, deploymentName string) (d
 }
 
 func (s *Store) DeleteSLOPolicy(ctx context.Context, tenant, deploymentName string) error {
-	result, err := s.ExecContext(ctx, `DELETE FROM deployment_slo_policies p USING deployments d WHERE p.deployment_id=d.id AND p.tenant_id=? AND d.tenant_id=? AND d.name=?`, tenant, tenant, deploymentName)
+	result, err := s.ExecContext(ctx, `DELETE FROM deployment_slo_policies p USING deployments d WHERE p.deployment_id=d.id AND p.tenant_id=? AND d.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, tenant, deploymentName)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (s *Store) InferenceRecommendations(ctx context.Context, tenant, deployment
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT r.id,r.tenant_id,r.deployment_id,r.status,r.algorithm_version,COALESCE(r.selected_evidence_id,''),r.reason,r.missing_json::text,r.candidates_json::text,r.input_snapshot_json::text,r.input_digest,r.created_at FROM inference_recommendations r JOIN deployments d ON d.id=r.deployment_id WHERE r.tenant_id=? AND d.tenant_id=? AND d.name=? ORDER BY r.created_at DESC,r.id DESC LIMIT ?`, tenant, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT r.id,r.tenant_id,r.deployment_id,r.status,r.algorithm_version,COALESCE(r.selected_evidence_id,''),r.reason,r.missing_json::text,r.candidates_json::text,r.input_snapshot_json::text,r.input_digest,r.created_at FROM inference_recommendations r JOIN deployments d ON d.id=r.deployment_id WHERE r.tenant_id=? AND d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY r.created_at DESC,r.id DESC LIMIT ?`, tenant, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // SubmitCloudDeployment atomically persists desired deployment state and its
@@ -63,7 +64,7 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 
 	existingOperation, lookupErr := operationByKeyQuery(ctx, tx, operation.TenantID, operation.Kind, operation.IdempotencyKey)
 	if lookupErr == nil {
-		existingDeployment, deploymentErr := deploymentByNameQuery(ctx, tx, deployment.TenantID, deployment.Name)
+		existingDeployment, deploymentErr := latestDeploymentByNameQuery(ctx, tx, deployment.TenantID, deployment.Name)
 		if deploymentErr == nil && (!sameOperationIntent(existingOperation, operation) || !sameDeploymentSubmission(existingDeployment, deployment)) {
 			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: idempotency key was already used for a different deployment intent", ErrConflict)
 		}
@@ -78,6 +79,9 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 	}
 
 	if existing, existingErr := deploymentByNameQuery(ctx, tx, deployment.TenantID, deployment.Name); existingErr == nil {
+		if existing.DesiredState == "deleted" {
+			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: deployment %s is still being deleted; deploy it again after cleanup finishes", ErrConflict, existing.Name)
+		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: deployment %s already exists", ErrConflict, existing.Name)
 	} else if !errors.Is(existingErr, ErrNotFound) {
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, existingErr
@@ -108,7 +112,7 @@ func (s *Store) submitCloudDeployment(ctx context.Context, deployment domain.Dep
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO deployments(id,name,model,runtime,routing_strategy,desired_state,observed_state,min_replicas,max_replicas,autoscaling_enabled,tenant_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, deployment.ID, deployment.Name, deployment.Model, deployment.Runtime, deployment.RoutingStrategy, deployment.DesiredState, deployment.ObservedState, deployment.MinReplicas, deployment.MaxReplicas, deployment.AutoscalingEnabled, deployment.TenantID, stamp, stamp); err != nil {
 		if isUniqueViolation(err) {
-			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, fmt.Errorf("%w: deployment already exists", ErrConflict)
+			return domain.Deployment{}, domain.Operation{}, emptyReservation, false, deploymentNameConflict(err, deployment.Name)
 		}
 		return domain.Deployment{}, domain.Operation{}, emptyReservation, false, err
 	}
@@ -210,7 +214,7 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 		return domain.Operation{}, false, lookupErr
 	}
 	var currentID, desired string
-	if err = tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=? FOR UPDATE`, tenant, name).Scan(&currentID, &desired); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=? AND `+liveDeployment+` FOR UPDATE`, tenant, name).Scan(&currentID, &desired); errors.Is(err, sql.ErrNoRows) {
 		return domain.Operation{}, false, ErrNotFound
 	} else if err != nil {
 		return domain.Operation{}, false, err
@@ -273,10 +277,42 @@ func operationByKeyQuery(ctx context.Context, tx *tx, tenant, kind, key string) 
 	return out, nil
 }
 
+// liveDeployment and liveDeploymentD match every deployment that still owns
+// its name: all rows except fully deleted ones, which stay only as history.
+// The deployments_tenant_live_name_key index allows at most one such row per
+// tenant and name, so a by-name lookup filtered with them is unambiguous.
+const (
+	liveDeployment  = `NOT (desired_state='deleted' AND observed_state='deleted')`
+	liveDeploymentD = `NOT (d.desired_state='deleted' AND d.observed_state='deleted')`
+)
+
+// deploymentNameConflict explains a unique violation raised while inserting a
+// deployment. The insert trigger also creates the deployment's endpoint, so
+// the name can be taken by an endpoint as well as by another deployment.
+func deploymentNameConflict(err error, name string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "endpoints_tenant_live_name_key" {
+		return fmt.Errorf("%w: endpoint %s already exists; delete it or choose another deployment name", ErrConflict, name)
+	}
+	return fmt.Errorf("%w: deployment %s already exists", ErrConflict, name)
+}
+
+// deploymentByNameQuery returns the deployment that currently owns name.
 func deploymentByNameQuery(ctx context.Context, tx *tx, tenant, name string) (domain.Deployment, error) {
+	return scanDeploymentByName(ctx, tx, tenant, name, ` AND `+liveDeploymentD)
+}
+
+// latestDeploymentByNameQuery returns the deployment that owns name or, when
+// every deployment with that name was deleted, the most recent one. It lets an
+// idempotent retry return the deployment its submission created.
+func latestDeploymentByNameQuery(ctx context.Context, tx *tx, tenant, name string) (domain.Deployment, error) {
+	return scanDeploymentByName(ctx, tx, tenant, name, ` ORDER BY (`+liveDeploymentD+`) DESC,d.created_at DESC,d.id DESC LIMIT 1`)
+}
+
+func scanDeploymentByName(ctx context.Context, tx *tx, tenant, name, suffix string) (domain.Deployment, error) {
 	var out domain.Deployment
 	var created, updated string
-	err := tx.QueryRowContext(ctx, `SELECT d.id,d.tenant_id,d.name,d.model,d.runtime,d.routing_strategy,d.desired_state,d.observed_state,d.min_replicas,d.max_replicas,d.autoscaling_enabled,COALESCE(d.active_revision_id,''),COALESCE(d.candidate_revision_id,''),COALESCE(dc.compute_connection_id,''),d.created_at,d.updated_at FROM deployments d LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE d.tenant_id=? AND d.name=?`, tenant, name).Scan(&out.ID, &out.TenantID, &out.Name, &out.Model, &out.Runtime, &out.RoutingStrategy, &out.DesiredState, &out.ObservedState, &out.MinReplicas, &out.MaxReplicas, &out.AutoscalingEnabled, &out.ActiveRevisionID, &out.CandidateRevisionID, &out.ComputeConnectionID, &created, &updated)
+	err := tx.QueryRowContext(ctx, `SELECT d.id,d.tenant_id,d.name,d.model,d.runtime,d.routing_strategy,d.desired_state,d.observed_state,d.min_replicas,d.max_replicas,d.autoscaling_enabled,COALESCE(d.active_revision_id,''),COALESCE(d.candidate_revision_id,''),COALESCE(dc.compute_connection_id,''),d.created_at,d.updated_at FROM deployments d LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE d.tenant_id=? AND d.name=?`+suffix, tenant, name).Scan(&out.ID, &out.TenantID, &out.Name, &out.Model, &out.Runtime, &out.RoutingStrategy, &out.DesiredState, &out.ObservedState, &out.MinReplicas, &out.MaxReplicas, &out.AutoscalingEnabled, &out.ActiveRevisionID, &out.CandidateRevisionID, &out.ComputeConnectionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	}

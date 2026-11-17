@@ -112,7 +112,7 @@ func (s *Store) InferencePassports(ctx context.Context, tenant, deploymentName s
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT p.id,p.tenant_id,p.deployment_id,p.revision_id,p.payload_json,p.payload_digest,p.signature,p.public_key,p.algorithm,p.key_id,p.created_at FROM inference_passports p JOIN deployments d ON d.id=p.deployment_id WHERE p.tenant_id=? AND d.name=? ORDER BY p.created_at DESC,p.id DESC LIMIT ?`, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT p.id,p.tenant_id,p.deployment_id,p.revision_id,p.payload_json,p.payload_digest,p.signature,p.public_key,p.algorithm,p.key_id,p.created_at FROM inference_passports p JOIN deployments d ON d.id=p.deployment_id WHERE p.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY p.created_at DESC,p.id DESC LIMIT ?`, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}
