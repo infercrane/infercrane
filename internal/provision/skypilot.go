@@ -113,6 +113,20 @@ func (r execRunner) Run(ctx context.Context, env []string, args ...string) ([]by
 type SkyPilot struct {
 	Binary, APIKey string
 	Runner         CommandRunner
+	// ServicePort, when set, is the only container port the cloud can expose
+	// to the control plane; every replica serves and is observed on it.
+	ServicePort int
+}
+
+// SkyPilotServicePort returns the container port a SkyPilot cloud must serve
+// on to be reachable, or 0 when any port works. Vast.ai forwards only container
+// port 8080 (through the instance's SSH port + 1); a server on 8000 starts but
+// is never reachable.
+func SkyPilotServicePort(cloud string) int {
+	if strings.EqualFold(strings.TrimSpace(cloud), "vast") {
+		return 8080
+	}
+	return 0
 }
 
 // Handle returns the deterministic provider identity for a durable external
@@ -139,6 +153,12 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	if spec.Port == 0 {
 		spec.Port = 8000
+	}
+	if s.ServicePort != 0 && spec.Port != s.ServicePort {
+		if !spec.Workload.Empty() {
+			return ProviderHandle{}, fmt.Errorf("%w: %s exposes only container port %d; the workload listens on %d", ErrInvalidReplicaSpec, spec.Cloud, s.ServicePort, spec.Port)
+		}
+		spec.Port = s.ServicePort
 	}
 	usesDefaultRuntime := spec.RuntimeVersion == ""
 	if usesDefaultRuntime {
@@ -241,6 +261,9 @@ func (s SkyPilot) ObserveReplica(ctx context.Context, handle ProviderHandle, por
 	}
 	if port == 0 {
 		port = 8000
+	}
+	if s.ServicePort != 0 {
+		port = s.ServicePort
 	}
 	return s.observe(ctx, handle.ResourceID, port, true)
 }

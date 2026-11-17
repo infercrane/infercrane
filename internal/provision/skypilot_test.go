@@ -21,6 +21,7 @@ type fakeSkyRunner struct {
 	jobState        string
 	jobFailure      string
 	endpoint        string
+	endpointPort    string
 	launchTask      string
 	launches, downs int
 	launchError     string
@@ -60,6 +61,7 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 		if !f.exists {
 			return nil, errors.New("not found")
 		}
+		f.endpointPort = args[len(args)-1]
 		endpoint := f.endpoint
 		if endpoint == "" {
 			endpoint = "https://worker.example"
@@ -110,6 +112,23 @@ func TestEnsureUsesProviderNeutralImageOutsideRunPod(t *testing.T) {
 	}
 	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultVLLMImage) {
 		t.Fatalf("launch task does not use the provider-neutral runtime image: %s", runner.launchTask)
+	}
+}
+
+func TestVastServesAndIsObservedOnItsOnlyForwardedPort(t *testing.T) {
+	runner := &fakeSkyRunner{}
+	provider := SkyPilot{APIKey: "secret", Runner: runner, ServicePort: SkyPilotServicePort("vast")}
+	if _, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "vast", GPU: "RTX4090"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "- 8080") || !strings.Contains(runner.launchTask, "--port 8080") {
+		t.Fatalf("Vast replica must serve on 8080: %s", runner.launchTask)
+	}
+	if _, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "infercrane-prod-r0"}, 8000); err != nil || runner.endpointPort != "8080" {
+		t.Fatalf("observed port=%q err=%v", runner.endpointPort, err)
+	}
+	if SkyPilotServicePort("aws") != 0 {
+		t.Fatal("only clouds with a single forwarded port pin the service port")
 	}
 }
 

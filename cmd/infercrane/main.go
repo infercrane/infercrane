@@ -4591,7 +4591,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 					advisor = capacity
 				}
 				defaultBackend := manifest.Cloud == "runpod" || manifest.Cloud == "aws" && !cfg.AWSEnabled() || manifest.Cloud == "gcp" && !cfg.GCPEnabled() || manifest.Cloud == "kubernetes" && !cfg.KubernetesEnabled() || manifest.Cloud != "runpod" && manifest.Cloud != "aws" && manifest.Cloud != "gcp" && manifest.Cloud != "kubernetes"
-				elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: adapter, Cloud: manifest.Cloud, Runtime: runtimeName, Default: defaultBackend, Profile: profile, Provider: skyProvider, Capacity: advisor})
+				cloudProvider := skyProvider
+				cloudProvider.ServicePort = provision.SkyPilotServicePort(manifest.Cloud)
+				elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: adapter, Cloud: manifest.Cloud, Runtime: runtimeName, Default: defaultBackend, Profile: profile, Provider: cloudProvider, Capacity: advisor})
 			}
 		}
 	}
