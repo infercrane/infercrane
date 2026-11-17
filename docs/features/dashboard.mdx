@@ -18,6 +18,12 @@ reads PostgreSQL or provider credentials directly.
 - fleet attention, stable endpoints, and concrete deployments;
 - durable operations with reconnectable timelines and cooperative cancellation;
 - Request Inspector and deterministic Doctor findings;
+- the Workbench: send a prompt to an endpoint and read the streamed answer with its time to first
+  token, token counts, and request ID; compare two endpoints, or an endpoint and a run's decided
+  setup, side by side; paste tool definitions and see whether the model's tool call matches the
+  schema; and copy the request as cURL, Python, or TypeScript. The browser never holds an API key:
+  the console server calls `POST /api/v1/playground/chat/completions` as the signed-in member
+  ([Gateway](/features/gateway#prompts-from-the-dashboard));
 - endpoint monitoring for request rate, errors, fallback, TTFT, queueing, latency, and reported token throughput;
 - typed freshness, source, sample count, and availability for every monitoring measurement;
 - Release Guard, benchmark, replay, revision, and replica evidence where available;

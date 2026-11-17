@@ -4809,6 +4809,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for kind, handler := range optimizationcampaign.ActivationHandlers(s, rec.RefreshEndpoints, nil) {
 		handlers[kind] = handler
 	}
+	// The gateway exists before the control API's handler so the dashboard's
+	// playground route can hand an authenticated member to the gateway's own
+	// inference path. Its remaining fields are bound below, before it serves.
+	inferenceGateway := &gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports, OpenRouterModelAliases: cfg.OpenRouterModelAliases}
+	controlAPI.Inference, controlAPI.CandidatePrompts = inferenceGateway, controlapi.NewCandidatePrompts()
 	control := controlAPI.Handler()
 	operationWorker := operations.Worker{Repository: s, Handlers: handlers, Owner: cfg.InstanceID, Lease: 30 * time.Second, PollInterval: time.Second, BaseBackoff: 2 * time.Second, MaxBackoff: time.Minute, Telemetry: operationTelemetry, Logger: logger}
 	go func() {
@@ -4853,7 +4858,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			return fmt.Errorf("configure OpenRouter provider catalog: %w", err)
 		}
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: (&gateway.Gateway{Routes: directory, APIKey: cfg.APIKey, Authenticator: credentialCache, Recorder: recorder, Logger: logger, Client: client, Ready: databaseReadiness.Check, Control: control, Telemetry: gatewayTelemetry, CapacityObservers: map[string]gateway.CapacityObserver{"runpod": serverless.ActiveWorkers}, ExternalAuthorizer: externalBudgets, ManagedBilling: s, HostedModels: hostedModels, RequestAuthorizer: requestQuotas, AdmissionAuthorizer: admissionPool, ContextPassports: contextPassports, OpenRouterCatalog: openRouterCatalog, OpenRouterModelAliases: cfg.OpenRouterModelAliases}).Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
+	inferenceGateway.Ready, inferenceGateway.Control, inferenceGateway.Telemetry, inferenceGateway.OpenRouterCatalog = databaseReadiness.Check, control, gatewayTelemetry, openRouterCatalog
+	server := &http.Server{Addr: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), Handler: inferenceGateway.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20, TLSConfig: serverTLS}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
