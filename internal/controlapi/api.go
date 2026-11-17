@@ -67,6 +67,7 @@ import (
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
+	"github.com/infercrane/infercrane/internal/upstreamcredential"
 	"github.com/infercrane/infercrane/internal/workflows"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
@@ -147,6 +148,7 @@ type endpointStore interface {
 }
 type adoptionStore interface {
 	AdoptEndpoint(context.Context, string, string, string, string, string, string, string, string) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error)
+	AdoptEndpointWithCredential(context.Context, string, string, string, string, string, string, string, string, *domain.SealedCredential) (domain.ResolvedEndpoint, domain.AdoptedWorkload, error)
 	PromoteAdoptionOwnership(context.Context, string, string, string) (domain.AdoptedWorkload, error)
 }
 type targetHealthStore interface {
@@ -429,6 +431,14 @@ type API struct {
 	CLISessionUsage *CLISessionUsage
 	// Now overrides the clock for CLI sign-in expiry in tests.
 	Now func() time.Time
+	// Agents manages InferCrane agents and serves the outbound-only agent
+	// protocol. Nil disables both.
+	Agents agentService
+	// UpstreamCredentials seals a write-only bearer credential for a server
+	// adopted with discovery. Nil when no tenant credential key is configured.
+	UpstreamCredentials interface {
+		Seal(string, string, string) (domain.SealedCredential, error)
+	}
 }
 
 // ComputeProvider is the customer-facing execution readiness for one cloud.
@@ -615,6 +625,12 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/logical-models", a.auth(authz.Deploy, a.createLogicalModel))
 	mux.HandleFunc("GET /api/v1/endpoints", a.auth(authz.Read, a.endpoints))
 	mux.HandleFunc("POST /api/v1/endpoints", a.auth(authz.Deploy, a.createEndpoint))
+	mux.HandleFunc("POST /api/v1/agents", a.auth(authz.Deploy, a.createAgent))
+	mux.HandleFunc("GET /api/v1/agents", a.auth(authz.Read, a.listAgents))
+	mux.HandleFunc("GET /api/v1/agents/{id}", a.auth(authz.Read, a.getAgent))
+	mux.HandleFunc("DELETE /api/v1/agents/{id}", a.auth(authz.Deploy, a.revokeAgent))
+	mux.HandleFunc("POST /api/v1/agent/sync", a.agentAuth(a.agentSync))
+	mux.HandleFunc("POST /api/v1/agent/servers", a.agentAuth(a.agentRegisterServer))
 	mux.HandleFunc("POST /api/v1/adoptions/endpoints", a.auth(authz.Deploy, a.adoptEndpoint))
 	mux.HandleFunc("PUT /api/v1/adoptions/endpoints/{name}/ownership", a.auth(authz.Deploy, a.promoteAdoptionOwnership))
 	mux.HandleFunc("GET /api/v1/requests/{id}", a.auth(authz.Read, a.requestInspection))
@@ -2387,12 +2403,39 @@ func (a API) adoptEndpoint(w http.ResponseWriter, r *http.Request) {
 		Discover           bool   `json:"discover,omitempty"`
 		Connector          string `json:"connector,omitempty"`
 		ProviderConnection string `json:"provider_connection,omitempty"`
+		UpstreamCredential string `json:"upstream_credential,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var discoveryCredential string
+	var sealedCredential *domain.SealedCredential
+	if request.UpstreamCredential != "" {
+		if request.ProviderConnection != "" {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "upstream_credential cannot be combined with provider_connection")
+			return
+		}
+		if a.UpstreamCredentials == nil {
+			writeError(w, http.StatusNotImplemented, "upstream_credential_unavailable", "this control plane cannot store server credentials; run `infercrane agent run --server URL --token-env VAR` on the server's machine instead, so the credential never leaves it")
+			return
+		}
+		if err := upstreamcredential.Validate(request.UpstreamCredential); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+			return
+		}
+		if !request.Discover {
+			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "upstream_credential requires endpoint discovery")
+			return
+		}
+		sealed, sealErr := a.UpstreamCredentials.Seal(actor.TenantID, request.Name, request.UpstreamCredential)
+		if sealErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "the server credential could not be stored")
+			return
+		}
+		sealedCredential = &sealed
+		discoveryCredential = request.UpstreamCredential
+	}
 	if request.ProviderConnection != "" {
 		if !request.Discover {
 			writeError(w, http.StatusUnprocessableEntity, "validation_failed", "provider_connection requires endpoint discovery")
@@ -2462,7 +2505,14 @@ func (a API) adoptEndpoint(w http.ResponseWriter, r *http.Request) {
 			request.Source = "vllm"
 		}
 	}
-	resolved, adoption, err := store.AdoptEndpoint(r.Context(), actor.TenantID, request.Name, request.LogicalModel, request.UpstreamModel, request.URL, request.Source, request.OwnershipMode, request.Runtime)
+	var resolved domain.ResolvedEndpoint
+	var adoption domain.AdoptedWorkload
+	var err error
+	if sealedCredential != nil {
+		resolved, adoption, err = store.AdoptEndpointWithCredential(r.Context(), actor.TenantID, request.Name, request.LogicalModel, request.UpstreamModel, request.URL, request.Source, request.OwnershipMode, request.Runtime, sealedCredential)
+	} else {
+		resolved, adoption, err = store.AdoptEndpoint(r.Context(), actor.TenantID, request.Name, request.LogicalModel, request.UpstreamModel, request.URL, request.Source, request.OwnershipMode, request.Runtime)
+	}
 	if writeEndpointMutationError(w, err) {
 		return
 	}
@@ -7130,6 +7180,10 @@ func (a API) auth(action authz.Action, next http.HandlerFunc) http.HandlerFunc {
 		}
 		if principal.Kind == "inference_token" {
 			writeError(w, http.StatusForbidden, "forbidden", "endpoint-scoped inference credentials cannot access the control-plane API")
+			return
+		}
+		if principal.Kind == domain.AgentPrincipalKind {
+			writeError(w, http.StatusForbidden, "forbidden", "InferCrane agent keys can call only the agent API")
 			return
 		}
 		if principal.Kind == clilogin.PrincipalKind {

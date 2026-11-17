@@ -25,6 +25,27 @@ InferCrane Deployment binding.
 The URL, source, logical model and physical upstream model form an immutable adoption identity. A
 safe retry returns the same adoption; changing immutable identity fails with a conflict.
 
+### Servers the control plane cannot reach
+
+A server on a laptop, behind NAT, or in a private network is adopted through the
+[InferCrane agent](/architecture/agent) instead (`infercrane agent run`). Its endpoint is
+`observe-only` and stays so: promotion to `traffic-managed` is refused, because the control plane
+never dials a server it learned through an agent. The agent reports health, and its relayed engine
+metrics (vLLM, SGLang, and llama.cpp) feed the endpoint's monitoring and optimization readiness
+like a scrape of an InferCrane deployment. Request timings appear only for requests sent through
+the agent's local gateway; the agent says when no traffic is visible.
+
+### A server that requires an API key
+
+`infercrane connect URL --as NAME --token-env VAR`, or `upstream_credential` on
+`POST /api/v1/adoptions/endpoints`, sends the key once. It is stored encrypted, never returned, and
+used for discovery and the reconciler's health probe. A stored key that cannot be opened (the
+credential key changed or was removed) marks the target unhealthy rather than probing without it; a
+temporary database error leaves its health unchanged until the next pass. The control plane needs
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`; otherwise the request is refused with
+`upstream_credential_unavailable`, and the agent (which keeps the key on the server's machine) is
+the path.
+
 ## Diagnose an adapter qualification gap
 
 ```bash

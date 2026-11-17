@@ -21,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/upstreamcredential"
 )
 
 type Store interface {
@@ -84,7 +85,28 @@ type Reconciler struct {
 	DirectTargets    map[string]DirectTargetBackend
 	ExternalFallback ExternalFallback
 	QueueSignals     QueueSignals
+	// UpstreamCredentials opens the bearer credential stored for a server
+	// connected directly with a credential. Nil probes without one.
+	UpstreamCredentials UpstreamCredentials
+	// Now overrides the clock in tests.
+	Now func() time.Time
 }
+
+// UpstreamCredentials resolves a directly connected server's credential.
+// It returns domain.ErrNotFound when the server has none.
+type UpstreamCredentials interface {
+	Resolve(context.Context, string, string) (string, error)
+}
+
+// silentAgentStore marks servers unhealthy when their agent stops reporting.
+type silentAgentStore interface {
+	MarkSilentAgentTargets(context.Context, time.Time) (int64, error)
+}
+
+// agentSilenceWindow is three of the longest poll intervals an agent may be
+// advised. A server its agent has not reported for that long is not known to
+// be healthy.
+const agentSilenceWindow = 3 * time.Minute
 
 func (r *Reconciler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.Interval)
@@ -356,6 +378,15 @@ func (r *Reconciler) Once(ctx context.Context) error {
 	if err := r.observeAdoptedTargets(ctx); err != nil {
 		failures = append(failures, err)
 	}
+	if store, ok := r.Store.(silentAgentStore); ok {
+		now := time.Now()
+		if r.Now != nil {
+			now = r.Now()
+		}
+		if _, err := store.MarkSilentAgentTargets(ctx, now.Add(-agentSilenceWindow)); err != nil {
+			failures = append(failures, err)
+		}
+	}
 	if err := r.compileEndpoints(ctx, deployments); err != nil {
 		failures = append(failures, err)
 	}
@@ -396,12 +427,45 @@ func (r *Reconciler) observeAdoptedTargets(ctx context.Context) error {
 				if targetErr != nil {
 					return targetErr
 				}
+				if target.AgentID != "" {
+					// Only the agent can reach this server; its health
+					// arrives with the agent's reports.
+					continue
+				}
 				backend, runtimeErr := r.Runtimes.ForRuntime(target.Runtime)
 				if runtimeErr != nil {
 					continue
 				}
 				health := "unhealthy"
-				if ok, models := backend.Inspector.Inspect(ctx, target.URL); ok {
+				ok, models := false, map[string]struct{}(nil)
+				credential := ""
+				if r.UpstreamCredentials != nil {
+					resolved, credentialErr := r.UpstreamCredentials.Resolve(ctx, tenant, target.ID)
+					switch {
+					case credentialErr == nil:
+						credential = resolved
+					case errors.Is(credentialErr, domain.ErrNotFound):
+					case errors.Is(credentialErr, upstreamcredential.ErrUnreadable):
+						// A stored credential that cannot be opened must not
+						// silently downgrade to an unauthenticated probe.
+						if target.Health != health {
+							_ = r.Store.SetTargetHealth(ctx, target.ID, health)
+						}
+						continue
+					default:
+						// A transient read error says nothing about the
+						// server; keep its health until the next pass.
+						continue
+					}
+				}
+				if credential != "" {
+					if credentialed, supported := backend.Inspector.(credentialRuntimeInspector); supported {
+						ok, models = credentialed.InspectWithCredential(ctx, target.URL, credential)
+					}
+				} else {
+					ok, models = backend.Inspector.Inspect(ctx, target.URL)
+				}
+				if ok {
 					if _, found := models[target.UpstreamModel]; found {
 						health = "healthy"
 					}
@@ -481,7 +545,8 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				}
 				if binding.Kind == "external" {
 					target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID)
-					if targetErr != nil {
+					if targetErr != nil || target.AgentID != "" {
+						// An agent-only target is never routable from here.
 						continue
 					}
 					_, managed, configErr := external.ParseManagedBindingConfig(binding.ConfigJSON)

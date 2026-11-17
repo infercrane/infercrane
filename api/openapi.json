@@ -1006,6 +1006,571 @@
         ],
         "type": "object"
       },
+      "Agent": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "connection": {
+            "description": "silent means no sync for three maximum poll intervals.",
+            "enum": [
+              "never_connected",
+              "connected",
+              "silent",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "gateway_server_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hardware": {
+            "description": "Content-free accelerator inventory the agent last reported; unknown fields are named, never guessed."
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "protocol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "servers": {
+            "description": "Local servers the agent last reported, with engine, version, models, and health."
+          },
+          "state": {
+            "enum": [
+              "active",
+              "revoked"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state",
+          "connection",
+          "created_by",
+          "agent_version",
+          "protocol",
+          "os",
+          "arch",
+          "hardware",
+          "servers",
+          "gateway_server_key",
+          "last_seen_at",
+          "created_at",
+          "updated_at",
+          "revoked_at"
+        ],
+        "type": "object"
+      },
+      "AgentCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "AgentCreated": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "credential_cache_synchronized": {
+            "description": "False when this control plane could not refresh its credential snapshot at once; the key works within a second.",
+            "type": "boolean"
+          },
+          "key": {
+            "description": "Agent key, returned once. It can call only the agent API.",
+            "type": "string"
+          },
+          "run_command": {
+            "description": "Command to start the agent with this key on the server's machine.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "key",
+          "run_command",
+          "credential_cache_synchronized"
+        ],
+        "type": "object"
+      },
+      "AgentDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "observed_servers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentObservedServer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "observed_servers"
+        ],
+        "type": "object"
+      },
+      "AgentEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      },
+      "AgentList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Agent"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "AgentObservedServer": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "description": "The server's address as the agent reaches it; the control plane never dials it.",
+            "type": "string"
+          },
+          "endpoint": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "health": {
+            "type": "string"
+          },
+          "key": {
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ownership": {
+            "enum": [
+              "observe-only"
+            ],
+            "type": "string"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "traffic_detail": {
+            "type": "string"
+          },
+          "traffic_source": {
+            "enum": [
+              "none",
+              "agent-gateway"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "endpoint",
+          "target_id",
+          "address",
+          "engine",
+          "model",
+          "health",
+          "reported_at",
+          "ownership",
+          "traffic_source",
+          "traffic_detail"
+        ],
+        "type": "object"
+      },
+      "AgentRegisteredServer": {
+        "additionalProperties": true,
+        "properties": {
+          "endpoint": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "health": {
+            "type": "string"
+          },
+          "key": {
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ownership": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "traffic_detail": {
+            "type": "string"
+          },
+          "traffic_source": {
+            "enum": [
+              "none",
+              "agent-gateway"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "endpoint",
+          "target_id",
+          "model",
+          "ownership",
+          "health",
+          "traffic_source",
+          "traffic_detail"
+        ],
+        "type": "object"
+      },
+      "AgentServerRegistration": {
+        "additionalProperties": true,
+        "properties": {
+          "address": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "endpoint": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "engine": {
+            "enum": [
+              "vllm",
+              "sglang",
+              "llama.cpp",
+              "ollama",
+              "lm-studio",
+              "openai-compatible"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "server_key": {
+            "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server_key",
+          "endpoint",
+          "model",
+          "engine",
+          "address"
+        ],
+        "type": "object"
+      },
+      "AgentServerRegistrationResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "server": {
+            "$ref": "#/components/schemas/AgentRegisteredServer"
+          }
+        },
+        "required": [
+          "server",
+          "created"
+        ],
+        "type": "object"
+      },
+      "AgentSyncRequest": {
+        "additionalProperties": true,
+        "description": "One agent sync. May be gzip-encoded; at most 8 MiB decompressed. Unknown fields are ignored within one protocol version.",
+        "properties": {
+          "agent_version": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "arch": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "gateway": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "hardware": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metrics": {
+            "description": "Per server: the newest filtered engine scrape and, when available, the oldest scrape of the same engine process in the trailing five minutes.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "os": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "protocol": {
+            "const": "infercrane.agent/v1",
+            "type": "string"
+          },
+          "sent_at": {
+            "description": "Agent clock; used to correct request-shape times for clock skew.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "servers": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "active_model": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "authenticated": {
+                  "type": "boolean"
+                },
+                "engine": {
+                  "enum": [
+                    "vllm",
+                    "sglang",
+                    "llama.cpp",
+                    "ollama",
+                    "lm-studio",
+                    "openai-compatible"
+                  ],
+                  "type": "string"
+                },
+                "engine_version": {
+                  "type": "string"
+                },
+                "health": {
+                  "enum": [
+                    "healthy",
+                    "unhealthy"
+                  ],
+                  "type": "string"
+                },
+                "health_detail": {
+                  "type": "string"
+                },
+                "key": {
+                  "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+                  "type": "string"
+                },
+                "metrics_available": {
+                  "type": "boolean"
+                },
+                "metrics_detail": {
+                  "type": "string"
+                },
+                "models": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 64,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "key",
+                "engine",
+                "address",
+                "models",
+                "health",
+                "metrics_available",
+                "authenticated"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "traffic": {
+            "description": "Content-free request shapes from the agent's local gateway.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "protocol",
+          "agent_version",
+          "os",
+          "arch",
+          "sent_at",
+          "hardware",
+          "servers"
+        ],
+        "type": "object"
+      },
+      "AgentSyncResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "accepted": {
+            "properties": {
+              "measurements": {
+                "type": "integer"
+              },
+              "requests": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "measurements",
+              "requests"
+            ],
+            "type": "object"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "commands": {
+            "description": "Reserved for candidate runs; protocol v1 sends none.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 0,
+            "type": "array"
+          },
+          "poll_interval_seconds": {
+            "maximum": 60,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "rejected": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "servers": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRegisteredServer"
+            },
+            "type": "array"
+          },
+          "upgrade": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_name",
+          "poll_interval_seconds",
+          "servers",
+          "accepted",
+          "rejected",
+          "upgrade",
+          "commands"
+        ],
+        "type": "object"
+      },
       "AlertPolicyCreate": {
         "additionalProperties": false,
         "properties": {
@@ -2349,6 +2914,13 @@
               "openai-compatible"
             ],
             "type": "string"
+          },
+          "upstream_credential": {
+            "description": "Write-only bearer token for the server, used for discovery and health checks. Requires discover. Stored encrypted with the tenant credential key; refused with upstream_credential_unavailable when none is configured.",
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
           },
           "upstream_model": {
             "type": "string"
@@ -12367,6 +12939,292 @@
         "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
         "tags": [
           "Adoption"
+        ]
+      }
+    },
+    "/api/v1/agent/servers": {
+      "post": {
+        "operationId": "registerAgentServer",
+        "parameters": [
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentServerRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentServerRegistrationResponse"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: observe one local server as an observe-only endpoint",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agent/sync": {
+      "post": {
+        "operationId": "syncAgent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSyncResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: report hardware, servers, health, filtered engine metrics, and content-free request shapes",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List InferCrane agents with their last report and connection state",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "post": {
+        "operationId": "createAgent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCreated"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create an InferCrane agent key for one machine; the key is returned once and can call only the agent API",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agents/{id}": {
+      "delete": {
+        "operationId": "revokeAgent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke an agent; it stops at its next sync and its servers are marked unhealthy",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "get": {
+        "operationId": "getAgent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDetail"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one agent and the servers observed through it",
+        "tags": [
+          "Agents"
         ]
       }
     },
@@ -22692,6 +23550,9 @@
     },
     {
       "name": "Adoption"
+    },
+    {
+      "name": "Agents"
     },
     {
       "name": "Alerts"

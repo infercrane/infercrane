@@ -289,7 +289,7 @@ func (s *Store) AddTargetForTenant(ctx context.Context, tenant string, target do
 func (s *Store) TargetForTenantByName(ctx context.Context, tenant, name string) (domain.Target, error) {
 	var target domain.Target
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND name=?`, tenant, name).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),COALESCE(agent_id,''),created_at,updated_at FROM targets WHERE tenant_id=? AND name=?`, tenant, name).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &target.AgentID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Target{}, ErrNotFound
 	}
@@ -303,7 +303,7 @@ func (s *Store) TargetForTenantByName(ctx context.Context, tenant, name string) 
 func (s *Store) TargetForTenantByID(ctx context.Context, tenant, id string) (domain.Target, error) {
 	var target domain.Target
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? AND id=?`, tenant, id).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),COALESCE(agent_id,''),created_at,updated_at FROM targets WHERE tenant_id=? AND id=?`, tenant, id).Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &target.AgentID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Target{}, ErrNotFound
 	}

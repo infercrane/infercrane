@@ -133,3 +133,25 @@ Both return a target that follows the same runtime and reconciliation path as an
    and sends one signed POST through `internal/alert`'s public-network-checked client. Retries back
    off from 30 seconds to an hour, at most six attempts; a 4xx other than 429 stops at once.
 5. None of this runs on the inference path, and the gateway never reads these tables.
+
+## Agent sync
+
+1. `infercrane agent run` probes local servers (`/v1/models`, version and loaded-model endpoints,
+   `/metrics`) and reads the host's accelerators. Nothing listens for the control plane.
+2. Each new healthy server is registered with `POST /api/v1/agent/servers`: one observe-only
+   endpoint whose target carries the agent's ID and the agent-local server key.
+3. Every poll interval the agent sends `POST /api/v1/agent/sync` (gzip JSON): hardware, servers and
+   health, one metric relay per server with a new scrape (the current scrape and the oldest scrape of
+   the same engine process in the trailing five minutes, both filtered on the machine), and request
+   shapes from the optional local gateway.
+4. The control plane re-checks that the agent is active, validates each item on its own (refused
+   items come back in `rejected`), records the heartbeat, sets each registered server's health, parses both scrapes with `metrics.ParseEngine`, derives rows with
+   `metrics.EngineMeasurements`, and stores them in `target_measurements` keyed by the target.
+   Request shapes become `request_records` with the endpoint's identities and compute mode
+   `agent-gateway`; shape IDs make retries idempotent and `sent_at` corrects clock skew.
+5. Endpoint monitoring and optimization readiness read deployment-bound and target-bound
+   measurements through the endpoint's bindings. The reconciler never probes an agent's target and
+   marks it unhealthy when its agent has been silent for three minutes.
+6. Revocation disables the agent's principal; the next sync is refused with HTTP 401
+   (`agent_revoked`, or `agent_unauthenticated` once the credential snapshot has dropped the key),
+   and the agent stops.

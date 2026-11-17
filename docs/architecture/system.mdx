@@ -42,6 +42,7 @@ flowchart TB
     RunPod[RunPod Serverless vLLM]
     Dedicated[InferCrane-managed dedicated GPU]
     BYOC[Customer cloud / Kubernetes / existing endpoint]
+    Agent[InferCrane agent beside a customer's own server]
   end
 
   Stripe[Stripe signed webhooks]
@@ -71,6 +72,7 @@ flowchart TB
   Router --> Settlement
   Settlement --> DB
   Stripe --> DB
+  Agent -- outbound HTTPS only --> API
 ```
 
 The public model ID and API endpoint stay stable. The private route may move from an upstream API
@@ -134,6 +136,11 @@ immutable target bindings and route publications; it never rewrites historical e
 
 The CLI, separately deployed web console, generated SDKs, Terraform provider, and GitHub delivery
 action use the same authenticated API. None reads PostgreSQL directly or owns provider resources.
+
+The [InferCrane agent](/architecture/agent) is the one component that runs on a customer's own
+machine. It dials out to the agent API with a key confined to that API, reports the servers and
+hardware it sees, and relays filtered engine metrics. The control plane never dials those servers
+and never routes inference to them; their health and metrics arrive only through the agent.
 
 Each horizontally scaled gateway process owns its loopback router processes and deterministic
 ports. Gateway instances share PostgreSQL state, never another instance's local router.
