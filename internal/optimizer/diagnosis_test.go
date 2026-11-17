@@ -405,7 +405,7 @@ func TestDiagnosisPlansAMDInstinctGPUsFromTheirReviewedIdentity(t *testing.T) {
 	if !strings.Contains(strings.Join(kv, " "), "--kv-cache-dtype fp8") {
 		t.Fatalf("no FP8 KV cache setup on MI300X: %+v", proposal.Diagnosis)
 	}
-	if proposal.Diagnosis == nil || proposal.Diagnosis.RulesVersion != "diagnosis-technique-rules-v2" {
+	if proposal.Diagnosis == nil || proposal.Diagnosis.RulesVersion != "diagnosis-technique-rules-v3" {
 		t.Fatalf("rules version=%+v", proposal.Diagnosis)
 	}
 }

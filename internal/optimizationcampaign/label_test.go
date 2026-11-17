@@ -55,6 +55,8 @@ func TestCandidateLabelsNameRecognizedFlagsAndNeverGuessUnknownOnes(t *testing.T
 		{"fp8 kv and chunk", labelCandidate("a", "vllm", []string{"--kv-cache-dtype", "fp8", "--max-num-batched-tokens", "2048"}), "FP8 KV cache, prefill chunks of 2,048 tokens"},
 		{"sglang nextn", labelCandidate("a", "sglang", []string{"--speculative-algorithm", "NEXTN", "--speculative-num-steps", "3", "--speculative-num-draft-tokens", "4", "--chunked-prefill-size=16384"}), "Speculative decoding (MTP, 4 draft tokens), prefill chunks of 16,384 tokens"},
 		{"defaults", labelCandidate("a", "vllm", nil), "vLLM defaults"},
+		{"larger graph capture", labelCandidate("a", "vllm", []string{"--max-model-len", "8192", "--max-cudagraph-capture-size", "880"}), "CUDA graphs for batches up to 880"},
+		{"async off", labelCandidate("a", "sglang", []string{"--disable-overlap-schedule"}), "No async scheduling"},
 		{"custom image defaults", labelCandidate("a", "custom-oci", nil), "Custom image defaults"},
 		{"unknown flag", labelCandidate("a", "vllm", []string{"--some-new-flag", "3"}), "vLLM --some-new-flag 3"},
 		{"publisher checkpoint", labelCandidate("a", "vllm", nil, optimizer.Feature{Name: "quantization", State: "nvfp4", Source: "modelopt@0.39.0"}), "NVFP4 checkpoint"},

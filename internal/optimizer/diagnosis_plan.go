@@ -42,6 +42,7 @@ const (
 	NeededFewerErrors    = "an error rate at or below 2%, so failed requests do not bias a speed comparison"
 	engineSignalPrefix   = "runtime_"
 	differentArtifactWhy = "This setup serves different model files from the starting setup, and a campaign cannot rank setups that serve different files yet, so it was left out."
+	moreGPUsWhy          = "This setup spreads the model over more GPUs per server than the starting setup, and the GPU trace shows communication between GPUs already holding the GPU idle, so it was left out."
 )
 
 // DiagnosisPlan records how a diagnosis chose and ordered the candidates:
@@ -169,6 +170,12 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		if !sameArtifact(candidate, control) {
 			if skipped[best.technique.id] == "" && !covered[best.technique.id] {
 				skipped[best.technique.id] = differentArtifactWhy
+			}
+			continue
+		}
+		if _, exposed := diagnosis.traceFinding(TraceRuleCommunicationExposed); exposed && gpusPerServer(candidate) > gpusPerServer(control) {
+			if skipped[best.technique.id] == "" && !covered[best.technique.id] {
+				skipped[best.technique.id] = moreGPUsWhy
 			}
 			continue
 		}
@@ -349,7 +356,7 @@ func sentenceCase(label string) string {
 // techniqueGate says why a chosen change must not be measured for this model
 // at all, whoever would apply it.
 func techniqueGate(technique technique, control Candidate) string {
-	if technique.outOfScope != "" && technique.id != TechniqueInt4Weights && technique.id != TechniqueCUDAGraphs {
+	if technique.outOfScope != "" && technique.id != TechniqueInt4Weights {
 		return technique.outOfScope
 	}
 	size, sized := modelSizeBillions(control.Deployment.Model.ID)
@@ -360,6 +367,11 @@ func techniqueGate(technique technique, control Candidate) string {
 		return fmt.Sprintf("The model name marks about %sB parameters; lower weight precision is not proposed for models of %sB or fewer.", numberWords(size), numberWords(precisionMinimumBillions))
 	}
 	return ""
+}
+
+// gpusPerServer is how many GPUs one server of a setup uses.
+func gpusPerServer(candidate Candidate) int {
+	return max(1, candidate.Deployment.Resources.GPUCount)
 }
 
 func sameArtifact(candidate, control Candidate) bool {
@@ -421,6 +433,12 @@ func deriveArgs(control Candidate, technique technique, diagnosis Diagnosis, req
 		return nil, "The model's weights already look quantized, so FP8 weights would not apply."
 	}
 	current := append([]string(nil), control.Deployment.Runtime.Args...)
+	if technique.id == TechniqueCUDAGraphs {
+		return cudaGraphArgs(current, engine, version, request.GPU, diagnosis)
+	}
+	if technique.id == TechniqueAsyncScheduling && hasSpeculation(current) {
+		return nil, fmt.Sprintf("The starting setup speculates, and its speculation method decides whether %s schedules ahead, so this cannot be changed on its own.", engineName(engine))
+	}
 	if technique.defaultOn[engine] {
 		for _, flag := range technique.disables[engine] {
 			if contains(current, flag) {
