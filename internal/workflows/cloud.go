@@ -27,7 +27,44 @@ const (
 	ReplicaProvisionKind   = "replica.provision"
 	ReplicaDeleteKind      = "replica.delete"
 	ScaleKind              = "deployment.scale"
+	// ReplicaRemoveLostKind removes one replica whose machine stopped
+	// serving, so its revision can be provisioned again. It never removes a
+	// replica that its provider reports ready and whose runtime still serves
+	// the model.
+	ReplicaRemoveLostKind = "deployment.replica.remove-lost"
+
+	// A replica its provider still reports ready is lost only when its
+	// runtime failed to serve on this many attempts spread over at least
+	// lostRuntimeConfirmWindow. One failed probe can be a network blip
+	// between the control plane and the server.
+	lostRuntimeConfirmAttempts = 3
+	lostRuntimeConfirmWindow   = time.Minute
 )
+
+// RemoveLostReplicaRequest names one replica of one deployment. The handler
+// decides from the provider and the runtime whether the machine is lost; the
+// caller's belief that it is lost is never enough to delete it.
+type RemoveLostReplicaRequest struct {
+	TenantID     string `json:"tenant_id"`
+	Name         string `json:"name"`
+	DeploymentID string `json:"deployment_id,omitempty"`
+	ReplicaID    string `json:"replica_id"`
+	Actor        string `json:"actor,omitempty"`
+}
+
+// RemoveLostReplicaResult says what the handler found. Lost is false when the
+// replica still serves; it was left untouched.
+type RemoveLostReplicaResult struct {
+	ReplicaID  string `json:"replica_id"`
+	RevisionID string `json:"revision_id"`
+	Lost       bool   `json:"lost"`
+}
+
+// lostReplicaStore releases a removed machine's target so its replacement
+// can register the same name at a new address.
+type lostReplicaStore interface {
+	ReleaseProvisionedTarget(context.Context, string, string, string) error
+}
 
 type CloudRequest struct {
 	DeploymentID           string                   `json:"deployment_id"`
@@ -1096,6 +1133,9 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		RolloutRejectKind:                candidateReject,
 		RolloutPromoteKind:               candidatePromote,
 		RolloutPromoteKind + ".cancel":   candidatePromoteCancel,
+		ReplicaRemoveLostKind: func(ctx context.Context, operation domain.Operation) (string, error) {
+			return removeLostReplica(ctx, store, backends, runtimes, operation)
+		},
 	}
 }
 
@@ -1117,6 +1157,9 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	externalKey := fmt.Sprintf("%s-r%d", request.DeploymentID, ordinal)
 	if request.Candidate {
 		externalKey = fmt.Sprintf("%s-%s-r%d", request.DeploymentID, request.RevisionID, ordinal)
+	}
+	if externalKey, err = replicaExternalKey(ctx, store, request, ordinal, externalKey); err != nil {
+		return "", "", "", operations.Retryable("replica_lookup_failed", err)
 	}
 	defer func() {
 		evidenceStore, ok := store.(CapacityOperationStore)
@@ -1262,10 +1305,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 	if err = store.ObserveReplica(ctx, replica.ID, "ready", observation.Endpoint, "healthy", readyDetails, readyAt); err != nil {
 		return "", "", "", classify("observation_failed", err)
 	}
-	targetName = fmt.Sprintf("%s-r%d", request.Name, ordinal)
-	if request.Candidate {
-		targetName = fmt.Sprintf("%s-%s-r%d", request.Name, request.RevisionID[:min(8, len(request.RevisionID))], ordinal)
-	}
+	targetName = replicaTargetName(request.Name, request.RevisionID, request.Candidate, ordinal)
 	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: backend.Name, Runtime: backend.Runtime, UpstreamModel: request.Model})
 	if err != nil {
 		return "", "", "", classify("target_registration_failed", err)
@@ -1281,6 +1321,187 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("activation_failed", err)
 	}
 	return targetName, observation.Endpoint, ensured.ResourceID, nil
+}
+
+// replicaExternalKey keeps the first replica of a revision ordinal on its
+// original provider identity and gives each replacement a new one, so no
+// provider adopts or deduplicates against the machine that was lost. A live
+// replica keeps its own key. Deleted replicas keep theirs for audit and
+// spend, so a replacement is numbered by how many were deleted; that count
+// does not change while the replacement lives, so a retry adopts it.
+func replicaExternalKey(ctx context.Context, store CloudStore, request CloudRequest, ordinal int, base string) (string, error) {
+	if request.RevisionID == "" {
+		return base, nil
+	}
+	replicas, err := store.ReplicasForDeployment(ctx, request.TenantID, request.DeploymentID)
+	if err != nil {
+		return "", err
+	}
+	deleted := 0
+	for _, replica := range replicas {
+		if replica.Ordinal != ordinal || replica.RevisionID != request.RevisionID {
+			continue
+		}
+		if replica.LifecycleState != "deleted" {
+			return replica.ExternalKey, nil
+		}
+		deleted++
+	}
+	if deleted == 0 {
+		return base, nil
+	}
+	return fmt.Sprintf("%s-g%d", base, deleted), nil
+}
+
+// replicaTargetName is the routing target a replica registers. A replacement
+// registers the same name as the machine it replaces.
+func replicaTargetName(name, revisionID string, candidate bool, ordinal int) string {
+	if candidate {
+		return fmt.Sprintf("%s-%s-r%d", name, revisionID[:min(8, len(revisionID))], ordinal)
+	}
+	return fmt.Sprintf("%s-r%d", name, ordinal)
+}
+
+// removeLostReplica deletes one replica whose machine is gone or no longer
+// serves. The provider and the runtime decide: a replica the provider reports
+// ready and whose runtime serves the model is left alone, one the provider is
+// restarting in place is waited for, and one whose runtime stopped answering
+// is lost only after repeated checks over a bounded window. Removal deletes the provider
+// resource, waits until the provider no longer lists it, releases its target,
+// and only then marks the replica deleted, so a retry repeats unfinished work
+// and never leaves a target behind.
+func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBackends, runtimes integration.RuntimeBackends, operation domain.Operation) (string, error) {
+	var request RemoveLostReplicaRequest
+	if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil || request.TenantID == "" || request.Name == "" || request.ReplicaID == "" {
+		return "", operations.Permanent("invalid_request", errors.New("tenant, deployment, and replica are required"))
+	}
+	releaser, ok := store.(lostReplicaStore)
+	if !ok {
+		return "", operations.Permanent("replica_recovery_unavailable", errors.New("lost replica removal requires target release support"))
+	}
+	resolved, err := store.ResolveForTenant(ctx, request.TenantID, request.Name)
+	if err != nil {
+		return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve deployment: %w", err))
+	}
+	if request.DeploymentID != "" && resolved.Deployment.ID != request.DeploymentID {
+		return "", operations.Permanent("deployment_missing", errors.New("deployment identity changed"))
+	}
+	replicas, err := store.ReplicasForDeployment(ctx, request.TenantID, resolved.Deployment.ID)
+	if err != nil {
+		return "", operations.Retryable("replica_lookup_failed", err)
+	}
+	var replica domain.Replica
+	for _, row := range replicas {
+		if row.ID == request.ReplicaID {
+			replica = row
+		}
+	}
+	if replica.ID == "" {
+		return "", operations.Permanent("replica_missing", errors.New("replica does not belong to the deployment"))
+	}
+	result := func(lost bool) string {
+		return mustJSON(RemoveLostReplicaResult{ReplicaID: replica.ID, RevisionID: replica.RevisionID, Lost: lost})
+	}
+	if replica.LifecycleState == "deleted" {
+		return result(true), nil
+	}
+	revision, err := store.Revision(ctx, request.TenantID, request.Name, replica.RevisionID)
+	if err != nil {
+		return "", operations.Permanent("revision_missing", fmt.Errorf("replica revision lookup: %w", err))
+	}
+	var spec domain.DeploymentRevisionSpec
+	if err = json.Unmarshal([]byte(revision.SpecJSON), &spec); err != nil {
+		return "", operations.Permanent("invalid_revision_spec", err)
+	}
+	if spec.ComputeMode == "serverless" {
+		return "", operations.Permanent("replica_recovery_unsupported", errors.New("serverless workers are replaced by their provider"))
+	}
+	backend, err := backends.ForProvider(replica.Provider)
+	if err != nil {
+		return "", operations.Permanent("provider_backend_unavailable", err)
+	}
+	provider, _, workerAPIKey, err := backend.resolveProvider(ctx, request.TenantID, resolved.Deployment.ComputeConnectionID, resolved.Deployment.ID)
+	if err != nil {
+		return "", operations.Permanent("compute_connection_unavailable", err)
+	}
+	runtimeName := spec.Runtime
+	if runtimeName == "" {
+		runtimeName = resolved.Deployment.Runtime
+	}
+	if runtimeName == "" {
+		runtimeName = support.DefaultRuntime
+	}
+	runtimeBackend, err := runtimes.ForRuntime(runtimeName)
+	if err != nil {
+		return "", operations.Permanent("runtime_backend_unavailable", err)
+	}
+	port := spec.Port
+	if port == 0 {
+		port = spec.Workload.Port
+	}
+	if port == 0 && spec.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
+		if workload, workloadErr := runtimeBackend.Profile.WorkloadFor(spec.GPU); workloadErr == nil {
+			port = workload.Port
+		}
+	}
+	handle := provider.Handle(replica.ExternalKey)
+	if replica.ProviderRequestID != "" {
+		handle.RequestID = replica.ProviderRequestID
+	}
+	if replica.ProviderResourceID != "" {
+		handle.ResourceID = replica.ProviderResourceID
+	}
+	observation, err := provider.ObserveReplica(ctx, handle, port)
+	if err != nil {
+		return "", operations.Retryable("provider_observe_failed", err)
+	}
+	// A replica already marked failed is being removed; finish the removal
+	// even if its provider reports it again.
+	if replica.LifecycleState != "failed" {
+		if observation.Exists && observation.State == "starting" {
+			_ = checkpoint(ctx, store, operation, "replica.recover", "waiting", observation, 40, "Provider is restarting the machine in place")
+			return "", operations.Retryable("replica_restarting", errors.New("provider is restarting the replica in place"))
+		}
+		if observation.Exists && observation.State == "ready" && observation.Endpoint != "" {
+			ready, models := inspectRuntime(ctx, runtimeBackend.Inspector, observation.Endpoint, workerAPIKey)
+			if _, present := models[spec.Model]; ready && present {
+				_ = checkpoint(ctx, store, operation, "replica.recover", "succeeded", map[string]string{"replica_id": replica.ID}, 95, "Machine still serves; nothing was removed")
+				return result(false), nil
+			}
+			if operation.Attempt < lostRuntimeConfirmAttempts || (!operation.CreatedAt.IsZero() && time.Since(operation.CreatedAt) < lostRuntimeConfirmWindow) {
+				_ = checkpoint(ctx, store, operation, "replica.recover", "waiting", observation, 40, "Provider reports the machine ready but its runtime did not answer; checking again")
+				return "", operations.Retryable("replica_runtime_unconfirmed", errors.New("the runtime did not answer; a single failed check does not prove the machine is lost"))
+			}
+		}
+		details := observation.Details
+		if details == "" {
+			details = replica.ProviderDetails
+		}
+		if err = store.ObserveReplica(ctx, replica.ID, "failed", replica.Endpoint, "unhealthy", details, time.Now()); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			return "", classify("observation_failed", err)
+		}
+	}
+	if observation.Exists {
+		if err = provider.DeleteReplica(ctx, handle); err != nil {
+			return "", operations.Retryable("provider_delete_failed", err)
+		}
+		after, observeErr := provider.ObserveReplica(ctx, handle, port)
+		if observeErr != nil {
+			return "", operations.Retryable("provider_delete_observe_failed", observeErr)
+		}
+		if after.Exists {
+			return "", operations.Retryable("provider_delete_pending", errors.New("lost machine deletion is pending"))
+		}
+	}
+	candidate := replica.RevisionID != resolved.Deployment.ActiveRevisionID
+	if err = releaser.ReleaseProvisionedTarget(ctx, request.TenantID, replicaTargetName(request.Name, replica.RevisionID, candidate, replica.Ordinal), backend.Name); err != nil {
+		return "", classify("target_release_failed", err)
+	}
+	if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return "", classify("replica_delete_persist_failed", err)
+	}
+	_ = checkpoint(ctx, store, operation, "replica.recover", "succeeded", map[string]string{"replica_id": replica.ID}, 95, "Lost machine removed")
+	return result(true), nil
 }
 
 type credentialedRuntimeInspector interface {

@@ -131,8 +131,8 @@ func newExecutorFixture(t *testing.T, request optimizer.Request) executorFixture
 		resolved:  domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "deployment"}},
 		revisions: []domain.DeploymentRevision{{ID: candidate.RevisionID}, {ID: control.RevisionID}},
 		replicas: []domain.Replica{
-			{RevisionID: candidate.RevisionID, Endpoint: candidateEndpoint, Provider: "aws-ec2", Health: "healthy", LifecycleState: "ready"},
-			{RevisionID: control.RevisionID, Endpoint: controlEndpoint, Provider: "aws-ec2", Health: "healthy", LifecycleState: "ready"},
+			{ID: "replica-candidate", RevisionID: candidate.RevisionID, Endpoint: candidateEndpoint, Provider: "aws-ec2", Health: "healthy", LifecycleState: "ready"},
+			{ID: "replica-control", RevisionID: control.RevisionID, Endpoint: controlEndpoint, Provider: "aws-ec2", Health: "healthy", LifecycleState: "ready"},
 		},
 		artifact: domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@" + strings.Repeat("a", 40)},
 	}
@@ -233,7 +233,7 @@ func TestBenchmarkExecutorReportsGainInsideControlSpreadAsNoMeasurableDifference
 	}
 }
 
-func TestBenchmarkExecutorInvalidatesComparisonWhenControlDriftsOrFails(t *testing.T) {
+func TestBenchmarkExecutorInvalidatesComparisonWhenControlDrifts(t *testing.T) {
 	drifting := newExecutorFixture(t, optimizer.Request{})
 	drifting.runner.throughput[controlEndpoint] = []float64{100, 110, 100, 110}
 	drifting.runner.throughput[candidateEndpoint] = []float64{150, 150, 150}
@@ -241,14 +241,6 @@ func TestBenchmarkExecutorInvalidatesComparisonWhenControlDriftsOrFails(t *testi
 	evidence := measuredEvidence(t, workload)
 	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || evidence.Control.MaxDrift < 0.09 || !strings.Contains(evidence.Control.Reason, "drifted") {
 		t.Fatalf("drifting control was used for a comparison: %+v", evidence)
-	}
-
-	failing := newExecutorFixture(t, optimizer.Request{})
-	failing.runner.failAt[controlEndpoint] = 2
-	row, workload := failing.run(t)
-	evidence = measuredEvidence(t, workload)
-	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || !strings.Contains(evidence.Control.Reason, "control run failed") || failing.runner.calls[candidateEndpoint] != 4 || row.RequestCount != 3*failing.profile.Requests {
-		t.Fatalf("a failed control must invalidate the comparison but keep the candidate measurement: evidence=%+v calls=%v", evidence, failing.runner.calls)
 	}
 }
 

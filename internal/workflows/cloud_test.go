@@ -33,6 +33,7 @@ type fakeCloudStore struct {
 	published      domain.ResolvedEndpoint
 	publishCalls   int
 	publishErr     error
+	released       []string
 }
 
 func (f *fakeCloudStore) RecordCapacityEvidence(_ context.Context, row domain.CapacityEvidence) (domain.CapacityEvidence, error) {

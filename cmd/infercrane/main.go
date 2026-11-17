@@ -4904,7 +4904,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for name, backend := range benchmarkBackends {
 		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
 	}
-	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
 	qualitySigner, err := builtinQualitySigner(passportKey, logger)
 	if err != nil {
 		return err

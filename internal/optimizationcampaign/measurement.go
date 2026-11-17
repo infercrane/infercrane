@@ -63,6 +63,7 @@ type ReplayTraceSource interface {
 // armTarget is one directly addressed, exact revision endpoint.
 type armTarget struct {
 	candidateID, revisionID, model string
+	replicaID                      string
 	endpoint, apiKey, apiKeyEnv    string
 	serverMetrics                  bool
 }
@@ -131,6 +132,11 @@ type MeasuredEvidence struct {
 	Comparison             map[string]MetricComparison `json:"comparison,omitempty"`
 	ServerMetricsRequested bool                        `json:"server_metrics_requested"`
 	GPUTelemetry           string                      `json:"gpu_telemetry"`
+	// Segments and Interruptions are present only when the measurement
+	// stopped and resumed. Runs and Comparison then cover every accepted
+	// run of every segment.
+	Segments      []MeasurementSegment      `json:"segments,omitempty"`
+	Interruptions []MeasurementInterruption `json:"interruptions,omitempty"`
 }
 
 type measurement struct {
@@ -217,79 +223,13 @@ func (i *invocations) run(ctx context.Context, target armTarget, requests int) (
 	return result, nil
 }
 
-// measureInterleaved warms each server, then runs control and candidate
-// alternately (C X C X C X C) so every candidate run is bracketed by control
-// runs from the same time window. Without a live control it runs the candidate
-// alone and records why the comparison is unavailable. A broken control never
-// fails the candidate: it makes the comparison invalid.
-// A tracker, when given, records each invocation as it starts and ends so the
-// run's progress can be read while it measures.
-func measureInterleaved(ctx context.Context, runs *invocations, candidate armTarget, control *armTarget, controlEvidence ControlEvidence, tracker *progressTracker) (measurement, error) {
-	result := measurement{evidence: MeasuredEvidence{Method: MeasurementMethod, InvocationBase: runs.base, Control: controlEvidence, ServerMetricsRequested: candidate.serverMetrics, GPUTelemetry: "not_collected"}}
-	result.evidence.Control.DriftLimit = maxControlDrift
-	tracker.plan(control != nil)
-	invoke := func(kind, arm string, target armTarget, requests int) (benchmark.Result, error) {
-		return tracker.run(kind, arm, requests, func() (benchmark.Result, error) { return runs.run(ctx, target, requests) })
-	}
-	var controlRuns []benchmark.Result
-	controlFailed := func(reason string) {
-		control = nil
-		result.evidence.Control.Role, result.evidence.Control.Reason = ControlRoleInvalid, reason
-		tracker.dropControl()
-	}
-	runControl := func() {
-		if control == nil {
-			return
-		}
-		measured, err := invoke(RunKindTurn, ArmControl, *control, runs.plan.requests)
-		result.evidence.Order = append(result.evidence.Order, "control")
-		if err != nil {
-			controlFailed("control run failed: " + boundedReason(err))
-			return
-		}
-		controlRuns = append(controlRuns, measured)
-		result.evidence.Runs = append(result.evidence.Runs, summarizeRun("control", measured))
-	}
-	if control != nil {
-		result.evidence.Control.ServerMetrics = control.serverMetrics
-		if _, err := invoke(RunKindWarmup, ArmControl, *control, runs.plan.warmup); err != nil {
-			controlFailed("control warmup failed: " + boundedReason(err))
-		} else {
-			result.evidence.Order = append(result.evidence.Order, "warmup:control")
-		}
-	}
-	if _, err := invoke(RunKindWarmup, ArmCandidate, candidate, runs.plan.warmup); err != nil {
-		return measurement{}, fmt.Errorf("candidate warmup: %w", err)
-	}
-	result.evidence.Order = append(result.evidence.Order, "warmup:candidate")
-	for index := 0; index < measurementRunsPerArm; index++ {
-		runControl()
-		measured, err := invoke(RunKindTurn, ArmCandidate, candidate, runs.plan.requests)
-		if err != nil {
-			return measurement{}, fmt.Errorf("candidate run %d: %w", index+1, err)
-		}
-		result.evidence.Order = append(result.evidence.Order, "candidate")
-		result.candidate = append(result.candidate, measured)
-		result.evidence.Runs = append(result.evidence.Runs, summarizeRun("candidate", measured))
-	}
-	runControl()
-	result.evidence.Control.Runs = len(controlRuns)
-	if result.evidence.Control.Role == ControlRoleBracketed {
-		if reason, drift := validControl(controlRuns); reason != "" {
-			result.evidence.Control.Role, result.evidence.Control.Reason, result.evidence.Control.MaxDrift = ControlRoleInvalid, reason, drift
-		} else {
-			result.evidence.Control.MaxDrift = drift
-			result.evidence.Comparison = compareArms(controlRuns, result.candidate)
-		}
-	}
-	return result, nil
-}
-
-// validControl applies kernel qualification's control discipline: every
-// control run is clean, and consecutive runs agree within the drift limit.
-func validControl(runs []benchmark.Result) (string, float64) {
-	if len(runs) != measurementRunsPerArm+1 {
-		return fmt.Sprintf("control completed %d of %d runs", len(runs), measurementRunsPerArm+1), 0
+// validControl applies kernel qualification's control discipline: the
+// expected control runs all completed, every one is clean, and consecutive
+// runs agree within the drift limit. After a resume the expected count grows
+// by one per segment, and the drift check spans each restart.
+func validControl(runs []benchmark.Result, expected int) (string, float64) {
+	if len(runs) != expected {
+		return fmt.Sprintf("control completed %d of %d runs", len(runs), expected), 0
 	}
 	drift := 0.0
 	for index, run := range runs {

@@ -1800,6 +1800,10 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	perCandidateBudget := request.MaxCostUSD / float64(len(pending.Candidates))
+	// Each setup's share must cover its machines until the approval ends.
+	// Whatever is left pays for replacing machines lost mid-run; the response
+	// says how many lost machines per setup the cap covers.
+	replacementsCovered := optimizationcampaign.MaxMachineReplacements
 	for _, candidate := range pending.Candidates {
 		var draft optimizer.DeploymentDraft
 		if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) != nil {
@@ -1810,10 +1814,12 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusConflict, "compute_connection_required", computeErr.Error())
 			return
 		}
-		if costErr := optimizationcampaign.AuthorizeCost(r.Context(), a.OptimizationCosts, actor.TenantID, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC()); costErr != nil {
+		covered, costErr := optimizationcampaign.AuthorizeCostCoverage(r.Context(), a.OptimizationCosts, actor.TenantID, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC())
+		if costErr != nil {
 			writeError(w, http.StatusUnprocessableEntity, "optimization_cost_authority_rejected", costErr.Error())
 			return
 		}
+		replacementsCovered = min(replacementsCovered, covered)
 	}
 	campaign, err := store.ApproveOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"), actor.Name, request.MaxCostUSD, expiresAt)
 	if errors.Is(err, domain.ErrNotFound) {
@@ -1839,7 +1845,7 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
-	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false})
+	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false, "machine_replacements_covered": replacementsCovered})
 }
 
 func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1948,7 +1954,7 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 				targetEndpoint = draft.Name
 			}
 		}
-		view := map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt, "label": labels[candidate.ID], "control": hasControl && control.ID == candidate.ID, "state_entered_at": optimizationcampaign.DecodeStateEnteredAt(candidate.StateEnteredAtJSON), "measurement": candidateMeasurement(candidate)}
+		view := map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt, "label": labels[candidate.ID], "control": hasControl && control.ID == candidate.ID, "state_entered_at": optimizationcampaign.DecodeStateEnteredAt(candidate.StateEnteredAtJSON), "measurement": candidateMeasurement(candidate), "machine_replacements": optimizationcampaign.MachineReplacementsUsed(optimizationcampaign.DecodeMachineReplacements(candidate.MachineReplacementsJSON))}
 		if reason := recorded.Reasons[candidate.ProposalCandidateID]; reason != nil {
 			view["reason"] = reason
 		}

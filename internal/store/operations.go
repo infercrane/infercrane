@@ -719,6 +719,33 @@ func (s *Store) DeleteProvisionedTarget(ctx context.Context, tenant, name, provi
 	return err
 }
 
+// ReleaseProvisionedTarget removes the provisioned target of a lost machine,
+// together with any deployment binding, so a replacement replica can register
+// the same target name at its new address. Agent-reported targets are never
+// released. A missing target is not an error.
+func (s *Store) ReleaseProvisionedTarget(ctx context.Context, tenant, name, provider string) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var id string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM targets WHERE tenant_id=? AND name=? AND provider=? AND agent_id IS NULL FOR UPDATE`, tenant, name, provider).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM deployment_targets WHERE target_id=?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM targets WHERE id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) DeleteProvisionedTargetByURL(ctx context.Context, tenant, endpoint, provider string) error {
 	_, err := s.ExecContext(ctx, `DELETE FROM targets t WHERE t.tenant_id=? AND t.url=? AND t.provider=? AND NOT EXISTS(SELECT 1 FROM deployment_targets dt WHERE dt.target_id=t.id)`, tenant, NormalizeURL(endpoint), provider)
 	return err
