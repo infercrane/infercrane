@@ -172,9 +172,9 @@ API clients send `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`. 
 - the endpoint's [optimization-readiness assessment](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)
   over the last hour: gateway request stages, the serving engine's own metrics, and DCGM profiling
   fields when they were fresh;
-- a summary of the newest [GPU profile](/features/telemetry#gpu-profiles) of the endpoint's active
-  revision, when one was captured in the last 7 days: the share of sampled kernel time spent in
-  attention, matrix-multiply, communication, and other kernels.
+- a summary of the newest [GPU profile](/features/gpu-profiling) of the endpoint's active
+  revision, when one was captured in the last 7 days: the share of kernel time spent in attention,
+  matrix-multiply, communication, and other kernels.
 
 A client cannot send a diagnosis itself. The server records it in the proposal's
 `input.diagnosis`, so the input digest binds the choice of setups to the evidence that made it. A

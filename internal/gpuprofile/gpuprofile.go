@@ -1,7 +1,8 @@
 // Package gpuprofile defines the bounded, content-free GPU profile a collector
 // records against a deployment's active revision: sampled GPU time attributed
 // to call stacks that run from Python down to CUDA kernels, SASS instructions,
-// and warp stall reasons.
+// and warp stall reasons. A v2 recording also carries the analysis of the
+// trace it came from and an excerpt of that trace's timeline.
 package gpuprofile
 
 import (
@@ -15,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-// SchemaVersion is the only accepted recording and response schema.
+// SchemaVersion is the call-stack-only recording and response schema.
 const SchemaVersion = "infercrane.gpu-profile/v1"
 
 // Bounds on one recording. The dashboard enforces the same limits.
@@ -107,28 +108,43 @@ type Stack struct {
 	GPUNS  int64 `json:"gpu_ns"`
 }
 
-// Recording is what a collector sends for one capture.
+// Recording is what a collector sends for one capture. Analysis and
+// TimelineExcerpt belong to v2 only.
 type Recording struct {
-	SchemaVersion     string          `json:"schema_version"`
-	Capture           CaptureMetadata `json:"capture"`
-	Timeline          Timeline        `json:"timeline"`
-	Frames            []Frame         `json:"frames"`
-	Stacks            []Stack         `json:"stacks"`
-	UnavailableLayers []string        `json:"unavailable_layers"`
+	SchemaVersion     string           `json:"schema_version"`
+	Capture           CaptureMetadata  `json:"capture"`
+	Timeline          Timeline         `json:"timeline"`
+	Frames            []Frame          `json:"frames"`
+	Stacks            []Stack          `json:"stacks"`
+	UnavailableLayers []string         `json:"unavailable_layers"`
+	Analysis          *Analysis        `json:"analysis,omitempty"`
+	TimelineExcerpt   *TimelineExcerpt `json:"timeline_excerpt,omitempty"`
 }
 
 // Profile is a stored capture as read through an endpoint.
 type Profile struct {
-	SchemaVersion     string    `json:"schema_version"`
-	Endpoint          string    `json:"endpoint"`
-	Deployment        string    `json:"deployment"`
-	Revision          int       `json:"revision"`
-	Capture           Capture   `json:"capture"`
-	Timeline          Timeline  `json:"timeline"`
-	Frames            []Frame   `json:"frames"`
-	Stacks            []Stack   `json:"stacks"`
-	UnavailableLayers []string  `json:"unavailable_layers"`
-	RecordedAt        time.Time `json:"recorded_at"`
+	SchemaVersion     string           `json:"schema_version"`
+	Endpoint          string           `json:"endpoint"`
+	Deployment        string           `json:"deployment"`
+	Revision          int              `json:"revision"`
+	Capture           Capture          `json:"capture"`
+	Timeline          Timeline         `json:"timeline"`
+	Frames            []Frame          `json:"frames"`
+	Stacks            []Stack          `json:"stacks"`
+	UnavailableLayers []string         `json:"unavailable_layers"`
+	Analysis          *Analysis        `json:"analysis,omitempty"`
+	TimelineExcerpt   *TimelineExcerpt `json:"timeline_excerpt,omitempty"`
+	RecordedAt        time.Time        `json:"recorded_at"`
+}
+
+// ProfileFromRecording is the read shape of a stored recording.
+func ProfileFromRecording(recording Recording) Profile {
+	recording = Normalize(recording)
+	return Profile{
+		SchemaVersion: recording.SchemaVersion, Capture: Capture{CaptureMetadata: recording.Capture}, Timeline: recording.Timeline,
+		Frames: recording.Frames, Stacks: recording.Stacks, UnavailableLayers: recording.UnavailableLayers,
+		Analysis: recording.Analysis, TimelineExcerpt: recording.TimelineExcerpt,
+	}
 }
 
 // Receipt confirms which deployment revision a recorded capture belongs to.
@@ -169,8 +185,25 @@ func Normalize(recording Recording) Recording {
 // Validate rejects a recording that is unbounded, inconsistent, claims
 // content, or is not a measurement. now bounds the capture time.
 func Validate(recording Recording, now time.Time) error {
-	if recording.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("schema_version must be %s", SchemaVersion)
+	switch recording.SchemaVersion {
+	case SchemaVersion:
+		if recording.Analysis != nil || recording.TimelineExcerpt != nil {
+			return fmt.Errorf("analysis and timeline_excerpt need schema_version %s", SchemaVersionV2)
+		}
+	case SchemaVersionV2:
+		if recording.Analysis == nil {
+			return fmt.Errorf("a %s recording needs its analysis", SchemaVersionV2)
+		}
+		if err := ValidateAnalysis(*recording.Analysis); err != nil {
+			return err
+		}
+		if recording.TimelineExcerpt != nil {
+			if err := ValidateExcerpt(*recording.TimelineExcerpt); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("schema_version must be %s or %s", SchemaVersion, SchemaVersionV2)
 	}
 	if err := validateCapture(recording.Capture, now); err != nil {
 		return err
@@ -214,6 +247,17 @@ func Validate(recording Recording, now time.Time) error {
 			return fmt.Errorf("unavailable_layers must name distinct frame kinds; %q is not one", layer)
 		}
 		seen[layer] = true
+	}
+	if analysis := recording.Analysis; analysis != nil {
+		captureMS := float64(recording.Capture.EndedAt.Sub(recording.Capture.StartedAt)) / float64(time.Millisecond)
+		// A second of slack covers the clock difference between the host that
+		// started the profiler and the timestamps the profiler wrote.
+		if analysis.Trace.WindowMS > captureMS+1000 || analysis.Trace.Devices > gpuCount(recording.Capture) {
+			return errors.New("analysis must fit inside the capture's time and GPU count")
+		}
+		if excerpt := recording.TimelineExcerpt; excerpt != nil && excerpt.StartMS+excerpt.DurationMS > analysis.Trace.WindowMS+1 {
+			return errors.New("timeline excerpt must fit inside the analyzed window")
+		}
 	}
 	return nil
 }

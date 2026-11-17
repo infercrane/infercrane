@@ -1,0 +1,649 @@
+{
+  "algorithm_version": "gpu-trace-analysis-v1",
+  "trace": {
+    "format": "kineto",
+    "engine": "sglang",
+    "engine_version": null,
+    "devices": 2,
+    "streams": 4,
+    "kernels": 1200,
+    "cpu_ops_recorded": true,
+    "shapes_recorded": false,
+    "launches_recorded": true,
+    "window_ms": 17.582,
+    "truncated": false
+  },
+  "verdict": {
+    "bottleneck": "communication",
+    "sentence": "Collective communication holds the GPU 23% of the time without compute running under it.",
+    "evidence": "communication 9.6 ms · 17% of it under compute"
+  },
+  "utilization": {
+    "busy_share": 0.7798,
+    "compute_share": 0.5528,
+    "non_compute_share": 0.2269,
+    "idle_share": 0.2202,
+    "bucket_ms": 0.1,
+    "busy_series": [
+      0.95,
+      0.975,
+      0.975,
+      0.98,
+      0.69,
+      0.08,
+      0.97,
+      0.97,
+      0.98,
+      0.975,
+      0.595,
+      0.18,
+      0.97,
+      0.97,
+      0.97,
+      0.98,
+      0.5,
+      0.28,
+      0.97,
+      0.97,
+      0.97,
+      0.975,
+      0.405,
+      0.37,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.31,
+      0.47,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.21,
+      0.57,
+      0.97,
+      0.98,
+      0.97,
+      0.97,
+      0.11,
+      0.66,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.01,
+      0.76,
+      0.975,
+      0.975,
+      0.98,
+      0.88,
+      0,
+      0.85,
+      0.98,
+      0.98,
+      0.97,
+      0.79,
+      0,
+      0.95,
+      0.975,
+      0.975,
+      0.98,
+      0.69,
+      0.08,
+      0.97,
+      0.97,
+      0.98,
+      0.975,
+      0.595,
+      0.18,
+      0.97,
+      0.97,
+      0.97,
+      0.98,
+      0.5,
+      0.28,
+      0.97,
+      0.97,
+      0.97,
+      0.975,
+      0.405,
+      0.37,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.31,
+      0.47,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.21,
+      0.57,
+      0.97,
+      0.98,
+      0.97,
+      0.97,
+      0.11,
+      0.66,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.01,
+      0.76,
+      0.975,
+      0.975,
+      0.98,
+      0.88,
+      0,
+      0.85,
+      0.98,
+      0.98,
+      0.97,
+      0.79,
+      0,
+      0.95,
+      0.975,
+      0.975,
+      0.98,
+      0.69,
+      0.08,
+      0.97,
+      0.97,
+      0.98,
+      0.975,
+      0.595,
+      0.18,
+      0.97,
+      0.97,
+      0.97,
+      0.98,
+      0.5,
+      0.28,
+      0.97,
+      0.97,
+      0.97,
+      0.975,
+      0.405,
+      0.37,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.31,
+      0.47,
+      0.98,
+      0.97,
+      0.97,
+      0.97,
+      0.21,
+      0.57,
+      0.97,
+      0.98,
+      0.97,
+      0.97,
+      0.11,
+      0.66,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.01,
+      0.76,
+      0.975,
+      0.975,
+      0.98,
+      0.88,
+      0,
+      0.85,
+      0.98,
+      0.98,
+      0.97,
+      0.9634
+    ]
+  },
+  "idle": {
+    "idle_ms": 7.744,
+    "host_wait_share": 0,
+    "launch_gap_share": 0.1007,
+    "other_share": 0.8993,
+    "reason": "",
+    "bubbles": {
+      "count": 838,
+      "p50_us": 1,
+      "p95_us": 120,
+      "max_us": 120,
+      "top": [
+        {
+          "start_ms": 0.47,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 1.06,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 1.65,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 2.24,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 2.83,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 3.42,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 4.01,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 5.19,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 6.37,
+          "duration_us": 120,
+          "device": 0,
+          "cause": "other"
+        },
+        {
+          "start_ms": 12.862,
+          "duration_us": 120,
+          "device": 1,
+          "cause": "other"
+        }
+      ]
+    }
+  },
+  "launch": {
+    "launches": 60,
+    "graph_launches": 60,
+    "per_second": 3412.6,
+    "host_launch_share": 0.0188,
+    "launch_delay_p50_us": 219,
+    "launch_delay_p95_us": 219,
+    "short_kernel_share": 0,
+    "reason": ""
+  },
+  "categories": [
+    {
+      "category": "gemm",
+      "kernel_ms": 12,
+      "share": 0.4132,
+      "count": 480
+    },
+    {
+      "category": "communication",
+      "kernel_ms": 9.6,
+      "share": 0.3306,
+      "count": 240
+    },
+    {
+      "category": "attention",
+      "kernel_ms": 6,
+      "share": 0.2066,
+      "count": 240
+    },
+    {
+      "category": "norm",
+      "kernel_ms": 1.44,
+      "share": 0.0496,
+      "count": 240
+    }
+  ],
+  "top_kernels": [
+    {
+      "name": "nvjet_tst_64x8_64x16_4x1_v_bz_TNT",
+      "category": "gemm",
+      "phase": null,
+      "count": 480,
+      "total_ms": 12,
+      "mean_us": 25,
+      "max_us": 30,
+      "share": 0.4132
+    },
+    {
+      "name": "ncclDevKernel_AllReduce_Sum_bf16_RING_LL(ncclDevKernelArgsStorage\u003c4096ul\u003e)",
+      "category": "communication",
+      "phase": null,
+      "count": 240,
+      "total_ms": 9.6,
+      "mean_us": 40,
+      "max_us": 40,
+      "share": 0.3306
+    },
+    {
+      "name": "void flashinfer::BatchDecodeWithPagedKVCacheKernel\u003c128u, 4u, 8u, 16u, 1u\u003e(flashinfer::BatchDecodeParams)",
+      "category": "attention",
+      "phase": "decode",
+      "count": 240,
+      "total_ms": 6,
+      "mean_us": 25,
+      "max_us": 25,
+      "share": 0.2066
+    },
+    {
+      "name": "void flashinfer::norm::FusedAddRMSNormKernel\u003c8u, __nv_bfloat16\u003e(__nv_bfloat16*, __nv_bfloat16*, __nv_bfloat16*, unsigned int, unsigned int, unsigned int, float, float)",
+      "category": "norm",
+      "phase": null,
+      "count": 240,
+      "total_ms": 1.44,
+      "mean_us": 6,
+      "max_us": 6,
+      "share": 0.0496
+    }
+  ],
+  "overlap": {
+    "communication_ms": 9.6,
+    "overlapped_share": 0.1688,
+    "reason": ""
+  },
+  "phases": {
+    "source": "kernel_names",
+    "prefill": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "decode": {
+      "gpu_ms": 29.04,
+      "share": 1,
+      "steps": 30
+    },
+    "mixed": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "unknown": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    }
+  },
+  "steps": {
+    "source": "idle_gaps",
+    "marker": null,
+    "count": 30,
+    "p50_ms": 0.47,
+    "p95_ms": 0.47,
+    "items": [
+      {
+        "start_ms": 0,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 0.59,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 1.18,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 1.77,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 2.36,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 2.95,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 3.54,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 4.13,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 4.72,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 5.31,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 5.9,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 6.49,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 7.08,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 7.67,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 8.26,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 8.85,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 9.44,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 10.03,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 10.62,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 11.21,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 11.8,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 12.39,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 12.98,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 13.57,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 14.16,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 14.75,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 15.34,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 15.93,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 16.52,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 17.11,
+        "duration_ms": 0.47,
+        "gpu_busy_ms": 0.457,
+        "kernels": 40,
+        "phase": "decode"
+      }
+    ],
+    "reason": ""
+  },
+  "roofline": {
+    "accelerator": "NVIDIA H100 80GB HBM3",
+    "peak": {
+      "compute_tflops": 989.5,
+      "precision": "BF16 dense tensor",
+      "memory_tbps": 3.35,
+      "source": "NVIDIA H100 datasheet, SXM (half the sparse figure)"
+    },
+    "ridge_flop_per_byte": 295.4,
+    "position": "unknown",
+    "memory_bound_share": null,
+    "covered_share": 0,
+    "points": [],
+    "reason": "No 16-bit matrix multiply had recorded shapes. Enable record_shapes; kernels replayed from CUDA graphs never have them."
+  },
+  "hardware": null,
+  "findings": [
+    {
+      "rule": "gpu.communication_exposed",
+      "observed": 0.2269,
+      "comparison": "\u003e=",
+      "threshold": 0.1,
+      "unit": "ratio",
+      "sentence": "Collective communication holds the GPU 23% of the time without compute running under it."
+    },
+    {
+      "rule": "gpu.idle",
+      "observed": 0.2202,
+      "comparison": "\u003e=",
+      "threshold": 0.2,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 22% of the capture."
+    },
+    {
+      "rule": "gpu.decode_dominant",
+      "observed": 1,
+      "comparison": "\u003e=",
+      "threshold": 0.7,
+      "unit": "ratio",
+      "sentence": "Decode steps take 100% of kernel time."
+    }
+  ]
+}

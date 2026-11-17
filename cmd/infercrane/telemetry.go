@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +21,7 @@ const maxCollectorPayload = 8 << 20
 
 func telemetryCommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) < 3 || args[0] != "collect" || args[1] != "dcgm" {
-		return errors.New("usage: infercrane telemetry collect dcgm DEPLOYMENT [--url URL | --file PATH] [--selector key=value]")
+		return errors.New("usage: infercrane telemetry collect dcgm DEPLOYMENT [--url URL | --file PATH] [--selector key=value] [--interval 15s]")
 	}
 	deployment := args[2]
 	fs := newFlagSet("telemetry collect dcgm")
@@ -31,6 +32,7 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	source := fs.String("source", "dcgm_exporter", "evidence source")
 	utilizationUnit := fs.String("utilization-unit", "percent", "percent or ratio")
 	ttl := fs.Duration("ttl", 2*time.Minute, "evidence freshness TTL")
+	interval := fs.Duration("interval", 0, "keep collecting at this interval (5s to 10m) until stopped; the TTL defaults to three intervals")
 	nvlinkPeak := fs.Float64("nvlink-peak-gbps", 0, "declared per-GPU, per-direction NVLink peak in GB/s")
 	pciePeak := fs.Float64("pcie-peak-gbps", 0, "declared per-GPU, per-direction PCIe peak in GB/s")
 	output := fs.String("output", "human", "human or json")
@@ -50,12 +52,56 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	if *nvlinkPeak < 0 || *pciePeak < 0 {
 		return errors.New("--nvlink-peak-gbps and --pcie-peak-gbps must not be negative")
 	}
-	payload, err := readCollectorPayload(ctx, *collectorURL, *file)
+	if *interval != 0 {
+		if *interval < 5*time.Second || *interval > 10*time.Minute {
+			return errors.New("--interval must be 5s to 10m")
+		}
+		if *file != "" {
+			return errors.New("--interval reads --url; a saved --file does not change")
+		}
+		ttlSet := false
+		fs.Visit(func(f *flag.Flag) { ttlSet = ttlSet || f.Name == "ttl" })
+		if !ttlSet {
+			*ttl = 3 * *interval
+		}
+	}
+	collect := func() error {
+		return collectDCGMOnce(ctx, cfg, deployment, *collectorURL, *file, *source, *replicaID, *utilizationUnit, *output, selector, *ttl, *nvlinkPeak, *pciePeak)
+	}
+	if *interval == 0 {
+		return collect()
+	}
+	// Continuous collection: a failed scrape or post is reported and retried
+	// at the next interval; the evidence goes stale on its own after its TTL.
+	for {
+		if err = collect(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s collection failed: %v\n", time.Now().UTC().Format(time.RFC3339), err)
+		}
+		if err = telemetrySleep(ctx, *interval); err != nil {
+			return nil
+		}
+	}
+}
+
+// telemetrySleep waits between continuous collections. Tests replace it.
+var telemetrySleep = func(ctx context.Context, wait time.Duration) error {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func collectDCGMOnce(ctx context.Context, cfg config.Config, deployment, collectorURL, file, source, replicaID, utilizationUnit, output string, selector map[string]string, ttl time.Duration, nvlinkPeak, pciePeak float64) error {
+	payload, err := readCollectorPayload(ctx, collectorURL, file)
 	if err != nil {
 		return err
 	}
 	observedAt := time.Now().UTC()
-	rows, err := metrics.ParseDCGM(string(payload), metrics.DCGMOptions{Selector: selector, ReplicaID: *replicaID, Source: *source, UtilizationUnit: *utilizationUnit, ObservedAt: observedAt, TTL: *ttl, NVLinkPeakBytesPerSecond: *nvlinkPeak * 1e9, PCIePeakBytesPerSecond: *pciePeak * 1e9})
+	rows, err := metrics.ParseDCGM(string(payload), metrics.DCGMOptions{Selector: selector, ReplicaID: replicaID, Source: source, UtilizationUnit: utilizationUnit, ObservedAt: observedAt, TTL: ttl, NVLinkPeakBytesPerSecond: nvlinkPeak * 1e9, PCIePeakBytesPerSecond: pciePeak * 1e9})
 	if err != nil {
 		return err
 	}
@@ -63,7 +109,7 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	for _, row := range rows {
 		values = append(values, map[string]any{"name": row.Name, "value": row.Value, "unit": row.Unit, "sample_count": row.SampleCount})
 	}
-	body := map[string]any{"source": *source, "evidence_class": "measured", "replica_id": *replicaID, "observed_at": observedAt, "valid_until": observedAt.Add(*ttl), "measurements": values}
+	body := map[string]any{"source": source, "evidence_class": "measured", "replica_id": replicaID, "observed_at": observedAt, "valid_until": observedAt.Add(ttl), "measurements": values}
 	var response struct {
 		Data            []domain.OperationalMeasurement `json:"data"`
 		ContentRecorded bool                            `json:"content_recorded"`
@@ -72,14 +118,14 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	if err = controlJSON(ctx, cfg, http.MethodPost, path, "", body, &response); err != nil {
 		return err
 	}
-	if *output == "json" {
+	if output == "json" {
 		return printJSON(response)
 	}
 	fmt.Printf("Hardware evidence recorded for %s\n\n", deployment)
 	for _, row := range response.Data {
 		fmt.Printf("  %-20s %10.2f %-10s samples %d\n", row.Name, row.Value, row.Unit, row.SampleCount)
 	}
-	fmt.Printf("\nFresh until %s · source %s · prompt/output content not recorded\n", observedAt.Add(*ttl).Format(time.RFC3339), *source)
+	fmt.Printf("\nFresh until %s · source %s · prompt/output content not recorded\n", observedAt.Add(ttl).Format(time.RFC3339), source)
 	return nil
 }
 

@@ -293,6 +293,21 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  listEndpointGPUProfiles(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  compareEndpointGPUProfiles(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles/compare`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getEndpointGPUProfileByID(name: string, id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getEndpointOptimizationReadiness(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/endpoints/${encodeURIComponent(name)}/optimization-readiness`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;

@@ -71,17 +71,28 @@ Both return a target that follows the same runtime and reconciliation path as an
 
 ## GPU profile capture
 
-1. A collector posts one bounded `infercrane.gpu-profile/v1` capture to
-   `POST /api/v1/deployments/{name}/gpu-profiles` with deploy permission. The control API rejects
-   unknown fields, bodies over 8 MiB, captures that claim content, and anything but measured
-   evidence before touching PostgreSQL.
-2. In one transaction the store resolves the deployment's active revision, inserts the capture into
+1. `infercrane profile` runs where the serving engine's HTTP port and trace directory are reachable.
+   It calls the engine's `/start_profile`, waits at most 30 seconds, calls `/stop_profile` (always,
+   even when interrupted), and reads the Kineto trace the engine wrote. The parser keeps kernel,
+   operator, and runtime-call names, times, devices, streams, correlations, and matrix-multiply shapes,
+   and skips Python frames, operator arguments, and every annotation other than engine-step markers.
+   `internal/gputrace` analyzes the trace on that host; the full trace never leaves it.
+2. The CLI posts one bounded `infercrane.gpu-profile/v2` recording (analysis, call stacks, and an
+   excerpt of at most 20,000 events) to `POST /api/v1/deployments/{name}/gpu-profiles` with deploy
+   permission. Other collectors may post a call-stack-only v1 recording. The control API rejects
+   unknown fields, bodies over 8 MiB, out-of-range analyses, captures that claim content, and anything
+   but measured evidence before touching PostgreSQL.
+3. In one transaction the store resolves the deployment's active revision, inserts the capture into
    `gpu_profiles` as one JSONB document keyed by tenant, deployment, revision, tool, start, and end,
-   and removes all but the newest eight captures for that deployment. A retry with the same samples
-   returns the stored receipt; a retry with different samples is a conflict.
-3. `GET /api/v1/endpoints/{name}/gpu-profile` reads the newest capture whose revision is still the
-   active revision of a deployment bound to the endpoint. None is a typed 404.
-4. Neither step runs on the inference path, and the gateway never reads `gpu_profiles`.
+   and removes captures that ended more than 30 days ago and all but the newest eight for that
+   deployment. A retry with the same samples returns the stored receipt; a retry with different
+   samples is a conflict.
+4. `GET /api/v1/endpoints/{name}/gpu-profile` reads the newest capture whose revision is still the
+   active revision of a deployment bound to the endpoint; `GET …/gpu-profiles` lists every retained
+   capture of those deployments, `GET …/gpu-profiles/{id}` reads one, and `GET …/gpu-profiles/compare`
+   compares two analyzed captures. None is a typed 404.
+5. A proposal planned from an endpoint diagnosis reads the newest capture's kernel-class shares.
+   Neither capture nor read runs on the inference path, and the gateway never reads `gpu_profiles`.
 
 ## Optimization run notifications
 

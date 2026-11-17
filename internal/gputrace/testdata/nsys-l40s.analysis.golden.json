@@ -1,0 +1,352 @@
+{
+  "algorithm_version": "gpu-trace-analysis-v1",
+  "trace": {
+    "format": "nsys",
+    "engine": null,
+    "engine_version": null,
+    "devices": 1,
+    "streams": 1,
+    "kernels": 1000,
+    "cpu_ops_recorded": false,
+    "shapes_recorded": false,
+    "launches_recorded": true,
+    "window_ms": 12.936,
+    "truncated": false
+  },
+  "verdict": {
+    "bottleneck": "host-launch",
+    "sentence": "The GPU sat idle 12% of the capture, mostly waiting for the host to launch work.",
+    "evidence": "idle 12% of 13 ms · 100% of idle waiting on launches · launch delay p50 88 µs"
+  },
+  "utilization": {
+    "busy_share": 0.8813,
+    "compute_share": 0.8813,
+    "non_compute_share": 0,
+    "idle_share": 0.1187,
+    "bucket_ms": 0.1,
+    "busy_series": [
+      1,
+      1,
+      1,
+      1,
+      0.56,
+      0.8,
+      1,
+      1,
+      1,
+      0.76,
+      0.6,
+      1,
+      1,
+      1,
+      0.96,
+      0.4,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.56,
+      0.8,
+      1,
+      1,
+      1,
+      0.76,
+      0.6,
+      1,
+      1,
+      1,
+      0.96,
+      0.4,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.56,
+      0.8,
+      1,
+      1,
+      1,
+      0.76,
+      0.6,
+      1,
+      1,
+      1,
+      0.96,
+      0.4,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.56,
+      0.8,
+      1,
+      1,
+      1,
+      0.76,
+      0.6,
+      1,
+      1,
+      1,
+      0.96,
+      0.4,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      0.56,
+      0.8,
+      1,
+      1,
+      1,
+      0.76,
+      0.6,
+      1,
+      1,
+      1,
+      0.96,
+      0.4,
+      1,
+      1,
+      1,
+      1,
+      0.36,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "idle": {
+    "idle_ms": 1.536,
+    "host_wait_share": 1,
+    "launch_gap_share": 0,
+    "other_share": 0,
+    "reason": "",
+    "bubbles": {
+      "count": 24,
+      "p50_us": 64,
+      "p95_us": 64,
+      "max_us": 64,
+      "top": [
+        {
+          "start_ms": 0.456,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 0.976,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 1.496,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 2.016,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 2.536,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 3.056,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 3.576,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 4.096,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 4.616,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 5.136,
+          "duration_us": 64,
+          "device": 0,
+          "cause": "host_wait"
+        }
+      ]
+    }
+  },
+  "launch": {
+    "launches": 1000,
+    "graph_launches": 0,
+    "per_second": 77303.6,
+    "host_launch_share": 0.5411,
+    "launch_delay_p50_us": 88,
+    "launch_delay_p95_us": 151,
+    "short_kernel_share": 0.8,
+    "reason": ""
+  },
+  "categories": [
+    {
+      "category": "gemm",
+      "kernel_ms": 9,
+      "share": 0.7895,
+      "count": 200
+    },
+    {
+      "category": "other",
+      "kernel_ms": 2.4,
+      "share": 0.2105,
+      "count": 800
+    }
+  ],
+  "top_kernels": [
+    {
+      "name": "ampere_bf16_s16816gemm_bf16_64x64_ldg8_f2f_stages_64x5_tn",
+      "category": "gemm",
+      "phase": null,
+      "count": 200,
+      "total_ms": 9,
+      "mean_us": 45,
+      "max_us": 45,
+      "share": 0.7895
+    },
+    {
+      "name": "void at::native::elementwise_kernel\u003c128, 2, at::native::gpu_kernel_impl\u003cat::native::CUDAFunctor_add\u003cc10::BFloat16\u003e \u003e(at::TensorIteratorBase\u0026, at::native::CUDAFunctor_add\u003cc10::BFloat16\u003e const\u0026)::{lambda(int)#1}\u003e(int, at::native::gpu_kernel_impl\u003cat::native::CUDAFunctor_add\u003cc10::BFloat16\u003e \u003e(at::TensorIteratorBase\u0026, at::native::CUDAFunctor_add\u003cc10::BFloat16\u003e const\u0026)::{lambda(int)#1})",
+      "category": "other",
+      "phase": null,
+      "count": 800,
+      "total_ms": 2.4,
+      "mean_us": 3,
+      "max_us": 3,
+      "share": 0.2105
+    }
+  ],
+  "overlap": {
+    "communication_ms": 0,
+    "overlapped_share": null,
+    "reason": "No collective communication kernels ran, so there is nothing to overlap."
+  },
+  "phases": {
+    "source": "unknown",
+    "prefill": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "decode": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "mixed": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "unknown": {
+      "gpu_ms": 11.4,
+      "share": 1,
+      "steps": 0
+    }
+  },
+  "steps": {
+    "source": "none",
+    "marker": null,
+    "count": 0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "items": [],
+    "reason": "The trace has no step annotations and too few GPU idle gaps to separate engine steps."
+  },
+  "roofline": {
+    "accelerator": "NVIDIA L40S",
+    "peak": {
+      "compute_tflops": 362.05,
+      "precision": "BF16 dense tensor",
+      "memory_tbps": 0.864,
+      "source": "NVIDIA L40S datasheet (half the sparse figure)"
+    },
+    "ridge_flop_per_byte": 419,
+    "position": "unknown",
+    "memory_bound_share": null,
+    "covered_share": 0,
+    "points": [],
+    "reason": "No 16-bit matrix multiply had recorded shapes. Enable record_shapes; kernels replayed from CUDA graphs never have them."
+  },
+  "hardware": null,
+  "findings": [
+    {
+      "rule": "gpu.idle_host_bound",
+      "observed": 0.1187,
+      "comparison": "\u003e=",
+      "threshold": 0.1,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 12% of the capture, mostly waiting for the host to launch work."
+    },
+    {
+      "rule": "gpu.launch_bound_kernels",
+      "observed": 0.8,
+      "comparison": "\u003e=",
+      "threshold": 0.5,
+      "unit": "ratio",
+      "sentence": "80% of launches finish on the GPU faster than the host takes to launch them."
+    }
+  ]
+}
