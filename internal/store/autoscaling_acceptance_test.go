@@ -65,7 +65,7 @@ func (p *acceptanceServerlessProvider) EnsureEndpoint(_ context.Context, spec pr
 			return endpoint, nil
 		}
 	}
-	endpoint := provision.ServerlessEndpoint{ID: "endpoint-1", Name: spec.ExternalKey, TemplateID: "template-qwen", GPUTypeIDs: []string{"NVIDIA L40S"}, WorkersMin: 0, WorkersMax: spec.WorkersMax}
+	endpoint := provision.ServerlessEndpoint{ID: "endpoint-1", Name: spec.ExternalKey, TemplateID: "template-qwen", GPUPools: []string{"ADA_48_PRO"}, WorkersMin: 0, WorkersMax: spec.WorkersMax}
 	p.endpoints[endpoint.ID] = endpoint
 	return endpoint, nil
 }

@@ -11,6 +11,11 @@ adapter, which does not require SSH inside the runtime image. Serverless deploym
 native endpoint lifecycle. InferCrane's base production stack does not require RunPod; enable it
 explicitly with `compose.production.runpod.yaml`.
 
+Native Pods and Serverless endpoints use RunPod's
+[REST API v2](https://docs.runpod.io/api-reference-v2/migrate-from-v1) at `https://api.runpod.io/v2`.
+InferCrane requests on-demand Secure Cloud Pods. RunPod no longer offers Spot (interruptible) Pods,
+so there is no interruptible option or price to choose.
+
 AMD Instinct MI300X and MI350X run through `runpod-pods` with the pinned ROCm vLLM image; SkyPilot and
 Serverless stay NVIDIA-only. See [AMD Instinct GPUs](/integrations/amd-instinct).
 
@@ -207,6 +212,38 @@ infercrane orphans
 The final `orphans` check proves InferCrane has no known unmanaged resource. For a credentialed
 qualification, also verify the RunPod inventory itself: zero run-owned Pods and zero run-owned
 Serverless endpoints. Never erase the PostgreSQL state while provider cleanup is unresolved.
+
+## Check for leftover resources
+
+RunPod retired REST API v1 on 2026-11-15. A control plane built before InferCrane moved to REST v2
+could not create, stop, or delete RunPod Pods or Serverless endpoints from that date. Each deletion it
+tried failed with `provider_delete_failed` and, once its retries ran out, ended as
+`attempts_exhausted`. The RunPod resource kept running and billing. Upgrade the control plane first,
+then:
+
+1. In the RunPod console, open the Pods and Serverless pages. InferCrane names every Pod
+   `infercrane-…` and every endpoint `infercrane-…-serverless`. Note each one's status and age.
+2. Compare them with `infercrane deployments`, `infercrane status <name>`, and `infercrane orphans`.
+   A Pod or endpoint whose deployment was deleted, or whose deletion failed, is a leftover.
+3. Retry the deletion through InferCrane so its records stay correct, using a new idempotency key:
+   `infercrane delete <name> --yes --wait --idempotency-key <new-key>`. Delete in the RunPod console
+   only a resource InferCrane no longer tracks.
+
+The same inventory through the API:
+
+```bash
+runpod_key=$(tr -d '\r\n' < "$RUNPOD_KEY_FILE")
+curl -fsS -H "Authorization: Bearer $runpod_key" 'https://api.runpod.io/v2/pods?limit=1000' |
+  jq '[.pods[] | select(.name | startswith("infercrane-")) | {id,name,status,cost,createdAt}]'
+curl -fsS -H "Authorization: Bearer $runpod_key" 'https://api.runpod.io/v2/serverless?limit=1000' |
+  jq '[.endpoints[] | select(.name | startswith("infercrane-")) | {id,name,workers,createdAt}]'
+unset runpod_key
+```
+
+RunPod's v2 delete also removes an endpoint's bound template. After deleting a Serverless endpoint
+that was created before the upgrade, run `infercrane doctor --serverless` to confirm the configured
+template still exists. Network volumes named `infercrane-artifact-…` are operator-owned caches that
+deletion keeps on purpose.
 
 See [provider setup](../provider-setup.md) for the credential boundary, [production operations](../production.md)
 for self-hosting, [serverless lifecycle](../features/serverless.md) for worker-zero behavior, and

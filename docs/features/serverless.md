@@ -45,6 +45,13 @@ InferCrane also constrains RunPod worker placement to hosts with a CUDA 13-capab
 maintained `worker-v1-vllm` image requires CUDA 13 or newer; without that provider constraint a
 worker can be placed successfully and then exit before model initialization begins.
 
+InferCrane uses RunPod's REST API v2 (`https://api.runpod.io/v2`). v2 places Serverless workers by
+GPU pool and has no list of allowed GPU types, so InferCrane reads RunPod's GPU catalog, selects the
+pool that contains the requested GPU, and excludes every other GPU type in that pool. Workers then
+run only on the GPU you asked for. A GPU type that is not in any Serverless pool is refused before
+anything is created. v2 copies the template into the endpoint when it is created: editing the template
+later does not change existing endpoints, so pin a new revision by deploying again.
+
 ## Deploy
 
 ```bash
@@ -71,6 +78,9 @@ restart.
 Endpoint creation is replay-safe. Before creating capacity, InferCrane lists endpoints for the
 deterministic deployment/revision key. A retry adopts the one exact matching endpoint; multiple
 matches or immutable-spec mismatches fail visibly instead of creating another billable resource.
+An endpoint matches only when its worker bounds, GPU pool and exclusions, image, and model
+revision equal the request. If RunPod has since added a GPU type to the pool, the endpoint could
+place workers on it, so InferCrane reports a mismatch instead of adopting it.
 
 ## Current limitations
 

@@ -49,26 +49,17 @@ func TestProviderAdaptersPassOrRefuseEngineEnvironment(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			if r.Method == http.MethodGet {
-				_ = json.NewEncoder(w).Encode(pods)
+				writeRunPodV2List(w, "pods", pods)
 				return
 			}
-			var body struct {
-				Name             string            `json:"name"`
-				ImageName        string            `json:"imageName"`
-				GPUCount         int               `json:"gpuCount"`
-				DockerEntrypoint []string          `json:"dockerEntrypoint"`
-				DockerStartCmd   []string          `json:"dockerStartCmd"`
-				Env              map[string]string `json:"env"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Error(err)
+			body, ok := decodeRunPodV2PodCreate(t, w, r)
+			if !ok {
 				return
 			}
 			created = body.Env
-			record := runPodRecord{ID: "pod-amd", Name: body.Name, DesiredStatus: "RUNNING", ImageName: body.ImageName, GPUCount: body.GPUCount, DockerEntrypoint: body.DockerEntrypoint, DockerStartCmd: body.DockerStartCmd, Environment: body.Env}
-			record.Machine.GPUTypeID = "AMD Instinct MI300X OAM"
-			pods = []runPodRecord{record}
-			_ = json.NewEncoder(w).Encode(record)
+			pods = []runPodRecord{body.pod("pod-amd", "EU-RO-1")}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(pods[0])
 		}))
 		defer server.Close()
 		provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "worker-secret", BaseURL: server.URL, Client: server.Client()}

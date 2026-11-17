@@ -75,18 +75,25 @@ the provider outcome cannot be proven.
   <Tab title="RunPod">
     ```bash
     runpod_key=$(tr -d '\r\n' < "$RUNPOD_KEY_FILE")
+    # RunPod REST v2 pages at 1000 items; a second page fails closed.
     curl -fsS -H "Authorization: Bearer $runpod_key" \
-      https://rest.runpod.io/v1/pods |
-      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
-        {id,name,desiredStatus,machineId}] | sort_by(.id)' \
+      'https://api.runpod.io/v2/pods?limit=1000' |
+      jq -S 'if .pagination.hasNextPage then error("more pages") else .pods end |
+        [.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,status,dataCenterId}] | sort_by(.id)' \
       > "$evidence/provider-inventory.json"
     curl -fsS -H "Authorization: Bearer $runpod_key" \
-      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' |
-      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
-        {id,name,workersMin,workersMax,
-         active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}] |
-        sort_by(.id)' \
+      'https://api.runpod.io/v2/serverless?limit=1000' |
+      jq -S 'if .pagination.hasNextPage then error("more pages") else .endpoints end |
+        [.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,workers}] | sort_by(.id)' \
       > "$evidence/provider-endpoints.json"
+    # v2 reports active workers per endpoint, not in the endpoint list.
+    for endpoint_id in $(jq -r '.[].id' "$evidence/provider-endpoints.json"); do
+      curl -fsS -H "Authorization: Bearer $runpod_key" \
+        "https://api.runpod.io/v2/serverless/$endpoint_id/workers" |
+        jq -S --arg id "$endpoint_id" '{id:$id,active_workers:(.summary.total // error("no summary"))}'
+    done | jq -sS 'sort_by(.id)' > "$evidence/provider-endpoint-workers.json"
     unset runpod_key
     ```
   </Tab>
