@@ -19,6 +19,7 @@ import (
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 	"github.com/infercrane/infercrane/internal/replay"
 )
@@ -51,6 +52,7 @@ const (
 	BasisBaselineKept  = "baseline_kept"
 	BasisReleaseGuard  = "release_guard"
 	BasisCampaignGate  = "campaign_quality_gate"
+	BasisBuiltinCheck  = "builtin_answer_check"
 	BasisReplayVolume  = "replayed_traffic"
 	BasisEngineMetrics = "engine_metrics_during_measurement"
 	BasisUnknown       = "unknown"
@@ -128,18 +130,21 @@ type Metric struct {
 
 // Quality is the answer-quality verdict of the winner against the baseline.
 type Quality struct {
-	Verdict                  string        `json:"verdict"`
-	Basis                    string        `json:"basis"`
-	Eval                     string        `json:"eval,omitempty"`
-	BaselineScore            *float64      `json:"baseline_score"`
-	WinnerScore              *float64      `json:"winner_score"`
-	Delta                    *float64      `json:"delta"`
-	RegressionPercent        *float64      `json:"regression_percent"`
-	WatchThresholdPercent    *float64      `json:"watch_threshold_percent"`
-	BlockThresholdPercent    *float64      `json:"block_threshold_percent"`
-	ReleaseGuardEvaluationID string        `json:"release_guard_evaluation_id,omitempty"`
-	Reason                   string        `json:"reason,omitempty"`
-	Evals                    []QualityEval `json:"evals"`
+	Verdict                  string   `json:"verdict"`
+	Basis                    string   `json:"basis"`
+	Eval                     string   `json:"eval,omitempty"`
+	BaselineScore            *float64 `json:"baseline_score"`
+	WinnerScore              *float64 `json:"winner_score"`
+	Delta                    *float64 `json:"delta"`
+	RegressionPercent        *float64 `json:"regression_percent"`
+	WatchThresholdPercent    *float64 `json:"watch_threshold_percent"`
+	BlockThresholdPercent    *float64 `json:"block_threshold_percent"`
+	ReleaseGuardEvaluationID string   `json:"release_guard_evaluation_id,omitempty"`
+	// Source names who produced the winner's deciding evidence: infercrane
+	// for the built-in answer check, customer for signed customer evidence.
+	Source string        `json:"source,omitempty"`
+	Reason string        `json:"reason,omitempty"`
+	Evals  []QualityEval `json:"evals"`
 }
 
 // QualityEval is one evaluation suite's verdict.
@@ -669,10 +674,29 @@ func quality(campaign domain.OptimizationCampaign, kind string, baseline, winner
 			eval.Reference = &side
 		}
 	}
+	source := winnerEvidence.Source
+	if source == "" {
+		source = domain.QualityEvidenceSourceCustomer
+	}
+	if source == domain.QualityEvidenceSourceInferCrane {
+		// The built-in answer check carries its own fixed watch and block
+		// thresholds, the same ones it applied when it gated the candidate.
+		result = fromQualityReport(releaseguard.CompareQuality(qualitycheck.Policy(), []domain.QualityEvalEvidence{eval}))
+		result.Basis, result.Source = BasisBuiltinCheck, source
+		switch {
+		case kind == OutcomeBaselineKept:
+			result.Basis, result.Reason = BasisBaselineKept, "your current setup is kept, so answer quality is unchanged"
+		case eval.Reference == nil:
+			result.Reason = "the baseline has no answer check from the same prompts, so the change is unknown"
+		default:
+			result.Reason = "InferCrane asked both setups the same prompts and compared the winner's answers with the baseline's"
+		}
+		return result
+	}
 	// The campaign's own gate is pass or fail on signed evidence; without a
 	// Release Guard policy there is no watch band, so WATCH cannot occur.
 	result = fromQualityReport(releaseguard.CompareQuality(domain.ReleaseGuardPolicy{}, []domain.QualityEvalEvidence{eval}))
-	result.Basis = BasisCampaignGate
+	result.Basis, result.Source = BasisCampaignGate, source
 	switch {
 	case kind == OutcomeBaselineKept:
 		result.Basis, result.Reason = BasisBaselineKept, "your current setup is kept, so answer quality is unchanged"

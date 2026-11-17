@@ -67,6 +67,7 @@ import (
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
 	"github.com/infercrane/infercrane/internal/requestquota"
@@ -211,6 +212,22 @@ func loadPassportSigningKey(path string) (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	return key, nil
+}
+
+// builtinQualitySigner returns the key that signs InferCrane-run quality
+// evidence: the passport signing key when one is configured, otherwise a key
+// generated for this process. A generated key still makes every row
+// verifiable, but its key ID changes on restart.
+func builtinQualitySigner(passportKey ed25519.PrivateKey, logger *slog.Logger) (ed25519.PrivateKey, error) {
+	if len(passportKey) == ed25519.PrivateKeySize {
+		return passportKey, nil
+	}
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate built-in quality evidence key: %w", err)
+	}
+	logger.Info("built-in quality evidence is signed with a key generated for this process; set INFERCRANE_PASSPORT_SIGNING_KEY_FILE for a stable key ID")
 	return key, nil
 }
 
@@ -2293,9 +2310,15 @@ func controlJSON(ctx context.Context, cfg config.Config, method, path, idempoten
 	return controlJSONWithTimeout(ctx, cfg, method, path, idempotencyKey, requestBody, responseBody, 30*time.Second)
 }
 
+// rawRequestBody is sent byte for byte. Content addressed by its digest, such
+// as an eval set, must not be re-encoded on the way.
+type rawRequestBody []byte
+
 func controlJSONWithTimeout(ctx context.Context, cfg config.Config, method, path, idempotencyKey string, requestBody, responseBody any, timeout time.Duration) error {
 	var body io.Reader
-	if requestBody != nil {
+	if raw, ok := requestBody.(rawRequestBody); ok {
+		body = bytes.NewReader(raw)
+	} else if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
 		if err != nil {
 			return fmt.Errorf("encode control-plane request: %w", err)
@@ -4690,7 +4713,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
 	}
 	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Replays: s}
+	qualitySigner, err := builtinQualitySigner(passportKey, logger)
+	if err != nil {
+		return err
+	}
+	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Replays: s}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}

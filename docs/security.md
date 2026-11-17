@@ -95,6 +95,13 @@ ticket, log, or qualification artifact.
 
 Prompt and output content are not recorded by default. Request telemetry stores identifiers, dimensions, status, timing, and token counts. AIPerf uses metrics-only record exports; InferCrane does not upload benchmark data. Shadow traffic is not implemented, so requests are never duplicated silently.
 
+The built-in answer check of an optimization run sends a small fixed prompt suite to candidate and
+reference revisions and compares the answers in memory; answers are never stored. A customer eval
+set is the one place InferCrane keeps prompts you choose to give it: `infercrane evaluation set
+upload` stores the uploaded file in plaintext, bounded to 512 KiB and 200 prompts, scoped to your
+organization, and readable only by the worker. The API returns its metadata, never its prompts, and
+`evaluation set delete` removes it. Do not upload prompts containing personal data or secrets.
+
 Durable async inference is the explicit exception. It remains disabled until an operator injects
 `INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.
 Request and result bodies are stored only as AES-256-GCM ciphertext bound to tenant and job identity.

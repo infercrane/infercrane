@@ -1,6 +1,7 @@
-// Package qualityevidence validates externally produced semantic-evaluation
-// evidence. InferCrane verifies provenance and applies deterministic policy;
-// it does not run an LLM judge or inspect prompt/output bodies.
+// Package qualityevidence validates signed semantic-evaluation evidence, from a
+// customer's evaluator or from InferCrane's built-in answer check. InferCrane
+// verifies provenance and applies deterministic policy; it does not run an LLM
+// judge and the evidence never contains prompt or output bodies.
 package qualityevidence
 
 import (
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/passport"
 )
 
@@ -175,6 +177,21 @@ func (p Payload) Validate() error {
 		return errors.New("quality evaluated_at must be set and cannot be in the future")
 	}
 	return nil
+}
+
+// Record converts a verified envelope and its decoded payload into the stored
+// evidence row. The caller sets Source; the attach API never sets it to
+// InferCrane.
+func Record(payload Payload, envelope passport.Envelope) (domain.QualityEvidence, error) {
+	distributionJSON := "{}"
+	if payload.Distribution != nil {
+		encoded, err := json.Marshal(payload.Distribution)
+		if err != nil {
+			return domain.QualityEvidence{}, errors.New("quality distribution could not be encoded")
+		}
+		distributionJSON = string(encoded)
+	}
+	return domain.QualityEvidence{RevisionID: payload.RevisionID, Suite: payload.Suite, SuiteVersion: payload.SuiteVersion, Evaluator: payload.Evaluator, EvaluatorVersion: payload.EvaluatorVersion, Score: payload.Score, Passed: payload.Passed, SampleCount: payload.SampleCount, DistributionJSON: distributionJSON, ArtifactDigest: payload.ArtifactDigest, PayloadDigest: envelope.Digest, Signature: envelope.Signature, PublicKey: envelope.PublicKey, Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, EvaluatedAt: payload.EvaluatedAt}, nil
 }
 
 func Comparable(a, b Payload) bool {

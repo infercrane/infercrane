@@ -87,13 +87,13 @@ func TestCampaignReturnsPersistedProposalWarnings(t *testing.T) {
 }
 
 func TestCampaignWarningsKeepNoneDistinctFromUnreadable(t *testing.T) {
-	none := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`})
+	none := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: `{"schema_version":"infercrane.optimizer.proposal/v1"}`}, campaignQualityInputs{})
 	encoded, err := json.Marshal(none["warnings"])
 	if err != nil || string(encoded) != "[]" {
 		t.Fatalf("a proposal without warnings must report an empty list, got %s err=%v", encoded, err)
 	}
 	for _, stored := range []string{"", "{", `{"warnings":"not-a-list"}`} {
-		if warnings, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: stored})["warnings"]; present {
+		if warnings, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: stored}, campaignQualityInputs{})["warnings"]; present {
 			t.Fatalf("unreadable proposal %q must omit warnings, got %#v", stored, warnings)
 		}
 	}

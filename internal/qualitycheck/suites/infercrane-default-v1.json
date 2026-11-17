@@ -1,0 +1,32 @@
+{
+  "schema": "infercrane.dev/quality-eval-set/v1",
+  "name": "infercrane-default",
+  "version": "1",
+  "max_tokens": 64,
+  "prompts": [
+    {"id": "arithmetic-sum", "prompt": "What is 487 + 356? Reply with only the number."},
+    {"id": "arithmetic-product", "prompt": "What is 23 multiplied by 17? Reply with only the number."},
+    {"id": "arithmetic-word", "prompt": "A box holds 12 eggs. How many eggs are in 7 boxes? Reply with only the number."},
+    {"id": "arithmetic-percent", "prompt": "What is 15% of 260? Reply with only the number."},
+    {"id": "unit-minutes", "prompt": "How many minutes are in 3.5 hours? Reply with only the number."},
+    {"id": "fact-capital", "prompt": "What is the capital city of Japan? Reply with only the city name."},
+    {"id": "fact-planet", "prompt": "Which planet is closest to the Sun? Reply with one word."},
+    {"id": "fact-symbol", "prompt": "What is the chemical symbol for sodium? Reply with only the symbol."},
+    {"id": "fact-boiling", "prompt": "At sea level, at what temperature in degrees Celsius does water boil? Reply with only the number."},
+    {"id": "text-uppercase", "prompt": "Convert this text to uppercase: inference crane. Reply with only the converted text."},
+    {"id": "text-word-count", "prompt": "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'? Reply with only the number."},
+    {"id": "sentiment-positive", "prompt": "Classify the sentiment of this review as positive or negative: 'The battery lasts all day and the screen is gorgeous.' Reply with one word."},
+    {"id": "sentiment-negative", "prompt": "Classify the sentiment of this review as positive or negative: 'It stopped working after two days and support never replied.' Reply with one word."},
+    {"id": "extract-json", "prompt": "Extract the name and age from this sentence as JSON with the keys \"name\" and \"age\": 'Maria is 34 years old.' Reply with only the JSON."},
+    {"id": "extract-year", "prompt": "Which year is mentioned in this sentence: 'The bridge opened to traffic in 1937.' Reply with only the year."},
+    {"id": "code-output", "prompt": "What does this Python code print? print(len([1, 2, 3]) * 2) Reply with only the output."},
+    {"id": "code-sql", "prompt": "Write a SQL query that selects every column from a table named orders. Reply with only the query."},
+    {"id": "logic-order", "prompt": "Anna is taller than Ben. Ben is taller than Chris. Who is the shortest? Reply with only the name."},
+    {"id": "logic-sequence", "prompt": "What is the next number in the sequence 2, 4, 8, 16? Reply with only the number."},
+    {"id": "date-weekday", "prompt": "If today is Monday, which day of the week is it in 3 days? Reply with one word."},
+    {"id": "translate-french", "prompt": "Translate 'good morning' into French. Reply with only the translation."},
+    {"id": "translate-spanish", "prompt": "Translate 'thank you' into Spanish. Reply with only the translation."},
+    {"id": "list-colors", "prompt": "Name the three primary colors of light, separated by commas. Reply with only the list."},
+    {"id": "summarize-short", "prompt": "Summarize in at most eight words: 'The city council approved a plan to add bike lanes on Main Street next spring.'"}
+  ]
+}

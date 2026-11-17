@@ -14,8 +14,11 @@ Required configuration:
 - `INFERCRANE_TLS_CERT_FILE` and `INFERCRANE_TLS_KEY_FILE`: optional native server identity. Both are
   required together. Add `INFERCRANE_TLS_CLIENT_CA_FILE` to require and verify client certificates.
 - `INFERCRANE_PASSPORT_SIGNING_KEY_FILE`: optional mounted Ed25519 private-key file for issuing
-  Inference Passports. It must be readable only by its owner (`0600`); the private key is never
-  persisted in PostgreSQL. Back it up and rotate it through the workload secret manager.
+  Inference Passports and signing the built-in answer check's quality evidence. It must be readable
+  only by its owner (`0600`); the private key is never persisted in PostgreSQL. Back it up and rotate
+  it through the workload secret manager. Without it, Inference Passports are unavailable and each
+  process signs built-in quality evidence with a key it generates at startup, so that key ID changes
+  on restart.
 
 ## Hosted control plane on Fly.io
 

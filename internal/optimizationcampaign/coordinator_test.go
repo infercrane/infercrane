@@ -94,6 +94,7 @@ type coordinatorDriver struct {
 	provisionErr                                                                     error
 	guardCandidate                                                                   domain.OptimizationCandidateRun
 	measured                                                                         []string
+	validation                                                                       *ValidationResult
 }
 
 func (d *coordinatorDriver) Provision(_ context.Context, _ string, _ domain.OptimizationCandidateRun, budget Budget) (ProvisionResult, error) {
@@ -114,6 +115,9 @@ func (d *coordinatorDriver) Measure(_ context.Context, candidateID string, _ dom
 
 func (d *coordinatorDriver) Validate(context.Context, string, domain.OptimizationCandidateRun) (ValidationResult, error) {
 	d.validateCalls++
+	if d.validation != nil {
+		return *d.validation, nil
+	}
 	return ValidationResult{QualityEvidenceID: "quality-1", Passed: d.qualityPass}, nil
 }
 

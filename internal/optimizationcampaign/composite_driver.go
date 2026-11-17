@@ -77,6 +77,9 @@ type CompositeDriver struct {
 	Costs     CostAuthority
 	Benchmark CandidateBenchmark
 	Ranker    CandidateRanker
+	// Quality runs the built-in answer check when no customer evidence is
+	// attached. Nil leaves every candidate waiting for customer evidence.
+	Quality QualityChecker
 	// Replays resolves a customer-observed campaign's bound trace. Provision
 	// checks it before any provider mutation, so a campaign that cannot
 	// replay its trace fails before it spends.
@@ -147,8 +150,13 @@ func (d CompositeDriver) Measure(ctx context.Context, candidateID string, candid
 	return measuredResult(benchmark), nil
 }
 
+// Validate decides whether the candidate's answers are still good enough.
+// Customer-signed evidence attached for the exact revision always wins. Without
+// it, the built-in answer check compares the candidate with its reference and
+// records InferCrane-run evidence, unless the campaign asked to wait for
+// customer evidence.
 func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun) (ValidationResult, error) {
-	_, _, err := d.inputs(ctx, candidateID, candidate)
+	campaign, _, err := d.inputs(ctx, candidateID, candidate)
 	if err != nil {
 		return ValidationResult{}, err
 	}
@@ -156,25 +164,35 @@ func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candi
 	if err != nil {
 		return ValidationResult{}, operations.Retryable("optimization_quality_lookup_failed", err)
 	}
-	var selected *domain.QualityEvidence
-	for index := range rows {
-		row := &rows[index]
-		// A revision is immutable and signed quality evidence is bound to that
-		// exact identity. Requiring it to be newer than the candidate state
-		// transition incorrectly rejects evidence attached between measurement
-		// and validation.
-		if row.RevisionID != candidate.RevisionID || selected != nil && !row.EvaluatedAt.After(selected.EvaluatedAt) {
-			continue
-		}
-		selected = row
+	// A revision is immutable and signed quality evidence is bound to that
+	// exact identity. Requiring it to be newer than the candidate state
+	// transition incorrectly rejects evidence attached between measurement
+	// and validation.
+	if row := newestEvidence(rows, candidate.RevisionID, func(row domain.QualityEvidence) bool { return row.Source != domain.QualityEvidenceSourceInferCrane }); row != nil {
+		return evidenceResult(*row), nil
 	}
-	if selected != nil {
-		if !selected.Passed {
-			return ValidationResult{QualityEvidenceID: selected.ID, Passed: false, FailureCode: "quality_gate_rejected"}, nil
-		}
-		return ValidationResult{QualityEvidenceID: selected.ID, Passed: true}, nil
+	if QualityWaitsForCustomer(campaign) || d.Quality == nil {
+		return ValidationResult{}, operations.Retryable(retryQualityEvidencePending, errors.New("attach passing signed semantic quality evidence for the exact candidate revision"))
 	}
-	return ValidationResult{}, operations.Retryable("optimization_quality_evidence_pending", errors.New("attach passing signed semantic quality evidence for the exact candidate revision"))
+	row, err := d.Quality.Check(ctx, campaign, candidate)
+	switch {
+	case errors.Is(err, ErrQualityEvalSetMissing):
+		return ValidationResult{}, operations.Retryable(retryQualityEvalSetPending, err)
+	case errors.Is(err, ErrQualityReferenceUnavailable):
+		// Missing reference answers never pass. The candidate ends
+		// inconclusive instead of waiting for the approval to expire.
+		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityReferenceUnavailable}, nil
+	case err != nil:
+		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, err)
+	}
+	return evidenceResult(row), nil
+}
+
+func evidenceResult(row domain.QualityEvidence) ValidationResult {
+	if !row.Passed {
+		return ValidationResult{QualityEvidenceID: row.ID, Passed: false, FailureCode: FailureQualityRejected}
+	}
+	return ValidationResult{QualityEvidenceID: row.ID, Passed: true}
 }
 
 func (d CompositeDriver) Rank(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun) (RankingResult, error) {

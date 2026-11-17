@@ -41,7 +41,14 @@ func (s *Store) RecordQualityEvidence(ctx context.Context, tenant, deploymentNam
 	if evidence.CreatedAt.IsZero() {
 		evidence.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.ExecContext(ctx, `INSERT INTO revision_quality_evidence(id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,payload_digest) DO NOTHING`, evidence.ID, evidence.TenantID, evidence.DeploymentID, evidence.RevisionID, evidence.Suite, evidence.SuiteVersion, evidence.Evaluator, evidence.EvaluatorVersion, evidence.Score, evidence.Passed, evidence.SampleCount, nullJSON(evidence.DistributionJSON), evidence.ArtifactDigest, evidence.PayloadDigest, evidence.Signature, evidence.PublicKey, evidence.Algorithm, evidence.KeyID, evidence.EvaluatedAt.Format(time.RFC3339Nano), evidence.CreatedAt.Format(time.RFC3339Nano))
+	switch evidence.Source {
+	case "":
+		evidence.Source = domain.QualityEvidenceSourceCustomer
+	case domain.QualityEvidenceSourceCustomer, domain.QualityEvidenceSourceInferCrane:
+	default:
+		return domain.QualityEvidence{}, false, errors.New("quality evidence source must be customer or infercrane")
+	}
+	result, err := s.ExecContext(ctx, `INSERT INTO revision_quality_evidence(id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,payload_digest) DO NOTHING`, evidence.ID, evidence.TenantID, evidence.DeploymentID, evidence.RevisionID, evidence.Suite, evidence.SuiteVersion, evidence.Evaluator, evidence.EvaluatorVersion, evidence.Score, evidence.Passed, evidence.SampleCount, nullJSON(evidence.DistributionJSON), evidence.ArtifactDigest, evidence.PayloadDigest, evidence.Signature, evidence.PublicKey, evidence.Algorithm, evidence.KeyID, evidence.EvaluatedAt.Format(time.RFC3339Nano), evidence.CreatedAt.Format(time.RFC3339Nano), evidence.Source, evidence.ReferenceRevisionID)
 	if err != nil {
 		return domain.QualityEvidence{}, false, err
 	}
@@ -56,7 +63,7 @@ func (s *Store) RecordQualityEvidence(ctx context.Context, tenant, deploymentNam
 		if err != nil {
 			return domain.QualityEvidence{}, false, err
 		}
-		if existing.DeploymentID != evidence.DeploymentID || existing.RevisionID != evidence.RevisionID || existing.Signature != evidence.Signature || existing.PublicKey != evidence.PublicKey {
+		if existing.DeploymentID != evidence.DeploymentID || existing.RevisionID != evidence.RevisionID || existing.Signature != evidence.Signature || existing.PublicKey != evidence.PublicKey || existing.Source != evidence.Source {
 			return domain.QualityEvidence{}, false, fmt.Errorf("%w: quality evidence digest already identifies another immutable record", ErrConflict)
 		}
 		return existing, false, nil
@@ -71,7 +78,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.distribution_json::text,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.distribution_json::text,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at,q.source,q.reference_revision_id FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +95,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 }
 
 func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest string) (domain.QualityEvidence, error) {
-	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
+	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
 	item, err := scanQualityEvidence(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, ErrNotFound
@@ -99,7 +106,7 @@ func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest stri
 func scanQualityEvidence(row rowScanner) (domain.QualityEvidence, error) {
 	var item domain.QualityEvidence
 	var evaluatedAt, createdAt string
-	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.DistributionJSON, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt)
+	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.DistributionJSON, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt, &item.Source, &item.ReferenceRevisionID)
 	item.EvaluatedAt, item.CreatedAt = parseTime(evaluatedAt), parseTime(createdAt)
 	return item, err
 }
@@ -242,4 +249,41 @@ func (s *Store) revisionModel(ctx context.Context, revisionID string) (string, e
 		return identity, nil
 	}
 	return requested, nil
+}
+
+// QualityEvidenceByIDs returns the tenant's evidence rows with the given IDs,
+// keyed by ID. Unknown IDs are absent from the map.
+func (s *Store) QualityEvidenceByIDs(ctx context.Context, tenant string, ids []string) (map[string]domain.QualityEvidence, error) {
+	if tenant == "" {
+		tenant = "global"
+	}
+	out := make(map[string]domain.QualityEvidence, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, duplicate := seen[id]; id == "" || duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return out, nil
+	}
+	if len(unique) > 1000 {
+		return nil, errors.New("at most 1000 quality evidence IDs can be read at once")
+	}
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		item, scanErr := scanQualityEvidence(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out[item.ID] = item
+	}
+	return out, rows.Err()
 }

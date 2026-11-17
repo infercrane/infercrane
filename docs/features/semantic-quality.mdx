@@ -1,16 +1,88 @@
 ---
 title: Semantic quality evidence
-description: Bind signed, aggregate task-quality evidence to exact revisions and gate rollouts with PASS, WATCH, and BLOCK verdicts per eval.
+description: Bind signed, aggregate task-quality evidence to exact revisions, from InferCrane's built-in answer check or your own evaluator, and gate rollouts with PASS, WATCH, and BLOCK verdicts per eval.
 ---
 
 # Healthy infrastructure is not enough
 
 A candidate may be ready, fast, and error-free while producing worse answers. InferCrane accepts
 aggregate evidence from a customer-owned evaluation suite, verifies its signature and revision
-identity, and lets Release Guard enforce explicit score thresholds.
+identity, and lets Release Guard enforce explicit score thresholds. Optimization runs also produce
+their own evidence with a [built-in answer check](#built-in-answer-check), so a run reaches a
+decision without you signing anything.
 
 InferCrane does not store prompts or generated outputs in this evidence format and does not choose an
 LLM judge for you.
+
+## Built-in answer check
+
+When an optimization campaign measures a candidate and finds no evidence you attached for its exact
+revision, the worker checks the candidate's answers itself. It sends the same prompts to the
+candidate and to a reference, the campaign control or, for an evolve-endpoint campaign, the target's
+active revision, and scores how closely each candidate answer matches the reference answer.
+[How a campaign checks answers](/features/optimization#how-a-campaign-checks-answers) describes the
+steps.
+
+| Property | Built-in answer check |
+|---|---|
+| Prompts | `infercrane-default` version 1: 24 short prompts with short answers (arithmetic, facts, extraction, code, translation, summaries), pinned by SHA-256 digest in the product. Print it with `infercrane evaluation set default`. |
+| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Sent directly to one ready replica of each exact revision. |
+| Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and `<think>` blocks. Two empty answers agree. |
+| Score | The mean over prompts. The reference's own row records 1. |
+| Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. `BLOCK` records `passed: false`. |
+| Evidence | Evaluator `infercrane-builtin` version 1, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, and an artifact digest that commits to a hash of every answer. Signed with the control plane's key. |
+| Provenance | `source: infercrane` and the reference's revision ID. Only the worker writes these rows; the attach API always records `source: customer` and refuses the evaluator name `infercrane-builtin`. |
+
+Answers are compared in memory and discarded. Prompts of the built-in suite live in the product;
+nothing about your traffic is sent.
+
+Evidence you attach for the candidate's exact revision always wins over the built-in check. A
+campaign created with `--quality-check customer_evidence` skips the built-in check and waits for your
+evidence. The run page and `infercrane optimize inspect` then show the exact `evaluation ingest`
+command for each waiting candidate.
+
+The answer check measures agreement with your current setup on general prompts. It is not a task
+accuracy benchmark. Use an eval set of your own prompts, or your own evaluator, for that.
+
+### Use your own prompts
+
+An eval set replaces the built-in prompts. It has the same format as the built-in suite:
+
+```json eval-set.json
+{
+  "schema": "infercrane.dev/quality-eval-set/v1",
+  "name": "support-answers",
+  "version": "3",
+  "max_tokens": 128,
+  "prompts": [
+    {"id": "refund-window", "prompt": "How many days do customers have to request a refund? Answer in one sentence."},
+    {"id": "reset-password", "system": "You are a support agent.", "prompt": "How do I reset my password?"}
+  ]
+}
+```
+
+Up to 200 prompts and 512 KiB. Prompt IDs are 1 to 64 letters, digits, dots, dashes, or underscores
+and must be unique. Unknown fields are rejected, so expected answers are not accepted: candidates are
+scored against the reference's answers, not against stored answers.
+
+```bash
+infercrane evaluation set upload eval-set.json
+infercrane optimize create MODEL --provider PROVIDER --gpu GPU --eval-set sha256:DIGEST
+```
+
+The digest is the SHA-256 of the file's exact bytes. The campaign stores it in its reviewed proposal,
+so the eval set cannot change under a running campaign. A campaign that names an eval set that is
+not uploaded waits for it, and the run page shows the upload command. `evaluation set inspect` shows
+an uploaded eval set without its prompts, and `evaluation set delete` removes it. Uploaded eval sets
+belong to your organization and are deleted with it.
+
+### Signing key
+
+Built-in evidence is signed with the passport signing key from
+`INFERCRANE_PASSPORT_SIGNING_KEY_FILE` when the control plane has one. Without it, each control-plane
+process generates a key when it starts. Every row stays verifiable either way, because the envelope
+carries its public key, but the key ID then changes on restart. Configure the passport key for a
+stable key ID.
 
 ## Create an evaluator key
 
@@ -121,7 +193,9 @@ Missing or incomparable required evidence leaves the decision waiting. A failed 
 the minimum, or regression beyond policy rejects the candidate. The evaluator cannot activate a
 revision; promotion remains a separate, authorized control-plane decision.
 
-Release Guard checks every eval the candidate has evidence for, not only the newest one. An eval is
+Release Guard checks every eval the candidate has evidence for, not only the newest one, including
+the built-in answer check. For an evolve-endpoint campaign the built-in check records the active
+revision as its reference, so the two rows are comparable. An eval is
 one suite scored by one evaluator. For each eval, InferCrane takes the candidate's newest evidence
 and compares it with the active revision's newest evidence from the same suite version and
 evaluator version.

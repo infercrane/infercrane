@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
 
@@ -560,5 +561,24 @@ func TestAssembleWithoutWinnerNeverInventsResults(t *testing.T) {
 		if report.Quality.Verdict != releaseguard.QualityUnknown || report.Monthly.WinnerUSD != nil {
 			t.Fatalf("%s: quality=%+v monthly=%+v", tc.state, report.Quality, report.Monthly)
 		}
+	}
+}
+
+func TestAssembleReadsTheBuiltinAnswerCheckWithItsWatchBand(t *testing.T) {
+	builtin := func(id, revision, reference string, score float64) *domain.QualityEvidence {
+		row := signedQuality(id, revision, "1@sha256:"+strings.Repeat("d", 64), score, true)
+		row.Suite, row.Evaluator, row.EvaluatorVersion = "infercrane-default", qualitycheck.Evaluator, qualitycheck.EvaluatorVersion
+		row.Source, row.ReferenceRevisionID = domain.QualityEvidenceSourceInferCrane, reference
+		return row
+	}
+	f := winnerFixture()
+	f.arms[0].quality = builtin("quality-control", "rev-control", "rev-control", 1)
+	f.arms[1].quality = builtin("quality-winner", "rev-winner", "rev-control", 0.93)
+	quality := Assemble(f.evidence()).Quality
+	if quality.Verdict != releaseguard.QualityWatch || quality.Basis != BasisBuiltinCheck || quality.Source != domain.QualityEvidenceSourceInferCrane || !near(quality.BaselineScore, 1) || !near(quality.WinnerScore, 0.93) || !near(quality.BlockThresholdPercent, qualitycheck.BlockRegressionPercent) || !near(quality.WatchThresholdPercent, qualitycheck.WatchRegressionPercent) {
+		t.Fatalf("quality = %+v", quality)
+	}
+	if customer := Assemble(winnerFixture().evidence()).Quality; customer.Source != domain.QualityEvidenceSourceCustomer || customer.Basis != BasisCampaignGate {
+		t.Fatalf("customer evidence quality = %+v", customer)
 	}
 }

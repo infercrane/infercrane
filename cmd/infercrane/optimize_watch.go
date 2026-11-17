@@ -31,6 +31,8 @@ var watchStateWords = map[string]string{
 
 var watchReasonWords = map[string]string{
 	"measured_no_measurable_difference":  "no real difference from your current setup",
+	"quality_gate_rejected":              "answers changed too much",
+	"quality_reference_unavailable":      "no reference answers to compare with",
 	"release_guard_rejected":             "failed the safety check",
 	"release_guard_inconclusive":         "safety check had too little evidence",
 	"approval_expired_before_activation": "approval expired before activation",
@@ -50,6 +52,22 @@ type watchCandidate struct {
 	BenchmarkID         string          `json:"benchmark_id"`
 	QualityEvidenceID   string          `json:"quality_evidence_id"`
 	DeploymentSpec      json.RawMessage `json:"deployment_spec"`
+	Quality             *watchQuality   `json:"quality"`
+}
+
+// watchQuality is the control API's view of a candidate's answer check.
+type watchQuality struct {
+	State   string `json:"state"`
+	Source  string `json:"source,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Reason  string `json:"reason"`
+	Command string `json:"command,omitempty"`
+}
+
+var watchQualityWords = map[string]string{
+	"checking":             "checking answers against your current setup",
+	"waiting_for_eval_set": "waiting for your eval set",
+	"waiting_for_evidence": "waiting for your signed evaluation",
 }
 
 type watchCampaign struct {
@@ -265,6 +283,9 @@ func watchLabel(candidate watchCandidate) string {
 
 func watchStatus(candidate watchCandidate) string {
 	text := watchStateWords[candidate.State]
+	if candidate.State == "validating" && candidate.Quality != nil && watchQualityWords[candidate.Quality.State] != "" {
+		text = watchQualityWords[candidate.Quality.State]
+	}
 	if text == "" {
 		text = strings.ReplaceAll(candidate.State, "_", " ")
 	}
@@ -378,6 +399,7 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 	if !measuredAny {
 		b.WriteString("  " + paint(s.subtle, "results appear as each setup finishes measuring") + "\n")
 	}
+	b.WriteString(renderWatchAnswers(candidates, s, paint))
 	if watchTerminal[campaign.State] {
 		b.WriteString("\n" + paint(s.title, "Decision") + "\n")
 		var winner *watchCandidate
@@ -398,6 +420,42 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 			b.WriteString("  " + paint(s.subtle, "infercrane optimize activate "+campaign.ID+" --candidate "+winner.ID+" publishes it as the optimized endpoint") + "\n")
 		default:
 			b.WriteString("  No setup qualified. Nothing changes in production.\n")
+		}
+	}
+	return b.String()
+}
+
+// renderWatchAnswers shows each setup's answer check as the control API
+// reports it, with the exact command when the check waits on the customer.
+func renderWatchAnswers(candidates []watchCandidate, s uiStyles, paint func(lipgloss.Style, string) string) string {
+	var b strings.Builder
+	for _, candidate := range candidates {
+		quality := candidate.Quality
+		if quality == nil || quality.State == "" || quality.State == "pending" || quality.State == "not_run" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("\n" + paint(s.title, "Answers") + "\n")
+		}
+		source := ""
+		switch quality.Source {
+		case "infercrane":
+			source = " (InferCrane check)"
+		case "customer":
+			source = " (your evaluation)"
+		}
+		style := s.subtle
+		switch quality.State {
+		case "passed":
+			style = s.healthyText
+		case "watch", "waiting_for_eval_set", "waiting_for_evidence":
+			style = s.warningText
+		case "blocked", "inconclusive":
+			style = s.failureText
+		}
+		b.WriteString(fmt.Sprintf("  %-40s %s\n", truncateText(watchLabel(candidate), 40), paint(style, quality.Reason+source)))
+		if quality.Command != "" {
+			b.WriteString("    " + paint(s.subtle, "run: "+quality.Command) + "\n")
 		}
 	}
 	return b.String()
