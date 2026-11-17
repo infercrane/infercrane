@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/intentplan"
 	"github.com/infercrane/infercrane/internal/modelcheck"
+	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/spec"
 )
 
@@ -68,5 +69,38 @@ func TestModelsCheckPrintsTheCheckAndWritesADeploymentSpec(t *testing.T) {
 	}
 	if err = modelsCheckCommand(context.Background(), cfg, []string{"phi-4"}); err == nil {
 		t.Fatal("a name that is not a repository was accepted")
+	}
+}
+
+func TestOptimizePinsAnUncatalogedModelOnlyThroughAConfiguredControlPlane(t *testing.T) {
+	registries, err := modelcheck.Registries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := modelcheck.Model{Repository: "microsoft/phi-4", Commit: "2db69c1c3e91a05d2c64a3185acfbaf36f744e25", PipelineTag: "text-generation", Architectures: []string{"Phi3ForCausalLM"},
+		Weights: &modelcheck.Weights{Parameters: 14659507200, ByDType: map[string]int64{"BF16": 14659507200}}, Config: &modelcheck.Config{Layers: 40, HiddenSize: 5120, AttentionHeads: 40, KVHeads: 10, ContextLength: 16384}, ConfigState: modelcheck.ConfigRead}
+	report := modelcheck.Evaluate(model, modelcheck.EvaluateOptions{GPUs: []modelcheck.GPU{{Name: "L40S", MemoryGiB: 48}}, Registries: registries})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/catalog/hugging-face/check" || r.URL.Query().Get("repository") != "microsoft/phi-4" {
+			t.Errorf("unexpected request %s", r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"check": report})
+	}))
+	defer server.Close()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("INFERCRANE_URL", server.URL)
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	request := optimizer.Request{ModelIdentity: "microsoft/phi-4"}
+	if err = pinUncatalogedModel(context.Background(), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.ModelRevision != report.Revision || request.MaxModelLen != 8192 {
+		t.Fatalf("the model was not pinned: %+v", request)
+	}
+	// Without a key there is no configured control plane: nothing is asked.
+	t.Setenv("INFERCRANE_API_KEY", "")
+	unpinned := optimizer.Request{ModelIdentity: "microsoft/phi-4"}
+	if err = pinUncatalogedModel(context.Background(), &unpinned); err != nil || unpinned.ModelRevision != "" {
+		t.Fatalf("an unconfigured CLI pinned the model: %+v %v", unpinned, err)
 	}
 }

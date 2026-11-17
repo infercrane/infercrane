@@ -143,8 +143,10 @@ func writeDraftSpec(path string, draft intentplan.DeploymentDraft) error {
 // pinUncatalogedModel asks the control plane to check a model outside the
 // reviewed catalog when no commit was given, so `optimize` can propose for
 // it. It pins the checked commit and bounds the baseline's context to the
-// length the GPU was sized for. Without a configured control plane the
-// request is left as it was.
+// length the GPU was sized for. Without a configured control plane, or when
+// it cannot answer, the request is left as it was and the proposal fails
+// closed on the missing commit, exactly as before. Only a model the check
+// found unsupported is refused here.
 func pinUncatalogedModel(ctx context.Context, request *optimizer.Request) error {
 	identity := strings.TrimSpace(request.ModelIdentity)
 	if request.ModelRevision != "" || strings.Contains(identity, "@") || !modelcheck.ValidRepository(identity) {
@@ -156,7 +158,7 @@ func pinUncatalogedModel(ctx context.Context, request *optimizer.Request) error 
 		}
 	}
 	cfg, err := config.LoadClient()
-	if err != nil {
+	if err != nil || strings.TrimSpace(cfg.APIKey) == "" {
 		return nil
 	}
 	var response struct {
@@ -164,7 +166,8 @@ func pinUncatalogedModel(ctx context.Context, request *optimizer.Request) error 
 	}
 	path := "/api/v1/catalog/hugging-face/check?" + url.Values{"repository": {identity}}.Encode()
 	if err = controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &response); err != nil {
-		return fmt.Errorf("check %s on the control plane (or pass --model-revision COMMIT): %w", identity, err)
+		fmt.Fprintf(os.Stderr, "Could not check %s on the control plane (%v); pass --model-revision COMMIT to propose for it.\n", identity, err)
+		return nil
 	}
 	if response.Check.Verdict == modelcheck.Unsupported {
 		return fmt.Errorf("%s cannot run on InferCrane's runtimes: %s", identity, response.Check.Reason)
