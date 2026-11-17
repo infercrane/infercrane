@@ -57,6 +57,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedsandbox"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
+	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/notification"
 	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/operations"
@@ -449,6 +450,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "recipes":
 		return recipesCommand(ctx, cfg, args[1:])
 	case "models":
+		if len(args) > 1 && args[1] == "check" {
+			return modelsCheckCommand(ctx, cfg, args[2:])
+		}
 		return modelsCommand(args[1:])
 	case "lab":
 		return labCommand(ctx, cfg, args[1:])
@@ -1316,7 +1320,7 @@ func modelsCommand(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 || (inspect && query == "") {
-		return errors.New("usage: infercrane models [QUERY] | infercrane models inspect NAME [--output human|json]")
+		return errors.New("usage: infercrane models [QUERY] | infercrane models inspect NAME | infercrane models check OWNER/NAME [--output human|json]")
 	}
 	if inspect {
 		entry, found := curatedrecipe.Get(query)
@@ -1353,7 +1357,7 @@ func modelsCommand(args []string) error {
 		return printJSON(map[string]any{"data": entries, "performance_claims": false})
 	}
 	if len(entries) == 0 {
-		fmt.Println("No reviewed model starting points match. Use `infercrane workload init --model REPOSITORY` for an explicit model.")
+		fmt.Println("No reviewed model starting points match. Check any open Hugging Face model with `infercrane models check OWNER/NAME`.")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -4634,6 +4638,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
 	}
 	controlAPI.HuggingFaceSearch = huggingFaceSearch
+	if cfg.HuggingFaceMetadataEnabled {
+		modelCheck, modelCheckErr := modelcheck.New(modelcheck.ResolverOptions{})
+		if modelCheckErr != nil {
+			return fmt.Errorf("configure Hugging Face model checks: %w", modelCheckErr)
+		}
+		controlAPI.ModelCheck = modelCheck
+	}
 	if cfg.StripeEnabled() {
 		stripeBilling, stripeErr := managedbilling.NewStripe(cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.StripeBillingReturnURL, cfg.StripePriceIDs, cfg.StripeLivemode)
 		if stripeErr != nil {

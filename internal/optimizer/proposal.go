@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
@@ -90,6 +91,11 @@ type Request struct {
 	Search                string   `json:"search,omitempty"`
 	ModelFeatures         []string `json:"model_features,omitempty"`
 	ModelConfigDigest     string   `json:"model_config_digest,omitempty"`
+	// MaxModelLen bounds the context of untuned baselines for models outside
+	// the reviewed catalog, so the runtime does not reserve KV cache for a
+	// longer context than the GPU was sized for. Reviewed profiles keep their
+	// own arguments.
+	MaxModelLen int `json:"max_model_len,omitempty"`
 	// QualityCheck chooses who decides whether a candidate's answers are still
 	// good enough. QualityCheckBuiltin (the default) runs InferCrane's
 	// built-in answer check against the campaign control; QualityCheckCustomer
@@ -376,6 +382,8 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 }
 
 const (
+	minMaxModelLen            = 256
+	maxMaxModelLen            = 1 << 20
 	maxProposalCandidates     = 100
 	genericBaselineLimitation = "This baseline has no model-specific runtime arguments or kernel claims."
 )
@@ -617,6 +625,9 @@ func validateRequest(request Request) error {
 	}
 	if request.QualityCheck != "" && request.QualityCheck != QualityCheckCustomer {
 		return errors.New("quality_check must be builtin or customer_evidence")
+	}
+	if request.MaxModelLen != 0 && (request.MaxModelLen < minMaxModelLen || request.MaxModelLen > maxMaxModelLen) {
+		return fmt.Errorf("max_model_len must be between %d and %d", minMaxModelLen, maxMaxModelLen)
 	}
 	if request.QualityEvalSet != "" && !qualityEvalSetDigest.MatchString(request.QualityEvalSet) {
 		return errors.New("quality_eval_set must be sha256:<64 lowercase hex characters>")
@@ -930,7 +941,7 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = model, revision
 	draft.Runtime.Engine, draft.Runtime.Version = compatible.Runtime, runtimeVersion
-	draft.Runtime.Args = []string{}
+	draft.Runtime.Args = genericRuntimeArgs(compatible, request)
 	draft.Compute.Mode = string(compatible.Mode)
 	draft.Resources.GPU, draft.Resources.GPUCount = request.GPU, request.GPUCount
 	draft.Provider.Cloud, draft.Provider.Adapter, draft.Provider.Region = compatible.Cloud, compatible.Adapter, request.Region
@@ -965,6 +976,29 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 	}{source, draft, request.WorkloadProfile, compatible})
 	sum := sha256.Sum256(identity)
 	return Candidate{ID: hex.EncodeToString(sum[:]), Status: "proposed-unmeasured", EvidenceState: EvidenceUnmeasured, Objective: request.Objective, ConfigurationProfile: compatible.Runtime + "-generic-baseline", BenchmarkProfile: request.WorkloadProfile, CompatibilityState: string(compatible.State), CompatibilityEvidence: compatible.Evidence, Source: source, Features: features, RequiredEvidence: required, Limitations: limitations, Deployment: draft}
+}
+
+// genericRuntimeArgs are the only arguments an untuned baseline carries: the
+// context bound the caller sized the GPU for, and tensor parallelism across
+// the replica's GPUs. A Dynamo graph sets tensor parallelism itself.
+func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Request) []string {
+	args := []string{}
+	sglang := compatible.Runtime == "sglang"
+	if request.MaxModelLen > 0 {
+		flag := "--max-model-len"
+		if sglang {
+			flag = "--context-length"
+		}
+		args = append(args, flag, strconv.Itoa(request.MaxModelLen))
+	}
+	if request.GPUCount > 1 && compatible.Adapter != "kubernetes-dynamo" {
+		flag := "--tensor-parallel-size"
+		if sglang {
+			flag = "--tp-size"
+		}
+		args = append(args, flag, strconv.Itoa(request.GPUCount))
+	}
+	return args
 }
 
 func matchingCompatibility(entries []integration.RuntimeCompatibility, request Request) []integration.RuntimeCompatibility {

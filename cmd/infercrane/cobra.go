@@ -61,7 +61,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
 	{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
-	{use: "models [QUERY] | models inspect NAME [flags]", short: "Explore reviewed model starting points", group: "start"},
+	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Explore reviewed models, or check any open Hugging Face model", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
 	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
@@ -96,6 +96,12 @@ var commandExamples = map[string]string{
 
   # Resume following one after a disconnect
   infercrane operation watch OPERATION_ID`,
+	"models": `  # Reviewed starting points
+  infercrane models qwen
+
+  # Check any open Hugging Face model, then deploy the setup it proposes
+  infercrane models check microsoft/phi-4 --spec phi-4.yaml
+  infercrane deploy phi-4.yaml --wait`,
 	"plan": `  # Common path: preview safe defaults
   infercrane plan meta-llama/Llama-3.1-8B-Instruct
 
@@ -610,7 +616,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--profile", "--revision", "--streaming", "--ttft-slo-ms", "--tpot-slo-ms", "--latency-slo-ms", "--output"},
 		"recipe":      {"--name", "--version", "--benchmark", "--output"},
 		"recipes":     {"--limit", "--output"},
-		"models":      {"--output"},
+		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
 		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},

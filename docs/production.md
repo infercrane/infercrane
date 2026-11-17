@@ -64,6 +64,12 @@ key is the platform's supply credential, not a tenant BYOC credential. Leave the
 false until current price ingestion, Stripe funding, auto-stop, provider deletion, and settlement
 are all operational.
 
+To let the dashboard and CLI deploy and optimize open Hugging Face models outside the reviewed
+catalog, set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. The control plane then needs outbound
+HTTPS to `huggingface.co` and reads model metadata only when someone plans, checks, or proposes such
+a model. Leave it unset to keep planning to reviewed models; see
+[Check any model automatically](/features/model-catalog#check-any-model-automatically).
+
 To enable customer-owned RunPod Pods, inject separate random
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY` values of at least 32
 bytes each. The first encrypts tenant provider credentials and optimization run notification

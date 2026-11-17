@@ -2,9 +2,9 @@ package optimizer
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -18,36 +18,14 @@ const (
 // were read from source. Another version has unknown defaults.
 var reviewedEngineVersions = map[string]string{"vllm": support.DefaultRuntimeVersion, "sglang": support.SGLangRuntimeVersion}
 
-// acceleratorMemoryGiB is the device memory of accelerators InferCrane
-// plans on, keyed by normalized name. An absent name has unknown memory.
-var acceleratorMemoryGiB = map[string]int{
-	"h100": 80, "h100sxm": 80, "h100pcie": 80, "h10080gb": 80, "h100nvl": 94, "h800": 80, "h20": 96, "h200": 141, "gh200": 96,
-	"b200": 180, "b300": 288, "gb200": 186, "gb300": 288, "rtxpro6000": 96,
-	"a100": 40, "a10040gb": 40, "a10080gb": 80, "a100sxm4": 40, "a800": 80,
-	"l40s": 48, "l40": 48, "l4": 24, "a10g": 24, "a10": 24, "a6000": 48, "rtxa6000": 48, "rtx6000ada": 48,
-	"rtx4090": 24, "rtx5090": 32, "t4": 16, "v100": 16,
-	"mi300x": 192, "mi325x": 256, "mi355x": 288,
-}
-
-var memorySuffix = regexp.MustCompile(`([0-9]+)gb$`)
-
 // acceleratorMemoryClass applies vLLM 0.22.1's rule for batch defaults:
 // 70 GiB or more of device memory, except A100, gets the larger defaults.
 func acceleratorMemoryClass(gpu string) (string, bool) {
-	name := normalizedAccelerator(gpu)
-	memory, known := acceleratorMemoryGiB[name]
-	if !known {
-		if match := memorySuffix.FindStringSubmatch(name); match != nil {
-			var parsed int
-			if _, err := fmt.Sscanf(match[1], "%d", &parsed); err == nil && parsed > 0 {
-				memory, known = parsed, true
-			}
-		}
-	}
+	memory, known := provideridentity.AcceleratorMemoryGiB(gpu)
 	if !known {
 		return "", false
 	}
-	if memory >= 70 && !strings.Contains(name, "a100") {
+	if memory >= 70 && !strings.Contains(provideridentity.NormalizedAccelerator(gpu), "a100") {
 		return memoryLarge, true
 	}
 	return memorySmall, true
