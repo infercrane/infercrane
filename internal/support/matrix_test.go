@@ -67,3 +67,24 @@ func TestV1QualificationIsExact(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateProviderAdmitsOnlyDeclaredSkyPilotAdapters(t *testing.T) {
+	matrix := V1()
+	if err := matrix.ValidateProvider(DefaultRuntime, "vast", ElasticMode, "skypilot-vast"); err != nil {
+		t.Fatalf("declared SkyPilot cloud rejected: %v", err)
+	}
+	for _, tc := range []struct{ runtime, cloud, mode, adapter string }{
+		{DefaultRuntime, "vast", ElasticMode, ""},
+		{DefaultRuntime, "vast", ElasticMode, "skypilot-lambda"},
+		{DefaultRuntime, "vast", ServerlessMode, "skypilot-vast"},
+		{"made-up-runtime", "vast", ElasticMode, "skypilot-vast"},
+		{DefaultRuntime, "Vast_AI", ElasticMode, "skypilot-Vast_AI"},
+	} {
+		if err := matrix.ValidateProvider(tc.runtime, tc.cloud, tc.mode, tc.adapter); err == nil {
+			t.Fatalf("ValidateProvider(%+v) admitted an undeclared combination", tc)
+		}
+	}
+	if err := matrix.ValidateProvider(DefaultRuntime, "aws", ElasticMode, ""); err != nil {
+		t.Fatalf("qualified cloud rejected: %v", err)
+	}
+}

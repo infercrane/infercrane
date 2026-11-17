@@ -102,7 +102,7 @@ func Load(path string) (Deployment, error) {
 	if out.Endpoint == "" {
 		out.Endpoint = out.Name
 	}
-	if err := support.V1().Validate(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode); err != nil {
+	if err := support.V1().ValidateProvider(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode, out.Provider.Adapter); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {

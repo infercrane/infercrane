@@ -46,6 +46,11 @@ func TestVastAliasesResolveToExactMarketplaceName(t *testing.T) {
 		"A100 80GB": "A100 SXM4",
 		"T4":        "Tesla T4",
 		"L40S":      "L40S",
+		"RTX4090":   "RTX 4090",
+		"RTX 4090":  "RTX 4090",
+		"RTX5090":   "RTX 5090",
+		"RTX3090":   "RTX 3090",
+		"A6000":     "RTX A6000",
 	} {
 		if got := GPUTypeID("vast", input); got != expected {
 			t.Fatalf("GPUTypeID(vast, %q)=%q, want %q", input, got, expected)

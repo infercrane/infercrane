@@ -70,7 +70,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 		return domain.DeploymentRevision{}, errors.New("serverless revision currently requires gpu_count 1")
 	}
 	if normalized.ComputeMode != "existing" {
-		if err := support.V1().Validate(normalized.Runtime, normalized.Cloud, normalized.ComputeMode); err != nil {
+		if err := support.V1().ValidateProvider(normalized.Runtime, normalized.Cloud, normalized.ComputeMode, normalized.ProviderAdapter); err != nil {
 			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)
 		}
 	}

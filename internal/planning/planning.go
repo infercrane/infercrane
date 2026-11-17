@@ -233,7 +233,7 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, errors.New("replicas must be positive and max replicas must be >= min replicas")
 	}
 	if in.Cloud != "" {
-		if err := support.V1().Validate(in.Runtime, in.Cloud, in.ComputeMode); err != nil {
+		if err := support.V1().ValidateProvider(in.Runtime, in.Cloud, in.ComputeMode, in.ProviderAdapter); err != nil {
 			return Plan{}, fmt.Errorf("support policy: %w", err)
 		}
 		if in.Cloud == "aws" && in.Region == "" {

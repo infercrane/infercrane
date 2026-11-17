@@ -63,6 +63,7 @@ ACCELERATOR_RESOURCE = "infercrane.dev/simulated-accelerator"
 ACCELERATOR_LABEL = "infercrane.dev/accelerator-product"
 ACCELERATOR = "SIMULATED-CPU"
 NOMINAL_HOURLY_USD = 0.25  # stated rate card for the laptop node, not a market price
+APPROVAL_HOURS = 24  # a CPU campaign measures every candidate in turns and can take hours
 API_PORT = 18080
 BASELINE = "poc-baseline"
 OPTIMIZED = "poc-optimized"
@@ -822,9 +823,11 @@ def run_poc(trace: str, requests_total: int) -> None:
     save({"labels": labels})
     campaign = campaign_create(doc)
     save({"campaign": campaign})
-    approval_cap = round(NOMINAL_HOURLY_USD * 6 * len(chosen) * 1.2, 2)
-    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", "24h")
-    log("approve", f"spend approved up to ${approval_cap} (stated laptop rate ${NOMINAL_HOURLY_USD}/h), valid 24 h")
+    # The control plane splits the cap evenly across candidates and requires each share to cover
+    # the hourly rate for the whole approval window, so the cap is rate x window x candidates.
+    approval_cap = round(NOMINAL_HOURLY_USD * APPROVAL_HOURS * len(doc["candidates"]) * 1.05, 2)
+    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", f"{APPROVAL_HOURS}h")
+    log("approve", f"spend approved up to ${approval_cap} (stated laptop rate ${NOMINAL_HOURLY_USD}/h), valid {APPROVAL_HOURS} h")
     finish(campaign, labels)
 
 

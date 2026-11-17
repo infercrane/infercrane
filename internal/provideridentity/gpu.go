@@ -74,6 +74,19 @@ func GPUTypeID(provider, gpu string) string {
 			return "Tesla T4"
 		case "V100", "TESLA V100":
 			return "Tesla V100"
+		// SkyPilot's Vast catalog writes consumer and workstation cards without
+		// the space Vast's marketplace uses, so a SkyPilot accelerator name must
+		// map to the exact marketplace name its price was observed under.
+		case "RTX4090", "RTX 4090":
+			return "RTX 4090"
+		case "RTX5090", "RTX 5090":
+			return "RTX 5090"
+		case "RTX3090", "RTX 3090":
+			return "RTX 3090"
+		case "RTX4080", "RTX 4080":
+			return "RTX 4080"
+		case "RTXA6000", "A6000", "RTX A6000":
+			return "RTX A6000"
 		default:
 			return gpu
 		}

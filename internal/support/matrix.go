@@ -121,6 +121,42 @@ func (m Matrix) Validate(runtime, cloud, mode string) error {
 	return nil
 }
 
+// ValidateProvider applies the public qualification matrix, then admits one
+// operator opt-in: a cloud the operator declared in a SkyPilot provider
+// manifest, named by its exact adapter identity ("skypilot-<cloud>") in elastic
+// mode with a known runtime. A cloud name alone is never enough, and the
+// control plane still refuses to launch unless that adapter was registered
+// from a manifest whose credentials are present.
+func (m Matrix) ValidateProvider(runtime, cloud, mode, adapter string) error {
+	err := m.Validate(runtime, cloud, mode)
+	if err == nil {
+		return nil
+	}
+	if mode != ElasticMode || adapter != "skypilot-"+cloud || !PortableCloud(cloud) {
+		return err
+	}
+	return m.ValidateRuntime(runtime)
+}
+
+// PortableCloud reports whether a cloud name is a valid SkyPilot cloud
+// identifier: lower-case letters, digits and inner dashes, at most 64 bytes.
+func PortableCloud(cloud string) bool {
+	if cloud == "" || len(cloud) > 64 {
+		return false
+	}
+	isAlphaNumeric := func(char byte) bool { return char >= 'a' && char <= 'z' || char >= '0' && char <= '9' }
+	if !isAlphaNumeric(cloud[0]) || !isAlphaNumeric(cloud[len(cloud)-1]) {
+		return false
+	}
+	for _, char := range cloud {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func defaultRuntime(runtime string) string {
 	if runtime == "" {
 		return DefaultRuntime

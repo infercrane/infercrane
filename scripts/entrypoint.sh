@@ -32,6 +32,23 @@ if [ -n "$runpod_key" ]; then
 fi
 unset runpod_key
 
+# SkyPilot's Vast.ai backend reads its key only from the Vast CLI config file.
+vast_key=${VAST_API_KEY:-}
+if [ -z "$vast_key" ] && [ -n "${VAST_API_KEY_FILE:-}" ]; then
+  [ -r "$VAST_API_KEY_FILE" ] || {
+    echo "VAST_API_KEY_FILE is not readable: $VAST_API_KEY_FILE" >&2
+    exit 1
+  }
+  vast_key=$(tr -d '\r\n' <"$VAST_API_KEY_FILE")
+fi
+if [ -n "$vast_key" ]; then
+  umask 077
+  mkdir -p "${HOME:?}/.config/vastai"
+  printf '%s' "$vast_key" >"$HOME/.config/vastai/vast_api_key"
+  export VAST_API_KEY="$vast_key"
+fi
+unset vast_key
+
 # Fly and similar platforms inject secrets as environment variables, while the
 # Brezel client deliberately accepts only a protected credential file. Materialize
 # the deployment secret on container-local storage and remove it from the child
@@ -67,12 +84,21 @@ case "$skypilot_mode" in
 esac
 unset skypilot_providers
 
-sky api start --host 127.0.0.1 --foreground &
+# SkyPilot logs failed provider calls with their full URL, and some provider SDKs
+# (Vast.ai) put the API key in the query string. Pass the server's output through
+# a filter that redacts key-bearing parameters before it reaches the log stream.
+sky_log_dir=$(mktemp -d /tmp/infercrane-sky-log.XXXXXX)
+mkfifo "$sky_log_dir/out"
+sed -u -E 's/((api_key|apikey|api-key|token|secret)=)[^&[:space:]"]+/\1[REDACTED]/Ig' <"$sky_log_dir/out" &
+sky_log_pid=$!
+sky api start --host 127.0.0.1 --foreground >"$sky_log_dir/out" 2>&1 &
 sky_pid=$!
 
 cleanup() {
   kill "${app_pid:-}" "$sky_pid" 2>/dev/null || true
   wait "${app_pid:-}" "$sky_pid" 2>/dev/null || true
+  wait "$sky_log_pid" 2>/dev/null || true
+  rm -rf "$sky_log_dir"
 }
 trap cleanup INT TERM EXIT
 
