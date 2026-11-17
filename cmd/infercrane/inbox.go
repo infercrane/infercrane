@@ -130,7 +130,8 @@ func readInbox(ctx context.Context, cfg config.Config, limit int) (inboxReport, 
 func endpointInboxItems(endpoint inboxEndpoint) []inboxItem {
 	items := make([]inboxItem, 0, 2)
 	state := strings.ToLower(strings.TrimSpace(endpoint.ObservedState))
-	if state != "serving" {
+	// "observing" is an observe-only endpoint that publishes no route by design.
+	if state != "serving" && state != "observing" {
 		severity := "warning"
 		code := "endpoint_not_converged"
 		if state == "degraded" || state == "suspended" {

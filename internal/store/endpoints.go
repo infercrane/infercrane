@@ -585,7 +585,7 @@ func (s *Store) StageEnvironmentPromotion(ctx context.Context, tenant, sourceNam
 }
 
 func (s *Store) SetEndpointState(ctx context.Context, tenant, id, state string) error {
-	if state != "pending" && state != "serving" && state != "degraded" && state != "suspended" && state != "deleted" {
+	if state != "pending" && state != "serving" && state != "observing" && state != "degraded" && state != "suspended" && state != "deleted" {
 		return errors.New("invalid endpoint observed state")
 	}
 	result, err := s.ExecContext(ctx, `UPDATE endpoints SET observed_state=?,updated_at=? WHERE id=? AND tenant_id=?`, state, now(), id, tenant)

@@ -187,7 +187,7 @@ infercrane inbox --limit 100 --output json
 ```
 
 The inbox reads tenant-scoped endpoint and deployment summaries, ranks non-serving state and staged
-candidates deterministically, and prints the exact persisted field behind each item. It fails the
+candidates deterministically (an `observing` endpoint is observe-only by design and is not listed), and prints the exact persisted field behind each item. It fails the
 whole read if either fleet API is unavailable, so a partial inventory cannot look healthy. It does
 not run Doctor implicitly and never reads prompt or response content.
 

@@ -82,7 +82,8 @@ func (s *Store) DiagnoseEndpoint(ctx context.Context, tenant, name string, windo
 	}
 	type rule struct{ code, severity, confidence, summary string }
 	var rules []rule
-	if evidence.EndpointState != "serving" {
+	// An observe-only endpoint publishes no route by design; that is not an outage.
+	if evidence.EndpointState != "serving" && evidence.EndpointState != "observing" {
 		rules = append(rules, rule{"endpoint_not_serving", "critical", "high", "Endpoint is not serving because its persisted route state is " + evidence.EndpointState + "."})
 	}
 	if evidence.Requests >= 20 && evidence.ErrorRate >= 0.05 {

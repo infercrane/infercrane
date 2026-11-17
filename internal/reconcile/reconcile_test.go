@@ -461,7 +461,8 @@ func TestAdoptedEndpointOwnershipControlsRouteCompilation(t *testing.T) {
 	for _, test := range []struct {
 		ownership string
 		routable  bool
-	}{{"observe-only", false}, {"traffic-managed", true}} {
+		state     string
+	}{{"observe-only", false, "observing"}, {"traffic-managed", true, "serving"}} {
 		t.Run(test.ownership, func(t *testing.T) {
 			store, directory := reconcilerFixture()
 			store.target = domain.Target{ID: "external-target", URL: "https://runtime.example/v1", Runtime: "vllm", Provider: "external", UpstreamModel: "model", Health: "healthy"}
@@ -479,6 +480,51 @@ func TestAdoptedEndpointOwnershipControlsRouteCompilation(t *testing.T) {
 			}
 			if ok && (route.DeploymentID != "" || route.TargetID != store.target.ID || route.ComputeMode != "external") {
 				t.Fatalf("external route=%#v", route)
+			}
+			if store.endpointState != test.state {
+				t.Fatalf("endpoint state=%q want=%q", store.endpointState, test.state)
+			}
+		})
+	}
+}
+
+func TestEndpointStateSeparatesObservingFromDegraded(t *testing.T) {
+	observeA := domain.BackendBinding{ID: "observe-a", Kind: "external", TargetID: "external-target", OwnershipMode: "observe-only"}
+	observeB := domain.BackendBinding{ID: "observe-b", Kind: "external", TargetID: "external-target", OwnershipMode: "observe-only"}
+	failedDeployment := domain.BackendBinding{ID: "failed-deployment", Kind: "deployment", DeploymentID: "missing-deployment", OwnershipMode: "lifecycle-managed"}
+	for _, test := range []struct {
+		name     string
+		previous string
+		policy   string
+		planned  []string
+		bindings []domain.BackendBinding
+		state    string
+	}{
+		{"every planned binding is observe-only", "degraded", "primary-fallback", []string{observeA.ID, observeB.ID}, []domain.BackendBinding{observeA, observeB}, "observing"},
+		{"observe-only beside a failed deployment route", "pending", "primary-fallback", []string{observeA.ID, failedDeployment.ID}, []domain.BackendBinding{observeA, failedDeployment}, "degraded"},
+		{"deployment route failed", "serving", "manual", []string{failedDeployment.ID}, []domain.BackendBinding{failedDeployment}, "degraded"},
+		{"planned binding is missing", "pending", "primary-fallback", []string{observeA.ID, "missing-binding"}, []domain.BackendBinding{observeA}, "degraded"},
+		{"plan has no bindings", "pending", "manual", nil, nil, "degraded"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, directory := reconcilerFixture()
+			store.target = domain.Target{ID: "external-target", URL: "https://runtime.example/v1", Runtime: "vllm", Provider: "external", UpstreamModel: "model", Health: "healthy"}
+			endpoint := domain.Endpoint{ID: "endpoint", TenantID: "global", Name: "connected", LogicalModelID: "model-id", EnvironmentID: "environment-id", DesiredState: "serving", ObservedState: test.previous, ActiveServingPlanID: "plan"}
+			planned := make([]domain.ServingPlanBinding, 0, len(test.planned))
+			for priority, id := range test.planned {
+				planned = append(planned, domain.ServingPlanBinding{BindingID: id, Priority: priority, Weight: 100})
+			}
+			store.endpoints = []domain.Endpoint{endpoint}
+			store.resolvedEndpoint = domain.ResolvedEndpoint{Endpoint: endpoint, ActivePlan: domain.ServingPlan{ID: "plan", EndpointID: endpoint.ID, RoutingPolicy: test.policy, Bindings: planned}, Bindings: test.bindings}
+			reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{})}
+			if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if store.endpointState != test.state {
+				t.Fatalf("endpoint state=%q want=%q", store.endpointState, test.state)
+			}
+			if route, _, ok := directory.AcquireForTenant("global", endpoint.Name); ok {
+				t.Fatalf("endpoint without a routed binding published route=%#v", route)
 			}
 		})
 	}

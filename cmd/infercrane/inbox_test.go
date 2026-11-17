@@ -122,6 +122,15 @@ func TestInboxTreatsUnknownStateAsAttentionRatherThanHealthy(t *testing.T) {
 	}
 }
 
+func TestInboxDoesNotFlagObserveOnlyEndpoint(t *testing.T) {
+	if items := endpointInboxItems(inboxEndpoint{Name: "connected", ObservedState: "observing"}); len(items) != 0 {
+		t.Fatalf("observing endpoint needs attention: %#v", items)
+	}
+	if items := endpointInboxItems(inboxEndpoint{Name: "routed", ObservedState: "degraded"}); len(items) != 1 || items[0].Code != "endpoint_not_serving" || items[0].Severity != "critical" {
+		t.Fatalf("degraded endpoint=%#v", items)
+	}
+}
+
 func TestInboxBoundsLargeFleetOutputWithoutLosingTotals(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

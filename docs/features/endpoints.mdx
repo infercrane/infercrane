@@ -61,6 +61,22 @@ infercrane endpoint promote coder-production PLAN_ID
 Plan creation returns `route_refresh: converged` when the in-memory route was published before the
 response. `pending` means durable state is committed and ordinary reconciliation will publish it.
 
+## Endpoint states
+
+The reconciler records each endpoint's `observed_state`:
+
+| State | Meaning |
+|---|---|
+| `pending` | Durable state is committed and reconciliation has not published a route yet. |
+| `serving` | A route is published for the active serving plan. |
+| `observing` | Every binding in the active plan is `observe-only`. InferCrane records health and evidence but publishes no route by design, so this is not a failure. |
+| `degraded` | At least one routable binding in the active plan could not be published, or a `manual` plan does not resolve to exactly one route. |
+| `suspended` | The endpoint is intentionally not serving. |
+| `deleted` | The endpoint was deleted. |
+
+A plan that mixes `observe-only` bindings with routable ones reads `serving` or `degraded` from the
+routable bindings alone.
+
 ## Routing policies
 
 | Policy | Behavior |
