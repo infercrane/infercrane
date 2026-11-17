@@ -65,7 +65,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Explore reviewed models, or check any open Hugging Face model", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose, measure, and roll out evidence-gated serving optimization runs", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -158,12 +158,18 @@ var commandExamples = map[string]string{
   infercrane open
   infercrane open endpoint support-bot
   infercrane open run 4f1c2d9e`,
-	"rollout": `  # Create a candidate from a complete DeploymentSpec
+	"rollout": `  # Create a candidate revision from a complete DeploymentSpec
   infercrane rollout create production --file candidate.yaml --idempotency-key production-r2
 
   # Follow its durable provisioning operation
-  infercrane rollout provision production REVISION_ID --wait`,
-	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
+  infercrane rollout provision production REVISION_ID --wait
+
+  # Roll out the candidate revision once Release Guard accepts it
+  infercrane rollout promote production REVISION_ID --wait
+
+  # Roll back to an earlier revision
+  infercrane rollout rollback production REVISION_ID --reason "p95 latency regressed" --wait`,
+	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed setups
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
   # Find the best setup for any model pinned to a commit; reads its public config.json
@@ -172,14 +178,35 @@ var commandExamples = map[string]string{
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
 
-  # Show what a finished campaign changed in cost, speed, and quality, and save a shareable page
-  infercrane optimize report CAMPAIGN_ID --html result.html
+  # Show what a finished run changed in cost, speed, and quality, and save a shareable page
+  infercrane optimize report RUN_ID --html result.html
+
+  # Roll out the winning setup of a run
+  infercrane optimize activate RUN_ID --candidate SETUP_ID
 
   # Inspect a remote-derived, content-free public workload profile
   infercrane optimize workload-profile --file chutes-profile.json
 
   # Advanced: bind the proposal to an observed content-free workload shape
   infercrane optimize propose Qwen/Qwen3-8B --provider kubernetes-dynamo --gpu NVIDIA-L40S --workload-fingerprint sha256:WORKLOAD_DIGEST --source aiconfigurator`,
+}
+
+// commandLong explains a command whose action names are the control API's
+// verbs, in the words the dashboard uses.
+var commandLong = map[string]string{
+	"optimize": `An optimization run measures setups side by side on the same traffic and checks
+answer quality. Nothing changes in production until you roll out a winner.
+
+  propose   preview the setups a run would measure, without creating a run
+  create    save a run and its setups; it waits for your spend approval
+  list      list runs
+  inspect   show one run and every setup in it
+  approve   approve a spend cap and an expiry so the run can start
+  watch     follow a run live
+  results   show the measured comparison and the decision
+  report    show what a finished run changed in cost, speed, and answer quality
+  activate  roll out the winning setup, named with --candidate SETUP_ID
+  cancel    stop a run and remove its measurement servers`,
 }
 
 func isPublicCommand(name string) bool {
@@ -250,6 +277,7 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 			return runLegacy(ctx, append([]string{name}, args...))
 		},
 	}
+	command.Long = commandLong[name]
 	command.Example = commandExamples[name]
 	addHelpFlags(command, name)
 	return command
@@ -579,15 +607,15 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("min-goodput", "", "minimum measured requests per second satisfying the SLO")
 		stringFlag("min-output-tokens-second", "", "required measured output throughput")
 		stringFlag("max-hourly-cost", "", "required sourced hourly cost")
-		stringFlag("write-dir", "", "write candidate DeploymentSpecs")
-		stringFlag("idempotency-key", "", "stable safe-retry key for campaign creation")
+		stringFlag("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
+		stringFlag("idempotency-key", "", "stable safe-retry key for run creation")
 		stringFlag("target-deployment", "", "existing deployment to evolve")
-		stringFlag("max-cost-usd", "", "hard maximum campaign spend for approval")
+		stringFlag("max-cost-usd", "", "hard maximum run spend for approval")
 		stringFlag("expires-in", "1h", "paid-resource approval validity")
-		stringFlag("candidate", "", "exact qualified candidate to activate")
+		stringFlag("candidate", "", "ID of the qualified setup that optimize activate rolls out")
 		boolFlag("yes", "approve without the confirmation prompt")
-		intFlag("max-candidates", 10, "maximum candidates")
-		intFlag("limit", 20, "maximum campaigns to list")
+		intFlag("max-candidates", 10, "maximum setups")
+		intFlag("limit", 20, "maximum runs to list")
 		boolFlag("include-simulated", "include simulated compatibility")
 		boolFlag("allow-model-metadata-network", "allow reading public model metadata from Hugging Face for estimates and --search recipes")
 		stringFlag("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
@@ -658,12 +686,12 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("require-compatibility", "require comparable model/runtime evidence")
 		boolFlag("require-synthetic", "require bounded AIPerf validation")
 		boolFlag("require-quality", "require signed comparable semantic quality evidence")
-		boolFlag("auto-rollback", "automatically roll back a rejected promoted revision")
+		boolFlag("auto-rollback", "automatically roll back a rolled-out revision that Release Guard rejects")
 		intFlag("minimum-requests", 0, "minimum measured requests per revision")
 		stringFlag("max-cost-regression", "", "maximum sourced cost regression percent")
 		stringFlag("minimum-quality-score", "", "minimum candidate semantic quality score")
 		stringFlag("max-quality-regression", "", "maximum semantic quality regression percent")
-		intFlag("auto-rollback-window", 0, "post-promotion observation window seconds")
+		intFlag("auto-rollback-window", 0, "observation window after a rollout, in seconds")
 		intFlag("validation-max-requests", 0, "hard validation request bound")
 		intFlag("validation-max-concurrency", 0, "hard validation concurrency bound")
 	}

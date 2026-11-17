@@ -27,6 +27,28 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 
 <SafeRetry />
 
+## Words
+
+Help and human-readable output use the dashboard's words. Command names, flag names, and
+`--output json` keep the control API's names, so scripts keep working:
+
+| You read | In commands, flags, the API, and JSON |
+|---|---|
+| run, optimization run | optimization campaign: `/api/v1/optimization/campaigns`, `campaign`, `campaign_id` |
+| setup | candidate: `candidates`, `candidate_id`, `--candidate`, `--max-candidates` |
+| current setup, baseline | the campaign control: `"control": true` |
+| roll out a setup | `optimize activate`, `rollout promote`; state `promoted` |
+| roll back | `rollout rollback` |
+
+A deployment's staged revision is still the candidate revision (`--revision candidate`,
+`candidate_revision_id`), and an endpoint's staged serving plan is its candidate plan.
+
+Where the CLI turns a state into words, a run or setup the API calls `promoted` reads
+`rolled out` (`live` in `optimize report`), and the current setup reads `baseline` where the API
+says `rejected` because another setup was chosen. That applies to the styled `optimize list` and
+`inspect`, to `optimize watch`, `results`, and `report`, and to shell completion. Plain `list` and
+`inspect` output and JSON print the API's own state.
+
 ## Terminal output
 
 In a terminal, human output is styled like the dashboard: state badges such as `● SERVING`,
@@ -42,8 +64,9 @@ Output stays plain, with no ANSI escape codes and no prompts, when:
 - `TERM=dumb`;
 - `--output json` is used.
 
-Plain and JSON output are exactly what earlier versions printed, so anything that parses them
-keeps working.
+JSON output is exactly what earlier versions printed, so anything that parses it keeps working.
+Plain output keeps its layout and prints states and codes as the control API names them; its
+labels use the [words](#words) above, for example `Optimization run ID · STATE` and `SETUPS`.
 
 Colors follow the terminal's background when it sets `COLORFGBG`. Otherwise the CLI uses mid-tone
 colors that read on dark and light backgrounds. It never queries the terminal, so a command never
@@ -52,7 +75,7 @@ waits on one.
 For example, `infercrane optimize list` in an 80-column terminal:
 
 ```text
-CAMPAIGN                          STATE                CREATED
+RUN                               STATE                CREATED
 ──────────────────────────────────────────────────────────────
 83ccd598540e2dd1f9c897040c1ea503  ● RANKED              2h ago
   Qwen/Qwen3-0.6B · interactive
@@ -121,7 +144,7 @@ Open a dashboard page for a resource, or print its URL with `--no-browser`.
 infercrane open
 infercrane open endpoint support-bot
 infercrane open deployment qwen-prod
-infercrane open run CAMPAIGN_ID
+infercrane open run RUN_ID
 infercrane open model Qwen/Qwen3-8B
 infercrane open operation OPERATION_ID --no-browser
 ```
@@ -253,7 +276,7 @@ infercrane inbox --limit 100 --output json
 ```
 
 The inbox reads tenant-scoped endpoint, deployment, and optimization run summaries, ranks
-non-serving state and staged candidates deterministically (an `observing` endpoint is observe-only
+non-serving state and staged candidate revisions and plans deterministically (an `observing` endpoint is observe-only
 by design and is not listed), and prints the exact persisted field behind each item. It fails the
 whole read if any of those APIs is unavailable, so a partial inventory cannot look healthy. It does
 not run Doctor implicitly and never reads prompt or response content.
@@ -373,7 +396,7 @@ reserved for InferCrane's own answer check and is refused.
 
 `evaluation set` manages the prompt sets that replace the built-in prompts of an optimization run's
 answer check. `default` prints the built-in suite to copy and adapt, `digest` validates a file
-without uploading it, and `upload` prints the digest a campaign names with `--eval-set`. See
+without uploading it, and `upload` prints the digest a run names with `--eval-set`. See
 [Semantic quality evidence](/features/semantic-quality#built-in-answer-check).
 
 ### `mcp`
@@ -416,8 +439,8 @@ for persistence. See [Terminal operations workspace](/features/terminal-ui).
 
 ### `optimize propose`
 
-Generate inspectable candidate DeploymentSpecs without contacting a control plane or provider.
-Check the optional modeled-candidate source first:
+Preview the setups a run would measure, as inspectable DeploymentSpecs, without contacting a
+control plane or provider. Check the optional estimator first:
 
 ```bash
 infercrane optimize doctor
@@ -434,7 +457,7 @@ infercrane optimize propose mistral-7b-instruct \
   --objective interactive --profile interactive \
   --source auto --target-concurrency 8 \
   --max-ttft-p95-ms 200 --max-tpot-p95-ms 25 \
-  --write-dir .infercrane/candidates/mistral-interactive
+  --write-dir .infercrane/setups/mistral-interactive
 ```
 
 Catalog output is `unmeasured`; AIConfigurator output is `modeled`. Neither is qualified. Use
@@ -449,8 +472,8 @@ GPU, runtime, or topology. See [Evidence-gated optimization](/features/optimizat
 
 ### `optimize create`
 
-Persist the proposal and candidate identities without provider mutation, then grant bounded paid
-authority explicitly:
+Create a run: persist the proposal and its setups without provider mutation, then grant bounded
+paid authority explicitly:
 
 ```bash
 infercrane optimize create llama-3.1-8b-instruct \
@@ -462,40 +485,41 @@ infercrane optimize create llama-3.1-8b-instruct \
   --provider aws --region eu-central-1 --gpu L40S \
   --objective interactive --max-candidates 3 \
   --target-deployment llama-production
-infercrane optimize inspect CAMPAIGN_ID
-infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
-infercrane optimize watch CAMPAIGN_ID
-infercrane optimize results CAMPAIGN_ID
-infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
-infercrane operation watch ACTIVATION_OPERATION_ID
-infercrane optimize cancel CAMPAIGN_ID
+infercrane optimize inspect RUN_ID
+infercrane optimize approve RUN_ID --max-cost-usd 20 --expires-in 1h
+infercrane optimize watch RUN_ID
+infercrane optimize results RUN_ID
+infercrane optimize activate RUN_ID --candidate SETUP_ID   # roll out the winning setup
+infercrane operation watch ROLLOUT_OPERATION_ID
+infercrane optimize cancel RUN_ID
 ```
 
 In a terminal, `optimize approve` first shows the spend cap, when the approval expires, and every
 setup the run starts, and asks before approving. `--yes` skips the question; scripts, pipes, and
 `--output json` never see it. Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
-infrastructure. The default `new_endpoint` intent stops at human activation after qualification.
-`--target-deployment` selects `evolve_endpoint`, which must stop at Release Guard and human
-promotion. `optimize activate` is the explicit boundary in both cases: it marks the qualified new
-deployment active, or delegates an evolution to the existing guarded rollout operation. Retrying
-the command adopts the same durable operation; InferCrane never promotes from the optimizer loop.
+infrastructure. The default `new_endpoint` intent stops after qualification and waits for you to
+roll out the winner. `--target-deployment` selects `evolve_endpoint`, which must also pass Release
+Guard before it waits for you. `optimize activate` rolls out the winning setup in both cases: it
+marks the qualified new deployment active, or hands an evolution to the existing guarded rollout
+operation. Retrying the command adopts the same durable operation; InferCrane never rolls out a
+setup from the optimizer loop.
 
 `optimize watch` follows a run live and `optimize results` prints the same summary once: each setup
 by name, the current setup first, which setup and measured turn the run is on, time elapsed, the
 control plane's estimate of time left, spend so far against the cap (estimated from the quoted
 rate), the measured comparison, the answer checks, and the decision with the exact `activate`
-command. `inspect` is the full record, with every candidate's name next to its ID. See
+command. `inspect` is the full record, with every setup's name next to its ID. See
 [Follow a run live](/features/optimization#follow-a-run-live).
 
-Every candidate's answers are checked before ranking. By default InferCrane runs its built-in answer
-check against the campaign control. `--eval-set sha256:DIGEST` replaces the built-in prompts with an
-uploaded eval set, and `--quality-check customer_evidence` makes every candidate wait for evidence you
-sign and attach instead. `inspect` prints each candidate's answer-check result and, while a candidate
+Every setup's answers are checked before ranking. By default InferCrane runs its built-in answer
+check against your current setup. `--eval-set sha256:DIGEST` replaces the built-in prompts with an
+uploaded eval set, and `--quality-check customer_evidence` makes every setup wait for evidence you
+sign and attach instead. `inspect` prints each setup's answer-check result and, while a setup
 waits on you, the exact command that unblocks it. `--output json` returns the control API's
-`quality` object for every candidate.
+`quality` object for every setup, under `candidates`.
 
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
-the campaign's proposal recorded warnings, such as skipped speculative-decoding setups.
+the run's proposal recorded warnings, such as skipped speculative-decoding setups.
 `--output json` keeps `warnings` as the control API returned it: an empty list means none were
 recorded, and an absent field means the stored proposal could not be read. Warnings are not
 performance evidence.
@@ -515,14 +539,14 @@ infercrane artifact optimize attest OPTIMIZED_ARTIFACT_ID \
   --output-revision IMMUTABLE_COMMIT --output-digest sha256:OUTPUT_DIGEST \
   --evidence-file build-evidence.json
 infercrane artifact optimize qualify OPTIMIZED_ARTIFACT_ID \
-  --candidate-run CANDIDATE_RUN_ID --quality-evidence QUALITY_EVIDENCE_ID
+  --candidate-run SETUP_ID --quality-evidence QUALITY_EVIDENCE_ID
 ```
 
 Presets are `fp8`, `awq`, `gptq`, `nvfp4`, `eagle3`, `mtp`, and `dflash`. There is no TensorRT engine
 preset: TensorRT-LLM removed its engine backend, and its PyTorch backend loads checkpoints directly.
 An engine built by an earlier TensorRT-LLM release can still be recorded with `--plan-file`. Builders
 are never executed inside the InferCrane API process, and no optimized artifact qualifies without
-exact candidate, revision, digest, and semantic-quality evidence.
+exact setup, revision, digest, and semantic-quality evidence.
 
 ### `workload`
 
@@ -539,7 +563,7 @@ infercrane workload deploy ./fraud-explainer --wait
 ```
 
 `workload init --recipe NAME --profile PROFILE` pins a reviewed model commit and writes the selected
-candidate's runtime version, immutable workload when present, GPU type and count, provider hint,
+profile's runtime version, immutable workload when present, GPU type and count, provider hint,
 replica bounds, and routing policy. The default profile is
 the recipe's general starting point; profiles are not benchmark claims. `workload build --tag IMAGE` performs a
 local Docker Buildx build for custom OCI projects; add `--push` to record a registry-confirmed
@@ -683,7 +707,7 @@ infercrane training list DEPLOYMENT --output json
 ```
 
 The private signing key remains local. Attachment binds immutable identity to one revision but does
-not promote it or claim that InferCrane executed training. See
+not roll it out or claim that InferCrane executed training. See
 [Training artifact handoffs](/integrations/training-artifacts).
 
 ## Send a request
@@ -1029,12 +1053,14 @@ infercrane rollout create llama-production \
 
 infercrane rollout provision qwen-prod REVISION_ID --wait
 infercrane rollout validate qwen-prod --acknowledge-validation-cost --wait
+# Roll out the candidate revision once Release Guard accepts it, or reject it.
 infercrane rollout promote qwen-prod REVISION_ID --reason 'guard accepted'
 infercrane rollout reject qwen-prod REVISION_ID --reason 'TTFT regression'
-infercrane rollout rollback qwen-prod REVISION_ID --wait
+# Roll back to an earlier revision.
+infercrane rollout rollback qwen-prod REVISION_ID --reason 'TTFT regression' --wait
 ```
 
-Candidate creation also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. `--file` preserves a complete validated DeploymentSpec, including advanced serving topology, and cannot be mixed with candidate override flags. Promotion remains policy-gated; no LLM decides the outcome.
+Creating a candidate revision also accepts `--model-revision`, `--runtime`, `--runtime-version`, `--runtime-args`, `--routing`, and `--region`. `--file` preserves a complete validated DeploymentSpec, including advanced serving topology, and cannot be mixed with candidate override flags. Rolling out a revision with `rollout promote` remains policy-gated; no LLM decides the outcome. `rollout rollback` requires `--reason`.
 
 `rollout validate` is explicit synthetic traffic, not shadowing. It runs the existing AIPerf adapter
 against active and candidate revisions using the same workload and persisted hard bounds. The
@@ -1159,8 +1185,8 @@ infercrane recommend qwen-prod --history --output json
 infercrane slo delete qwen-prod
 ```
 
-`recommended` identifies a qualified candidate satisfying the policy. `no_match` means measured
-candidates violate it. `unknown` means required evidence is missing. See
+`recommended` identifies a qualified setup that satisfies the policy. `no_match` means the measured
+setups violate it. `unknown` means required evidence is missing. See
 [Inference decisions](/features/inference-decisions).
 
 Advisory Autopilot turns that evidence into a reviewable plan without mutating production:

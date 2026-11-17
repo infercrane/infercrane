@@ -1,5 +1,5 @@
 Optimization result
-Qwen/Qwen3-0.6B · goal: interactive · campaign
+Qwen/Qwen3-0.6B · goal: interactive · run
 83ccd598540e2dd1f9c897040c1ea503
 
 ╭──────────────────────────────────────────────────────────╮
@@ -107,7 +107,7 @@ Your current setup (kept) ──────────────────
              f7aa12bd415ffc55637dd3de38e7255f-rev-1
 
 Evidence ───────────────────────────────────────────────────
-  campaign input
+  run input
     sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a4
     58a6d6e2b90d011 (83ccd598540e2dd1f9c897040c1ea503)
     Qwen/Qwen3-0.6B

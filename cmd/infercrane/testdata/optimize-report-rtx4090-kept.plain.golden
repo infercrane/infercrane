@@ -1,5 +1,5 @@
 Optimization result
-Qwen/Qwen3-0.6B · goal: interactive · campaign 83ccd598540e2dd1f9c897040c1ea503
+Qwen/Qwen3-0.6B · goal: interactive · run 83ccd598540e2dd1f9c897040c1ea503
 
 Keep your current setup: nothing beat it by more than the measurement noise.
 
@@ -39,7 +39,7 @@ Your current setup (kept)
   Revision  qwen-rtx-optimized-opt-91f3961c f7aa12bd415ffc55637dd3de38e7255f-rev-1
 
 Evidence
-  campaign input     sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a458a6d6e2b90d011  (83ccd598540e2dd1f9c897040c1ea503)  Qwen/Qwen3-0.6B
+  run input          sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a458a6d6e2b90d011  (83ccd598540e2dd1f9c897040c1ea503)  Qwen/Qwen3-0.6B
   proposal           sha256:b73a6ef0eb11c3559b633c6d9dadd2d0eaaab5015932461962236036e663f4ba  catalog-candidate-planner-v2
   winner benchmark   sha256:9202af74a954dc5e60980c47abc9637944b68856da77f09d90471c0a87728225  (bc166396f334d891c178f44a4136916d)  Qwen/Qwen3-0.6B@c1899de289a04d12100db370d81485cdf75e47ca revision f7aa12bd415ffc55637dd3de38e7255f-rev-1
   winner quality     sha256:1129a5fd423853f96eff7a960b2d30674a9e39bab09f2d3b5865af2690dda6c6  (f51587c017a1d63f8bd57029685a6964)  infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af signed by sha256:7018e276457751c2

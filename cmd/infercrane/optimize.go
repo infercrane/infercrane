@@ -77,19 +77,19 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	minGoodput := fs.String("min-goodput", "", "minimum measured requests per second satisfying the SLO")
 	minOutputTPS := fs.String("min-output-tokens-second", "", "required measured output throughput")
 	maxHourlyCost := fs.String("max-hourly-cost", "", "required sourced hourly cost")
-	includeSimulated := fs.Bool("include-simulated", false, "include locally simulated compatibility candidates")
-	maxCandidates := fs.Int("max-candidates", 10, "maximum candidates")
+	includeSimulated := fs.Bool("include-simulated", false, "include locally simulated compatibility setups")
+	maxCandidates := fs.Int("max-candidates", 10, "maximum setups")
 	targetConcurrency := fs.String("target-concurrency", "", "observed or expected concurrent requests; defaults to the workload profile")
 	workloadFingerprint := fs.String("workload-fingerprint", "", "content-free observed workload fingerprint")
-	sourceName := fs.String("source", "auto", "candidate source: auto, catalog, or aiconfigurator")
+	sourceName := fs.String("source", "auto", "where setups come from: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
 	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates and --search recipes")
 	search := fs.String("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
 	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
-	writeDir := fs.String("write-dir", "", "write candidate DeploymentSpecs into a new or empty directory")
-	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for campaign creation")
+	writeDir := fs.String("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
+	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for run creation")
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
-	qualityCheck := fs.String("quality-check", "builtin", "who checks answer quality: builtin (InferCrane compares answers with the control) or customer_evidence (wait for your signed evaluation)")
+	qualityCheck := fs.String("quality-check", "builtin", "who checks answer quality: builtin (InferCrane compares answers with your current setup) or customer_evidence (wait for your signed evaluation)")
 	evalSet := fs.String("eval-set", "", "digest of an uploaded eval set that replaces the built-in prompts (see: infercrane evaluation set upload)")
 	diagnosisEndpoint := fs.String("diagnosis-endpoint", "", "endpoint whose recorded bottleneck diagnosis chooses and orders the setups; the control plane reads it and plans")
 	output := fs.String("output", "human", "human or json")
@@ -175,8 +175,8 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		if *output == "json" {
 			return printJSON(response)
 		}
-		fmt.Printf("Optimization campaign %s · %s\n", response.Campaign.ID, response.Campaign.State)
-		fmt.Printf("Model       %s\nObjective   %s\nIntent      %s\nCandidates  %d\nMutation    none\n", response.Campaign.ModelIdentity, response.Campaign.Objective, response.Campaign.Intent, len(response.Campaign.Candidates))
+		fmt.Printf("Optimization run %s · %s\n", response.Campaign.ID, response.Campaign.State)
+		fmt.Printf("Model       %s\nObjective   %s\nIntent      %s\nSetups      %d\nMutation    none\n", response.Campaign.ModelIdentity, response.Campaign.Objective, response.Campaign.Intent, len(response.Campaign.Candidates))
 		if response.Campaign.TargetDeployment != "" {
 			fmt.Printf("Target      %s\n", response.Campaign.TargetDeployment)
 		}
@@ -193,13 +193,13 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		fmt.Println(string(encoded))
 		return nil
 	}
-	fmt.Printf("Optimization candidates · %s · %s on %s\n", proposal.Input.ModelIdentity, proposal.Input.Objective, proposal.Input.Provider)
+	fmt.Printf("Optimization setups · %s · %s on %s\n", proposal.Input.ModelIdentity, proposal.Input.Objective, proposal.Input.Provider)
 	fmt.Printf("Input evidence %s · mutation %s\n\n", shortID(proposal.InputDigest), proposal.Mutation)
 	for _, warning := range proposal.Warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", warning)
 	}
 	if len(proposal.Candidates) == 0 {
-		fmt.Printf("No safe candidate was produced. Missing: %s\n", strings.Join(proposal.Missing, ", "))
+		fmt.Printf("No safe setup was produced. Missing: %s\n", strings.Join(proposal.Missing, ", "))
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -211,12 +211,12 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	if proposal.StartingPoint != nil {
-		fmt.Printf("\nStarting point: candidate %s · %s\n", shortID(proposal.StartingPoint.CandidateID), proposal.StartingPoint.ClaimBoundary)
+		fmt.Printf("\nStarting point: setup %s · %s\n", shortID(proposal.StartingPoint.CandidateID), proposal.StartingPoint.ClaimBoundary)
 	}
 	if err = printDiagnosisPlan(proposal); err != nil {
 		return err
 	}
-	fmt.Println("These are configuration candidates, not performance recommendations.")
+	fmt.Println("These are setups to measure, not performance recommendations.")
 	fmt.Printf("Next: deploy the starting point, observe representative traffic, run `infercrane benchmark NAME --profile %s`, profile material bottlenecks, compare with `infercrane lab`, then use Release Guard.\n", proposal.Input.WorkloadProfile)
 	if *writeDir != "" {
 		fmt.Printf("DeploymentSpecs: %s\n", *writeDir)
@@ -387,7 +387,7 @@ func optimizeEvidenceCommand(args []string) error {
 		if *output == "json" {
 			return printJSON(imported)
 		}
-		fmt.Printf("FastPath candidate · %s\n", imported.CandidateID)
+		fmt.Printf("FastPath setup · %s\n", imported.CandidateID)
 		fmt.Printf("Model       %s\nRuntime     %s\nGPU         %d× %s\nManifest    %s\nClaimed     %s / %s\nImported    %s\n\n", imported.ModelIdentity, imported.RuntimeIdentity, imported.GPUCount, imported.GPU, imported.ManifestDigest, imported.ClaimedStatus, imported.ClaimedEvidenceState, imported.ImportedEvidenceState)
 		fmt.Println("Qualification remains blocked until InferCrane binds the exact revision and passing signed quality evidence.")
 		return nil
@@ -410,7 +410,7 @@ func optimizeEvidenceCommand(args []string) error {
 	}
 	fmt.Println()
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "CHOICE\tCANDIDATE\tRUNTIME\tQUALIFIED\tSCORE\tPARETO\tREASON")
+	fmt.Fprintln(w, "CHOICE\tSETUP\tRUNTIME\tQUALIFIED\tSCORE\tPARETO\tREASON")
 	for _, candidate := range evaluation.Candidates {
 		choice := ""
 		if candidate.Selected {
@@ -606,16 +606,16 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	id := ""
 	if action != "list" {
 		if len(args) < 2 || strings.HasPrefix(args[1], "-") {
-			return errors.New("usage: infercrane optimize " + action + " CAMPAIGN [flags]")
+			return errors.New("usage: infercrane optimize " + action + " RUN [flags]")
 		}
 		id = args[1]
 		flagArgs = args[2:]
 	}
 	fs := newFlagSet("optimize " + action)
-	limit := fs.Int("limit", 20, "maximum campaigns")
-	maxCost := fs.Float64("max-cost-usd", 0, "hard maximum campaign spend")
+	limit := fs.Int("limit", 20, "maximum runs")
+	maxCost := fs.Float64("max-cost-usd", 0, "hard maximum run spend")
 	expiresIn := fs.Duration("expires-in", time.Hour, "approval expiry, from 1m through 24h")
-	candidateID := fs.String("candidate", "", "exact qualified candidate ID to activate or promote")
+	candidateID := fs.String("candidate", "", "ID of the qualified setup that optimize activate rolls out")
 	output := fs.String("output", "human", "human or json")
 	yes := fs.Bool("yes", false, "approve without the confirmation prompt")
 	if err := fs.Parse(flagArgs); err != nil {
@@ -657,12 +657,12 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 			fmt.Printf("%-36s  %-18s  %-14s  %s\n", campaign.ID, campaign.State, campaign.Objective, campaign.ModelIdentity)
 		}
 		if len(response.Data) == 0 {
-			fmt.Println("No optimization campaigns.")
+			fmt.Println("No optimization runs.")
 		}
 		return nil
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: infercrane optimize " + action + " CAMPAIGN [flags]")
+		return errors.New("usage: infercrane optimize " + action + " RUN [flags]")
 	}
 	if action == "results" && *output == "human" {
 		// results is the decided-run summary: the same view as watch, once.
@@ -702,13 +702,13 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		err = controlJSON(ctx, cfg, http.MethodPost, path+"/approve", "", map[string]any{"max_cost_usd": *maxCost, "expires_in_seconds": int(expiresIn.Seconds())}, &raw)
 	case "activate":
 		if strings.TrimSpace(*candidateID) == "" {
-			return errors.New("activate requires --candidate CANDIDATE_ID")
+			return errors.New("activate requires --candidate SETUP_ID: the setup to roll out")
 		}
 		err = controlJSON(ctx, cfg, http.MethodPost, path+"/activate", "", map[string]any{"candidate_id": strings.TrimSpace(*candidateID)}, &raw)
 	case "cancel":
 		err = controlJSON(ctx, cfg, http.MethodPost, path+"/cancel", "", map[string]any{}, &raw)
 	default:
-		return errors.New("unknown optimization campaign action")
+		return errors.New("unknown optimization run action")
 	}
 	if err != nil {
 		return err
@@ -735,7 +735,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		printResourceLink(cfg, "run", view.ID)
 		return nil
 	}
-	fmt.Printf("Optimization campaign %s · %s\n", view.ID, view.State)
+	fmt.Printf("Optimization run %s · %s\n", view.ID, view.State)
 	fmt.Printf("Model      %s\nObjective  %s\nIntent     %s\nSource     %s\n", view.ModelIdentity, view.Objective, view.Intent, view.Source)
 	if view.TargetDeployment != "" {
 		fmt.Printf("Target     %s\n", view.TargetDeployment)
@@ -747,7 +747,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		fmt.Printf("Execution  %s · %s\n", response.Operation.ID, response.Operation.Status)
 	}
 	if response.Activation != nil {
-		fmt.Printf("Activation %s · %s\n", response.Activation.ID, response.Activation.Status)
+		fmt.Printf("Rollout    %s · %s\n", response.Activation.ID, response.Activation.Status)
 	}
 	if response.CleanupOperation != nil {
 		fmt.Printf("Cleanup    %s · %s\n", response.CleanupOperation.ID, response.CleanupOperation.Status)
@@ -759,7 +759,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		}
 	}
 	if len(view.Candidates) > 0 {
-		fmt.Println("\nCANDIDATES")
+		fmt.Println("\nSETUPS")
 		for _, candidate := range view.Candidates {
 			name := candidate.Label
 			if name == "" {
@@ -1038,12 +1038,12 @@ func optimizeDoctorCommand(ctx context.Context, args []string) error {
 	}
 	if available {
 		fmt.Printf("AIConfigurator  ready · %s · %s\n", version, *python)
-		fmt.Println("Boundary        modeled candidate source; AIPerf, quality, cost, and Release Guard still qualify")
+		fmt.Println("Boundary        modeled source of setups; AIPerf, quality, cost, and Release Guard still qualify")
 		return nil
 	}
 	fmt.Printf("AIConfigurator  unavailable · %s\n", err)
 	fmt.Printf("Install         %s -m pip install aiconfigurator==%s plotext==%s\n", *python, optimizer.AIConfiguratorVersion, optimizer.AIConfiguratorPlotextVersion)
-	fmt.Println("Fallback        `infercrane optimize propose` continues with reviewed catalog candidates")
+	fmt.Println("Fallback        `infercrane optimize propose` continues with reviewed catalog setups")
 	return nil
 }
 
@@ -1090,29 +1090,29 @@ func optionalPositiveNumber(value string) (*float64, error) {
 func writeCandidateSpecs(directory string, candidates []optimizer.Candidate) error {
 	info, err := os.Stat(directory)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect candidate directory: %w", err)
+		return fmt.Errorf("inspect setup directory: %w", err)
 	}
 	if err == nil && !info.IsDir() {
-		return errors.New("candidate output path exists and is not a directory")
+		return errors.New("setup output path exists and is not a directory")
 	}
 	if err = os.MkdirAll(directory, 0o755); err != nil {
-		return fmt.Errorf("create candidate directory: %w", err)
+		return fmt.Errorf("create setup directory: %w", err)
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil {
-		return fmt.Errorf("read candidate directory: %w", err)
+		return fmt.Errorf("read setup directory: %w", err)
 	}
 	if len(entries) != 0 {
-		return errors.New("candidate output directory must be empty to prevent overwriting prior evidence")
+		return errors.New("setup output directory must be empty to prevent overwriting prior evidence")
 	}
 	for _, candidate := range candidates {
 		encoded, marshalErr := yaml.Marshal(candidate.Deployment)
 		if marshalErr != nil {
-			return fmt.Errorf("encode candidate %s: %w", candidate.ID, marshalErr)
+			return fmt.Errorf("encode setup %s: %w", candidate.ID, marshalErr)
 		}
 		path := filepath.Join(directory, fmt.Sprintf("%02d-%s.yaml", candidate.Rank, candidate.Deployment.Name))
 		if writeErr := os.WriteFile(path, encoded, 0o644); writeErr != nil {
-			return fmt.Errorf("write candidate %s: %w", candidate.ID, writeErr)
+			return fmt.Errorf("write setup %s: %w", candidate.ID, writeErr)
 		}
 	}
 	return nil

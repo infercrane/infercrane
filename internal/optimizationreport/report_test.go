@@ -653,7 +653,7 @@ func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T
 	}
 	text := Text(report)
 	for _, want := range []string{
-		"vLLM defaults [current setup, kept] · kept · nothing to activate",
+		"vLLM defaults [current setup, kept] · kept · nothing to roll out",
 		"· rejected · throughput got worse by 24% (noise ±7.3%), latency got worse by 55% (noise ±6.9%)",
 		"· rejected · throughput got worse by 25% (noise ±1.7%), first-token time got worse by 14% (noise ±5.1%)",
 	} {
@@ -661,7 +661,7 @@ func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T
 			t.Fatalf("report lacks %q:\n%s", want, text)
 		}
 	}
-	for _, wrong := range []string{"winner, ready to activate", "no real difference from your current setup", "another setup measured better"} {
+	for _, wrong := range []string{"winner, ready to roll out", "no real difference from your current setup", "another setup measured better"} {
 		if strings.Contains(text, wrong) {
 			t.Fatalf("report still says %q:\n%s", wrong, text)
 		}

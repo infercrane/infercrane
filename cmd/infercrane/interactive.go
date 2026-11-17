@@ -272,7 +272,7 @@ func confirmDeletion(ctx context.Context, cfg config.Config, t theme, name strin
 	return nil
 }
 
-// approvalSetup is the part of a campaign candidate's DeploymentSpec that says
+// approvalSetup is the part of a setup's DeploymentSpec that says
 // what a paid run starts.
 type approvalSetup struct {
 	ID    string `json:"id"`
@@ -346,7 +346,7 @@ func confirmApproval(ctx context.Context, cfg config.Config, t theme, id string,
 	values := []string{
 		emptyAs(campaign.ModelIdentity, "unknown") + " · goal " + emptyAs(campaign.Objective, "unknown"),
 		fmt.Sprintf("$%.2f, a hard maximum for this run", maxCost),
-		now.Add(expiresIn).Local().Format("15:04 MST") + " (" + relativeTime(now, now.Add(expiresIn)) + "); then unfinished setups and an unactivated winner are stopped and cleaned up, and the approval cannot be extended",
+		now.Add(expiresIn).Local().Format("15:04 MST") + " (" + relativeTime(now, now.Add(expiresIn)) + "); then unfinished setups and a winner that was not rolled out are stopped and cleaned up, and the approval cannot be extended",
 	}
 	whatRuns := fmt.Sprintf("%d setups", len(campaign.Candidates))
 	if readErr != nil {

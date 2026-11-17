@@ -18,15 +18,16 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 )
 
-// optimize watch is a read-only, plain-language view of one campaign: where each
+// optimize watch is a read-only, plain-language view of one run: where each
 // setup is, what was measured against the current setup, and what happens next.
-// It only reads the control API and never approves, activates, or cancels.
+// It only reads the control API and never approves, rolls out, or cancels.
 
 var watchStateWords = map[string]string{
 	"proposed": "queued", "provisioning": "starting a server", "ready": "server ready",
 	"measuring": "measuring against your current setup", "validating": "checking answer quality",
 	"ranked": "measured, waiting to compare", "guarding": "running the safety check", "guard_passed": "passed the safety check",
-	"qualified": "winner, ready to activate", "rejected": "rejected", "inconclusive": "no clear result",
+	"qualified": "winner, ready to roll out", "rejected": "rejected", "inconclusive": "no clear result",
+	"promoted": "rolled out", "observed": "rolled out",
 	"failed": "failed", "cancelled": "cancelled", "cleaned": "server removed",
 }
 
@@ -39,7 +40,7 @@ var watchReasonWords = map[string]string{
 	"quality_reference_unavailable":      "no reference answers to compare with",
 	"release_guard_rejected":             "failed the safety check",
 	"release_guard_inconclusive":         "safety check had too little evidence",
-	"approval_expired_before_activation": "approval expired before activation",
+	"approval_expired_before_activation": "approval expired before rollout",
 }
 
 var watchStages = []string{"proposed", "provisioning", "ready", "measuring", "validating", "ranked", "qualified"}
@@ -176,13 +177,13 @@ type watchModel struct {
 
 func optimizeWatchCommand(ctx context.Context, args []string) error {
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
-		return errors.New("usage: infercrane optimize watch CAMPAIGN [--once]")
+		return errors.New("usage: infercrane optimize watch RUN [--once]")
 	}
 	id := args[0]
 	fs := newFlagSet("optimize watch")
 	once := fs.Bool("once", false, "print one plain-text snapshot and exit")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
-		return errors.New("usage: infercrane optimize watch CAMPAIGN [--once]")
+		return errors.New("usage: infercrane optimize watch RUN [--once]")
 	}
 	cfg, err := config.LoadClient()
 	if err != nil {
@@ -234,7 +235,7 @@ func (m watchModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m watchModel) View() tea.View {
-	content := "Loading campaign " + m.id + "…"
+	content := "Loading run " + m.id + "…"
 	if !m.loading {
 		content = renderOptimizeWatch(m.snapshot, newUIStyles(m.dark), m.width, true) + "\n" + newUIStyles(m.dark).subtle.Render("q to quit · read-only · refreshes every 2 s")
 	}
@@ -360,17 +361,25 @@ var watchMeasuredLoss = map[string]bool{
 	optimizationcampaign.FailureComparisonUnavailable: true, "measured_candidate_superseded": true,
 }
 
-// watchKeptWords describe a control the campaign kept. Activating it would
+// watchKeptWords describe a current setup the run kept. Rolling it out would
 // change nothing, so it is never called a winner.
-const watchKeptWords = "kept · nothing to activate"
+const watchKeptWords = "kept · nothing to roll out"
 
-// watchStatus describes one setup. kept is true for a control the campaign
-// kept; measurement may be empty.
-func watchStatus(candidate watchCandidate, measurement watchMeasurement, kept bool) string {
+// watchBaselineWord is the current setup's word once another setup was
+// chosen. It is the baseline the others are measured against, so the run
+// never calls it rejected; the API's state stays "rejected" in JSON.
+const watchBaselineWord = "baseline"
+
+// watchStatus describes one setup. current is true for the current setup and
+// kept for a current setup the run kept; measurement may be empty.
+func watchStatus(candidate watchCandidate, measurement watchMeasurement, current, kept bool) string {
 	if kept && (candidate.State == "qualified" || candidate.State == "guard_passed") {
 		return watchKeptWords
 	}
 	text := watchStateWords[candidate.State]
+	if current && candidate.State == "rejected" {
+		text = watchBaselineWord
+	}
 	if candidate.State == "validating" && candidate.Quality != nil && watchQualityWords[candidate.Quality.State] != "" {
 		text = watchQualityWords[candidate.Quality.State]
 	}
@@ -483,12 +492,12 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 			}
 			track.WriteString(mark)
 		}
-		isKept := kept && candidate.ID == control.ID
+		isCurrent := control != nil && candidate.ID == control.ID
 		name := watchLabel(candidate)
-		if control != nil && candidate.ID == control.ID && !strings.Contains(strings.ToLower(name), "current setup") {
+		if isCurrent && !strings.Contains(strings.ToLower(name), "current setup") {
 			name += " · current setup"
 		}
-		b.WriteString("  " + track.String() + "  " + padText(truncateText(name, 44), 44) + "  " + paint(s.subtle, watchStatus(candidate, snapshot.measurements[candidate.ID], isKept)) + "\n")
+		b.WriteString("  " + track.String() + "  " + padText(truncateText(name, 44), 44) + "  " + paint(s.subtle, watchStatus(candidate, snapshot.measurements[candidate.ID], isCurrent, kept && isCurrent)) + "\n")
 	}
 	b.WriteString(renderWatchTurns(candidates, s, paint))
 	b.WriteString("\n" + paint(s.title, "Measured") + "\n")
@@ -554,9 +563,9 @@ func renderWatchKept(campaign watchCampaign, s uiStyles, paint func(lipgloss.Sty
 		if target == "" {
 			target = "your endpoint"
 		}
-		b.WriteString("  Nothing to activate: " + target + " keeps serving its current revision.\n")
+		b.WriteString("  Nothing to roll out: " + target + " keeps serving its current revision.\n")
 	} else {
-		b.WriteString("  Nothing to activate: no new endpoint is published.\n")
+		b.WriteString("  Nothing to roll out: no new endpoint is created.\n")
 	}
 	cleanup := "infercrane optimize cancel " + campaign.ID + " removes the measurement servers now"
 	if campaign.ApprovalExpiresAt != nil {
@@ -644,7 +653,7 @@ func watchStageWord(campaign watchCampaign) string {
 	if campaign.Progress != nil && watchStageWords[campaign.Progress.Stage] != "" {
 		return watchStageWords[campaign.Progress.Stage]
 	}
-	return watchStatus(watchCandidate{State: campaign.State}, watchMeasurement{}, false)
+	return watchStatus(watchCandidate{State: campaign.State}, watchMeasurement{}, false, false)
 }
 
 // watchTurn says which measured turn is running, as the control API counts it.

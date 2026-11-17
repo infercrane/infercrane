@@ -33,7 +33,7 @@ func TestStyledCampaignListFitsAndBadgesStates(t *testing.T) {
 		}
 		assertFits(t, text, width)
 	}
-	if out := renderCampaignList(plainTheme, nil, nil, styledNow); out != "No optimization campaigns.\n" {
+	if out := renderCampaignList(plainTheme, nil, nil, styledNow); out != "No optimization runs.\n" {
 		t.Fatalf("empty plain list = %q", out)
 	}
 }

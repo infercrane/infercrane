@@ -1,15 +1,20 @@
 ---
 title: Evidence-gated optimization
-description: Turn a model, workload, infrastructure boundary, and objective into inspectable candidates that InferCrane can measure and prove.
+description: Turn a model, workload, infrastructure boundary, and objective into inspectable setups that InferCrane can measure and prove.
 ---
 
 # Evidence-gated optimization
 
 InferCrane separates proposing a configuration from proving it. The optimizer starts with reviewed
 model metadata and locally or really qualified provider/runtime compatibility. When the exact
-optional estimator toolchain is available, it uses AIConfigurator to reduce the candidate space.
-Otherwise it creates conservative reviewed catalog candidates. Neither path contacts a control
+optional estimator toolchain is available, it uses AIConfigurator to narrow the setups it proposes.
+Otherwise it proposes conservative setups from the reviewed catalog. Neither path contacts a control
 plane or provisions paid capacity.
+
+The CLI and the dashboard call one optimization a *run* and each configuration it measures a
+*setup*; a winner is *rolled out*. The control API calls a run an optimization campaign, a setup a
+candidate, and rolling out activating or promoting. API fields, states, codes, and the sections on
+how measurement works keep the API's names. See [Words](/cli#words).
 
 Check the optional estimator once:
 
@@ -46,14 +51,14 @@ infercrane optimize propose mistral-7b-instruct \
   --max-error-rate 0.01 \
   --min-goodput 4 \
   --max-hourly-cost 3 \
-  --write-dir .infercrane/candidates/mistral-interactive
+  --write-dir .infercrane/setups/mistral-interactive
 ```
 
 The default `--source auto` tries the pinned AIConfigurator adapter and visibly falls back to the
 reviewed catalog when the optional tool is unavailable. Use `--source aiconfigurator` to require the
 estimator or `--source catalog` for deterministic reviewed starting profiles only.
 
-The result is a bounded candidate set. Each spec pins:
+The result is a bounded list of setups. Each spec pins:
 
 - the exact model revision;
 - runtime engine and version;
@@ -79,7 +84,7 @@ decode-heavy shapes.
 
 The public trace chooses token-shape experiments only. It does not supply a customer arrival rate,
 quality target, or production SLO, so InferCrane marks it `promotion_eligible: false`. Every
-candidate requires a representative customer replay before qualification or promotion. The prior
+setup requires a representative customer replay before qualification or rollout. The prior
 ships as an embedded artifact; normal product use does not download or rescan the dataset.
 
 ### Start with any pinned open-weight model
@@ -101,7 +106,7 @@ split it across its GPUs (`--tensor-parallel-size`, or `--tp-size` for SGLang, w
 above 1) and, when `max_model_len` is set, bound its context (`--max-model-len`, or
 `--context-length`). It does not infer tokenizer behavior, quantization, speculative decoding, or
 kernel compatibility. Those gaps are listed as required evidence. The optional AIConfigurator
-adapter may reduce this generic candidate space, but its output remains modeled and unqualified. A
+adapter may narrow these generic setups, but its output remains modeled and unqualified. A
 mutable branch such as `main` is rejected; the revision must be a 40–64 character hexadecimal commit.
 
 When the control plane has Hugging Face metadata access on, you can leave out the commit. Both
@@ -144,16 +149,16 @@ optimization technique or combines two:
 | FP8 KV cache | Always; requires semantic quality evidence |
 
 This currently covers SGLang 0.5.20 on H100, H200, and B200 through RunPod Pods. Anywhere else the
-proposal keeps its existing candidates and explains why no setups were added.
+proposal keeps its existing setups and explains why none were added.
 
 <Warning>
   Added setups are listed in planning order, not by predicted performance. Each setup's flags ran on
   this image with another model, which proves only that the flags exist. Every added setup is
-  `proposed-unmeasured` until a campaign measures it against the starting setup; a wrong or missing
+  `proposed-unmeasured` until a run measures it against the starting setup; a wrong or missing
   config feature costs at most one failed experiment inside the approved spend limit.
 </Warning>
 
-The command refuses to overwrite a non-empty candidate directory. Use `--output json` to archive the
+The command refuses to overwrite a non-empty output directory. Use `--output json` to archive the
 input digest, source, compatibility evidence, required evidence, and limitations with the specs.
 
 <Warning>
@@ -241,7 +246,7 @@ A chosen change is skipped, and the proposal records why, when:
   (pass `--model-config config.json` to declare it);
 - the change needs a draft model or a 4-bit publisher checkpoint. No draft model is paired with a
   model yet. A [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves different
-  model files, and a campaign cannot yet rank setups that serve different files, so it is left out;
+  model files, and a run cannot yet rank setups that serve different files, so it is left out;
 - the model's weights already look quantized, for FP8 weights;
 - the change is already in the starting setup, equals the engine default, or has an unknown default;
 - it changes the GPU, the GPUs per server, or the endpoint's routing. Right-sizing is flagged when
@@ -251,10 +256,10 @@ Every proposed setup carries a `reason`: its `role` (`control` or `diagnosis`), 
 `priority` from 0 to 100, an `expected_benefit` of `high`, `medium`, or `low`, the `rules` that
 chose it, a one-sentence `summary` that cites the measured value, and the `evidence` behind it. The
 proposal's `diagnosis` records the plan `state`, a `summary`, every chosen technique with the setups
-that apply it or the reason it was `skipped`, and `needed_evidence`. Campaign reads return the same
-plan as `diagnosis`, with its monitoring window, and each candidate's `reason`.
+that apply it or the reason it was `skipped`, and `needed_evidence`. Reads of a run return the same
+plan as `diagnosis`, with its monitoring window, and each setup's `reason`.
 
-```json title="A candidate's reason"
+```json title="A setup's reason"
 {
   "role": "diagnosis",
   "technique": "fp8-kv-cache",
@@ -278,7 +283,7 @@ plan as `diagnosis`, with its monitoring window, and each candidate's `reason`.
 <Warning>
   Priority and expected benefit order what to measure first. They are planning priors from the
   diagnosis, not a measured or predicted gain, and they never relax a gate: every added setup is
-  `proposed-unmeasured`, a precision change still needs the answer check, and a campaign keeps the
+  `proposed-unmeasured`, a precision change still needs the answer check, and a run keeps the
   starting setup unless a setup beats it by more than the noise floor. On the first real GPU run
   (Qwen3-0.6B on one RTX 4090, one request at a time), n-gram speculation and an FP8 KV cache both
   lost to vLLM defaults. For that diagnosis the rules propose no change and flag right-sizing, and
@@ -299,39 +304,40 @@ infercrane optimize propose Qwen/Qwen3-8B \
   --max-hourly-cost 3
 ```
 
-Advanced users can bind the search to an observed content-free Replay digest, which campaigns then
+Advanced users can bind the search to an observed content-free Replay digest, which runs then
 replay as their load, choose runtimes,
 control the workload profile and concurrency, require the estimator, and inspect the complete JSON
 provenance. Provider credentials are not passed to the estimator. Model metadata network access is
 off by default and requires `--allow-model-metadata-network`.
 
-## Create a durable campaign
+## Create a durable run
 
 The authenticated console exposes the same boundaries under **Optimize**:
 
 1. choose a reviewed model, objective, infrastructure target, and optional SLO;
-2. review the candidate boundary without allocating provider resources;
-3. create an immutable campaign;
+2. review the proposed setups without allocating provider resources;
+3. create an immutable run;
 4. grant a hard spend cap with a maximum 24-hour expiry;
 5. follow durable execution from Activity, even after closing the browser;
 6. inspect modeled and measured evidence separately;
-7. explicitly publish a qualified new endpoint or promote a Release Guard-approved evolution.
+7. explicitly roll out the winning setup: a qualified new endpoint, or a Release Guard-approved
+   evolution of an existing one.
 
 Cancellation is durable too: it persists the decision and links to the cleanup operation. The
-console never treats a proposed endpoint name as published until activation completes.
+console never treats a proposed endpoint name as live until the rollout completes.
 
-A campaign keeps the warnings its proposal recorded, such as skipped speculative-decoding setups
-or the reminder that every added setup is unmeasured. Campaign responses, including
-`GET /api/v1/optimization/campaigns/{id}`, return them as `warnings` so the campaign page shows the
+A run keeps the warnings its proposal recorded, such as skipped speculative-decoding setups
+or the reminder that every added setup is unmeasured. Run responses, including
+`GET /api/v1/optimization/campaigns/{id}`, return them as `warnings` so the run page shows the
 same boundary as the review step. An empty list means the proposal recorded none; the field is absent
 only when the stored proposal cannot be read. `infercrane optimize inspect`, `results`, `approve`,
-`activate`, and `cancel` print a **Proposal warnings** block after the campaign header when there
+`activate`, and `cancel` print a **Proposal warnings** block after the run header when there
 is at least one warning, and `--output json` keeps the field exactly as returned. Warnings explain
 what was skipped or left unproven. They are not performance evidence.
 
-Campaign responses also return `workload`, the load the immutable proposal bound the campaign to:
+Run responses also return `workload`, the load the immutable proposal bound the run to:
 
-| `workload.source` | Load the campaign sends | `workload.fingerprint` |
+| `workload.source` | Load the run sends | `workload.fingerprint` |
 |---|---|---|
 | `customer_observed` | Your recorded content-free Replay | The Replay shape digest |
 | `public_prior` | The public workload prior | The public prior's digest |
@@ -339,7 +345,7 @@ Campaign responses also return `workload`, the load the immutable proposal bound
 
 The console uses it to show whether a run tests on your recorded traffic before anything is
 measured. `workload` is absent when the stored proposal cannot be read or recorded no source, and
-it states what the campaign was asked to replay, not what was measured. Each candidate's measured
+it states what the run was asked to replay, not what was measured. Each setup's measured
 workload evidence records what actually ran.
 
 Use `propose` for a completely offline preview. Use `create` to persist the same immutable proposal
@@ -350,55 +356,57 @@ infercrane optimize create llama-3.1-8b-instruct \
   --provider aws --region eu-central-1 --gpu L40S \
   --objective interactive --max-candidates 3
 
-infercrane optimize inspect CAMPAIGN_ID
-infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h   # asks first in a terminal; --yes skips
+infercrane optimize inspect RUN_ID
+infercrane optimize approve RUN_ID --max-cost-usd 20 --expires-in 1h   # asks first in a terminal; --yes skips
 infercrane operation watch OPERATION_ID
-infercrane optimize results CAMPAIGN_ID
-infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
-infercrane operation watch ACTIVATION_OPERATION_ID
+infercrane optimize results RUN_ID
+infercrane optimize activate RUN_ID --candidate SETUP_ID   # roll out the winning setup
+infercrane operation watch ROLLOUT_OPERATION_ID
 ```
 
-To follow a campaign live, run `infercrane optimize watch CAMPAIGN_ID`. It shows, in plain words,
+To follow a run live, run `infercrane optimize watch RUN_ID`. It shows, in plain words,
 where each setup is (starting a server, measuring against your current setup, checking answer
 quality), what was measured (throughput, p95 time to first token, p95 latency, and cost per million
 tokens when the price is sourced), how each setup compared with the current one including the
 measurement noise floor, each setup's answer check, and the decision. When a setup beat your
-current setup, the decision prints the exact `activate` command. When nothing did, your current setup
-is kept: the control is marked `kept · nothing to activate`, for a new endpoint no endpoint is
-published, for an evolution the endpoint keeps serving its current revision, and the one step left
-is `infercrane optimize cancel CAMPAIGN_ID`, which removes the measurement servers now instead of
+current setup, the decision prints the exact `activate` command that rolls it out, and your current
+setup reads `baseline`. When nothing did, your current setup is kept: it is marked
+`kept · nothing to roll out`, for a new endpoint no endpoint is created, for an evolution the
+endpoint keeps serving its current revision, and the one step left
+is `infercrane optimize cancel RUN_ID`, which removes the measurement servers now instead of
 when the approval ends. `infercrane inbox` shows the same step. When a setup waits on you, for your
 eval set or your signed evaluation, it prints the exact command that unblocks it. It only reads the
 control API; `--once` prints one plain snapshot for scripts and logs. `infercrane optimize results
-CAMPAIGN_ID` prints the same summary once, and adds a pointer to `watch` while the run is still
+RUN_ID` prints the same summary once, and adds a pointer to `watch` while the run is still
 going.
 
 ### Follow a run live
 
-A run takes hours, so every campaign read says where it is without guessing. Each candidate has:
+A run takes hours, so every read of a run says where it is without guessing. Each setup, a
+`candidate` in the API, has:
 
 | Field | Meaning |
 |---|---|
 | `label` | What the setup changes, in plain words. A description written into the proposal wins, such as "Speculative decoding (n-gram)". Otherwise the label is built from the serving flags InferCrane recognizes, such as "FP8 KV cache, prefill chunks of 2,048 tokens", and a setup with none is "vLLM defaults". An unrecognized flag is shown as written, never guessed. Labels describe configuration, never performance. |
-| `control` | `true` for the current setup every other candidate is measured against. |
-| `state_entered_at` | When the candidate first entered each state. A state it never reached is absent. |
-| `measurement` | The live measurement while and after the candidate measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. `turns_planned` drops when the control stops answering mid-measurement. `null` before measuring starts. |
+| `control` | `true` for the current setup every other setup is measured against. |
+| `state_entered_at` | When the setup first entered each state. A state it never reached is absent. |
+| `measurement` | The live measurement while and after the setup measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. `turns_planned` drops when the control stops answering mid-measurement. `null` before measuring starts. |
 
-The campaign's `progress` summarizes the run:
+The run's `progress` summarizes it:
 
 | Field | Meaning |
 |---|---|
-| `stage` | `awaiting_approval`, `running`, `comparing`, `decided`, or `cancelled`. It comes from the candidates, not the campaign `state`, which reads `ranked` as soon as the first setup is ranked while later setups still measure. |
+| `stage` | `awaiting_approval`, `running`, `comparing`, `decided`, or `cancelled`. It comes from the setups, not the run's `state`, which reads `ranked` as soon as the first setup is ranked while later setups still measure. |
 | `started_at`, `ended_at`, `elapsed_seconds` | From approval to the moment the last setup reached its decision. `ended_at` is `null` while the run goes on or when a decision time was never recorded. |
 | `turns_done`, `turns_total` | Measured turns so far and expected in all. |
 | `eta` | An estimate of the time left, labelled `basis: observed_durations`. It uses only step durations this run already observed: provisioning, warmups, turns, and answer checks. It stays `unknown`, with a reason, until each remaining kind of step was timed once, and it never covers waiting for a person. |
 
 `GET /api/v1/optimization/campaigns/{id}` also returns `spend`: spend so far, estimated as each
-candidate's sourced hourly quote, divided by its quoted maximum replica count, times how long its
-replicas existed. The quote is the first one that authorized the candidate's servers. The value is
+setup's sourced hourly quote, divided by its quoted maximum replica count, times how long its
+replicas existed. The quote is the first one that authorized the setup's servers. The value is
 labelled `estimated from quoted rate` and is not an invoice. It is `unknown`, never zero, when a
-setup held servers without a recorded quote (any candidate provisioned by an earlier control plane)
-or when its servers cannot be attributed yet, such as an evolution candidate whose revision is
+setup held servers without a recorded quote (any setup provisioned by an earlier control plane)
+or when its servers cannot be attributed yet, such as an evolution setup whose revision is
 still being created. `cap_usd` is the approved cap.
 
 `infercrane optimize watch` and the console's run page show the same values: the setup and turn the
@@ -424,8 +432,8 @@ curl -X POST "$INFERCRANE_URL/api/v1/notifications/subscriptions" \
 | `approval_needed` | A run is created and waits for spend approval. |
 | `approval_expiring` | A run's approval ends within a quarter of its window, at most one hour. A result waiting for rollout is discarded at that time; work still running stops and is cleaned up. |
 | `quality_evidence_needed` | A setup has waited more than five minutes on you before its answers can be checked: for your signed evaluation when the run asked for [customer evidence](#how-a-campaign-checks-answers), or for the eval set the run names to be uploaded. The built-in answer check needs no one and never sends it. |
-| `decided` | The run reaches a decision. `outcome.kind` is `winner`, `no_clear_winner` (nothing beat your current setup by more than the measurement noise), or `nothing_passed` (no setup qualified). It comes from the [outcome report](#read-the-outcome-of-a-campaign) and is `unknown` when the report cannot be read. |
-| `failed` | The run failed. `failure.code` is the first candidate failure, or `unknown`. |
+| `decided` | The run reaches a decision. `outcome.kind` is `winner`, `no_clear_winner` (nothing beat your current setup by more than the measurement noise), or `nothing_passed` (no setup qualified). It comes from the [outcome report](#read-the-outcome-of-a-run) and is `unknown` when the report cannot be read. |
+| `failed` | The run failed. `failure.code` is the first setup failure, or `unknown`. |
 | `rolled_out` | The winner is rolled out. |
 
 Each event is sent once per destination, only for runs that change after the destination was
@@ -453,10 +461,10 @@ than 429 is final. A workspace can have ten destinations. Destinations need
 
 `infercrane inbox` lists the same waiting runs with the next command to run.
 
-### Read the outcome of a campaign
+### Read the outcome of a run
 
-When a campaign finishes, `infercrane optimize report CAMPAIGN_ID` shows what it changed. It compares
-your current setup, the campaign control, with the winning setup on:
+When a run finishes, `infercrane optimize report RUN_ID` shows what it changed. It compares
+your current setup with the winning setup on:
 
 | Outcome | How it is computed |
 |---|---|
@@ -472,13 +480,13 @@ When the winner was measured in turns with your current setup, both values come 
 window, and each change is checked against that window's noise floor: the report says `better`,
 `worse`, or `no real difference`. When it was not, the report shows each setup's own measurement and
 leaves the decision `unknown`. Cost and per-GPU throughput are rescaled by price and GPU count the same
-way the campaign ranking rescales them. The answer-quality verdict comes from the Release Guard
+way the run's ranking rescales them. The answer-quality verdict comes from the Release Guard
 evaluation when one exists. Otherwise it comes from the evidence that decided the winner's answer
 check, and `quality.source` says whose it is. For InferCrane's built-in check (`infercrane`, basis
 `builtin_answer_check`) the verdict uses the check's own watch and block thresholds. For signed
 customer evidence (`customer`, basis `campaign_quality_gate`) it is the eval's pass or fail, with no
 WATCH band. The monthly projection assumes servers stay busy, so idle capacity
-is not included. It is only made for a campaign that replayed your traffic, and only when every
+is not included. It is only made for a run that replayed your traffic, and only when every
 replayed request recorded its output tokens.
 
 The answer-quality outcome is named after the check that produced it: `Answer quality · InferCrane
@@ -492,9 +500,9 @@ shows the fixed banner **CPU run: proves the pipeline, not GPU speed**. Per-GPU 
 labelled per simulated accelerator.
 
 ```bash
-infercrane optimize report CAMPAIGN_ID                       # cards in a terminal, plain text when piped
-infercrane optimize report CAMPAIGN_ID --output json         # the API report, unchanged
-infercrane optimize report CAMPAIGN_ID --html result.html    # one self-contained page to share
+infercrane optimize report RUN_ID                       # cards in a terminal, plain text when piped
+infercrane optimize report RUN_ID --output json         # the API report, unchanged
+infercrane optimize report RUN_ID --html result.html    # one self-contained page to share
 ```
 
 In a terminal the report leads with the verdict, then one card per outcome: your current setup →
@@ -539,26 +547,26 @@ Piped or redirected output, `NO_COLOR`, and `TERM=dumb` print the plain text unc
 The HTML page has no scripts or external resources. It shows outcome cards first, then how the
 setups were measured and every setup's result. Next come the engine's cache, queue, and preemption
 signals when the runtime reported any, and an appendix. The appendix has the winning setup (engine,
-version, args, hardware, price) and the evidence digests: campaign input, proposal, benchmarks, signed
+version, args, hardware, price) and the evidence digests: run input, proposal, benchmarks, signed
 quality evidence, ranking, Release Guard evaluation, replayed traffic, and the report itself. Automation
 clients read the same report from `GET /api/v1/optimization/campaigns/{id}/report`, which requires read
-access and only returns campaigns of the caller's organization. The report reads the benchmark,
-quality, and Release Guard records each candidate recorded, by their IDs, so a finished campaign keeps
-its measured results after cleanup deletes the candidate deployments, and after their names are
+access and only returns runs of the caller's organization. The report reads the benchmark,
+quality, and Release Guard records each setup recorded, by their IDs, so a finished run keeps
+its measured results after cleanup deletes the setups' deployments, and after their names are
 deployed again. A referenced record that does not exist leaves its field `unknown`.
 
-The report also keeps the campaign's decision after cleanup. Cleanup marks every setup `cleaned`,
+The report also keeps the run's decision after cleanup. Cleanup marks every setup `cleaned`,
 cancelling marks waiting setups `cancelled`, and the proposal rank is only the planner's order, so the
 report reads the decision from the ranking each setup recorded when it was ranked. A setup counts as
 chosen only when its own ranking selected it, it was measured, its answers did not fail, no later
 check failed it, and, for an evolution, Release Guard accepted it. A kept current setup still reads
-"Keep your current setup". A chosen setup that nobody activated is named as the best setup found but
+"Keep your current setup". A chosen setup that nobody rolled out is named as the best setup found but
 not rolled out, with whether its server was removed because the approval ended or because the run
 was cancelled; the report never says it went live. When nothing qualified, the outcome cards lead with
 your current setup's measured values.
 
-That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
-that already serves production, bind the campaign to its stable deployment identity:
+That default creates a `new_endpoint` run. To improve an endpoint that already serves production,
+bind the run to its stable deployment identity:
 
 ```bash
 infercrane optimize create llama-3.1-8b-instruct \
@@ -568,19 +576,19 @@ infercrane optimize create llama-3.1-8b-instruct \
 ```
 
 InferCrane keeps these proof paths distinct. A new endpoint has no production baseline, so a winning
-candidate may become `qualified` after measured performance, sourced cost, and a passing answer
-check. It then waits for explicit human activation. An `evolve_endpoint` campaign must
+setup may become `qualified` after measured performance, sourced cost, and a passing answer
+check. It then waits for you to roll it out. An `evolve_endpoint` run must
 create a candidate revision against the named deployment, compare it with active production through
-Release Guard, and wait for explicit human promotion. InferCrane never invents a baseline for a new
+Release Guard, and wait for you to roll it out. InferCrane never invents a baseline for a new
 endpoint and never lets an evolution bypass Release Guard.
 
-Activation is itself a durable, idempotent operation. A new-endpoint campaign may activate only a
-`qualified` candidate. It atomically publishes the endpoint name from the immutable proposal and
-binds it to the selected isolated candidate deployment; an existing alias is never silently rebound.
-The activation operation waits until the request-path route generation is published. An evolution
-campaign may promote only a `guard_passed` candidate and delegates the traffic mutation to the
+Rolling out with `optimize activate` is itself a durable, idempotent operation. A new-endpoint run
+can roll out only a `qualified` setup. It atomically publishes the endpoint name from the immutable
+proposal and binds it to the selected setup's isolated deployment; an existing alias is never
+silently rebound. The rollout operation waits until the request-path route generation is published.
+An evolution run can roll out only a `guard_passed` setup and delegates the traffic mutation to the
 normal guarded rollout workflow. Approval expiry is checked before mutation, while a retry after a
-completed activation remains a successful no-op.
+completed rollout remains a successful no-op.
 
 A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, and is
 measured directly against its replicas. Converge publishes no endpoint for it. The database still
@@ -989,10 +997,10 @@ Use the generated files through the existing lifecycle:
 
 ```bash
 # Review without mutation.
-infercrane plan .infercrane/candidates/mistral-interactive/01-*.yaml
+infercrane plan .infercrane/setups/mistral-interactive/01-*.yaml
 
-# Deploy one explicitly selected candidate.
-infercrane deploy .infercrane/candidates/mistral-interactive/01-*.yaml \
+# Deploy one explicitly selected setup.
+infercrane deploy .infercrane/setups/mistral-interactive/01-*.yaml \
   --idempotency-key mistral-interactive-candidate-1 \
   --wait
 
@@ -1009,12 +1017,12 @@ infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
   --min-goodput 4 \
   --max-hourly-cost 3
 
-# Apply normal candidate and Release Guard policy before promotion.
+# Apply the normal candidate-revision and Release Guard policy before rolling out.
 infercrane rollout inspect DEPLOYMENT
 ```
 
 When model precision or model artifacts differ, attach signed semantic evaluation evidence before
-promotion. When cost is part of the objective, attach sourced, dated cost evidence. Only an exact
+rolling out. When cost is part of the objective, attach sourced, dated cost evidence. Only an exact
 model, runtime, accelerator, provider, and canonical workload result supports a measured recipe.
 
 ## Seed candidates from publisher checkpoints

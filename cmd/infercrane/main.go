@@ -1469,7 +1469,7 @@ func labCommand(ctx context.Context, cfg config.Config, args []string) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "CHOICE\tCLASS\tCANDIDATE\tPROFILE\tTTFT P95\tTPOT P95\tOUTPUT TOK/S\tGOODPUT\tERRORS\tCONSTRAINTS\tCOST/H")
+	fmt.Fprintln(w, "CHOICE\tCLASS\tSETUP\tPROFILE\tTTFT P95\tTPOT P95\tOUTPUT TOK/S\tGOODPUT\tERRORS\tCONSTRAINTS\tCOST/H")
 	for _, row := range response.Evaluation.Results {
 		candidate := fmt.Sprintf("%s / %s / %s", benchmarkValue(row["provider"]), benchmarkValue(row["runtime"]), benchmarkValue(row["gpu"]))
 		choice := ""
@@ -3925,7 +3925,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		compatibility := fs.Bool("require-compatibility", policy.RequireCompatibilityEvidence, "require comparable model/runtime evidence")
 		synthetic := fs.Bool("require-synthetic", policy.RequireSyntheticEvidence, "require bounded AIPerf validation")
 		quality := fs.Bool("require-quality", policy.RequireQualityEvidence, "require signed comparable semantic quality evidence")
-		autoRollback := fs.Bool("auto-rollback", policy.AutoRollbackEnabled, "monitor promoted revision and automatically roll back rejection")
+		autoRollback := fs.Bool("auto-rollback", policy.AutoRollbackEnabled, "monitor the rolled-out revision and roll it back automatically when Release Guard rejects it")
 		minimum := fs.Int("minimum-requests", policy.MinimumRequests, "minimum measured requests per revision")
 		maxCost := fs.String("max-cost-regression", "", "maximum sourced cost regression percent; omit to preserve")
 		minimumQuality := fs.String("minimum-quality-score", "", "minimum candidate score from 0 to 1; omit to preserve")
@@ -3934,7 +3934,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		bootstrapAlpha := fs.Float64("quality-bootstrap-alpha", policy.QualityBootstrapAlpha, "paired-bootstrap alpha")
 		bootstrapMinimum := fs.Int("quality-bootstrap-min-samples", policy.QualityBootstrapMinSamples, "minimum paired quality samples")
 		bootstrapSeed := fs.Int64("quality-bootstrap-seed", policy.QualityBootstrapSeed, "deterministic paired-bootstrap seed")
-		window := fs.Int("auto-rollback-window", policy.AutoRollbackWindowSeconds, "observation window seconds")
+		window := fs.Int("auto-rollback-window", policy.AutoRollbackWindowSeconds, "observation window after a rollout, in seconds")
 		maxRequests := fs.Int("validation-max-requests", policy.ValidationMaxRequests, "hard validation request bound")
 		maxConcurrency := fs.Int("validation-max-concurrency", policy.ValidationMaxConcurrency, "hard validation concurrency bound")
 		output := fs.String("output", "human", "human or json")

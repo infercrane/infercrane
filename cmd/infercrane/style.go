@@ -191,7 +191,7 @@ func (t theme) tone(tone, text string) string {
 // statusTone maps a lifecycle state from any resource to its meaning.
 func statusTone(state string) string {
 	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "healthy", "ready", "active", "serving", "converged", "succeeded", "pass", "qualified", "guard_passed", "promoted", "observed", "live":
+	case "healthy", "ready", "active", "serving", "converged", "succeeded", "pass", "qualified", "guard_passed", "promoted", "rolled_out", "observed", "live":
 		return toneGood
 	case "pending", "starting", "running", "leased", "observing", "approved", "provisioning", "measuring", "validating", "ranked", "guarding", "creating", "deleting":
 		return toneInfo

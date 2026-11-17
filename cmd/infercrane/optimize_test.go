@@ -260,7 +260,7 @@ func TestOptimizeCreatePersistsProposalWithoutProviderMutation(t *testing.T) {
 	output, err := captureStdout(t, func() error {
 		return optimizeCommand(context.Background(), []string{"create", "mistral-7b-instruct", "--provider", "aws", "--region", "eu-central-1", "--gpu", "L40S", "--source", "catalog"})
 	})
-	if err != nil || !strings.Contains(output, "Optimization campaign campaign-1 · awaiting_approval") || !strings.Contains(output, "Mutation    none") {
+	if err != nil || !strings.Contains(output, "Optimization run campaign-1 · awaiting_approval") || !strings.Contains(output, "Setups      1") || !strings.Contains(output, "Mutation    none") {
 		t.Fatalf("output=%q err=%v", output, err)
 	}
 }

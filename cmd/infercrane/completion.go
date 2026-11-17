@@ -81,12 +81,12 @@ func (s completionSource) campaigns(prefix string) []string {
 	}
 	values := make([]string, 0, len(response.Data))
 	for _, campaign := range response.Data {
-		values = append(values, completionValue(campaign.ID, emptyAs(campaign.ModelIdentity, "unknown model"), strings.ReplaceAll(emptyAs(campaign.State, "unknown"), "_", " ")))
+		values = append(values, completionValue(campaign.ID, emptyAs(campaign.ModelIdentity, "unknown model"), strings.ReplaceAll(runStateWord(emptyAs(campaign.State, "unknown")), "_", " ")))
 	}
 	return matching(values, prefix)
 }
 
-// candidates completes the setup IDs of one campaign, for --candidate.
+// candidates completes the setup IDs of one run, for --candidate.
 func (s completionSource) candidates(campaign, prefix string) []string {
 	var response struct {
 		Campaign optimizationCampaignView `json:"campaign"`
@@ -96,7 +96,7 @@ func (s completionSource) candidates(campaign, prefix string) []string {
 	}
 	values := make([]string, 0, len(response.Campaign.Candidates))
 	for _, candidate := range response.Campaign.Candidates {
-		values = append(values, completionValue(candidate.ID, strings.ReplaceAll(emptyAs(candidate.State, "unknown"), "_", " ")))
+		values = append(values, completionValue(candidate.ID, strings.ReplaceAll(setupStateWord(emptyAs(candidate.State, "unknown"), candidate.Control != nil && *candidate.Control), "_", " ")))
 	}
 	return matching(values, prefix)
 }
@@ -300,7 +300,7 @@ func completeFlagValue(s completionSource, command string, args []string, name, 
 	return nil, false
 }
 
-// campaignArgument is the campaign ID in "optimize ACTION CAMPAIGN".
+// campaignArgument is the run ID in "optimize ACTION RUN".
 func campaignArgument(args []string) string {
 	if len(args) >= 2 && !strings.HasPrefix(args[1], "-") {
 		return args[1]
