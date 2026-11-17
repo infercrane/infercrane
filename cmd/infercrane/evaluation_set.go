@@ -22,7 +22,7 @@ type qualityEvalSetView struct {
 
 // evaluationSetCommand manages customer eval sets for the built-in answer
 // check. An eval set is addressed by the SHA-256 digest of the file's exact
-// bytes, so the digest printed here is the one a campaign names.
+// bytes, so the digest printed here is the one a run names.
 func evaluationSetCommand(ctx context.Context, args []string) error {
 	usage := errors.New("usage: infercrane evaluation set upload FILE | inspect DIGEST | delete DIGEST | digest FILE | default")
 	if len(args) == 0 {
@@ -84,7 +84,7 @@ func evaluationSetCommand(ctx context.Context, args []string) error {
 		if err = printEvalSet(response.EvalSet, *output, title); err != nil || *output == "json" {
 			return err
 		}
-		fmt.Printf("\nUse it in a campaign:\n  infercrane optimize create MODEL --provider PROVIDER --gpu GPU --eval-set %s\n", response.EvalSet.Digest)
+		fmt.Printf("\nUse it in an optimization run:\n  infercrane optimize create MODEL --provider PROVIDER --gpu GPU --eval-set %s\n", response.EvalSet.Digest)
 		return nil
 	case "inspect":
 		var response struct {
@@ -101,7 +101,7 @@ func evaluationSetCommand(ctx context.Context, args []string) error {
 		if *output == "json" {
 			return printJSON(map[string]any{"digest": argument, "deleted": true})
 		}
-		fmt.Printf("Eval set %s deleted. Campaigns that name it wait until it is uploaded again.\n", argument)
+		fmt.Printf("Eval set %s deleted. Runs that name it wait until it is uploaded again.\n", argument)
 		return nil
 	default:
 		return usage

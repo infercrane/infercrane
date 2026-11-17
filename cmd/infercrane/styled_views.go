@@ -11,7 +11,7 @@ import (
 // Styled renderings of list and detail views for a person at a terminal. The
 // plain output of each command stays where it was, unchanged, for scripts.
 
-// campaignTimes reads the timestamps the campaign list returns. They are
+// campaignTimes reads the timestamps the run list returns. They are
 // decoded apart from optimizationCampaignView so --output json stays the
 // same document it always was.
 type campaignTimes struct {
@@ -21,12 +21,12 @@ type campaignTimes struct {
 
 func renderCampaignList(t theme, campaigns []optimizationCampaignView, times []campaignTimes, now time.Time) string {
 	if len(campaigns) == 0 {
-		return t.muted("No optimization campaigns.") + "\n"
+		return t.muted("No optimization runs.") + "\n"
 	}
-	// Wide terminals get one row per campaign; narrow ones put the model and
-	// goal on a second line, so the full campaign ID never wraps.
+	// Wide terminals get one row per run; narrow ones put the model and
+	// goal on a second line, so the full run ID never wraps.
 	wide := t.width >= 110
-	columns := []column{{header: "Campaign"}, {header: "State"}}
+	columns := []column{{header: "Run"}, {header: "State"}}
 	if wide {
 		columns = append(columns, column{header: "Model", wrap: true}, column{header: "Goal"})
 	}
@@ -37,7 +37,7 @@ func renderCampaignList(t theme, campaigns []optimizationCampaignView, times []c
 		if index < len(times) {
 			created = relativeTime(now, times[index].CreatedAt)
 		}
-		row := []string{campaign.ID, stateWord(campaign.State)}
+		row := []string{campaign.ID, stateWord(runStateWord(campaign.State))}
 		if wide {
 			row = append(row, emptyAs(campaign.ModelIdentity, "unknown"), emptyAs(campaign.Objective, "unknown"))
 		}
@@ -59,7 +59,7 @@ func renderCampaignList(t theme, campaigns []optimizationCampaignView, times []c
 		switch columns[col].header {
 		case "State":
 			return t.tone(statusTone(campaigns[row].State), text)
-		case "Campaign":
+		case "Run":
 			return t.title(text)
 		case "Created", "Goal":
 			return t.muted(text)
@@ -74,11 +74,31 @@ func stateWord(state string) string {
 	return "● " + strings.ToUpper(strings.ReplaceAll(emptyAs(state, "unknown"), "_", " "))
 }
 
+// runStateWord is a run or setup state in the words the dashboard uses. The
+// control API calls a rolled-out winner "promoted"; every other state keeps
+// its own name. --output json and the plain output keep the API's value.
+func runStateWord(state string) string {
+	if state == "promoted" {
+		return "rolled_out"
+	}
+	return state
+}
+
+// setupStateWord is runStateWord for one setup's state or evidence state. The
+// current setup is the baseline the others are measured against, so a run
+// that chose another setup never calls it rejected.
+func setupStateWord(state string, current bool) string {
+	if current && state == "rejected" {
+		return "baseline"
+	}
+	return runStateWord(state)
+}
+
 // renderCampaign is one optimization run: its facts, warnings, and setups.
 // described maps a setup ID to what it runs, when the spec was returned.
 func renderCampaign(t theme, view optimizationCampaignView, described map[string]string, execution, activation, cleanup *domain.Operation, now time.Time) string {
 	var b strings.Builder
-	b.WriteString(t.title("Optimization campaign") + "  " + t.badge(view.State) + "\n")
+	b.WriteString(t.title("Optimization run") + "  " + t.badge(runStateWord(view.State)) + "\n")
 	b.WriteString(t.muted(view.ID) + "\n\n")
 	names := []string{"Model", "Objective", "Intent", "Source"}
 	values := []string{emptyAs(view.ModelIdentity, "unknown"), emptyAs(view.Objective, "unknown"), emptyAs(view.Intent, "unknown"), emptyAs(view.Source, "unknown")}
@@ -96,7 +116,7 @@ func renderCampaign(t theme, view optimizationCampaignView, described map[string
 	for _, item := range []struct {
 		name      string
 		operation *domain.Operation
-	}{{"Execution", execution}, {"Activation", activation}, {"Cleanup", cleanup}} {
+	}{{"Execution", execution}, {"Rollout", activation}, {"Cleanup", cleanup}} {
 		if item.operation != nil {
 			names, values = append(names, item.name), append(values, item.operation.ID+" · "+strings.ToUpper(item.operation.Status))
 			operationNames = append(operationNames, item.name)
@@ -127,10 +147,12 @@ func renderCampaign(t theme, view optimizationCampaignView, described map[string
 	if len(view.Candidates) > 0 {
 		b.WriteString("\n" + t.section("Setups") + "\n")
 		rows := make([][]string, 0, len(view.Candidates))
+		states := make([]string, 0, len(view.Candidates))
 		for _, candidate := range view.Candidates {
+			current := candidate.Control != nil && *candidate.Control
 			detail := candidate.ID
 			if setup := described[candidate.ID]; setup != "" {
-				if candidate.Control != nil && *candidate.Control {
+				if current {
 					setup = "current setup · " + setup
 				}
 				detail = setup + " · " + candidate.ID
@@ -141,12 +163,13 @@ func renderCampaign(t theme, view optimizationCampaignView, described map[string
 			if candidate.FailureCode != "" {
 				detail += " · " + candidate.FailureCode
 			}
-			rows = append(rows, []string{fmt.Sprintf("%d", candidate.Rank), stateWord(candidate.State), emptyAs(candidate.EvidenceState, "unknown"), detail})
+			states = append(states, setupStateWord(candidate.State, current))
+			rows = append(rows, []string{fmt.Sprintf("%d", candidate.Rank), stateWord(states[len(states)-1]), setupStateWord(emptyAs(candidate.EvidenceState, "unknown"), current), detail})
 		}
 		b.WriteString(t.tableWithDetail(2, []column{{header: "#", right: true}, {header: "State"}, {header: "Evidence"}, {header: "Setup", wrap: true}}, rows, func(row, col int, text string) string {
 			switch col {
 			case 1:
-				return t.tone(statusTone(view.Candidates[row].State), text)
+				return t.tone(statusTone(states[row]), text)
 			case 0, 2:
 				return t.muted(text)
 			}

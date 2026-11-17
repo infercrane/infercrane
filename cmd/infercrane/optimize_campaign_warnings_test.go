@@ -61,9 +61,9 @@ func TestOptimizeCampaignActionsPrintProposalWarnings(t *testing.T) {
 			}
 			continue
 		}
-		header := strings.Index(output, "Optimization campaign campaign-1 · awaiting_approval")
+		header := strings.Index(output, "Optimization run campaign-1 · awaiting_approval")
 		warnings := strings.Index(output, block)
-		candidates := strings.Index(output, "CANDIDATES")
+		candidates := strings.Index(output, "SETUPS")
 		if header < 0 || warnings < header || candidates < warnings {
 			t.Fatalf("args=%v: warnings block missing or out of order:\n%s", args, output)
 		}
@@ -107,7 +107,7 @@ func TestOptimizeCampaignWithoutWarningsPrintsNoBlock(t *testing.T) {
 			output, err := captureStdout(t, func() error {
 				return optimizeCampaignCommand(context.Background(), []string{"inspect", "campaign-1"})
 			})
-			if err != nil || !strings.Contains(output, "CANDIDATES") || strings.Contains(output, campaignWarningsHeading) {
+			if err != nil || !strings.Contains(output, "SETUPS") || strings.Contains(output, campaignWarningsHeading) {
 				t.Fatalf("output=%q err=%v", output, err)
 			}
 

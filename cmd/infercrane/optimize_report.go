@@ -17,11 +17,11 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationreport"
 )
 
-// optimize report prints the outcome of one campaign: the current setup
+// optimize report prints the outcome of one run: the current setup
 // against the winning setup on cost, speed, and answer quality, then the
 // measurement that proves it. It only reads the control API.
 
-const optimizeReportUsage = "usage: infercrane optimize report CAMPAIGN [--output text|json] [--html FILE]"
+const optimizeReportUsage = "usage: infercrane optimize report RUN [--output text|json] [--html FILE]"
 
 func optimizeReportCommand(ctx context.Context, args []string) error {
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
@@ -375,7 +375,9 @@ func renderSetupTable(candidates []optimizationreport.ViewCandidate, t theme) st
 		for index, status := range wrapWords(candidate.Status, detail-2) {
 			prefix := "      "
 			if index == 0 {
-				prefix = "    " + t.tone(statusTone(candidate.State), "●") + " "
+				// The dot follows the status words: a replaced current setup
+				// reads "baseline", so its dot is neutral, not a failure.
+				prefix = "    " + t.tone(statusTone(setupStateWord(candidate.State, strings.HasPrefix(candidate.Role, "current setup"))), "●") + " "
 			}
 			b.WriteString(prefix + status + "\n")
 		}

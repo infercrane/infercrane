@@ -1,5 +1,5 @@
 Optimization result
-Qwen/Qwen3-0.6B · goal: interactive · campaign 83ccd598540e2dd1f9c897040c1ea503
+Qwen/Qwen3-0.6B · goal: interactive · run 83ccd598540e2dd1f9c897040c1ea503
 
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ● NO WINNER                                                                                                │
@@ -64,7 +64,7 @@ Your current setup ────────────────────�
   Revision   qwen-rtx-optimized-opt-91f3961c f7aa12bd415ffc55637dd3de38e7255f-rev-1
 
 Evidence ─────────────────────────────────────────────────────────────────────────────────────────────────────
-  campaign input      sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a458a6d6e2b90d011
+  run input           sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a458a6d6e2b90d011
                       (83ccd598540e2dd1f9c897040c1ea503) Qwen/Qwen3-0.6B
   proposal            sha256:b73a6ef0eb11c3559b633c6d9dadd2d0eaaab5015932461962236036e663f4ba
                       catalog-candidate-planner-v2

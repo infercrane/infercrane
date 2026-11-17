@@ -53,7 +53,7 @@ func optimizedArtifactCommand(ctx context.Context, cfg config.Config, args []str
 	evidenceFile := fs.String("evidence-file", "", "bounded content-free build evidence JSON")
 	failureCode := fs.String("failure-code", "", "stable builder failure code")
 	qualityEvidenceID := fs.String("quality-evidence", "", "passing signed revision quality-evidence ID")
-	candidateRunID := fs.String("candidate-run", "", "exact optimization candidate run evaluated")
+	candidateRunID := fs.String("candidate-run", "", "ID of the optimization setup that was evaluated")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
