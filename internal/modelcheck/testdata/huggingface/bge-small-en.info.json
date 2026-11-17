@@ -1,0 +1,70 @@
+{
+ "_id": "64fff537d522560505ad6567",
+ "id": "BAAI/bge-small-en-v1.5",
+ "sha": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+ "pipeline_tag": "feature-extraction",
+ "cardData": {
+  "license": "mit"
+ },
+ "gated": false,
+ "private": false,
+ "config": {
+  "architectures": [
+   "BertModel"
+  ],
+  "model_type": "bert"
+ },
+ "tags": [
+  "sentence-transformers",
+  "pytorch",
+  "onnx",
+  "safetensors",
+  "bert",
+  "feature-extraction",
+  "sentence-similarity",
+  "transformers",
+  "mteb",
+  "en",
+  "arxiv:2401.03462",
+  "arxiv:2312.15503",
+  "arxiv:2311.13534",
+  "arxiv:2310.07554",
+  "arxiv:2309.07597",
+  "license:mit",
+  "model-index",
+  "text-embeddings-inference",
+  "endpoints_compatible",
+  "deploy:sagemaker",
+  "deploy:azure",
+  "region:us"
+ ],
+ "library_name": "sentence-transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "1_Pooling/config.json"
+  },
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "model.safetensors"
+  },
+  {
+   "rfilename": "pytorch_model.bin"
+  },
+  {
+   "rfilename": "sentence_bert_config.json"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  }
+ ],
+ "safetensors": {
+  "parameters": {
+   "I64": 512,
+   "F32": 33360000
+  },
+  "total": 33360512
+ }
+}

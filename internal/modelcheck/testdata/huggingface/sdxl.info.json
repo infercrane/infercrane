@@ -1,0 +1,79 @@
+{
+ "_id": "64bfcd5ff462a99a04fd1ec8",
+ "id": "stabilityai/stable-diffusion-xl-base-1.0",
+ "sha": "462165984030d82259a11f4367a4eed129e94a7b",
+ "pipeline_tag": "text-to-image",
+ "cardData": {
+  "license": "openrail++"
+ },
+ "gated": false,
+ "private": false,
+ "config": {
+  "diffusers": {
+   "_class_name": "StableDiffusionXLPipeline"
+  }
+ },
+ "tags": [
+  "diffusers",
+  "onnx",
+  "safetensors",
+  "text-to-image",
+  "stable-diffusion",
+  "arxiv:2307.01952",
+  "arxiv:2211.01324",
+  "arxiv:2108.01073",
+  "arxiv:2112.10752",
+  "license:openrail++",
+  "endpoints_compatible",
+  "diffusers:StableDiffusionXLPipeline",
+  "deploy:sagemaker",
+  "deploy:azure",
+  "region:us"
+ ],
+ "library_name": "diffusers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "scheduler/scheduler_config.json"
+  },
+  {
+   "rfilename": "sd_xl_base_1.0.safetensors"
+  },
+  {
+   "rfilename": "sd_xl_base_1.0_0.9vae.safetensors"
+  },
+  {
+   "rfilename": "sd_xl_offset_example-lora_1.0.safetensors"
+  },
+  {
+   "rfilename": "text_encoder/config.json"
+  },
+  {
+   "rfilename": "text_encoder/model.fp16.safetensors"
+  },
+  {
+   "rfilename": "text_encoder/model.safetensors"
+  },
+  {
+   "rfilename": "text_encoder/openvino_model.bin"
+  },
+  {
+   "rfilename": "text_encoder_2/config.json"
+  },
+  {
+   "rfilename": "text_encoder_2/model.fp16.safetensors"
+  },
+  {
+   "rfilename": "text_encoder_2/model.safetensors"
+  },
+  {
+   "rfilename": "text_encoder_2/openvino_model.bin"
+  }
+ ],
+ "safetensors": {
+  "parameters": {
+   "F32": 2567463684
+  },
+  "total": 2567463684
+ }
+}
