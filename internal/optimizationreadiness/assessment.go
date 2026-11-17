@@ -115,22 +115,38 @@ type Assessment struct {
 	ProviderMutation  bool       `json:"provider_mutation"`
 }
 
+// Primary bottlenecks an assessment reports. A planner reads them as typed
+// values; "unknown" means the window was not diagnosable.
+const (
+	BottleneckUnknown         = "unknown"
+	BottleneckReliability     = "reliability"
+	BottleneckKVCachePressure = "kv-cache-pressure"
+	BottleneckHostScheduler   = "host-and-scheduler"
+	BottleneckQueueing        = "queueing-and-admission"
+	BottleneckPrefill         = "prefill-and-first-token"
+	BottleneckDecode          = "decode-and-generation"
+	BottleneckUnattributed    = "unattributed-serving-time"
+	StateCollecting           = "collecting"
+	StateProfileReady         = "profile-ready"
+	StateReliabilityBlocked   = "reliability-blocked"
+)
+
 // Rule identifiers for engine-signal findings.
 const (
-	RuleKVPreemption       = "kv_cache.preemption"
-	RuleKVSaturation       = "kv_cache.saturation"
-	RuleEngineQueue        = "queue.engine_wait"
-	RuleLongInputPrefill   = "prefill.long_input"
-	RuleLowConcurrency     = "decode.low_concurrency"
-	RulePrefixReuse        = "prefix.low_reuse"
-	RuleSpeculativeAccept  = "speculative.low_acceptance"
-	RuleMemoryBandwidth    = "gpu.memory_bandwidth_bound"
-	RuleComputeBound       = "gpu.compute_bound"
-	RuleHostBound          = "gpu.host_bound"
-	RuleInterconnectBound  = "gpu.interconnect_bound"
-	signalSharedPrefix     = "shared_prefix_request_ratio"
-	signalPreemptionRate   = "runtime_preemptions_per_completed_request"
-	signalRunningPerWorker = "runtime_requests_running_per_replica"
+	RuleKVPreemption        = "kv_cache.preemption"
+	RuleKVSaturation        = "kv_cache.saturation"
+	RuleEngineQueue         = "queue.engine_wait"
+	RuleLongInputPrefill    = "prefill.long_input"
+	RuleLowConcurrency      = "decode.low_concurrency"
+	RulePrefixReuse         = "prefix.low_reuse"
+	RuleSpeculativeAccept   = "speculative.low_acceptance"
+	RuleMemoryBandwidth     = "gpu.memory_bandwidth_bound"
+	RuleComputeBound        = "gpu.compute_bound"
+	RuleHostBound           = "gpu.host_bound"
+	RuleInterconnectBound   = "gpu.interconnect_bound"
+	SignalSharedPrefixRatio = "shared_prefix_request_ratio"
+	SignalPreemptionRate    = "runtime_preemptions_per_completed_request"
+	SignalRunningPerReplica = "runtime_requests_running_per_replica"
 )
 
 func DefaultPolicy() Policy {
@@ -146,7 +162,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 	policy = normalizePolicy(policy)
 	result := Assessment{
 		SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Endpoint: snapshot.Endpoint,
-		State: "collecting", PrimaryBottleneck: "unknown", Confidence: "insufficient",
+		State: StateCollecting, PrimaryBottleneck: BottleneckUnknown, Confidence: "insufficient",
 		NextAction:        "collect fresh request and token telemetry before starting a paid optimization campaign",
 		CandidateFamilies: []string{}, Findings: []Finding{}, RequiredEvidence: []string{"fresh request window", "representative workload distribution", "runtime and accelerator identity"},
 		KernelGate:      KernelGate{Eligible: false, Reason: "request-level monitoring cannot establish a GPU operator hotspot; an exact target-GPU profile and Amdahl gate are required"},
@@ -163,10 +179,10 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		return result
 	}
 
-	result.State, result.Confidence = "profile-ready", "stage-level"
+	result.State, result.Confidence = StateProfileReady, "stage-level"
 	latency := snapshot.Summary.P95LatencyMS
 	if snapshot.Summary.ErrorRate != nil && *snapshot.Summary.ErrorRate > policy.MaxErrorRate {
-		result.State, result.PrimaryBottleneck = "reliability-blocked", "reliability"
+		result.State, result.PrimaryBottleneck = StateReliabilityBlocked, BottleneckReliability
 		result.NextAction = "resolve serving errors before performance tuning so failed requests do not bias the benchmark"
 		result.CandidateFamilies = []string{"runtime compatibility", "capacity and health", "request validation"}
 		result.RequiredEvidence = []string{"error taxonomy", "runtime logs", "provider health", "passing correctness workload"}
@@ -207,21 +223,21 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 	}
 
 	if len(kv) > 0 {
-		result.PrimaryBottleneck = "kv-cache-pressure"
+		result.PrimaryBottleneck = BottleneckKVCachePressure
 		result.NextAction = "replay the workload against FP8 KV-cache and KV offload candidates and compare preemptions, queue time, and quality before adding replicas"
 		result.RequiredEvidence = []string{"KV-cache usage and preemptions on the replayed workload", "output-length distribution", "quality evaluation for reduced-precision KV", "SLO-qualified goodput", "sourced cost"}
 		result.finish(kv, secondaryFor(), []string{"replica scaling"}, missingEvidence)
 		return result
 	}
 	if host, ok := gpu[RuleHostBound]; ok {
-		result.PrimaryBottleneck = "host-and-scheduler"
+		result.PrimaryBottleneck = BottleneckHostScheduler
 		result.NextAction = "capture a short Nsight Systems timeline of the serving process and attribute scheduling, tokenization, and kernel-launch time before adding GPUs"
 		result.RequiredEvidence = []string{"serving-process CPU/GPU timeline", "kernel-launch overhead", "API server and tokenizer CPU time", "SLO-qualified goodput"}
 		result.finish([]Finding{host}, secondaryFor(RuleHostBound), []string{"continuous batching", "batch-token budget", "admission policy"}, missingEvidence)
 		return result
 	}
 	if queuePressure || engineQueuePressure {
-		result.PrimaryBottleneck = "queueing-and-admission"
+		result.PrimaryBottleneck = BottleneckQueueing
 		result.NextAction = "replay the workload with AIPerf and profile scheduler, batching, replica, and admission settings before kernel work"
 		result.RequiredEvidence = []string{"arrival distribution", "concurrency sweep", "queue p95", "SLO-qualified goodput", "sourced cost"}
 		var primary []Finding
@@ -240,7 +256,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		ttft = engine.value(metrics.MeasurementTTFTP95)
 	}
 	if meaningfulShare(ttft, latency, policy.TTFTShare, 50) {
-		result.PrimaryBottleneck, result.ProfilePhase = "prefill-and-first-token", "prefill"
+		result.PrimaryBottleneck, result.ProfilePhase = BottleneckPrefill, "prefill"
 		result.NextAction = "capture prefill/decode timing and prefix-reuse evidence, then compare cache, chunked-prefill, runtime, and attention candidates"
 		result.RequiredEvidence = []string{"input-length distribution", "prefix reuse", "prefill GPU trace", "AIPerf TTFT lanes"}
 		var primary []Finding
@@ -266,7 +282,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		return result
 	}
 	if meaningfulShare(snapshot.Summary.P95GenerationMS, latency, policy.GenerationShare, 50) {
-		result.PrimaryBottleneck, result.ProfilePhase = "decode-and-generation", "decode"
+		result.PrimaryBottleneck, result.ProfilePhase = BottleneckDecode, "decode"
 		result.NextAction = "capture decode throughput, KV-cache, and GPU operator profiles, then compare decoding, cache, quantization, and runtime candidates"
 		result.RequiredEvidence = []string{"output-length distribution", "decode tokens/second", "KV-cache pressure", "target-GPU operator profile"}
 		var primary []Finding
@@ -277,7 +293,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 				families = []string{"weight quantization", "speculative decoding"}
 			}
 			primary = append(primary, Finding{
-				Rule: RuleLowConcurrency, Signal: signalRunningPerWorker, Observed: running, Comparison: "<=", Threshold: policy.LowConcurrency, Unit: "requests",
+				Rule: RuleLowConcurrency, Signal: SignalRunningPerReplica, Observed: running, Comparison: "<=", Threshold: policy.LowConcurrency, Unit: "requests",
 				TechniqueFamilies: families,
 				Explanation:       "few concurrent sequences leave decode memory-bandwidth bound, where fewer target-model steps or smaller weights cut time per token",
 			})
@@ -290,7 +306,7 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 		result.finish(primary, secondaryFor(RuleMemoryBandwidth), []string{"KV cache", "speculative decoding", "quantization", "decode attention", "sampling"}, missingEvidence)
 		return result
 	}
-	result.PrimaryBottleneck = "unattributed-serving-time"
+	result.PrimaryBottleneck = BottleneckUnattributed
 	result.NextAction = "run a bounded AIPerf replay with Nsight Systems or runtime profiling to attribute CPU, transfer, prefill, decode, and communication time"
 	result.RequiredEvidence = []string{"AIPerf replay", "CPU/GPU timeline", "prefill/decode split", "cost per successful output"}
 	result.finish(nil, secondaryFor(), []string{"runtime", "scheduling", "cache", "precision", "hardware"}, missingEvidence)
@@ -384,7 +400,7 @@ func kvPressure(engine engineSignals, policy Policy, waiting bool) []Finding {
 	var findings []Finding
 	if rate, ok := preemptionRate(engine); ok && rate >= policy.PreemptionRate {
 		findings = append(findings, Finding{
-			Rule: RuleKVPreemption, Signal: signalPreemptionRate, Observed: rate, Comparison: ">=", Threshold: policy.PreemptionRate, Unit: "ratio",
+			Rule: RuleKVPreemption, Signal: SignalPreemptionRate, Observed: rate, Comparison: ">=", Threshold: policy.PreemptionRate, Unit: "ratio",
 			TechniqueFamilies: []string{"FP8 KV cache", "KV cache offload", "max-sequence budget"},
 			Explanation:       "the engine evicts running sequences because the KV cache is full, which wastes recomputation and inflates latency",
 		})
@@ -556,7 +572,7 @@ func runningPerReplica(engine engineSignals) (float64, bool) {
 
 func sharedPrefix(snapshot domain.EndpointMonitoringSnapshot) *float64 {
 	for _, measurement := range snapshot.Evidence.Measurements {
-		if measurement.Name == signalSharedPrefix && measurement.Availability == "available" && measurement.Value != nil {
+		if measurement.Name == SignalSharedPrefixRatio && measurement.Availability == "available" && measurement.Value != nil {
 			value := *measurement.Value
 			return &value
 		}
@@ -591,10 +607,10 @@ func monitoringSignals(snapshot domain.EndpointMonitoringSnapshot, engine engine
 		{"p95_ttft", "ms", "First-token pressure suggests prefill, batching, cache, or attention investigation.", snapshot.Summary.P95TTFTMS},
 		{"p95_generation", "ms", "Generation pressure suggests decode, KV-cache, sampling, or quantization investigation.", snapshot.Summary.P95GenerationMS},
 		{"mean_input_tokens", "tokens", "Long inputs make the batched-token budget and chunked prefill the first prefill levers.", meanInputTokens(snapshot)},
-		{signalSharedPrefix, "ratio", "Requests that repeat a system prefix can reuse cached prefix tokens.", sharedPrefix(snapshot)},
+		{SignalSharedPrefixRatio, "ratio", "Requests that repeat a system prefix can reuse cached prefix tokens.", sharedPrefix(snapshot)},
 		{metrics.MeasurementKVCacheUsage, "percent", "A nearly full KV cache with waiting requests limits admission by memory, not compute.", engine.value(metrics.MeasurementKVCacheUsage)},
-		{signalPreemptionRate, "ratio", "Preemptions mean the engine evicted running sequences for lack of KV-cache space.", optional(preemption, preemptionOK)},
-		{signalRunningPerWorker, "requests", "Few concurrent sequences per replica leave decode memory-bandwidth bound.", optional(running, runningOK)},
+		{SignalPreemptionRate, "ratio", "Preemptions mean the engine evicted running sequences for lack of KV-cache space.", optional(preemption, preemptionOK)},
+		{SignalRunningPerReplica, "requests", "Few concurrent sequences per replica leave decode memory-bandwidth bound.", optional(running, runningOK)},
 		{metrics.MeasurementQueueTimeP95, "ms", "Time requests wait inside the engine scheduler before running.", engine.value(metrics.MeasurementQueueTimeP95)},
 		{metrics.MeasurementTTFTP95, "ms", "Engine-measured first-token time, independent of gateway and network overhead.", engine.value(metrics.MeasurementTTFTP95)},
 		{metrics.MeasurementTPOTP95, "ms", "Engine-measured time per output token for completed requests.", engine.value(metrics.MeasurementTPOTP95)},

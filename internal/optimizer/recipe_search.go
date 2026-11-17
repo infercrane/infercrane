@@ -29,6 +29,8 @@ const (
 	recipeRuntime       = "custom-oci"
 
 	maxModelConfigBytes = 4 << 20
+
+	recipeOrderWarning = "Added setups are listed in planning order, not by predicted performance. Each stays unmeasured until the campaign measures it against the untuned starting setup on the same image."
 )
 
 // ModelConfigEvidence is what the pinned model configuration declares. Absence
@@ -174,10 +176,12 @@ func normalizedFeatures(values []string) []string {
 func validateSearch(request Request) error {
 	switch request.Search {
 	case "":
-		if len(request.ModelFeatures) > 0 || request.ModelConfigDigest != "" {
-			return errors.New("model features and model config digest require search recipes")
+		if request.Diagnosis == nil && (len(request.ModelFeatures) > 0 || request.ModelConfigDigest != "") {
+			return errors.New("model features and model config digest require search recipes or a diagnosis")
 		}
-		return nil
+		if request.Diagnosis == nil {
+			return nil
+		}
 	case SearchRecipes:
 	default:
 		return errors.New("search must be recipes when set")
@@ -230,7 +234,7 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 	}
 	proposal.Missing = nil
 	attachStartingPoint(&proposal)
-	proposal.Warnings = append(proposal.Warnings, "Added setups are listed in planning order, not by predicted performance. Each stays unmeasured until the campaign measures it against the untuned starting setup on the same image.")
+	proposal.Warnings = append(proposal.Warnings, recipeOrderWarning)
 	return proposal, nil
 }
 

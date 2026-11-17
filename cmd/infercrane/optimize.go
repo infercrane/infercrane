@@ -91,6 +91,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
 	qualityCheck := fs.String("quality-check", "builtin", "who checks answer quality: builtin (InferCrane compares answers with the control) or customer_evidence (wait for your signed evaluation)")
 	evalSet := fs.String("eval-set", "", "digest of an uploaded eval set that replaces the built-in prompts (see: infercrane evaluation set upload)")
+	diagnosisEndpoint := fs.String("diagnosis-endpoint", "", "endpoint whose recorded bottleneck diagnosis chooses and orders the setups; the control plane reads it and plans")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[2:]); err != nil {
 		return err
@@ -129,10 +130,16 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("load integration inventory: %w", err)
 	}
 	catalog := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot())
-	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, *allowMetadataNetwork); err != nil {
+	diagnosed := strings.TrimSpace(*diagnosisEndpoint) != ""
+	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, *allowMetadataNetwork, diagnosed); err != nil {
 		return err
 	}
-	proposal, err := optimizationProposal(ctx, request, catalog, *sourceName, *python, *allowMetadataNetwork)
+	var proposal optimizer.Proposal
+	if diagnosed {
+		proposal, err = diagnosedProposal(ctx, request, *diagnosisEndpoint, *sourceName)
+	} else {
+		proposal, err = optimizationProposal(ctx, request, catalog, *sourceName, *python, *allowMetadataNetwork)
+	}
 	if err != nil {
 		return err
 	}
@@ -200,6 +207,9 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	}
 	if proposal.StartingPoint != nil {
 		fmt.Printf("\nStarting point: candidate %s · %s\n", shortID(proposal.StartingPoint.CandidateID), proposal.StartingPoint.ClaimBoundary)
+	}
+	if err = printDiagnosisPlan(proposal); err != nil {
+		return err
 	}
 	fmt.Println("These are configuration candidates, not performance recommendations.")
 	fmt.Printf("Next: deploy the starting point, observe representative traffic, run `infercrane benchmark NAME --profile %s`, profile material bottlenecks, compare with `infercrane lab`, then use Release Guard.\n", proposal.Input.WorkloadProfile)
@@ -355,6 +365,9 @@ func optimizeEvidenceCommand(args []string) error {
 		return err
 	}
 	if action == "golden" {
+		if body, readErr := os.ReadFile(*filePath); readErr == nil && optimizer.IsPlanningGoldenManifest(body) {
+			return optimizePlanningGolden(*filePath, *output)
+		}
 		return optimizeEvidenceGolden(*filePath, *output)
 	}
 	body, err := os.ReadFile(*filePath)
@@ -405,6 +418,49 @@ func optimizeEvidenceCommand(args []string) error {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%t\t%s\t%t\t%s\n", choice, candidate.CandidateID, candidate.RuntimeID, candidate.Qualified, score, candidate.Pareto, strings.Join(candidate.RejectionReasons, "; "))
 	}
 	return w.Flush()
+}
+
+// optimizePlanningGolden proposes every recorded diagnosis in a planning
+// golden manifest and fails when any proposal's order, state, or skipped
+// techniques differ from the reviewed expectation.
+func optimizePlanningGolden(path, output string) error {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		return fmt.Errorf("load integration inventory: %w", err)
+	}
+	report, err := optimizer.RunPlanningGolden(context.Background(), path, optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot()))
+	if err != nil {
+		return err
+	}
+	if output == "json" {
+		if err = printJSON(report); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Planner golden suite · %s + %s\n", report.PlannerAlgorithm, report.RulesVersion)
+		fmt.Printf("Plans       %d of %d as reviewed\n\n", report.Correct, report.Tasks)
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "RESULT\tTASK\tSTATE\tORDER")
+		for _, result := range report.Results {
+			status := "ok"
+			if !result.Correct {
+				status = "WRONG"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", status, result.TaskID, result.State, strings.Join(result.Order, " > "))
+		}
+		if err = w.Flush(); err != nil {
+			return err
+		}
+		for _, result := range report.Results {
+			for _, problem := range result.Problems {
+				fmt.Printf("%s: %s\n", result.TaskID, problem)
+			}
+		}
+	}
+	if !report.Passed {
+		return fmt.Errorf("planner golden suite failed: %d of %d plans as reviewed", report.Correct, report.Tasks)
+	}
+	return nil
 }
 
 // optimizeEvidenceGolden runs the evaluator over a fixed set of recorded
@@ -656,6 +712,66 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	return nil
 }
 
+// diagnosedProposal asks the control plane to plan from the endpoint's
+// recorded diagnosis. The server reads the diagnosis (readiness, engine
+// metrics, GPU profile) and its own provider inventory, so the order matches
+// what the dashboard proposes for the same request.
+func diagnosedProposal(ctx context.Context, request optimizer.Request, endpoint, sourceName string) (optimizer.Proposal, error) {
+	if strings.EqualFold(strings.TrimSpace(sourceName), "aiconfigurator") {
+		return optimizer.Proposal{}, errors.New("--diagnosis-endpoint cannot be combined with --source aiconfigurator; the estimator does not read a diagnosis")
+	}
+	cfg, err := config.LoadClient()
+	if err != nil {
+		return optimizer.Proposal{}, err
+	}
+	body := struct {
+		optimizer.Request
+		DiagnosisEndpoint string `json:"diagnosis_endpoint"`
+	}{request, strings.TrimSpace(endpoint)}
+	var response struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if err = controlJSON(ctx, cfg, http.MethodPost, "/api/v1/optimization/proposals", "", body, &response); err != nil {
+		return optimizer.Proposal{}, err
+	}
+	if len(response.Proposal.Candidates) > 0 {
+		if err = optimizer.ValidateProposal(response.Proposal); err != nil {
+			return optimizer.Proposal{}, fmt.Errorf("control plane returned an invalid proposal: %w", err)
+		}
+	}
+	return response.Proposal, nil
+}
+
+// printDiagnosisPlan explains a diagnosis-ordered proposal: what the
+// diagnosis found, why each setup is there, and why a chosen change was not.
+func printDiagnosisPlan(proposal optimizer.Proposal) error {
+	plan := proposal.Diagnosis
+	if plan == nil {
+		return nil
+	}
+	fmt.Printf("\nDiagnosis · %s · %s\n%s\n", plan.Endpoint, plan.RulesVersion, plan.Summary)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "RANK\tWHY\tEXPECTED\tREASON")
+	for _, candidate := range proposal.Candidates {
+		if candidate.Reason != nil {
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n", candidate.Rank, candidate.Reason.Label, candidate.Reason.ExpectedBenefit, candidate.Reason.Summary)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	for _, technique := range plan.Techniques {
+		if technique.Skipped != "" {
+			fmt.Printf("Not added: %s · %s\n", technique.Label, technique.Skipped)
+		}
+	}
+	for _, needed := range plan.NeededEvidence {
+		fmt.Printf("Collect: %s\n", needed)
+	}
+	fmt.Println("Expected benefit orders what to measure first; it is not a measured result.")
+	return nil
+}
+
 func optimizationProposal(ctx context.Context, request optimizer.Request, catalog optimizer.CatalogSource, sourceName, python string, allowNetwork bool) (optimizer.Proposal, error) {
 	sourceName = strings.ToLower(strings.TrimSpace(sourceName))
 	if sourceName != "auto" && sourceName != "catalog" && sourceName != "aiconfigurator" {
@@ -693,13 +809,15 @@ const maxFetchedModelConfigBytes = 4 << 20
 
 // applyRecipeSearch records what the pinned model config declares. The network
 // is used only when the operator explicitly allowed metadata lookup.
-func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork bool) error {
+func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork, diagnosed bool) error {
 	request.Search = strings.ToLower(strings.TrimSpace(search))
 	if request.Search == "" {
-		if strings.TrimSpace(configPath) != "" {
-			return errors.New("--model-config requires --search recipes")
+		if strings.TrimSpace(configPath) == "" {
+			return nil
 		}
-		return nil
+		if !diagnosed {
+			return errors.New("--model-config requires --search recipes or --diagnosis-endpoint")
+		}
 	}
 	var raw []byte
 	var err error

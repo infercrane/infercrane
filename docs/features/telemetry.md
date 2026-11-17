@@ -171,7 +171,10 @@ adds engine signals to the gateway's stage triage. Engine rules run only after t
 fresh request evidence, at least 20 requests, and an error rate at or below 2%. Each rule that
 fires is returned in `findings` with the observed value, the threshold, and the technique families
 worth measuring. Families are candidates for a measured comparison, never changes InferCrane
-applies by itself, and the custom-kernel gate stays closed.
+applies by itself, and the custom-kernel gate stays closed. A proposal can
+[plan from this diagnosis](/features/optimization#choose-setups-from-the-endpoint-diagnosis):
+it turns the findings into setups to measure, ordered by expected benefit, with the reason recorded
+on each.
 
 ```bash title="Read engine findings"
 curl -fsS "$INFERCRANE_API_URL/api/v1/endpoints/coder-production/optimization-readiness" \

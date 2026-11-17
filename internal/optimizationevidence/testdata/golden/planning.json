@@ -1,0 +1,943 @@
+{
+  "schema_version": "infercrane.dev/optimizer-planning-golden/v1",
+  "tasks": [
+    {
+      "id": "h100-kv-preemption-fp8-kv-first",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "kv-cache-pressure",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "kv_cache.preemption",
+              "signal": "runtime_preemptions_per_completed_request",
+              "observed": 0.08,
+              "comparison": ">=",
+              "threshold": 0.01,
+              "unit": "ratio"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 48,
+            "runtime_preemptions_per_completed_request": 0.08,
+            "p95_latency": 4200,
+            "runtime_kv_cache_timeseries": 99
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "kv-sequence-cap"
+      ],
+      "must_not_propose": [
+        "batch-budget"
+      ],
+      "categories": [
+        "kv_pressure"
+      ],
+      "why": "The engine evicted 8 running requests per 100 completed because the KV cache was full, so the KV cache is what binds. An FP8 KV cache stores about twice the tokens in the same memory on an H100, so it comes first. Capping concurrent requests below the 48 observed (to 32) stops the evictions at the cost of some queueing. Adding batch slots would make the evictions worse."
+    },
+    {
+      "id": "l40s-kv-saturation-reviewed-profile",
+      "request": {
+        "model_identity": "mistral-7b-instruct",
+        "provider": "aws",
+        "gpu": "L40S",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "kv-cache-pressure",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "kv_cache.saturation",
+              "signal": "runtime_kv_cache_timeseries",
+              "observed": 97,
+              "comparison": ">=",
+              "threshold": 90,
+              "unit": "percent"
+            }
+          ],
+          "signals": {
+            "runtime_kv_cache_timeseries": 97,
+            "runtime_requests_waiting": 6,
+            "p95_queue": 300,
+            "p95_latency": 1400
+          }
+        },
+        "region": "eu-central-1"
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache"
+      ],
+      "expected_skipped": [
+        "kv-sequence-cap"
+      ],
+      "categories": [
+        "kv_pressure"
+      ],
+      "why": "The KV cache was 97% full while six requests waited, so admission is limited by KV memory. The L40S is an Ada GPU with FP8 support, so an FP8 KV cache on the reviewed interactive profile is the change to measure. The engine did not report how many requests ran at once, so no running-request cap can be set and the plan records that. The reviewed balanced and throughput profiles are generic alternatives no rule chose, so they are left out."
+    },
+    {
+      "id": "h100-engine-queue-larger-batches",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "queueing-and-admission",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "queue.engine_wait",
+              "signal": "runtime_queue_time_p95",
+              "observed": 640,
+              "comparison": ">=",
+              "threshold": 360,
+              "unit": "ms"
+            }
+          ],
+          "signals": {
+            "runtime_queue_time_p95": 640,
+            "runtime_requests_waiting": 14,
+            "runtime_kv_cache_timeseries": 41,
+            "p95_latency": 1800
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "batch-budget"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "fp8-weights",
+        "speculative-mtp"
+      ],
+      "categories": [
+        "queueing"
+      ],
+      "why": "Requests waited 640 ms at p95 inside the engine while the KV cache was only 41% used, so memory is not what holds them back; the scheduler admits too few per step. On an 80 GB H100, vLLM 0.22.1 already defaults to 1,024 sequences and 8,192 batched tokens, so the larger-batch setup raises both above those defaults (2,048 and 16,384) instead of restating them. Nothing points at precision or speculation."
+    },
+    {
+      "id": "l40s-sglang-queue-unknown-defaults",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "aws",
+        "gpu": "L40S",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "queueing-and-admission",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "queue.engine_wait",
+              "signal": "runtime_queue_time_p95",
+              "observed": 640,
+              "comparison": ">=",
+              "threshold": 360,
+              "unit": "ms"
+            }
+          ],
+          "signals": {
+            "runtime_queue_time_p95": 640,
+            "runtime_requests_waiting": 14,
+            "p95_latency": 1800
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "sglang"
+        ],
+        "region": "eu-central-1",
+        "include_simulated": true
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "batch-budget"
+      ],
+      "expected_skipped": [
+        "batch-budget"
+      ],
+      "categories": [
+        "queueing"
+      ],
+      "why": "The same queueing diagnosis on SGLang. SGLang sizes its batch limits from GPU memory when it starts, and InferCrane has not recorded that rule, so a larger-batch setup could equal the default. Rather than pay to measure a possible no-op, the plan records why and measures only the starting setup."
+    },
+    {
+      "id": "host-bound-api-servers-then-stream-interval",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "host-and-scheduler",
+          "confidence": "stage-engine-and-gpu-level",
+          "findings": [
+            {
+              "rule": "gpu.host_bound",
+              "signal": "gpu_sm_active",
+              "observed": 31,
+              "comparison": "<",
+              "threshold": 50,
+              "unit": "percent"
+            }
+          ],
+          "signals": {
+            "gpu_sm_active": 31,
+            "runtime_requests_waiting": 9,
+            "p95_queue": 420,
+            "p95_latency": 1500
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "api-server-processes",
+        "stream-interval"
+      ],
+      "must_not_propose": [
+        "speculative-mtp"
+      ],
+      "must_not_use_args": [
+        "ngram",
+        "--enforce-eager"
+      ],
+      "expected_skipped": [
+        "cuda-graphs"
+      ],
+      "categories": [
+        "host_bound"
+      ],
+      "why": "Requests waited while SMs had resident work on only 31% of cycles: the CPU side is not keeping the GPU fed. More API server processes take tokenization and HTTP handling off the engine's path, and streaming tokens in small groups cuts per-token work there. Both keep async scheduling and CUDA graphs on. vLLM already captures CUDA graphs by default, so no graph setup is added for a built-in runtime."
+    },
+    {
+      "id": "long-prompts-bigger-chunks",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "prefill.long_input",
+              "signal": "mean_input_tokens",
+              "observed": 6200,
+              "comparison": ">=",
+              "threshold": 2048,
+              "unit": "tokens"
+            }
+          ],
+          "signals": {
+            "mean_input_tokens": 6200,
+            "shared_prefix_request_ratio": 0.8,
+            "p95_ttft": 1900,
+            "p95_latency": 2600
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "prefill-chunk-large"
+      ],
+      "expected_skipped": [
+        "prefix-cache"
+      ],
+      "categories": [
+        "prefill",
+        "prefix_reuse"
+      ],
+      "why": "First tokens took 73% of p95 latency with 6,200-token prompts, so a per-step prompt budget of 16,384 tokens (twice the H100 default) finishes each prompt in fewer steps. Most requests share a system prompt, but vLLM 0.22.1 already caches prefixes by default and the starting setup keeps it on, so a prefix-cache setup would measure the starting setup twice; the plan records it as skipped instead."
+    },
+    {
+      "id": "vllm-prefix-low-reuse-nothing-to-flag",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "prefix.low_reuse",
+              "signal": "runtime_prefix_cache_hit_rate",
+              "observed": 0.09,
+              "comparison": "<",
+              "threshold": 0.25,
+              "unit": "ratio"
+            }
+          ],
+          "signals": {
+            "mean_input_tokens": 700,
+            "shared_prefix_request_ratio": 0.82,
+            "runtime_prefix_cache_hit_rate": 0.09,
+            "p95_ttft": 900,
+            "p95_latency": 1600
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "prefill-chunk-large"
+      ],
+      "expected_skipped": [
+        "prefix-cache",
+        "prefix-aware-scheduling",
+        "prefix-aware-routing"
+      ],
+      "categories": [
+        "prefix_reuse"
+      ],
+      "why": "82% of requests share a system prompt but only 9% of prompt tokens came from the cache. vLLM already caches prefixes by default and has no prefix-aware scheduling flag; routing requests that share a prompt to the same server is an endpoint change planned separately. Prompts average 700 tokens, too short for chunk size to matter. No flag change can address this, so only the starting setup is measured."
+    },
+    {
+      "id": "sglang-prefix-low-reuse-prefix-aware-scheduling",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "prefix.low_reuse",
+              "signal": "runtime_prefix_cache_hit_rate",
+              "observed": 0.09,
+              "comparison": "<",
+              "threshold": 0.25,
+              "unit": "ratio"
+            }
+          ],
+          "signals": {
+            "mean_input_tokens": 700,
+            "shared_prefix_request_ratio": 0.82,
+            "runtime_prefix_cache_hit_rate": 0.09,
+            "p95_ttft": 900,
+            "p95_latency": 1600
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "sglang"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "prefix-aware-scheduling"
+      ],
+      "expected_skipped": [
+        "prefix-cache",
+        "prefix-aware-routing"
+      ],
+      "categories": [
+        "prefix_reuse"
+      ],
+      "why": "The same low reuse on SGLang. Its radix cache is on by default, but its default first-come-first-served schedule interleaves requests with different prompts; longest-prefix-match scheduling runs requests that share a prompt together so the prompt stays cached."
+    },
+    {
+      "id": "rtx4090-qwen3-0.6b-low-concurrency-no-change",
+      "request": {
+        "model_identity": "Qwen/Qwen3-0.6B",
+        "provider": "runpod-pods",
+        "gpu": "RTX4090",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "decode.low_concurrency",
+              "signal": "runtime_requests_running_per_replica",
+              "observed": 1,
+              "comparison": "<=",
+              "threshold": 4,
+              "unit": "requests"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 1,
+            "mean_input_tokens": 278,
+            "p95_generation": 330,
+            "p95_latency": 610
+          }
+        },
+        "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "fp8-weights",
+        "speculative-mtp"
+      ],
+      "must_not_use_args": [
+        "ngram",
+        "--kv-cache-dtype",
+        "--quantization",
+        "--max-num-batched-tokens"
+      ],
+      "expected_skipped": [
+        "speculative-mtp",
+        "speculative-draft-model",
+        "fp8-weights",
+        "int4-weights",
+        "right-sizing"
+      ],
+      "categories": [
+        "recorded_gpu_run",
+        "decode_low_concurrency"
+      ],
+      "why": "Recorded on 2026-11-17 (Qwen3-0.6B, one RTX 4090, replay at one request at a time): vLLM defaults served 246 tok/s, n-gram speculation 188 tok/s, and FP8 KV cache with 2048-token chunks 193 tok/s (2048 is already the default under 70 GiB, so that arm was FP8 KV alone). Both lost. With one request running, decode waits on weight reads, but speculation does not pay at 0.6B and lower weight precision is not proposed at 1.5B or fewer; the model also declares no prediction head and has no reviewed draft model or 4-bit checkpoint. Few requests run at once, so right-sizing the GPU is flagged for a separate run. Nothing is worth measuring, so only the starting setup is."
+    },
+    {
+      "id": "rtx4090-short-prompts-collect-engine-metrics",
+      "request": {
+        "model_identity": "Qwen/Qwen3-0.6B",
+        "provider": "runpod-pods",
+        "gpu": "RTX4090",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-level",
+          "findings": [],
+          "signals": {
+            "mean_input_tokens": 278,
+            "p95_ttft": 315,
+            "p95_latency": 610,
+            "shared_prefix_request_ratio": 0.02
+          }
+        },
+        "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_use_args": [
+        "ngram",
+        "--kv-cache-dtype",
+        "--max-num-batched-tokens"
+      ],
+      "expected_needed_evidence": [
+        "engine_metrics"
+      ],
+      "categories": [
+        "recorded_gpu_run",
+        "prefill"
+      ],
+      "why": "Same recorded workload seen from the gateway only, as on the real run, when the engine reported no metrics: first tokens took about half of p95 latency, but prompts average 278 tokens, far below any per-step prompt budget, so that time is not prompt work. No rule fires, so the planner proposes no change and asks for engine metrics instead of falling back to generic setups."
+    },
+    {
+      "id": "h100-high-concurrency-long-context-decode",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "throughput",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 9000
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "batch-budget",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "speculative-mtp"
+      ],
+      "categories": [
+        "decode_high_concurrency"
+      ],
+      "why": "Decode took 85% of p95 latency with 64 requests running per server on 9,000-token contexts. Each step reads one copy of the weights but 64 long KV caches, so halving KV bytes with an FP8 KV cache comes first. For a throughput goal, larger batches share each weight read across more requests; FP8 weights are the weaker lever and follow. The low-concurrency rule did not fire, so speculation is not chosen."
+    },
+    {
+      "id": "h100-high-concurrency-short-context-no-fp8-kv",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 1500
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "batch-budget",
+        "speculative-mtp"
+      ],
+      "categories": [
+        "decode_high_concurrency"
+      ],
+      "why": "Decode-bound at 64 running requests, but on 1,500-token contexts and with no KV pressure. Below about 7k tokens of context BF16 KV has measured slightly better token latency, so an FP8 KV cache is not chosen. The goal is interactive, so larger batches, which raise latency, are not chosen either. FP8 weights remain."
+    },
+    {
+      "id": "b200-low-concurrency-checkpoint-not-rankable",
+      "request": {
+        "model_identity": "Qwen/Qwen3.8-27B",
+        "provider": "runpod-pods",
+        "gpu": "B200",
+        "objective": "throughput",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "decode.low_concurrency",
+              "signal": "runtime_requests_running_per_replica",
+              "observed": 2,
+              "comparison": "<=",
+              "threshold": 4,
+              "unit": "requests"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 2,
+            "p95_generation": 2400,
+            "p95_latency": 2900
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_use_args": [
+        "nvfp4"
+      ],
+      "expected_skipped": [
+        "speculative-mtp",
+        "speculative-draft-model",
+        "int4-weights"
+      ],
+      "categories": [
+        "publisher_checkpoint",
+        "decode_low_concurrency"
+      ],
+      "why": "Two requests ran per server, so decode is bound by reading weights. FP8 weights quantized at load serve the same model files and halve those bytes. NVIDIA's reviewed NVFP4 checkpoint of this model would halve them again, but it serves different model files, and a campaign cannot rank setups that serve different files yet, so it is left out with that reason. No prediction head or draft model is declared, so speculation is recorded as skipped."
+    },
+    {
+      "id": "h200-pinned-image-kv-fp8-first",
+      "request": {
+        "model_identity": "acme/novel-model",
+        "provider": "runpod-pods",
+        "gpu": "H200",
+        "objective": "throughput",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "kv-cache-pressure",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "kv_cache.preemption",
+              "signal": "runtime_preemptions_per_completed_request",
+              "observed": 0.05,
+              "comparison": ">=",
+              "threshold": 0.01,
+              "unit": "ratio"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 40
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "search": "recipes",
+        "model_features": [
+          "native_mtp"
+        ],
+        "model_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache"
+      ],
+      "expected_skipped": [
+        "kv-sequence-cap"
+      ],
+      "categories": [
+        "pinned_image_setups",
+        "kv_pressure"
+      ],
+      "why": "On the pinned SGLang image the starting setup is the image's untuned control, and the reviewed FP8 KV cache setup on the same image directly answers the evictions. The image's other setups (speculation, graph capture, prompt chunks) do not address KV capacity and are left out. Flag changes to a pinned image are not derived, so the running-request cap is recorded as skipped."
+    },
+    {
+      "id": "h200-pinned-image-low-concurrency-speculation-first",
+      "request": {
+        "model_identity": "acme/novel-model",
+        "provider": "runpod-pods",
+        "gpu": "H200",
+        "objective": "throughput",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "decode.low_concurrency",
+              "signal": "runtime_requests_running_per_replica",
+              "observed": 1.5,
+              "comparison": "<=",
+              "threshold": 4,
+              "unit": "requests"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 1.5
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "search": "recipes",
+        "model_features": [
+          "native_mtp"
+        ],
+        "model_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "speculative-mtp",
+        "speculative-mtp"
+      ],
+      "categories": [
+        "pinned_image_setups",
+        "decode_low_concurrency"
+      ],
+      "why": "With 1.5 requests running per server, decode is bound by weight reads and the model declares a native prediction head, so the image's NEXTN speculation setups lead. They were also the measured winners on H200 in the recorded decode receipts. Speculation keeps async scheduling on in this family."
+    },
+    {
+      "id": "not-ready-measures-only-the-control",
+      "request": {
+        "model_identity": "mistral-7b-instruct",
+        "provider": "aws",
+        "gpu": "L40S",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "collecting",
+          "primary_bottleneck": "unknown",
+          "confidence": "insufficient",
+          "findings": [],
+          "signals": {}
+        },
+        "region": "eu-central-1"
+      },
+      "expected_state": "not_ready",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "batch-budget",
+        "fp8-weights"
+      ],
+      "expected_needed_evidence": [
+        "fresh_traffic",
+        "engine_metrics"
+      ],
+      "categories": [
+        "not_ready"
+      ],
+      "why": "The window had too few fresh requests to diagnose. The planner must not guess a bottleneck or fall back to generic setups: it measures only the starting setup and asks for fresh traffic and engine metrics."
+    },
+    {
+      "id": "reliability-blocked-measures-only-the-control",
+      "request": {
+        "model_identity": "mistral-7b-instruct",
+        "provider": "aws",
+        "gpu": "L40S",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "reliability-blocked",
+          "primary_bottleneck": "reliability",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "error_rate": 0.07,
+            "p95_latency": 900,
+            "runtime_requests_running_per_replica": 3
+          }
+        },
+        "region": "eu-central-1"
+      },
+      "expected_state": "reliability_blocked",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "batch-budget",
+        "fp8-weights"
+      ],
+      "expected_needed_evidence": [
+        "fewer_errors"
+      ],
+      "categories": [
+        "reliability"
+      ],
+      "why": "7% of requests failed. Speed comparisons on a failing endpoint are biased by the failures, so the planner adds no speed setups until the errors are fixed."
+    },
+    {
+      "id": "gpu-profile-attention-heavy-long-context",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-level",
+          "findings": [],
+          "signals": {
+            "p95_generation": 3100,
+            "p95_latency": 3600,
+            "mean_input_tokens": 9000
+          },
+          "gpu_profile": {
+            "capture_id": "gpuprof-1",
+            "tool": "nsight-compute",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 41.2,
+            "shares": {
+              "attention": 0.56,
+              "gemm": 0.31,
+              "communication": 0,
+              "other": 0.13
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "speculative-mtp"
+      ],
+      "categories": [
+        "gpu_profile"
+      ],
+      "why": "Decode dominates and the engine did not report concurrency, so the stage alone only weakly suggests FP8 weights. The GPU profile settles it: on 9,000-token contexts attention kernels took 56% of sampled GPU time against 31% for matrix multiplies, so the KV reads attention performs are the larger cost and an FP8 KV cache comes first. Speculation needs low concurrency, which was not reported, so it is not chosen."
+    }
+  ]
+}

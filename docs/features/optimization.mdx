@@ -154,6 +154,128 @@ input digest, source, compatibility evidence, required evidence, and limitations
   `proposed-unmeasured`. InferCrane never presents an estimate as measured or qualified evidence.
 </Warning>
 
+### Choose setups from the endpoint diagnosis
+
+When an endpoint already serves traffic, let its measured bottleneck choose what to try. Name the
+endpoint and the control plane plans from its recorded diagnosis:
+
+```bash title="Plan from the endpoint's diagnosis"
+infercrane optimize propose acme/novel-open-model \
+  --model-revision 0123456789abcdef0123456789abcdef01234567 \
+  --provider runpod-pods --gpu H100 --runtimes vllm \
+  --max-candidates 3 \
+  --diagnosis-endpoint chat-production
+```
+
+API clients send `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`. The server reads:
+
+- the endpoint's [optimization-readiness assessment](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)
+  over the last hour: gateway request stages, the serving engine's own metrics, and DCGM profiling
+  fields when they were fresh;
+- a summary of the newest [GPU profile](/features/telemetry#gpu-profiles) of the endpoint's active
+  revision, when one was captured in the last 7 days: the share of sampled kernel time spent in
+  attention, matrix-multiply, communication, and other kernels.
+
+A client cannot send a diagnosis itself. The server records it in the proposal's
+`input.diagnosis`, so the input digest binds the choice of setups to the evidence that made it. A
+missing signal stays missing: no rule fires on it, and a GPU profile that was not recorded is left
+out rather than inferred. With `--diagnosis-endpoint`, the CLI asks the control plane for the
+proposal, so the result matches what the dashboard gets for the same request. It cannot be combined
+with `--source aiconfigurator`, because the estimator does not read a diagnosis.
+
+The proposal holds the starting setup, which every other setup is measured against, and only setups
+a diagnosis rule chose, in order of expected benefit. Each added setup is the starting setup with
+one change, or an existing setup that already makes that change, such as a setup on a
+[pinned image](#find-the-best-setup-for-a-pinned-model). Generic alternatives are left out.
+`--max-candidates` cuts the list after ranking, so the changes most likely to help are the ones
+measured. When no rule applies, the proposal holds the starting setup alone, and its diagnosis says
+what to collect, such as serving-engine metrics, before planning again.
+
+| Diagnosis | Tried, in order | vLLM flags (SGLang) |
+|---|---|---|
+| KV cache full and evicting requests (`kv_cache.preemption`) | FP8 KV cache, then fewer requests at once | `--kv-cache-dtype fp8` (`fp8_e4m3`); `--max-num-seqs` at about 75% of the observed running requests, rounded down to a multiple of 8 (`--max-running-requests`) |
+| KV cache nearly full while requests wait (`kv_cache.saturation`) | FP8 KV cache, then fewer requests at once | as above |
+| Requests waiting in line (`queue.engine_wait` or a queueing bottleneck) | Larger batches | under 70 GB of GPU memory, and on A100: `--max-num-seqs 512 --max-num-batched-tokens 8192`; 70 GB or more: `--max-num-seqs 2048 --max-num-batched-tokens 16384` |
+| GPU idle while requests wait (`gpu.host_bound`) | More API server processes, then streaming tokens in small groups | `--api-server-count 2`; `--stream-interval 2` |
+| Long prompts (`prefill.long_input`, or a first-token bottleneck with prompts of 1,024 tokens or more) | Bigger prompt chunks | `--max-num-batched-tokens 16384` (`--chunked-prefill-size 16384`) |
+| Shared system prompts reused poorly (`prefix.low_reuse`) | Prefix caching if the starting setup turned it off; prefix-aware scheduling | removes `--no-enable-prefix-caching` (`--disable-radix-cache`); SGLang only: `--schedule-policy lpm` |
+| Tensor cores busy (`gpu.compute_bound`) | FP8 weights | `--quantization fp8` |
+| Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights | `--speculative-config {"method":"mtp","num_speculative_tokens":1}` (NEXTN with one step); `--quantization fp8` |
+| Memory busy, tensor cores idle (`gpu.memory_bandwidth_bound`) | FP8 weights; FP8 KV cache on contexts of 7,000 tokens or more | as above |
+| Writing answers with many requests running per server | FP8 KV cache on contexts of 7,000 tokens or more; larger batches for a throughput or cost goal; FP8 weights | as above |
+| Attention kernels ≥ 40% of profiled GPU time, on contexts of 7,000 tokens or more | FP8 KV cache | as above |
+| Matrix-multiply kernels ≥ 50% of profiled GPU time | FP8 weights | as above |
+
+Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
+When several rules choose the same change, it keeps its strongest priority plus a small bonus for
+each rule that agrees. Speculation is chosen only at low concurrency, where it pays, and never with
+n-gram drafts, which need repeated text and turn vLLM's async scheduling off. An FP8 KV cache is
+chosen only when the KV cache limits the server or contexts are long: below about 7,000 tokens BF16
+KV has measured slightly better token latency.
+
+Every flag is checked against the engine's resolved default before a setup is added. Defaults were
+read from the source of vLLM 0.22.1 and SGLang 0.5.12. vLLM's batch defaults depend on GPU memory:
+2,048 batched tokens and 256 sequences under 70 GB and on A100, and 8,192 and 1,024 from 70 GB up. A
+flag equal to its default is dropped, and a setup left with no change is not added. When a default
+is unknown, the setup is not added either. This covers an accelerator whose memory InferCrane does
+not know, the batch sizes SGLang derives from GPU memory at start, and any other engine version.
+
+A chosen change is skipped, and the proposal records why, when:
+
+- the starting setup runs a pinned custom image or a Dynamo serving graph, whose flags change only
+  through setups reviewed for that image;
+- the model name states 1B parameters or fewer, for speculation, or 1.5B or fewer, for lower weight
+  precision;
+- the accelerator does not run FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell), for FP8 weights
+  and the FP8 KV cache;
+- the model's pinned config was not read or declares no native prediction head, for speculation
+  (pass `--model-config config.json` to declare it);
+- the change needs a draft model or a 4-bit publisher checkpoint. No draft model is paired with a
+  model yet. A [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves different
+  model files, and a campaign cannot yet rank setups that serve different files, so it is left out;
+- the model's weights already look quantized, for FP8 weights;
+- the change is already in the starting setup, equals the engine default, or has an unknown default;
+- it changes the GPU, the GPUs per server, or the endpoint's routing. Right-sizing is flagged when
+  few requests run at once, and is planned as a separate run.
+
+Every proposed setup carries a `reason`: its `role` (`control` or `diagnosis`), the `technique`, a
+`priority` from 0 to 100, an `expected_benefit` of `high`, `medium`, or `low`, the `rules` that
+chose it, a one-sentence `summary` that cites the measured value, and the `evidence` behind it. The
+proposal's `diagnosis` records the plan `state`, a `summary`, every chosen technique with the setups
+that apply it or the reason it was `skipped`, and `needed_evidence`. Campaign reads return the same
+plan as `diagnosis`, with its monitoring window, and each candidate's `reason`.
+
+```json title="A candidate's reason"
+{
+  "role": "diagnosis",
+  "technique": "fp8-kv-cache",
+  "label": "FP8 KV cache",
+  "priority": 100,
+  "expected_benefit": "high",
+  "rules": ["kv_cache.preemption"],
+  "summary": "The engine evicted running requests (0.08 per completed request, limit 0.01) because the KV cache was full, so an FP8 KV cache, which holds about twice the tokens in the same memory, comes first.",
+  "evidence": [{"signal": "runtime_preemptions_per_completed_request", "observed": 0.08, "comparison": ">=", "threshold": 0.01, "unit": "ratio"}]
+}
+```
+
+| Plan state | Meaning | Setups |
+|---|---|---|
+| `applied` | Rules chose changes that apply here. | The starting setup and the chosen setups |
+| `not_ready` | Too little fresh traffic to diagnose. | The starting setup alone; collect traffic and engine metrics |
+| `reliability_blocked` | The endpoint fails too many requests to compare speed. | The starting setup alone; fix the errors first |
+| `no_actionable_findings` | No rule fired, or none of the chosen changes applies here. | The starting setup alone; engine metrics are requested when the window had none |
+| `no_starting_setup` | No starting setup could be planned for this model and infrastructure. | None |
+
+<Warning>
+  Priority and expected benefit order what to measure first. They are planning priors from the
+  diagnosis, not a measured or predicted gain, and they never relax a gate: every added setup is
+  `proposed-unmeasured`, a precision change still needs the answer check, and a campaign keeps the
+  starting setup unless a setup beats it by more than the noise floor. On the first real GPU run
+  (Qwen3-0.6B on one RTX 4090, one request at a time), n-gram speculation and an FP8 KV cache both
+  lost to vLLM defaults. For that diagnosis the rules propose no change and flag right-sizing, and
+  the [planning golden suite](/testing/optimizer-golden-suite#planning-tasks) keeps it that way.
+</Warning>
+
 ## The simple and advanced paths
 
 The common path needs an objective, not a collection of runtime flags:
@@ -856,9 +978,12 @@ aliases such as `NVIDIA-L40S` normalize to the exact hardware family. Dynamo can
 one InferCrane-owned parent graph with outer autoscaling fixed at one; Dynamo owns its internal
 workers. This prevents two controllers from scaling the same serving graph.
 
-It does not infer that a model fits an accelerator. It does not automatically enable quantization,
-speculative decoding, LMCache, disaggregated serving, FlashInfer, or TensorRT-LLM. Those mechanisms
-are version- and workload-specific and require their own compatibility and qualification evidence.
+It does not infer that a model fits an accelerator. Without an endpoint diagnosis it does not
+propose quantization or speculative decoding on a built-in runtime. With one, it adds those changes
+only as unmeasured setups chosen by the
+[diagnosis rules](#choose-setups-from-the-endpoint-diagnosis). It never enables LMCache,
+disaggregated serving, FlashInfer, or TensorRT-LLM. Those mechanisms are version- and
+workload-specific and require their own compatibility and qualification evidence.
 Use `--include-simulated` only for development exploration; simulated candidates are excluded by
 default.
 

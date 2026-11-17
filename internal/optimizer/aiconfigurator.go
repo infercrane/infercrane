@@ -35,6 +35,10 @@ var aiConfiguratorAdapter []byte
 
 var ErrEstimatorUnavailable = errors.New("optimization estimator unavailable")
 
+// ErrDiagnosisNeedsCatalog reports a diagnosis-ordered request sent to the
+// estimator, which does not read a diagnosis.
+var ErrDiagnosisNeedsCatalog = errors.New("a diagnosis-ordered proposal uses the catalog planner; the estimator does not read a diagnosis")
+
 type estimatorInput struct {
 	SchemaVersion          string  `json:"schema_version"`
 	RequiredVersion        string  `json:"required_version"`
@@ -266,6 +270,11 @@ type AIConfiguratorSource struct {
 }
 
 func (s AIConfiguratorSource) Propose(ctx context.Context, request Request) (Proposal, error) {
+	if request.Diagnosis != nil {
+		// Modeled estimates replace the candidate set, which would discard the
+		// diagnosis order and the reason recorded on each candidate.
+		return Proposal{}, ErrDiagnosisNeedsCatalog
+	}
 	base, err := s.Catalog.Propose(ctx, request)
 	if err != nil || len(base.Candidates) == 0 {
 		return base, err
