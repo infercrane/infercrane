@@ -19,9 +19,11 @@ export INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$HOME/.config/infercrane/passport-s
 ```
 
 The command creates the private key with mode `0600` and refuses to overwrite an existing key.
-Mount the key into the control-plane process. InferCrane persists only the public key, key identity,
-signature, digest, and signed payload. Back up and rotate private keys using your normal secret
-management system.
+Mount the key into the control-plane process. On platforms that inject secrets as environment
+variables, set `INFERCRANE_PASSPORT_SIGNING_KEY` to the file's contents instead; the container
+entrypoint writes it to an owner-only file before the server starts. InferCrane persists only the
+public key, key identity, signature, digest, and signed payload. Back up and rotate private keys
+using your normal secret management system.
 
 ## Issue and verify
 
