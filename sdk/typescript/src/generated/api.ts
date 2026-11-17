@@ -108,6 +108,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  checkHuggingFaceModel(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/hugging-face/check';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   planIntent(body: JsonValue): Promise<IntentPlanEnvelope> {
     const requestPath = '/planning/intents';
     return this.transport.request('POST', requestPath, { body }) as Promise<IntentPlanEnvelope>;
@@ -290,6 +295,21 @@ export class ControlApi {
 
   getEndpointGPUProfile(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profile`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listEndpointGPUProfiles(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  compareEndpointGPUProfiles(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles/compare`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getEndpointGPUProfileByID(name: string, id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profiles/${encodeURIComponent(id)}`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
@@ -610,6 +630,16 @@ export class ControlApi {
 
   cancelOptimizationCampaign(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/cancel`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createOptimizationCandidateChatCompletion(id: string, candidate_id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/candidates/${encodeURIComponent(candidate_id)}/chat/completions`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createPlaygroundChatCompletion(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/playground/chat/completions';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 

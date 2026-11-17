@@ -84,10 +84,8 @@ decode-heavy shapes.
 
 The public trace chooses token-shape experiments only. It does not supply a customer arrival rate,
 quality target, or production SLO, so InferCrane marks it `promotion_eligible: false`. Every
-setup requires a representative customer replay before qualification or rollout. Use the
-remote Modal profiler in the [public trace PoC](/testing/chutes-public-workload-poc) only to
-reproduce or update the embedded artifact; normal product use does not download or rescan the
-dataset.
+setup requires a representative customer replay before qualification or rollout. The prior
+ships as an embedded artifact; normal product use does not download or rescan the dataset.
 
 ### Start with any pinned open-weight model
 
@@ -103,12 +101,22 @@ infercrane optimize propose acme/novel-open-model \
   --objective throughput
 ```
 
-By default, an uncataloged model gets only an empty-argument vLLM or SGLang baseline. It does
-not infer architecture support, memory fit, tokenizer behavior, licensing, quantization, speculative
-decoding, or kernel compatibility. Those gaps are listed as required evidence. The optional
-AIConfigurator adapter may narrow these generic setups, but its output remains modeled and
-unqualified. A mutable branch such as `main` is rejected; the revision must be a 40–64 character
-hexadecimal commit.
+By default, an uncataloged model gets only an untuned vLLM or SGLang baseline. Its only arguments
+split it across its GPUs (`--tensor-parallel-size`, or `--tp-size` for SGLang, when `--gpu-count` is
+above 1) and, when `max_model_len` is set, bound its context (`--max-model-len`, or
+`--context-length`). It does not infer tokenizer behavior, quantization, speculative decoding, or
+kernel compatibility. Those gaps are listed as required evidence. The optional AIConfigurator
+adapter may narrow these generic setups, but its output remains modeled and unqualified. A
+mutable branch such as `main` is rejected; the revision must be a 40–64 character hexadecimal commit.
+
+When the control plane has Hugging Face metadata access on, you can leave out the commit. Both
+`infercrane optimize propose|create ORG/MODEL` and `POST /api/v1/optimization/proposals` then run the
+[automatic check](/features/model-catalog#check-any-model-automatically): it pins the commit it read,
+sets `max_model_len` to the context the GPU was sized for (8192 tokens by default), and refuses a
+model it found unsupported with `model_unsupported` and the reason. For a gated model, name the saved
+Hugging Face token with `model_secret_reference_id`. A request that already names a commit proceeds
+as before when the check cannot run. This is how a run started from the dashboard works for any
+model it deployed.
 
 ### Find the best setup for a pinned model
 
@@ -177,9 +185,9 @@ API clients send `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`. 
 - the endpoint's [optimization-readiness assessment](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)
   over the last hour: gateway request stages, the serving engine's own metrics, and DCGM profiling
   fields when they were fresh;
-- a summary of the newest [GPU profile](/features/telemetry#gpu-profiles) of the endpoint's active
-  revision, when one was captured in the last 7 days: the share of sampled kernel time spent in
-  attention, matrix-multiply, communication, and other kernels.
+- a summary of the newest [GPU profile](/features/gpu-profiling) of the endpoint's active
+  revision, when one was captured in the last 7 days: the share of kernel time spent in attention,
+  matrix-multiply, communication, and other kernels.
 
 A client cannot send a diagnosis itself. The server records it in the proposal's
 `input.diagnosis`, so the input digest binds the choice of setups to the evidence that made it. A
@@ -716,6 +724,10 @@ decision without you signing anything:
    own key and labelled `source: infercrane`, separate from evidence you sign (`source: customer`).
    The reference gets its own row with score 1: its answers are the reference.
 
+The check needs nothing reviewed about the model: for a model outside the reviewed catalog, the
+reference is still the campaign control, so every candidate is compared with the baseline's own
+answers on the same prompts.
+
 The check never passes on missing evidence. When no serving reference exists, for example because
 the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
 When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
@@ -751,6 +763,42 @@ your current setup. It can win a campaign when its answers hold and it is measur
 The persisted ranking lists the quantized artifacts it admitted under `derived_model_identities` in
 its input, and names each quantized row's artifact (`model_identity`) and lineage
 (`artifact_lineage`: `exact` or `publisher_declared`). Unmodified rows keep their earlier shape.
+
+### Prompt a decided setup yourself
+
+Scores say that answers agree. To read the answers, send your own prompt to the setup the run
+decided on, before you roll it out:
+
+```bash
+curl -N "$INFERCRANE_URL/api/v1/optimization/campaigns/RUN_ID/candidates/CANDIDATE_ID/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"stream":true,"messages":[{"role":"user","content":"Summarize our refund policy in one sentence."}]}'
+```
+
+The body is an OpenAI chat completion request. `model` is ignored: the candidate serves the model it
+was measured with. Tools, `temperature`, and `max_tokens` pass through unchanged. The dashboard's
+Workbench uses this route to show the current setup and the candidate side by side.
+
+- **Which revision answers.** The request goes to the lowest-ordinal healthy replica of the exact
+  revision the run measured, addressed the same way the measurement and the answer check address it.
+  The response names it in `X-InferCrane-Deployment` and `X-InferCrane-Revision`.
+- **When it answers.** Only a candidate in `qualified`, `guard_passed`, `promoted`, or `observed`
+  answers. While the run is still provisioning, measuring, checking, or ranking a candidate, the
+  route returns `409 candidate_not_decided`, so a prompt never runs beside a measurement. A candidate
+  that lost, failed, or was cleaned up returns `409 candidate_not_running`. A decided candidate with
+  no healthy replica returns `503 candidate_unavailable` with `Retry-After`.
+- **Limits.** The request body is at most 1 MiB, the answer at most 8 MiB and five minutes, and one
+  organization runs at most two candidate prompts at once (`429 rate_limited` with `Retry-After`).
+- **What is kept.** Nothing. The request does not pass through the gateway, so it has no request
+  trace, does not count toward the endpoint's traffic or its request quota, and adds no per-request
+  charge. The candidate's compute is already billed while it runs. The control plane uses its own
+  server-side credential for the replica; that credential and the runtime's error text never reach
+  the caller. A runtime error keeps only its status: a 4xx becomes `422 candidate_rejected_request`,
+  a 429 stays `429`, and anything else becomes `502 candidate_upstream_error`.
+
+Any role that can read the run can prompt its decided candidate, the same rule as sending inference
+with an API key.
 
 ### How a campaign measures candidates
 

@@ -99,6 +99,7 @@ func TestCompletionSuggestsLiveNamesAndIDs(t *testing.T) {
 		{"deployment names", []string{"status", ""}, []string{"llama-canary\tfailed", "qwen-prod\tserving · Qwen/Qwen3-8B"}},
 		{"deployment for delete", []string{"delete", "qw"}, []string{"qwen-prod\tserving · Qwen/Qwen3-8B"}},
 		{"endpoint names", []string{"endpoint", "inspect", ""}, []string{"support-bot\tserving"}},
+		{"endpoint to profile", []string{"profile", "sup"}, []string{"support-bot\tserving"}},
 		{"models for propose", []string{"optimize", "propose", "Qwen"}, []string{"Qwen/Qwen3-8B\tQwen3 8B"}},
 		{"models for deploy", []string{"deploy", "meta"}, []string{"meta-llama/Llama-3.1-8B-Instruct\tLlama 3.1 8B Instruct"}},
 		{"GPUs for a provider", []string{"optimize", "propose", "Qwen/Qwen3-8B", "--provider", "runpod", "--gpu", ""}, []string{"NVIDIA H100 80GB HBM3\trunpod", "NVIDIA L40S\trunpod"}},

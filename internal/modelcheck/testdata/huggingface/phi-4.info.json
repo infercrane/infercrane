@@ -1,0 +1,80 @@
+{
+ "_id": "67597bd1b9cdca50cb621f94",
+ "id": "microsoft/phi-4",
+ "sha": "2db69c1c3e91a05d2c64a3185acfbaf36f744e25",
+ "pipeline_tag": "text-generation",
+ "cardData": {
+  "license": "mit",
+  "license_link": "https://huggingface.co/microsoft/phi-4/resolve/main/LICENSE",
+  "pipeline_tag": "text-generation",
+  "library_name": "transformers"
+ },
+ "gated": false,
+ "private": false,
+ "config": {
+  "architectures": [
+   "Phi3ForCausalLM"
+  ],
+  "model_type": "phi3"
+ },
+ "tags": [
+  "transformers",
+  "safetensors",
+  "phi3",
+  "text-generation",
+  "phi",
+  "nlp",
+  "math",
+  "code",
+  "chat",
+  "conversational",
+  "en",
+  "arxiv:2412.08905",
+  "license:mit",
+  "eval-results",
+  "text-generation-inference",
+  "endpoints_compatible",
+  "deploy:azure",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "generation_config.json"
+  },
+  {
+   "rfilename": "model-00001-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model-00002-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model-00003-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model-00004-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model-00005-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model-00006-of-00006.safetensors"
+  },
+  {
+   "rfilename": "model.safetensors.index.json"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  }
+ ],
+ "safetensors": {
+  "parameters": {
+   "BF16": 14659507200
+  },
+  "total": 14659507200
+ }
+}

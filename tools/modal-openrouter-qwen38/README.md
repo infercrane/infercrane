@@ -9,7 +9,8 @@ workload prior, and provider implementation to those contracts.
 The campaign searches Qwen3.8 runtime recipes on Modal GPUs. Workload shapes come from the released
 [Agentic Systems Open Data](https://data.agentic-system.org/) sources.
 OpenRouter measurements are captured separately as an external production
-target, never substituted for workload evidence.
+target, never substituted for workload evidence. The launch decision for this
+campaign is recorded in [launch-decision-2026-09-23.md](launch-decision-2026-09-23.md).
 
 Local validation does not rent a GPU:
 

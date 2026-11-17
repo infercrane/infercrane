@@ -28,7 +28,6 @@ network path.
 The deterministic outputs matched. Streaming and buffered usage, finish reasons, structured output,
 forced tools, malformed-request handling, and prompt-token accounting passed.
 
-- [Human decision record](docs/testing/qwen38-openrouter-launch-decision-2026-09-23.md)
 - [Machine-readable receipt](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json)
 - [Raw measurements](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z-raw.json)
 

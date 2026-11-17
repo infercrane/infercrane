@@ -220,7 +220,9 @@ requirements, and qualify the exact provider/runtime combination before producti
 
 ## Any Hugging Face model remains available
 
-The catalog is convenience, not an allowlist:
+The catalog is convenience, not an allowlist. Any open Hugging Face model can be checked
+automatically and deployed from the dashboard or the CLI (see
+[Check any model automatically](#check-any-model-automatically)), or scaffolded by hand:
 
 ```bash
 infercrane workload init ./my-model --model organization/repository
@@ -269,6 +271,77 @@ When Hugging Face cannot answer, the route returns `hugging_face_search_unavaila
 it timed out and HTTP 502 for any other failure, with the reason in `error.message`. A control plane
 without outbound HTTPS access to `huggingface.co` always returns that error; the catalog routes keep
 working.
+
+### Check any model automatically
+
+A model outside the reviewed catalog is **not reviewed: checked automatically**. The control plane
+reads what Hugging Face publishes for one exact commit and answers four questions:
+
+| Check | What is read | Result |
+| --- | --- | --- |
+| Architecture | `config.json` `architectures`, compared with a committed snapshot of the vLLM 0.22.1 and SGLang 0.5.12 model registries | `supported` (with the runtime), `unsupported` (with the reason), or `unknown` |
+| Size | Hugging Face's safetensors summary: parameters by tensor type, and stored bytes | Read, or unknown when the repository has no safetensors |
+| GPU fit | Weights plus KV cache for the target load, against GPUs this control plane has a current price for | The fewest GPUs, then the smallest GPU, that hold it, with tensor parallelism across them; or `does_not_fit`, or unknown |
+| License and access | The model card's license, and Hugging Face's `gated` and `private` flags | Shown as declared; a gated or private model needs a Hugging Face token |
+
+The GPU fit sizes one replica for `concurrency` requests (default 8) at `context_tokens` tokens each
+(default 8192, capped at the model's declared context length). It assumes vLLM's default 90% memory
+use, 2 GiB per GPU for activations and buffers, a 16-bit KV cache in every layer (an upper bound for
+sliding-window models), and 32-bit weights served at 16 bits. Multi-head latent attention models
+cache their compressed latent instead. The fit lists every priced GPU type that holds the model.
+
+```bash
+infercrane models check microsoft/phi-4
+infercrane models check microsoft/phi-4 --concurrency 16 --context-tokens 16384
+infercrane models check microsoft/phi-4 --spec phi-4.yaml
+infercrane deploy phi-4.yaml --wait
+```
+
+`--spec` writes the proposed setup as a DeploymentSpec: the pinned commit, the runtime's own
+defaults with `--max-model-len` set to the checked context, and `--tensor-parallel-size` when the
+fit needs more than one GPU. In the dashboard, a Hugging Face search result shows the same check
+inline, and opening it shows the proposed setup with a **Not reviewed: checked automatically**
+badge and every check that ran. An unsupported model shows why, with the nearest reviewed models.
+
+```bash
+curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/hugging-face/check?repository=microsoft/phi-4&concurrency=8" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The response holds `check` (schema `infercrane.model-check/v1`), `reviewed_model` (the reviewed
+catalog name when the repository has one; prefer that setup), and `performance_claims: false`.
+`check.verdict` is `supported` only when the architecture is registered, the model fits a priced
+layout, and it could be read; `unsupported` when one of those is known to fail; and `unknown` when
+something could not be read. `check.checks` lists what was checked, one line each. A value Hugging
+Face did not publish is `null`.
+
+The check never claims throughput, latency, answer quality, capacity, or price. Measure those with
+an [optimization run](/features/optimization).
+
+**Gated and private models.** Save a Hugging Face token as a workspace credential named `model-…`
+under Settings › Connections (or `infercrane secret`), from an account that accepted the model's
+terms. Pass its ID as `model_secret_reference_id` (`--secret` in the CLI). The token is resolved
+only to read the model, is never returned, and its reads are cached per workspace and credential,
+so one workspace's token never answers another's request. The token pins and reads the model; the
+GPU provider still downloads weights with its own configured Hugging Face credential.
+
+**Turning it on.** The control plane reads Hugging Face for checks only when the operator sets
+`INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. It is off by default; planning then says that
+models outside the reviewed catalog cannot be checked, and the check route returns
+`metadata_access_disabled` (HTTP 501). The reads never happen on the inference request path and never
+touch PostgreSQL.
+
+**Limits.** Each check waits at most 8 seconds for Hugging Face, sends at most 8 requests at once, and
+follows redirects only on the same host. Results are cached in memory by commit, up to 512 per
+control-plane process; a branch name is re-pinned after 10 minutes. Errors are typed:
+`model_not_found` (HTTP 404; Hugging Face answers the same way for a private repository read without a
+token), `revision_not_found` (404), `hugging_face_token_rejected` (422), and
+`hugging_face_unavailable` (504 on timeout, 502 otherwise).
+
+**Where the runtime registries come from.** `internal/modelcheck/runtime_model_registries.json`
+records the architectures each pinned runtime release registers, read from its source at the
+release commit, plus vLLM's quantization methods. `scripts/snapshot-runtime-model-registries.py`
+rebuilds it; a test fails when the pinned runtime versions change without a new snapshot.
 
 ## API
 
