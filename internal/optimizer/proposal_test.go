@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -146,13 +147,45 @@ func TestCatalogProposalCreatesConservativeGenericOpenWeightBaseline(t *testing.
 	if err != nil || len(proposal.Candidates) != 2 {
 		t.Fatalf("proposal=%+v err=%v", proposal, err)
 	}
+	// The only arguments a generic baseline carries split it across its GPUs.
+	tensorParallel := map[string][]string{"vllm": {"--tensor-parallel-size", "2"}, "sglang": {"--tp-size", "2"}}
 	for _, candidate := range proposal.Candidates {
-		if candidate.Source.Name != "infercrane-generic-open-weight" || candidate.EvidenceState != EvidenceUnmeasured || candidate.Deployment.Model.ID != "acme/novel-model" || candidate.Deployment.Model.Revision != revision || candidate.Deployment.Resources.GPUCount != 2 || len(candidate.Deployment.Runtime.Args) != 0 || !hasFeature(candidate.Features, "runtime_baseline", "untuned") {
+		if candidate.Source.Name != "infercrane-generic-open-weight" || candidate.EvidenceState != EvidenceUnmeasured || candidate.Deployment.Model.ID != "acme/novel-model" || candidate.Deployment.Model.Revision != revision || candidate.Deployment.Resources.GPUCount != 2 || !reflect.DeepEqual(candidate.Deployment.Runtime.Args, tensorParallel[candidate.Deployment.Runtime.Engine]) || !hasFeature(candidate.Features, "runtime_baseline", "untuned") {
 			t.Fatalf("generic baseline crossed its proof boundary: %+v", candidate)
 		}
 	}
 	if err = ValidateProposal(proposal); err != nil {
 		t.Fatalf("generic proposal failed validation: %v", err)
+	}
+}
+
+func TestGenericBaselineBoundsContextOnlyWhenAsked(t *testing.T) {
+	revision := strings.Repeat("a", 40)
+	request := Request{ModelIdentity: "acme/novel-model", ModelRevision: revision, Provider: "runpod-pods", GPU: "L40S", Runtimes: []string{"vllm", "sglang"}, Objective: "interactive", IncludeSimulated: true, MaxModelLen: 8192}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil || len(proposal.Candidates) != 2 {
+		t.Fatalf("proposal=%+v err=%v", proposal, err)
+	}
+	contextFlag := map[string][]string{"vllm": {"--max-model-len", "8192"}, "sglang": {"--context-length", "8192"}}
+	for _, candidate := range proposal.Candidates {
+		if !reflect.DeepEqual(candidate.Deployment.Runtime.Args, contextFlag[candidate.Deployment.Runtime.Engine]) {
+			t.Fatalf("unexpected baseline args: %+v", candidate.Deployment.Runtime)
+		}
+	}
+	reviewed, err := catalogSource(t).Propose(context.Background(), Request{ModelIdentity: "qwen3-8b", Provider: "runpod-pods", GPU: "L40S", Objective: "interactive", MaxModelLen: 8192})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range reviewed.Candidates {
+		if slices.Contains(candidate.Deployment.Runtime.Args, "--max-model-len") {
+			t.Fatalf("a reviewed profile took the generic context bound: %+v", candidate.Deployment.Runtime)
+		}
+	}
+	for _, length := range []int{1, maxMaxModelLen + 1} {
+		request.MaxModelLen = length
+		if _, err = catalogSource(t).Propose(context.Background(), request); err == nil {
+			t.Fatalf("max_model_len %d was accepted", length)
+		}
 	}
 }
 

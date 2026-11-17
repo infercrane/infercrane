@@ -8,7 +8,9 @@ sidebarTitle: Intent planning
 
 `POST /api/v1/planning/intents` is an authenticated, read-only planning endpoint. It accepts a short
 intent and optional explicit choices, resolves an exact reviewed model when possible, and returns an
-editable configuration plus a small architecture graph.
+editable configuration plus a small architecture graph. A Hugging Face repository outside the
+reviewed catalog is [checked automatically](/features/model-catalog#check-any-model-automatically)
+instead.
 
 ```bash
 curl -fsS "$INFERCRANE_URL/api/v1/planning/intents" \
@@ -21,7 +23,9 @@ curl -fsS "$INFERCRANE_URL/api/v1/planning/intents" \
 
 Optional fields are `model`, `provider`, `region`, `gpu`, `objective`, and `compute_mode`. Explicit
 fields override only the matching interpretation. Objectives are `interactive`, `latency`,
-`throughput`, or `cost-efficiency`; compute mode is `elastic` or `serverless`.
+`throughput`, or `cost-efficiency`; compute mode is `elastic` or `serverless`. For a model outside
+the reviewed catalog, `model_revision`, `model_secret_reference_id`, `context_tokens`, and
+`concurrency` choose the commit, the saved Hugging Face token, and the load the GPU is sized for.
 
 When no provider is named, InferCrane ranks compatible registered providers only when it has an
 exact, fresh USD quote for the reviewed GPU count and region. The quote must be a complete instance
@@ -30,12 +34,32 @@ change that ranking: a cheaper unconnected provider is returned with a `provider
 remediation. If no comparable quote exists, selection falls back to the reviewed profile hint or one
 unambiguous ready provider.
 
-The response has one of two statuses:
+The response has one of three statuses:
 
-- `ready`: every choice needed to form the reviewed starting configuration is present.
+- `ready`: every choice needed to form the starting configuration is present.
 - `needs_input`: `missing_choices` contains a prompt, bounded options when available, the evidence
-  reason, and a remediation. InferCrane never substitutes an unreviewed model or silently chooses
+  reason, and a remediation. InferCrane never substitutes another model or silently chooses
   among several ready providers.
+- `unsupported`: the automatic check found that the model cannot run on the pinned runtimes, or
+  does not fit any priced GPU layout. The `model` missing choice gives the reason and the nearest
+  reviewed models.
+
+### Models outside the reviewed catalog
+
+When `model` is an exact Hugging Face repository that is not a reviewed model, the control plane runs
+the automatic check first and plans from it. `plan.model.review` is `checked_automatically` (reviewed
+models say `reviewed`), and `plan.model_check` holds the whole check: the pinned commit, the
+architecture and runtime it matched, size, license, access, and the GPU fit.
+
+A supported model gets the runtime's own defaults on the smallest priced layout: `vllm` 0.22.1 (or
+SGLang 0.5.12 when only SGLang registers the architecture), `--max-model-len` set to the checked
+context, `--tensor-parallel-size` across more than one GPU, elastic compute, and one replica. The
+deployment draft pins the commit the check read and carries `model_secret_reference_id` when one was
+given.
+
+A gated or private model without a token returns `needs_input` with a `model_secret_reference_id`
+missing choice. When the control plane cannot check the model (metadata access off, repository not
+found, Hugging Face down), the plan is `needs_input` with the reason; it never guesses a setup.
 
 `choices` is suitable for an editable form. `architecture.nodes` and `architecture.edges` provide a
 stable application → endpoint → runtime/model/compute view without requiring the console to invent
@@ -46,7 +70,8 @@ idempotent request.
 
 The plan combines only these facts:
 
-- immutable identities and starting profiles from the reviewed model recipe catalog;
+- immutable identities and starting profiles from the reviewed model recipe catalog, or, for a model
+  outside it, what the automatic check read from Hugging Face at one commit;
 - registered runtime/provider compatibility;
 - configured compute-connection readiness; and
 - a current exact provider catalog observation for one replica, when one exists.
@@ -57,4 +82,5 @@ account-specific discount, or a final invoice. Accelerator-only price components
 non-comparable with complete instance totals.
 
 The request body is a strict JSON object bounded to 16 KiB, and the intent itself is bounded to 2 KiB.
-The endpoint performs no provider calls, reserves no capacity, and starts no billable work.
+The endpoint performs no provider calls, reserves no capacity, and starts no billable work. Its only
+outbound call is the automatic check's read of Hugging Face, when the operator enabled it.

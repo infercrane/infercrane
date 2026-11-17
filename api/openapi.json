@@ -2654,6 +2654,9 @@
           "model": {
             "$ref": "#/components/schemas/IntentPlanModel"
           },
+          "model_check": {
+            "$ref": "#/components/schemas/ModelCheck"
+          },
           "mutation": {
             "const": "none",
             "type": "string"
@@ -2663,9 +2666,11 @@
             "type": "string"
           },
           "status": {
+            "description": "unsupported: the automatic check found the model cannot run on the pinned runtimes; missing_choices names the reason and the nearest reviewed models.",
             "enum": [
               "ready",
-              "needs_input"
+              "needs_input",
+              "unsupported"
             ],
             "type": "string"
           },
@@ -2988,6 +2993,14 @@
           "repository": {
             "type": "string"
           },
+          "review": {
+            "description": "reviewed: a reviewed catalog entry. checked_automatically: not reviewed; its setup comes from the automatic check in model_check.",
+            "enum": [
+              "reviewed",
+              "checked_automatically"
+            ],
+            "type": "string"
+          },
           "revision": {
             "type": "string"
           },
@@ -3002,6 +3015,7 @@
           }
         },
         "required": [
+          "review",
           "name",
           "display_name",
           "repository",
@@ -3130,6 +3144,18 @@
             ],
             "type": "string"
           },
+          "concurrency": {
+            "description": "Concurrent requests an unreviewed model's GPU is sized for. Defaults to 8.",
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "context_tokens": {
+            "description": "Tokens per request an unreviewed model's GPU is sized for. Defaults to 8192.",
+            "maximum": 1048576,
+            "minimum": 256,
+            "type": "integer"
+          },
           "gpu": {
             "maxLength": 128,
             "type": "string"
@@ -3139,7 +3165,18 @@
             "type": "string"
           },
           "model": {
+            "description": "Reviewed catalog name or Hugging Face repository. A repository outside the reviewed catalog is checked automatically when the operator enabled Hugging Face metadata access.",
             "maxLength": 256,
+            "type": "string"
+          },
+          "model_revision": {
+            "description": "Branch, tag, or commit of an unreviewed model; the plan pins the commit it read. Reviewed models always use their reviewed commit.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "model_secret_reference_id": {
+            "description": "Saved Hugging Face token reference for gated or private models. The token never enters the plan.",
+            "maxLength": 255,
             "type": "string"
           },
           "objective": {
@@ -4320,6 +4357,539 @@
           "outcome",
           "evidence_reference",
           "observed_at"
+        ],
+        "type": "object"
+      },
+      "ModelCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "additionalProperties": false,
+            "properties": {
+              "gated": {
+                "type": "boolean"
+              },
+              "gated_mode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "private": {
+                "type": "boolean"
+              },
+              "state": {
+                "enum": [
+                  "public",
+                  "token_used",
+                  "token_required"
+                ],
+                "type": "string"
+              },
+              "token_used": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "state",
+              "gated",
+              "gated_mode",
+              "private",
+              "token_used"
+            ],
+            "type": "object"
+          },
+          "architecture": {
+            "additionalProperties": false,
+            "properties": {
+              "custom_code": {
+                "type": "boolean"
+              },
+              "model_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "runtime": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtime_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sources": {
+                "description": "The committed runtime registry snapshots the check read.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "commit": {
+                      "type": "string"
+                    },
+                    "runtime": {
+                      "type": "string"
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "runtime",
+                    "version",
+                    "commit",
+                    "source_url"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "state": {
+                "enum": [
+                  "supported",
+                  "unsupported",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "name",
+              "model_type",
+              "runtime",
+              "runtime_version",
+              "reason",
+              "custom_code",
+              "sources"
+            ],
+            "type": "object"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "checks": {
+            "description": "What was checked, one line each, for people.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "name": {
+                  "enum": [
+                    "architecture",
+                    "weights",
+                    "quantization",
+                    "memory",
+                    "license",
+                    "access",
+                    "custom_code"
+                  ],
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "info"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "state",
+                "label",
+                "detail"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "config": {
+            "additionalProperties": false,
+            "properties": {
+              "attention_heads": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "context_length": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "digest": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dtype": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "head_dim": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "hidden_size": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_cache_bytes_per_token": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_heads": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "layers": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "read",
+                  "token_required",
+                  "not_found",
+                  "invalid"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "digest",
+              "layers",
+              "hidden_size",
+              "attention_heads",
+              "kv_heads",
+              "head_dim",
+              "context_length",
+              "dtype",
+              "kv_cache_bytes_per_token"
+            ],
+            "type": "object"
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "memory": {
+            "additionalProperties": false,
+            "properties": {
+              "assumptions": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "considered_gpus": {
+                "description": "GPUs with a current price observation that the fit considered.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "context_tokens": {
+                "type": "integer"
+              },
+              "gpu": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "gpu_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "gpu_memory_gib": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "kv_cache_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "layouts": {
+                "description": "Every priced GPU type the model fits, with the fewest GPUs that hold it; fewest GPUs, then smallest GPU, first.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "gpu": {
+                      "type": "string"
+                    },
+                    "gpu_count": {
+                      "type": "integer"
+                    },
+                    "gpu_memory_gib": {
+                      "type": "integer"
+                    },
+                    "per_gpu_required_bytes": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "gpu",
+                    "gpu_count",
+                    "gpu_memory_gib",
+                    "per_gpu_required_bytes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "required_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "fits",
+                  "does_not_fit",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "weights_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "reason",
+              "gpu",
+              "gpu_count",
+              "gpu_memory_gib",
+              "context_tokens",
+              "concurrency",
+              "weights_bytes",
+              "kv_cache_bytes",
+              "required_bytes",
+              "layouts",
+              "assumptions",
+              "considered_gpus"
+            ],
+            "type": "object"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "pipeline_tag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "requested_revision": {
+            "type": "string"
+          },
+          "reviewed": {
+            "const": false,
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "The immutable commit the check read.",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "infercrane.model-check/v1",
+            "type": "string"
+          },
+          "source": {
+            "const": "hugging-face",
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "task": {
+            "enum": [
+              "chat",
+              "embeddings",
+              ""
+            ],
+            "type": "string"
+          },
+          "verdict": {
+            "description": "supported: the architecture is in a pinned runtime's registry, the model fits a priced GPU layout, and it can be read. unsupported: one of those is known to fail. unknown: something could not be read.",
+            "enum": [
+              "supported",
+              "unsupported",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": false,
+            "properties": {
+              "dtypes": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              "format": {
+                "enum": [
+                  "safetensors",
+                  "gguf",
+                  "pytorch",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "parameters": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "quantization": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "read",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "stored_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "state",
+              "format",
+              "parameters",
+              "stored_bytes",
+              "dtypes",
+              "quantization",
+              "reason"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "repository",
+          "requested_revision",
+          "revision",
+          "source",
+          "source_url",
+          "checked_at",
+          "reviewed",
+          "performance_claims",
+          "verdict",
+          "reason",
+          "task",
+          "pipeline_tag",
+          "license",
+          "access",
+          "architecture",
+          "weights",
+          "config",
+          "memory",
+          "checks"
+        ],
+        "type": "object"
+      },
+      "ModelCheckEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "$ref": "#/components/schemas/ModelCheck"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "reviewed_model": {
+            "description": "Reviewed catalog name for this repository, when one exists. Prefer the reviewed setup.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "check",
+          "reviewed_model",
+          "performance_claims"
         ],
         "type": "object"
       },
@@ -6876,6 +7446,12 @@
             "minimum": 0,
             "type": "number"
           },
+          "max_model_len": {
+            "description": "Context bound for untuned baselines of models outside the reviewed catalog. When Hugging Face metadata access is on and it is omitted, the server sets it to the length the model was checked for. Reviewed profiles keep their own arguments.",
+            "maximum": 1048576,
+            "minimum": 256,
+            "type": "integer"
+          },
           "max_tpot_p95_ms": {
             "minimum": 0,
             "type": "number"
@@ -6916,6 +7492,11 @@
           },
           "model_revision": {
             "pattern": "^[a-fA-F0-9]{40,64}$",
+            "type": "string"
+          },
+          "model_secret_reference_id": {
+            "description": "Saved Hugging Face token reference used to check a gated model outside the reviewed catalog. The token never enters the proposal.",
+            "maxLength": 255,
             "type": "string"
           },
           "objective": {
@@ -9930,6 +10511,97 @@
         "summary": "List timestamped GPU price observations without claiming stock",
         "tags": [
           "Compute"
+        ]
+      }
+    },
+    "/api/v1/catalog/hugging-face/check": {
+      "get": {
+        "operationId": "checkHuggingFaceModel",
+        "parameters": [
+          {
+            "description": "Exact owner/name Hugging Face repository.",
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "maxLength": 193,
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Branch, tag, or commit. Defaults to main; the check always reports the commit it read.",
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace's saved Hugging Face token reference, for gated or private models. The token is never returned.",
+            "in": "query",
+            "name": "model_secret_reference_id",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Tokens per request the GPU is sized for. Defaults to 8192, capped at the model's declared context length.",
+            "in": "query",
+            "name": "context_tokens",
+            "required": false,
+            "schema": {
+              "maximum": 1048576,
+              "minimum": 256,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Concurrent requests the GPU is sized for. Defaults to 8.",
+            "in": "query",
+            "name": "concurrency",
+            "required": false,
+            "schema": {
+              "maximum": 1024,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCheckEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Check automatically whether an unreviewed Hugging Face model runs on the pinned runtimes and which GPUs it fits; not a performance claim",
+        "tags": [
+          "Model catalog"
         ]
       }
     },

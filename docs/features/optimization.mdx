@@ -98,12 +98,22 @@ infercrane optimize propose acme/novel-open-model \
   --objective throughput
 ```
 
-By default, an uncataloged model gets only an empty-argument vLLM or SGLang baseline. It does
-not infer architecture support, memory fit, tokenizer behavior, licensing, quantization, speculative
-decoding, or kernel compatibility. Those gaps are listed as required evidence. The optional
-AIConfigurator adapter may reduce this generic candidate space, but its output remains modeled and
-unqualified. A mutable branch such as `main` is rejected; the revision must be a 40–64 character
-hexadecimal commit.
+By default, an uncataloged model gets only an untuned vLLM or SGLang baseline. Its only arguments
+split it across its GPUs (`--tensor-parallel-size`, or `--tp-size` for SGLang, when `--gpu-count` is
+above 1) and, when `max_model_len` is set, bound its context (`--max-model-len`, or
+`--context-length`). It does not infer tokenizer behavior, quantization, speculative decoding, or
+kernel compatibility. Those gaps are listed as required evidence. The optional AIConfigurator
+adapter may reduce this generic candidate space, but its output remains modeled and unqualified. A
+mutable branch such as `main` is rejected; the revision must be a 40–64 character hexadecimal commit.
+
+When the control plane has Hugging Face metadata access on, you can leave out the commit. Both
+`infercrane optimize propose|create ORG/MODEL` and `POST /api/v1/optimization/proposals` then run the
+[automatic check](/features/model-catalog#check-any-model-automatically): it pins the commit it read,
+sets `max_model_len` to the context the GPU was sized for (8192 tokens by default), and refuses a
+model it found unsupported with `model_unsupported` and the reason. For a gated model, name the saved
+Hugging Face token with `model_secret_reference_id`. A request that already names a commit proceeds
+as before when the check cannot run. This is how a run started from the dashboard works for any
+model it deployed.
 
 ### Find the best setup for a pinned model
 
@@ -668,6 +678,10 @@ decision without you signing anything:
 4. **The result is signed evidence.** It is stored as quality evidence signed with the control plane's
    own key and labelled `source: infercrane`, separate from evidence you sign (`source: customer`).
    The reference gets its own row with score 1: its answers are the reference.
+
+The check needs nothing reviewed about the model: for a model outside the reviewed catalog, the
+reference is still the campaign control, so every candidate is compared with the baseline's own
+answers on the same prompts.
 
 The check never passes on missing evidence. When no serving reference exists, for example because
 the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
