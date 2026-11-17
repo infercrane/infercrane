@@ -270,6 +270,36 @@ func (s *Store) CancelOptimizationCampaign(ctx context.Context, tenant, id strin
 	return s.OptimizationCampaign(ctx, tenant, id)
 }
 
+// setOptimizationCampaignState stores the aggregate state and records the
+// change, so a decision stays readable after cleanup rewrites the state. The
+// first failure code of a failed campaign is kept for the same reason.
+func (s *Store) setOptimizationCampaignState(ctx context.Context, tenant, campaignID, state, failureCode, stamp string) error {
+	transaction, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	var previous string
+	if err = transaction.QueryRowContext(ctx, `SELECT state FROM optimization_campaigns WHERE tenant_id=? AND id=? FOR UPDATE`, tenant, campaignID).Scan(&previous); errors.Is(err, sql.ErrNoRows) {
+		return domain.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if _, err = transaction.ExecContext(ctx, `UPDATE optimization_campaigns SET state=?,failure_code=COALESCE(failure_code,?),updated_at=? WHERE tenant_id=? AND id=?`, state, null(failureCode), stamp, tenant, campaignID); err != nil {
+		return err
+	}
+	if previous != state {
+		id, idErr := newID()
+		if idErr != nil {
+			return idErr
+		}
+		if _, err = transaction.ExecContext(ctx, `INSERT INTO optimization_campaign_transitions(id,tenant_id,campaign_id,from_state,to_state,created_at) VALUES(?,?,?,?,?,?)`, id, tenant, campaignID, previous, state, stamp); err != nil {
+			return err
+		}
+	}
+	return transaction.Commit()
+}
+
 // TransitionOptimizationCandidate is the fenced worker boundary. The caller
 // must supply the state it observed; stale workers cannot overwrite newer
 // evidence. Actual evidence is append-by-replacement only for the same legal
@@ -409,7 +439,16 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	if stateErr != nil {
 		return domain.OptimizationCandidateRun{}, stateErr
 	}
-	if _, err = s.ExecContext(ctx, `UPDATE optimization_campaigns SET state=?,updated_at=? WHERE tenant_id=? AND id=?`, campaignState, stamp, tenant, campaignID); err != nil {
+	failureCode := ""
+	if campaignState == optimizationcampaign.CampaignFailed {
+		for _, row := range rows {
+			if row.State == optimizationcampaign.CandidateFailed && row.FailureCode != "" {
+				failureCode = row.FailureCode
+				break
+			}
+		}
+	}
+	if err = s.setOptimizationCampaignState(ctx, tenant, campaignID, campaignState, failureCode, stamp); err != nil {
 		return domain.OptimizationCandidateRun{}, err
 	}
 	for _, row := range rows {

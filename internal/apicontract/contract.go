@@ -148,6 +148,11 @@ var Routes = []Route{
 	{"POST", "/optimization/campaigns/{id}/approve", "approveOptimizationCampaign", "Inference optimization", "Validate bounded cost authority and queue durable optimization execution", "OptimizationCampaignApproval", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/activate", "activateOptimizationCampaign", "Inference optimization", "Queue explicit activation or guarded promotion for a qualified candidate", "OptimizationCampaignActivation", "Object", 202, false},
 	{"POST", "/optimization/campaigns/{id}/cancel", "cancelOptimizationCampaign", "Inference optimization", "Cancel future campaign work and require cleanup", "Object", "Object", 202, false},
+	{"GET", "/notifications/subscriptions", "listNotificationSubscriptions", "Notifications", "List workspace destinations for optimization run events without returning URLs or secrets", "", "NotificationSubscriptionList", 200, false},
+	{"POST", "/notifications/subscriptions", "createNotificationSubscription", "Notifications", "Add a webhook or Slack destination; a webhook's signing secret is returned once", "NotificationSubscriptionCreate", "NotificationSubscriptionCreated", 201, false},
+	{"PATCH", "/notifications/subscriptions/{id}", "updateNotificationSubscription", "Notifications", "Change a destination's name, URL, events, or enabled state", "NotificationSubscriptionUpdate", "NotificationSubscriptionEnvelope", 200, false},
+	{"DELETE", "/notifications/subscriptions/{id}", "deleteNotificationSubscription", "Notifications", "Delete a destination and its pending deliveries", "", "Empty", 204, false},
+	{"POST", "/notifications/subscriptions/{id}/test", "testNotificationSubscription", "Notifications", "Send one signed test event now and return its delivery result", "", "NotificationDeliveryEnvelope", 200, false},
 	{"GET", "/deployments/{name}/continual-optimization/policy", "getContinualOptimizationPolicy", "Inference optimization", "Inspect the bounded continual optimization policy", "", "Object", 200, false},
 	{"PUT", "/deployments/{name}/continual-optimization/policy", "setContinualOptimizationPolicy", "Inference optimization", "Set workload, evidence, experiment budget, reliability, and promotion boundaries", "Object", "Object", 200, false},
 	{"POST", "/deployments/{name}/continual-optimization/evaluate", "evaluateContinualOptimization", "Inference optimization", "Evaluate public screening or customer replay evidence and persist a bounded next action", "Object", "Object", 201, false},
@@ -569,6 +574,9 @@ func schemas() map[string]any {
 		result[schemaName].(map[string]any)["properties"].(map[string]any)["adapter"].(map[string]any)["enum"] = supportedExternalAdapters
 	}
 	for name, schema := range gpuProfileSchemas() {
+		result[name] = schema
+	}
+	for name, schema := range notificationSchemas() {
 		result[name] = schema
 	}
 	return result

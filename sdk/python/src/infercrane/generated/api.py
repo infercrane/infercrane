@@ -495,6 +495,26 @@ class ControlAPI:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/cancel"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
 
+    def list_notification_subscriptions(self) -> dict[str, Any]:
+        request_path = "/notifications/subscriptions"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def create_notification_subscription(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/notifications/subscriptions"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def update_notification_subscription(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/notifications/subscriptions/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("PATCH", request_path, body=body))
+
+    def delete_notification_subscription(self, id: str) -> None:
+        request_path = f"/notifications/subscriptions/{quote(id, safe='')}"
+        return cast(None, self._transport.request("DELETE", request_path))
+
+    def test_notification_subscription(self, id: str) -> dict[str, Any]:
+        request_path = f"/notifications/subscriptions/{quote(id, safe='')}/test"
+        return cast(dict[str, Any], self._transport.request("POST", request_path))
+
     def get_continual_optimization_policy(self, name: str) -> dict[str, Any]:
         request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/policy"
         return cast(dict[str, Any], self._transport.request("GET", request_path))

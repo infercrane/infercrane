@@ -1,4 +1,6 @@
-// Package alert delivers deterministic signed webhook findings.
+// Package alert delivers signed webhooks: deterministic diagnostic findings,
+// and through Post, any caller-built event such as an optimization campaign
+// notification.
 package alert
 
 import (
@@ -71,49 +73,22 @@ func (d Deliverer) Deliver(ctx context.Context, policy domain.AlertPolicy, findi
 	if err != nil {
 		return delivery, errors.New("alert signing secret is unavailable")
 	}
-	now := d.Now
-	if now == nil {
-		now = time.Now
-	}
-	client := d.Client
-	if client == nil {
-		client = d.safeClient()
-	}
+	client := d.client()
 	for delivery.Attempts < policy.MaxAttempts {
-		timestamp := strconv.FormatInt(now().UTC().Unix(), 10)
-		signature := sign(secret, timestamp, body)
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodPost, policy.WebhookURL, bytes.NewReader(body))
-		if requestErr != nil {
-			return delivery, requestErr
-		}
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("InferCrane-Delivery", delivery.ID)
-		request.Header.Set("InferCrane-Timestamp", timestamp)
-		request.Header.Set("InferCrane-Signature", "v1="+signature)
-		response, sendErr := client.Do(request)
-		status, code, delivered := 0, "network_error", false
-		if sendErr == nil {
-			status = response.StatusCode
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-			_ = response.Body.Close()
-			delivered = status >= 200 && status < 300
-			if delivered {
-				code = ""
-			}
-			if !delivered {
-				code = "http_" + strconv.Itoa(status)
-			}
+		attempt, sendErr := d.send(ctx, client, policy.WebhookURL, secret, delivery.ID, body)
+		if sendErr != nil {
+			return delivery, sendErr
 		}
 		maxAttempts := policy.MaxAttempts
-		if status >= 400 && status < 500 && status != http.StatusTooManyRequests {
+		if attempt.Permanent {
 			maxAttempts = delivery.Attempts + 1
 		}
-		if err = d.Store.RecordAlertDeliveryAttempt(ctx, delivery.ID, delivered, status, code, maxAttempts); err != nil {
+		if err = d.Store.RecordAlertDeliveryAttempt(ctx, delivery.ID, attempt.Delivered, attempt.Status, attempt.Code, maxAttempts); err != nil {
 			return delivery, err
 		}
 		delivery.Attempts++
-		delivery.ResponseStatus = status
-		if delivered {
+		delivery.ResponseStatus = attempt.Status
+		if attempt.Delivered {
 			delivery.Status = "delivered"
 			return delivery, nil
 		}
@@ -126,7 +101,64 @@ func (d Deliverer) Deliver(ctx context.Context, policy domain.AlertPolicy, findi
 	return delivery, fmt.Errorf("alert delivery failed after %d attempts", delivery.Attempts)
 }
 
-func (d Deliverer) safeClient() *http.Client {
+// Attempt is the outcome of one signed POST.
+type Attempt struct {
+	// Status is the HTTP response status, or 0 when no response arrived.
+	Status int
+	// Code is empty on delivery, otherwise network_error or http_<status>.
+	Code      string
+	Delivered bool
+	// Permanent is true for a 4xx other than 429: retrying the same body
+	// cannot succeed.
+	Permanent bool
+}
+
+// Post validates the destination and sends one exact body once, signed with
+// the same InferCrane headers as alert deliveries. The caller owns retries and
+// the delivery ledger. Only the destination check returns an error; a refused
+// or failed request is reported in the Attempt.
+func (d Deliverer) Post(ctx context.Context, destination, secret, deliveryID string, body []byte) (Attempt, error) {
+	if secret == "" || deliveryID == "" {
+		return Attempt{}, errors.New("a signing secret and delivery ID are required")
+	}
+	if err := d.validateDestination(ctx, destination); err != nil {
+		return Attempt{}, err
+	}
+	return d.send(ctx, d.client(), destination, secret, deliveryID, body)
+}
+
+func (d Deliverer) send(ctx context.Context, client *http.Client, destination, secret, deliveryID string, body []byte) (Attempt, error) {
+	now := d.Now
+	if now == nil {
+		now = time.Now
+	}
+	timestamp := strconv.FormatInt(now().UTC().Unix(), 10)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, bytes.NewReader(body))
+	if err != nil {
+		return Attempt{}, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("InferCrane-Delivery", deliveryID)
+	request.Header.Set("InferCrane-Timestamp", timestamp)
+	request.Header.Set("InferCrane-Signature", "v1="+sign(secret, timestamp, body))
+	response, err := client.Do(request)
+	if err != nil {
+		return Attempt{Code: "network_error"}, nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+	_ = response.Body.Close()
+	attempt := Attempt{Status: response.StatusCode, Delivered: response.StatusCode >= 200 && response.StatusCode < 300}
+	if !attempt.Delivered {
+		attempt.Code = "http_" + strconv.Itoa(response.StatusCode)
+		attempt.Permanent = response.StatusCode >= 400 && response.StatusCode < 500 && response.StatusCode != http.StatusTooManyRequests
+	}
+	return attempt, nil
+}
+
+func (d Deliverer) client() *http.Client {
+	if d.Client != nil {
+		return d.Client
+	}
 	return safehttp.WebhookClient(d.ResolveIP, d.AllowPrivate)
 }
 

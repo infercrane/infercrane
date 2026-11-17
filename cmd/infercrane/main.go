@@ -57,6 +57,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedsandbox"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapirouting"
+	"github.com/infercrane/infercrane/internal/notification"
 	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
@@ -4444,6 +4445,10 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return err
 	}
+	notificationService, err := newNotificationService(cfg, s)
+	if err != nil {
+		return err
+	}
 	if optimizationCosts != nil && computeConnectionService != nil {
 		managedOptimizationCosts := optimizationCosts
 		optimizationCosts = optimizationcampaign.ConnectionPricingAuthority{
@@ -4559,7 +4564,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		}
 		controlAPI.BillingCheckout = stripeBilling
 	}
-	bindOptionalControlServices(&controlAPI, asyncService, computeConnectionService)
+	bindOptionalControlServices(&controlAPI, asyncService, computeConnectionService, notificationService)
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {
@@ -4734,6 +4739,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			logger.Error("operation worker stopped", "error", err)
 		}
 	}()
+	if notificationService != nil {
+		go notification.Notifier{Service: *notificationService, Store: s, Reports: s, Logger: logger}.Run(ctx)
+	}
 	if controlAPI.ManagedDeployments.Enabled {
 		go runManagedDeploymentExpiry(ctx, s, time.Minute, logger)
 	}

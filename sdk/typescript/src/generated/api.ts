@@ -608,6 +608,31 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  listNotificationSubscriptions(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/notifications/subscriptions';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  createNotificationSubscription(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/notifications/subscriptions';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  updateNotificationSubscription(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/notifications/subscriptions/${encodeURIComponent(id)}`;
+    return this.transport.request('PATCH', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  deleteNotificationSubscription(id: string): Promise<void> {
+    const requestPath = `/notifications/subscriptions/${encodeURIComponent(id)}`;
+    return this.transport.request('DELETE', requestPath) as Promise<void>;
+  }
+
+  testNotificationSubscription(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/notifications/subscriptions/${encodeURIComponent(id)}/test`;
+    return this.transport.request('POST', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getContinualOptimizationPolicy(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/policy`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;

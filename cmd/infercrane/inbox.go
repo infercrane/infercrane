@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/notification"
 )
 
 type inboxItem struct {
@@ -32,10 +34,38 @@ type inboxReport struct {
 	TotalAttention int         `json:"total_attention"`
 	TotalEndpoints int         `json:"total_endpoints"`
 	TotalDeploys   int         `json:"total_deployments"`
+	TotalRuns      int         `json:"total_optimization_runs"`
 	Returned       int         `json:"returned"`
 	Truncated      bool        `json:"truncated"`
 	Evidence       string      `json:"evidence"`
 	ObservedAt     time.Time   `json:"observed_at"`
+}
+
+// inboxCampaign is the part of an optimization campaign the inbox reads.
+type inboxCampaign struct {
+	ID                string     `json:"id"`
+	ModelIdentity     string     `json:"model_identity"`
+	Intent            string     `json:"intent"`
+	State             string     `json:"state"`
+	FailureCode       string     `json:"failure_code"`
+	CancelRequested   bool       `json:"cancel_requested"`
+	ApprovalExpiresAt *time.Time `json:"approval_expires_at"`
+	ApprovedAt        *time.Time `json:"approved_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	Candidates        []struct {
+		ID                string    `json:"id"`
+		State             string    `json:"state"`
+		DeploymentName    string    `json:"deployment_name"`
+		QualityEvidenceID string    `json:"quality_evidence_id"`
+		FailureCode       string    `json:"failure_code"`
+		UpdatedAt         time.Time `json:"updated_at"`
+		// Quality is the control plane's own reading of the answer check.
+		// An older control plane omits it, and then no wait is claimed.
+		Quality struct {
+			State string `json:"state"`
+		} `json:"quality"`
+	} `json:"candidates"`
 }
 
 type inboxEndpoint struct {
@@ -87,12 +117,23 @@ func readInbox(ctx context.Context, cfg config.Config, limit int) (inboxReport, 
 		return inboxReport{}, fmt.Errorf("read deployment fleet: %w", err)
 	}
 
+	var campaigns struct {
+		Data []inboxCampaign `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/optimization/campaigns?limit=100", "", nil, &campaigns); err != nil {
+		return inboxReport{}, fmt.Errorf("read optimization runs: %w", err)
+	}
+
 	items := make([]inboxItem, 0)
 	for _, endpoint := range endpoints.Data {
 		items = append(items, endpointInboxItems(endpoint)...)
 	}
 	for _, deployment := range deployments.Data {
 		items = append(items, deploymentInboxItems(deployment)...)
+	}
+	observedAt := time.Now().UTC()
+	for _, campaign := range campaigns.Data {
+		items = append(items, campaignInboxItems(campaign, observedAt)...)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		left, right := inboxSeverityOrder(items[i].Severity), inboxSeverityOrder(items[j].Severity)
@@ -111,7 +152,7 @@ func readInbox(ctx context.Context, cfg config.Config, limit int) (inboxReport, 
 		}
 		return items[i].Code < items[j].Code
 	})
-	report := inboxReport{Items: items, TotalAttention: len(items), TotalEndpoints: len(endpoints.Data), TotalDeploys: len(deployments.Data), Evidence: "persisted_control_plane_state", ObservedAt: time.Now().UTC()}
+	report := inboxReport{Items: items, TotalAttention: len(items), TotalEndpoints: len(endpoints.Data), TotalDeploys: len(deployments.Data), TotalRuns: len(campaigns.Data), Evidence: "persisted_control_plane_state", ObservedAt: observedAt}
 	for _, item := range items {
 		if item.Severity == "critical" {
 			report.Critical++
@@ -166,6 +207,30 @@ func deploymentInboxItems(deployment deploymentSummary) []inboxItem {
 	return items
 }
 
+// campaignInboxItems lists what an optimization run needs from a person,
+// with the same rules as the run notifications.
+func campaignInboxItems(campaign inboxCampaign, now time.Time) []inboxItem {
+	run := domain.OptimizationCampaign{ID: campaign.ID, ModelIdentity: campaign.ModelIdentity, Intent: campaign.Intent, State: campaign.State, FailureCode: campaign.FailureCode, CancelRequested: campaign.CancelRequested, ApprovalExpiresAt: campaign.ApprovalExpiresAt, ApprovedAt: campaign.ApprovedAt, CreatedAt: campaign.CreatedAt, UpdatedAt: campaign.UpdatedAt}
+	wait := notification.QualityWaitNone
+	for _, candidate := range campaign.Candidates {
+		run.Candidates = append(run.Candidates, domain.OptimizationCandidateRun{ID: candidate.ID, CampaignID: campaign.ID, State: candidate.State, DeploymentName: candidate.DeploymentName, QualityEvidenceID: candidate.QualityEvidenceID, FailureCode: candidate.FailureCode, UpdatedAt: candidate.UpdatedAt})
+		switch candidate.Quality.State {
+		case "waiting_for_evidence":
+			wait = notification.QualityWaitEvidence
+		case "waiting_for_eval_set":
+			if wait == notification.QualityWaitNone {
+				wait = notification.QualityWaitEvalSet
+			}
+		}
+	}
+	attention := notification.CampaignAttention(run, now, wait)
+	items := make([]inboxItem, 0, len(attention))
+	for _, item := range attention {
+		items = append(items, inboxItem{Severity: item.Severity, Code: item.Code, ResourceKind: "optimization", ResourceName: campaign.ID, Summary: item.Summary, Evidence: "optimization_campaign.state", Next: item.Next, UpdatedAt: item.UpdatedAt})
+	}
+	return items
+}
+
 func inboxSeverityOrder(severity string) int {
 	if severity == "critical" {
 		return 0
@@ -183,7 +248,7 @@ func inboxCodeOrder(code string) int {
 func printInbox(report inboxReport) {
 	fmt.Printf("InferCrane inbox · persisted fleet evidence\n\n")
 	if report.TotalAttention == 0 {
-		fmt.Printf("No persisted fleet issue currently requires attention.\n\nFleet     %d endpoints · %d deployments\nEvidence  persisted state; no diagnosis was run\n\nRun `infercrane observe NAME --diagnose` for a fresh deterministic endpoint evaluation.\n", report.TotalEndpoints, report.TotalDeploys)
+		fmt.Printf("No persisted fleet issue currently requires attention.\n\nFleet     %d endpoints · %d deployments · %d optimization runs\nEvidence  persisted state; no diagnosis was run\n\nRun `infercrane observe NAME --diagnose` for a fresh deterministic endpoint evaluation.\n", report.TotalEndpoints, report.TotalDeploys, report.TotalRuns)
 		return
 	}
 	fmt.Printf("%d attention item(s) · %d critical · %d warning\n", report.TotalAttention, report.Critical, report.Warnings)
