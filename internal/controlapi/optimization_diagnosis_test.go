@@ -6,16 +6,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/gpuprofile"
+	"github.com/infercrane/infercrane/internal/gputrace"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/metrics"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/testtools/tracefixture"
 )
 
 // diagnosisCampaignStore serves monitoring, a GPU profile, and campaigns, so
@@ -204,6 +208,69 @@ func TestProposalDiagnosisIsReadByTheServerOnly(t *testing.T) {
 	plain.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotImplemented {
 		t.Fatalf("store without monitoring status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// sampleTraceCapture analyzes a generated sample vLLM trace into a stored v2
+// capture ended an hour ago. The sample is a generator's output, not a
+// measurement.
+func sampleTraceCapture(t *testing.T) gpuprofile.Profile {
+	t.Helper()
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "rank0.pt.trace.json.gz"), tracefixture.VLLMSingleGPU(tracefixture.SampleBase), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := gputrace.ParseFiles([]string{directory}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := time.Now().UTC().Add(-time.Hour)
+	recording, err := gputrace.Profile(trace, gputrace.Options{Engine: "vllm", EngineVersion: "0.22.1"}, gputrace.CaptureFromTrace(trace, "torch-profiler", "vllm-0.22.1", tracefixture.SampleBase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := gpuprofile.ProfileFromRecording(recording)
+	profile.Capture.ID, profile.Revision = "gpc-sample", 2
+	profile.Capture.StartedAt, profile.Capture.EndedAt = ended.Add(-10*time.Second), ended
+	return profile
+}
+
+func TestProposalPlansFromTheTraceAnalysisOfARecentCapture(t *testing.T) {
+	store := &diagnosisCampaignStore{fakeOptimizationCampaignStore: &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}, snapshot: kvPressureSnapshot(), profile: sampleTraceCapture(t)}
+	call := diagnosisHandler(t, store)
+	response := call(http.MethodPost, "/api/v1/optimization/proposals", diagnosisProposalBody, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("proposal status=%d body=%s", response.Code, response.Body.String())
+	}
+	var proposed struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &proposed); err != nil {
+		t.Fatal(err)
+	}
+	proposal := proposed.Proposal
+	profile := proposal.Input.Diagnosis.GPUProfile
+	if profile == nil || profile.Trace == nil || profile.Trace.AlgorithmVersion != gpuprofile.AnalysisAlgorithm || len(profile.Trace.Findings) != len(store.profile.Analysis.Findings) {
+		t.Fatalf("the server did not carry the capture's trace analysis: %+v", profile)
+	}
+	var graphs *optimizer.PlannedTechnique
+	for index := range proposal.Diagnosis.Techniques {
+		if proposal.Diagnosis.Techniques[index].Technique == optimizer.TechniqueCUDAGraphs {
+			graphs = &proposal.Diagnosis.Techniques[index]
+		}
+	}
+	if graphs == nil || !contains(graphs.Rules, optimizer.TraceRuleIdleHostBound) || graphs.Skipped == "" || len(graphs.CandidateIDs) != 0 {
+		t.Fatalf("a host-launch trace on default CUDA graphs must be recorded and skipped: %+v", proposal.Diagnosis.Techniques)
+	}
+	if err := optimizer.ValidateProposal(proposal); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := store.profile
+	stale.Capture.EndedAt = time.Now().UTC().Add(-optimizer.GPUProfileMaxAge - time.Hour)
+	store.profile = stale
+	if response = call(http.MethodPost, "/api/v1/optimization/proposals", diagnosisProposalBody, ""); response.Code != http.StatusOK || strings.Contains(response.Body.String(), `"gpu_profile"`) || strings.Contains(response.Body.String(), `"trace"`) {
+		t.Fatalf("a capture older than 7 days must stay absent: status=%d", response.Code)
 	}
 }
 

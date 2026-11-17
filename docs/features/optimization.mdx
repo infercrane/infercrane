@@ -182,7 +182,13 @@ API clients send `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`. 
   fields when they were fresh;
 - a summary of the newest [GPU profile](/features/gpu-profiling) of the endpoint's active
   revision, when one was captured in the last 7 days: the share of kernel time spent in attention,
-  matrix-multiply, communication, and other kernels.
+  matrix-multiply, communication, and other kernels. For a capture recorded with
+  `infercrane profile`, it also carries the trace analysis (`input.diagnosis.gpu_profile.trace`):
+  every analysis rule that fired, with its measured value, threshold, and unit, and the measured
+  values behind them, such as idle time waiting on the host, launch delay, the share of graph
+  launches, communication overlap, roofline coverage, decode share, and step times. A value the
+  trace could not measure is left out. A call-stack-only capture, or an analysis version the
+  planner was not written against, carries the kernel shares alone.
 
 A client cannot send a diagnosis itself. The server records it in the proposal's
 `input.diagnosis`, so the input digest binds the choice of setups to the evidence that made it. A
@@ -204,15 +210,21 @@ what to collect, such as serving-engine metrics, before planning again.
 | KV cache full and evicting requests (`kv_cache.preemption`) | FP8 KV cache, then fewer requests at once | `--kv-cache-dtype fp8` (`fp8_e4m3`); `--max-num-seqs` at about 75% of the observed running requests, rounded down to a multiple of 8 (`--max-running-requests`) |
 | KV cache nearly full while requests wait (`kv_cache.saturation`) | FP8 KV cache, then fewer requests at once | as above |
 | Requests waiting in line (`queue.engine_wait` or a queueing bottleneck) | Larger batches | under 70 GB of GPU memory, and on A100: `--max-num-seqs 512 --max-num-batched-tokens 8192`; 70 GB or more: `--max-num-seqs 2048 --max-num-batched-tokens 16384` |
-| GPU idle while requests wait (`gpu.host_bound`) | More API server processes, then streaming tokens in small groups | `--api-server-count 2`; `--stream-interval 2` |
+| GPU idle while requests wait (`gpu.host_bound`) | More API server processes, then streaming tokens in small groups, then CUDA graphs sized to your batches | `--api-server-count 2`; `--stream-interval 2`; CUDA graphs as in the trace rows below |
 | Long prompts (`prefill.long_input`, or a first-token bottleneck with prompts of 1,024 tokens or more) | Bigger prompt chunks | `--max-num-batched-tokens 16384` (`--chunked-prefill-size 16384`) |
 | Shared system prompts reused poorly (`prefix.low_reuse`) | Prefix caching if the starting setup turned it off; prefix-aware scheduling | removes `--no-enable-prefix-caching` (`--disable-radix-cache`); SGLang only: `--schedule-policy lpm` |
 | Tensor cores busy (`gpu.compute_bound`) | FP8 weights | `--quantization fp8` |
 | Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights | `--speculative-config {"method":"mtp","num_speculative_tokens":1}` (NEXTN with one step); `--quantization fp8` |
 | Memory busy, tensor cores idle (`gpu.memory_bandwidth_bound`) | FP8 weights; FP8 KV cache on contexts of 7,000 tokens or more | as above |
 | Writing answers with many requests running per server | FP8 KV cache on contexts of 7,000 tokens or more; larger batches for a throughput or cost goal; FP8 weights | as above |
-| Attention kernels ≥ 40% of profiled GPU time, on contexts of 7,000 tokens or more | FP8 KV cache | as above |
+| Attention kernels ≥ 40% of profiled GPU time, on contexts of 7,000 tokens or more, in a capture without a trace analysis | FP8 KV cache | as above |
 | Matrix-multiply kernels ≥ 50% of profiled GPU time | FP8 weights | as above |
+| Trace: GPU idle waiting on host launches ≥ 10% of the time (`gpu.idle_host_bound`) | CUDA graphs sized to your batches, then preparing the next step while the GPU runs this one | removes `--enforce-eager` (`--disable-cuda-graph`); vLLM only: `--max-cudagraph-capture-size` a quarter above the running requests per server, when they exceed what vLLM captures by default; removes `--no-async-scheduling` (`--disable-overlap-schedule`) |
+| Trace: ≥ 50% of kernels finish faster than their launch call (`gpu.launch_bound_kernels`) | CUDA graphs sized to your batches | as above |
+| Trace: communication between GPUs not hidden under compute ≥ 10% of the time (`gpu.communication_exposed`) | Fewer GPUs per server, planned as a separate run; no setup with more GPUs per server is added | none |
+| Trace: ≥ 60% of matrix-multiply time below the roofline ridge (`gpu.memory_bound_gemm`), with shapes recorded for ≥ 50% of that time | FP8 weights | `--quantization fp8` |
+| Trace: ≥ 60% of matrix-multiply time above the ridge (`gpu.compute_bound_gemm`), with the same coverage | FP8 weights | as above |
+| Trace: attention ≥ 35% of kernel time (`gpu.attention_heavy`), on contexts of 7,000 tokens or more | FP8 KV cache | `--kv-cache-dtype fp8` (`fp8_e4m3`) |
 
 Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
 When several rules choose the same change, it keeps its strongest priority plus a small bonus for
@@ -227,6 +239,32 @@ read from the source of vLLM 0.22.1 and SGLang 0.5.12. vLLM's batch defaults dep
 flag equal to its default is dropped, and a setup left with no change is not added. When a default
 is unknown, the setup is not added either. This covers an accelerator whose memory InferCrane does
 not know, the batch sizes SGLang derives from GPU memory at start, and any other engine version.
+
+#### Rules from a GPU trace
+
+The trace rows apply only to a capture with a trace analysis (`gpu-trace-analysis-v1`). They cite
+the analysis' own measured value and threshold, so a candidate's `evidence` shows, for example,
+`gpu_trace_host_wait_share` 0.31 against 0.1. For the same capture, the trace's attention finding
+replaces the kernel-share attention row, and a measured communication overlap replaces the
+kernel-share communication rule: communication hidden under compute costs nothing.
+
+- **Launch overhead.** vLLM 0.22.1 and SGLang 0.5.12 already run CUDA graphs and schedule the next
+  step while the GPU runs the current one. A setup is added only when the starting setup turned one
+  off, or, on vLLM, when more requests run per server than the largest batch vLLM captures a graph
+  for: `min(max_num_seqs × 2, 512)`, capped at the per-step token budget, which is 512 with the
+  default limits on any GPU. The new capture size covers the running requests plus a quarter, on
+  vLLM's capture grid, and never exceeds the setup's own request or token limit. With the defaults
+  and up to 512 requests running, both changes are skipped as no-ops. SGLang sizes its largest graph
+  from GPU memory at start, so no SGLang capture size is planned. Async scheduling is not planned
+  separately when the starting setup speculates, because the speculation method decides whether it
+  runs. The speculation the planner proposes keeps it on in both engines.
+- **Exposed communication.** A wider layout would add communication, so no setup with more GPUs per
+  server than the starting setup is added while the trace shows exposed communication.
+- **Roofline.** A memory- or compute-bound verdict covers only the matrix multiplies whose shapes the
+  trace recorded. It chooses nothing until those cover at least half of the multiply time.
+- **Findings that name no change.** Idle time without a known cause (`gpu.idle`), long idle gaps
+  (`gpu.long_bubbles`), and decode-dominant kernel time (`gpu.decode_dominant`) are carried as
+  evidence but choose nothing on their own.
 
 A chosen change is skipped, and the proposal records why, when:
 

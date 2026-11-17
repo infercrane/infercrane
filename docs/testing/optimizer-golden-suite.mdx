@@ -198,7 +198,7 @@ A task fails when any of these differ from the expectation:
 | `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
 | `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
 
-Current result: 18 of 18 plans as reviewed, rule set `diagnosis-technique-rules-v1`.
+Current result: 24 of 24 plans as reviewed, rule set `diagnosis-technique-rules-v2`.
 
 | Task | Diagnosis | Expected setups after the control |
 | --- | --- | --- |
@@ -220,8 +220,17 @@ Current result: 18 of 18 plans as reviewed, rule set `diagnosis-technique-rules-
 | `not-ready-measures-only-the-control` | Too little traffic | Nothing; asks for traffic and engine metrics |
 | `reliability-blocked-measures-only-the-control` | 7% errors | Nothing; asks for fewer errors |
 | `gpu-profile-attention-heavy-long-context` | Attention 56% of profiled GPU time | FP8 KV cache, FP8 weights |
+| `rtx4090-qwen3-0.6b-trace-host-launch-defaults-already-on` | Trace: GPU idle 29% waiting on launches, 6 running | Nothing: vLLM's default CUDA graphs and async scheduling already cover it |
+| `h100-trace-host-launch-high-concurrency-larger-graph-capture` | Trace: host-launch bound, 700 running, SMs active 38% | CUDA graphs captured up to 880, more API server processes, streaming in small groups |
+| `h100-tp2-trace-communication-exposed-no-wider-layout` | Trace: two GPUs, communication exposed 17% of the time | FP8 weights; fewer GPUs per server flagged, no wider layout |
+| `h100-trace-memory-bound-gemm-fp8-weights-first` | Trace: 90% of matrix-multiply time memory-bound, 74% covered | FP8 weights |
+| `h100-trace-roofline-few-shapes-no-change` | Trace: memory-bound verdict on 18% of matrix-multiply time | Nothing: too little of the multiply time has shapes |
+| `h100-trace-attention-heavy-long-context` | Trace: attention 38% of kernel time, 9,000-token contexts | FP8 KV cache, FP8 weights |
 
-The two RTX 4090 tasks come from the first real GPU run (Qwen3-0.6B, Vast through SkyPilot, a replay
+The `gpu_trace` tasks are written by hand from the trace analysis rules. They are not recorded
+captures: no real GPU trace has been planned from yet.
+
+The two RTX 4090 tasks in `recorded_gpu_run` come from the first real GPU run (Qwen3-0.6B, Vast through SkyPilot, a replay
 at one request at a time). vLLM defaults served 246 tok/s; n-gram speculation served 188 tok/s, and
 an FP8 KV cache with 2,048-token chunks served 193 tok/s. 2,048 is already vLLM's default under
 70 GB, so that arm changed only the KV cache. Both were hand-picked before the planner read a
@@ -231,10 +240,10 @@ registered only when a control plane starts.
 To add a planning task, write the diagnosis from recorded readiness output, decide the order from
 the rule table before you run the planner, and record the reason in `why`. Categories are
 `kv_pressure`, `queueing`, `host_bound`, `prefill`, `prefix_reuse`, `decode_low_concurrency`,
-`decode_high_concurrency`, `gpu_profile`, `not_ready`, `reliability`, `recorded_gpu_run`,
-`publisher_checkpoint`, and `pinned_image_setups`, and the test fails if any of them loses its last
-task. A change to a rule, priority, or flag value must bump `diagnosis-technique-rules-v1` and
-explain each changed expectation in its task's `why`.
+`decode_high_concurrency`, `gpu_profile`, `gpu_trace`, `not_ready`, `reliability`,
+`recorded_gpu_run`, `publisher_checkpoint`, and `pinned_image_setups`, and the test fails if any of
+them loses its last task. A change to a rule, priority, or flag value must bump the rule set version
+(now `diagnosis-technique-rules-v2`) and explain each changed expectation in its task's `why`.
 
 ## Limits
 

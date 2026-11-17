@@ -137,6 +137,12 @@ measured value and threshold.
 With no rule naming a bottleneck, a GPU busy at least 80% of the time reads as `busy`; otherwise the
 verdict is `unknown`, and says so when the trace has no launch calls to explain idle time.
 
+When Optimize plans from the endpoint's diagnosis, the newest capture of the active revision from
+the last 7 days carries these findings, with their measured values and thresholds, into the plan.
+Host-launch, exposed-communication, roofline, and attention findings can choose a setup to measure;
+`gpu.idle`, `gpu.long_bubbles`, and `gpu.decode_dominant` choose nothing on their own. See
+[rules from a GPU trace](/features/optimization#rules-from-a-gpu-trace).
+
 ### Roofline peaks
 
 Peaks are vendor datasheet figures (dense, without sparsity), not measurements: H100 SXM and PCIe,

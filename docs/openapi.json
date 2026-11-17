@@ -9917,7 +9917,7 @@
             "type": "string"
           },
           "diagnosis_endpoint": {
-            "description": "Endpoint whose recorded diagnosis (readiness assessment over the last hour, engine metrics, and a GPU profile summary when one was captured in the last 7 days) chooses and orders the candidates. The proposal then holds the starting setup plus only setups a diagnosis rule chose; when no rule applies it holds the starting setup alone and diagnosis.needed_evidence says what to collect. The server reads the diagnosis; a client cannot supply one. The proposal records it in input.diagnosis and explains the order in diagnosis and each candidate's reason.",
+            "description": "Endpoint whose recorded diagnosis (readiness assessment over the last hour, engine metrics, and a GPU profile summary when one was captured in the last 7 days: kernel shares, plus the fired trace analysis findings with measured values and thresholds for a capture recorded with infercrane profile) chooses and orders the candidates. The proposal then holds the starting setup plus only setups a diagnosis rule chose; when no rule applies it holds the starting setup alone and diagnosis.needed_evidence says what to collect. The server reads the diagnosis; a client cannot supply one. The proposal records it in input.diagnosis and explains the order in diagnosis and each candidate's reason.",
             "maxLength": 255,
             "minLength": 1,
             "type": "string"

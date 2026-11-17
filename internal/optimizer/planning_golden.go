@@ -44,13 +44,14 @@ const (
 	PlanningRecordedGPURun        = "recorded_gpu_run"
 	PlanningPublisherCheckpoint   = "publisher_checkpoint"
 	PlanningPinnedImageSetups     = "pinned_image_setups"
+	PlanningGPUTrace              = "gpu_trace"
 )
 
 // RequiredPlanningCategories lists every situation the suite must cover.
 var RequiredPlanningCategories = []string{
 	PlanningKVPressure, PlanningQueueing, PlanningHostBound, PlanningPrefill, PlanningPrefixReuse,
 	PlanningDecodeLowConcurrency, PlanningDecodeHighConcurrency, PlanningGPUProfile, PlanningNotReady,
-	PlanningReliability, PlanningRecordedGPURun, PlanningPublisherCheckpoint, PlanningPinnedImageSetups,
+	PlanningReliability, PlanningRecordedGPURun, PlanningPublisherCheckpoint, PlanningPinnedImageSetups, PlanningGPUTrace,
 }
 
 type PlanningGoldenManifest struct {

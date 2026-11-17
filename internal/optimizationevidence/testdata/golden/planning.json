@@ -938,6 +938,594 @@
         "gpu_profile"
       ],
       "why": "Decode dominates and the engine did not report concurrency, so the stage alone only weakly suggests FP8 weights. The GPU profile settles it: on 9,000-token contexts attention kernels took 56% of sampled GPU time against 31% for matrix multiplies, so the KV reads attention performs are the larger cost and an FP8 KV cache comes first. Speculation needs low concurrency, which was not reported, so it is not chosen."
+    },
+    {
+      "id": "rtx4090-qwen3-0.6b-trace-host-launch-defaults-already-on",
+      "request": {
+        "model_identity": "Qwen/Qwen3-0.6B",
+        "provider": "runpod-pods",
+        "gpu": "RTX4090",
+        "objective": "interactive",
+        "max_candidates": 3,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 6,
+            "mean_input_tokens": 278,
+            "p95_generation": 330,
+            "p95_latency": 610
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-host-small",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.18,
+              "gemm": 0.41,
+              "communication": 0,
+              "other": 0.41
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "host-launch",
+              "devices": 1,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.idle_host_bound",
+                  "observed": 0.29,
+                  "comparison": ">=",
+                  "threshold": 0.1,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.launch_bound_kernels",
+                  "observed": 0.71,
+                  "comparison": ">=",
+                  "threshold": 0.5,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.idle",
+                  "observed": 0.33,
+                  "comparison": ">=",
+                  "threshold": 0.2,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.decode_dominant",
+                  "observed": 0.88,
+                  "comparison": ">=",
+                  "threshold": 0.7,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.33,
+                "idle_host_wait_share": 0.82,
+                "launch_delay_p50_us": 9.4,
+                "short_kernel_share": 0.71,
+                "graph_launch_share": 0.93,
+                "decode_share": 0.88,
+                "step_p50_ms": 4.1,
+                "step_p95_ms": 6.3
+              }
+            }
+          }
+        },
+        "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "fp8-weights",
+        "fp8-kv-cache",
+        "speculative-mtp"
+      ],
+      "must_not_use_args": [
+        "ngram",
+        "--enforce-eager",
+        "--no-async-scheduling",
+        "--max-cudagraph-capture-size"
+      ],
+      "expected_skipped": [
+        "cuda-graphs",
+        "async-scheduling",
+        "fp8-weights"
+      ],
+      "categories": [
+        "gpu_trace",
+        "host_bound"
+      ],
+      "why": "The trace places the cost on the host: the GPU sat idle 29% of the window waiting on launches and 71% of kernels finished faster than their launch call. The levers for launch overhead are CUDA graphs and scheduling the next step while the GPU runs this one. vLLM 0.22.1 runs both by default, and under 70 GiB it captures graphs for batches up to 512 (min(256 x 2, 512)), far above the 6 requests running here, so a larger capture changes nothing. Decode-bound at 6 requests would choose FP8 weights, which are not proposed at 0.6B. No change is worth measuring, so only the starting setup is."
+    },
+    {
+      "id": "h100-trace-host-launch-high-concurrency-larger-graph-capture",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "host-and-scheduler",
+          "confidence": "stage-engine-and-gpu-level",
+          "findings": [
+            {
+              "rule": "gpu.host_bound",
+              "signal": "gpu_sm_active",
+              "observed": 38,
+              "comparison": "<",
+              "threshold": 50,
+              "unit": "percent"
+            }
+          ],
+          "signals": {
+            "gpu_sm_active": 38,
+            "runtime_requests_running_per_replica": 700,
+            "runtime_requests_waiting": 40,
+            "p95_queue": 380,
+            "p95_latency": 2100
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-host-busy",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.22,
+              "gemm": 0.46,
+              "communication": 0,
+              "other": 0.32
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "host-launch",
+              "devices": 1,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.idle_host_bound",
+                  "observed": 0.24,
+                  "comparison": ">=",
+                  "threshold": 0.1,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.launch_bound_kernels",
+                  "observed": 0.58,
+                  "comparison": ">=",
+                  "threshold": 0.5,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.idle",
+                  "observed": 0.27,
+                  "comparison": ">=",
+                  "threshold": 0.2,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.decode_dominant",
+                  "observed": 0.74,
+                  "comparison": ">=",
+                  "threshold": 0.7,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.27,
+                "idle_host_wait_share": 0.88,
+                "launch_delay_p50_us": 11.2,
+                "short_kernel_share": 0.58,
+                "graph_launch_share": 0.41,
+                "decode_share": 0.74,
+                "step_p50_ms": 18.5,
+                "step_p95_ms": 31
+              }
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "cuda-graphs",
+        "api-server-processes",
+        "stream-interval"
+      ],
+      "must_not_propose": [
+        "speculative-mtp"
+      ],
+      "must_not_use_args": [
+        "ngram",
+        "--enforce-eager",
+        "--no-async-scheduling"
+      ],
+      "expected_skipped": [
+        "async-scheduling"
+      ],
+      "categories": [
+        "gpu_trace",
+        "host_bound"
+      ],
+      "why": "Requests waited while SMs had resident work on only 38% of cycles, and the trace names the cause: the GPU sat idle 24% of the window waiting on host launches, and 58% of kernels finished faster than their launch call. About 700 requests run per server, above the largest batch vLLM 0.22.1 captures a CUDA graph for on an 80 GB GPU (min(1024 x 2, 512) = 512), so those steps run without a full graph. Capturing graphs up to 880 (a quarter above 700, on vLLM's 16-step grid) addresses the measured cause and comes first. More API server processes and streaming tokens in small groups follow from the CPU-side finding. Async scheduling is already on by default, so it adds no setup."
+    },
+    {
+      "id": "h100-tp2-trace-communication-exposed-no-wider-layout",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "gpu_count": 2,
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 1500
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-tp2",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.21,
+              "gemm": 0.43,
+              "communication": 0.24,
+              "other": 0.12
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "communication",
+              "devices": 2,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.communication_exposed",
+                  "observed": 0.17,
+                  "comparison": ">=",
+                  "threshold": 0.1,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.decode_dominant",
+                  "observed": 0.91,
+                  "comparison": ">=",
+                  "threshold": 0.7,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.12,
+                "communication_overlapped_share": 0.29,
+                "decode_share": 0.91,
+                "step_p50_ms": 21.4,
+                "step_p95_ms": 30.2
+              }
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "batch-budget",
+        "speculative-mtp"
+      ],
+      "expected_skipped": [
+        "parallelism-layout"
+      ],
+      "categories": [
+        "gpu_trace",
+        "decode_high_concurrency"
+      ],
+      "why": "Two GPUs per server, and the trace measured how much of their communication hides under compute: only 29%, leaving it holding the GPU 17% of the window with nothing running underneath. Spreading the model over more GPUs would add to that, so no wider layout is measured; fewer GPUs per server is the lever, and changing hardware is planned as a separate run. Decode is the bottleneck at 64 running requests on 1,500-token contexts with an interactive goal, which leaves FP8 weights."
+    },
+    {
+      "id": "h100-trace-memory-bound-gemm-fp8-weights-first",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-level",
+          "findings": [],
+          "signals": {
+            "p95_generation": 3100,
+            "p95_latency": 3600,
+            "mean_input_tokens": 900
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-roofline",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.24,
+              "gemm": 0.48,
+              "communication": 0,
+              "other": 0.28
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "memory-bandwidth",
+              "devices": 1,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.memory_bound_gemm",
+                  "observed": 0.9,
+                  "comparison": ">=",
+                  "threshold": 0.6,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.decode_dominant",
+                  "observed": 0.86,
+                  "comparison": ">=",
+                  "threshold": 0.7,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.08,
+                "roofline_covered_share": 0.74,
+                "decode_share": 0.86,
+                "step_p50_ms": 12.2,
+                "step_p95_ms": 16.9
+              }
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "speculative-mtp"
+      ],
+      "expected_skipped": [
+        "int4-weights"
+      ],
+      "categories": [
+        "gpu_trace",
+        "gpu_profile"
+      ],
+      "why": "Decode dominates and the engine did not report concurrency, so the stage alone only weakly suggests FP8 weights. The trace placed 74% of matrix-multiply time on the H100's roofline and found 90% of it below the ridge point: the multiplies wait on memory, not math. Smaller weights move fewer bytes per step, so FP8 weights come first with stronger support. 4-bit weights would need a publisher checkpoint a campaign cannot rank yet. Contexts are short, so an FP8 KV cache is not chosen."
+    },
+    {
+      "id": "h100-trace-roofline-few-shapes-no-change",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "unattributed-serving-time",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 12,
+            "p95_latency": 900
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-few-shapes",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.3,
+              "gemm": 0.45,
+              "communication": 0,
+              "other": 0.25
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "memory-bandwidth",
+              "devices": 1,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.memory_bound_gemm",
+                  "observed": 0.88,
+                  "comparison": ">=",
+                  "threshold": 0.6,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.idle",
+                  "observed": 0.22,
+                  "comparison": ">=",
+                  "threshold": 0.2,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.22,
+                "roofline_covered_share": 0.18,
+                "step_p50_ms": 9.1,
+                "step_p95_ms": 14.4
+              }
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "fp8-weights"
+      ],
+      "must_not_use_args": [
+        "--quantization"
+      ],
+      "categories": [
+        "gpu_trace"
+      ],
+      "why": "The trace calls the matrix multiplies memory-bound, but it recorded shapes for only 18% of their time, so the verdict describes a small sample rather than the server. Idle time without a known cause and serving time the window cannot attribute name no change. Nothing is chosen until a trace with recorded shapes covers most of the multiply time."
+    },
+    {
+      "id": "h100-trace-attention-heavy-long-context",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-level",
+          "findings": [],
+          "signals": {
+            "p95_generation": 3100,
+            "p95_latency": 3600,
+            "mean_input_tokens": 9000
+          },
+          "gpu_profile": {
+            "capture_id": "gpc-trace-attention",
+            "tool": "torch-profiler",
+            "revision": 3,
+            "captured_at": "2026-11-16T22:00:00Z",
+            "kernel_seconds": 9.6,
+            "shares": {
+              "attention": 0.38,
+              "gemm": 0.4,
+              "communication": 0,
+              "other": 0.22
+            },
+            "trace": {
+              "algorithm_version": "gpu-trace-analysis-v1",
+              "bottleneck": "attention",
+              "devices": 1,
+              "window_ms": 10000,
+              "findings": [
+                {
+                  "rule": "gpu.attention_heavy",
+                  "observed": 0.38,
+                  "comparison": ">=",
+                  "threshold": 0.35,
+                  "unit": "ratio"
+                },
+                {
+                  "rule": "gpu.decode_dominant",
+                  "observed": 0.8,
+                  "comparison": ">=",
+                  "threshold": 0.7,
+                  "unit": "ratio"
+                }
+              ],
+              "measurements": {
+                "idle_share": 0.06,
+                "decode_share": 0.8,
+                "step_p50_ms": 14.8,
+                "step_p95_ms": 22.5
+              }
+            }
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "speculative-mtp"
+      ],
+      "categories": [
+        "gpu_trace",
+        "gpu_profile"
+      ],
+      "why": "On 9,000-token contexts the trace found attention taking 38% of kernel time, above its 35% threshold, so the KV reads attention performs are a large cost and an FP8 KV cache comes first. The trace's own finding replaces the coarser share rule for the same capture. Decode dominates with concurrency unreported, which weakly suggests FP8 weights next. Speculation needs low concurrency, which was not reported."
     }
   ]
 }

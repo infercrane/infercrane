@@ -133,6 +133,12 @@ func flagTechniques(args []string) []string {
 			add("bounded CUDA graphs")
 		case "--enforce-eager", "--disable-cuda-graph":
 			add("no CUDA graphs")
+		case "--max-cudagraph-capture-size":
+			if size, err := strconv.Atoi(next); err == nil && size > 0 {
+				add("CUDA graphs for batches up to " + groupThousands(size))
+			}
+		case "--no-async-scheduling", "--disable-overlap-schedule":
+			add("no async scheduling")
 		case "--max-num-seqs", "--max-running-requests":
 			if count, err := strconv.Atoi(next); err == nil && count > 0 {
 				add("up to " + groupThousands(count) + " concurrent requests")
