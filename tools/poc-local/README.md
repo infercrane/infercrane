@@ -25,6 +25,12 @@ pointed at the local control plane.
 Campaigns are approved for 24 hours. A CPU campaign runs every candidate in turns and can take
 hours, and an approval that expires mid-run stops the campaign.
 
+A loaded laptop restarts model servers and drops the `kubectl port-forward` to the control plane.
+The harness then restarts the port-forward and repeats the call for up to 10 minutes, but only a
+call that cannot apply twice: a read, a write with an idempotency key, or a request the control
+plane never received. If the connection drops after an approval or activation was sent, the harness
+reads the campaign back instead of sending it again.
+
 Requirements: Docker, kubectl, Go, curl, Python 3.9+. With 7.7 GB of Docker memory, the first run
 had model servers killed for running out of memory and the control plane lost its database for
 hours; give Docker more memory than that. The working minimum is not measured yet. Pinned inputs: kind node image, llama.cpp
