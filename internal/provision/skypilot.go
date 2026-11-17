@@ -113,6 +113,20 @@ func (r execRunner) Run(ctx context.Context, env []string, args ...string) ([]by
 type SkyPilot struct {
 	Binary, APIKey string
 	Runner         CommandRunner
+	// ServicePort, when set, is the only container port the cloud can expose
+	// to the control plane; every replica serves and is observed on it.
+	ServicePort int
+}
+
+// SkyPilotServicePort returns the container port a SkyPilot cloud must serve
+// on to be reachable, or 0 when any port works. Vast.ai forwards only container
+// port 8080 (through the instance's SSH port + 1); a server on 8000 starts but
+// is never reachable.
+func SkyPilotServicePort(cloud string) int {
+	if strings.EqualFold(strings.TrimSpace(cloud), "vast") {
+		return 8080
+	}
+	return 0
 }
 
 // Handle returns the deterministic provider identity for a durable external
@@ -139,6 +153,14 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	if spec.Port == 0 {
 		spec.Port = 8000
+	}
+	if s.ServicePort != 0 && spec.Port != s.ServicePort {
+		// A workload whose command takes ${PORT} can move to the forwarded port;
+		// one with a fixed port would start a server nobody can reach.
+		if !spec.Workload.Empty() && !takesPort(spec.Workload.Command) {
+			return ProviderHandle{}, fmt.Errorf("%w: %s exposes only container port %d; the workload listens on %d", ErrInvalidReplicaSpec, spec.Cloud, s.ServicePort, spec.Port)
+		}
+		spec.Port = s.ServicePort
 	}
 	usesDefaultRuntime := spec.RuntimeVersion == ""
 	if usesDefaultRuntime {
@@ -242,6 +264,9 @@ func (s SkyPilot) ObserveReplica(ctx context.Context, handle ProviderHandle, por
 	if port == 0 {
 		port = 8000
 	}
+	if s.ServicePort != 0 {
+		port = s.ServicePort
+	}
 	return s.observe(ctx, handle.ResourceID, port, true)
 }
 
@@ -319,6 +344,15 @@ func runCommand(model, revision string, port int, runtimeArgs []string) string {
 	// supported hf_xet/HTTP transfer path instead of failing before model load.
 	return fmt.Sprintf(`unset HF_HUB_ENABLE_HF_TRANSFER; VLLM_API_KEY="$INFERCRANE_WORKER_API_KEY" exec vllm serve %s --host 0.0.0.0 --port %d --served-model-name %s %s`, shellQuote(model), port, shellQuote(model), strings.Join(args, " "))
 }
+func takesPort(command []string) bool {
+	for _, value := range command {
+		if strings.Contains(value, "${PORT}") {
+			return true
+		}
+	}
+	return false
+}
+
 func workloadCommand(command []string, model, revision string, port int, runtimeArgs []string) string {
 	values := append(append([]string(nil), command...), runtimeArgs...)
 	for i, value := range values {
