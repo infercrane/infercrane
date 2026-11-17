@@ -567,6 +567,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/kernel-opportunities", a.auth(authz.Read, a.kernelOpportunities))
 	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/capabilities", a.auth(authz.Read, a.acceleratorLabCapabilities))
 	mux.HandleFunc("POST /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Deploy, a.runAcceleratorLab))
+	mux.HandleFunc("GET /api/v1/optimization/accelerator-lab/runs", a.auth(authz.Read, a.acceleratorLabRuns))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns", a.auth(authz.Read, a.optimizationCampaigns))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
@@ -1679,14 +1680,14 @@ func (a API) runAcceleratorLab(w http.ResponseWriter, r *http.Request) {
 	}
 	encoded, _ := json.Marshal(validated)
 	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{
-		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: validated.CampaignID,
+		TenantID: actor.TenantID, Kind: acceleratorlab.ExecuteKind, ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID,
 		IdempotencyKey: "accelerator-lab:" + digest, RequestJSON: string(encoded), MaxAttempts: 20,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "accelerator_lab_enqueue_failed", "accelerator qualification could not be queued")
 		return
 	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: "optimization_campaign", ResourceName: validated.CampaignID, Outcome: "queued"})
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "accelerator_lab.run", ResourceType: acceleratorLabResourceType, ResourceName: validated.CampaignID, Outcome: "queued"})
 	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "input_digest": digest, "provider_mutation": false, "automatic_promotion": false})
 }
 

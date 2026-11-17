@@ -890,6 +890,28 @@ Research abstracts are shown to the model as untrusted reference data and record
 They are never performance evidence. The first reviewed pack covers residual-add + RMSNorm in
 Triton; other operators fail closed until a pack exists.
 
+### Read lab runs
+
+List your organization's lab runs, newest first. The viewer role is enough. `campaign_id` limits
+the list to one campaign, and `limit` sets the page size from 1 to 100 (default 20):
+
+```bash
+curl -fsS "$INFERCRANE_URL/api/v1/optimization/accelerator-lab/runs?campaign_id=CAMPAIGN_ID&limit=20" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+Each run carries its operation status and progress, the target and policy from the request, and the
+recorded result: profile hotspots, planned candidates, and each experiment's build, qualification,
+and kernel research attempts. `result_state` is `pending` until the worker records a result, and
+`unreadable` when the stored result does not decode or has another schema version. The read copies
+what the worker stored. A hotspot duration or invocation count the profiler did not record is null,
+not zero.
+
+Artifacts appear only as content digests, never as locations or sizes. The read never returns
+literature references, credentials, tenant IDs, lease owners, or idempotency keys, and a URI inside
+an error message becomes `[uri redacted]`. A lab run is an experiment on the target GPU: a qualified
+kernel still needs Release Guard and explicit promotion before it serves traffic.
+
 ## Plan an optimized artifact
 
 Builders run outside InferCrane. The common path produces a strict immutable plan:

@@ -141,6 +141,7 @@ var Routes = []Route{
 	{"POST", "/optimization/kernel-opportunities", "planKernelOpportunities", "Inference optimization", "Search reviewed existing kernel sources before bounded custom-kernel experiments", "KernelOpportunityRequest", "Object", 200, false},
 	{"GET", "/optimization/accelerator-lab/capabilities", "getAcceleratorLabCapabilities", "Inference optimization", "Inspect exact accelerator, runtime, topology, profiler, and modality adapter contracts", "", "Object", 200, false},
 	{"POST", "/optimization/accelerator-lab/runs", "runAcceleratorLab", "Inference optimization", "Queue a budget-bounded profile, isolated build, and exact-target qualification operation", "Object", "OperationEnvelope", 202, true},
+	{"GET", "/optimization/accelerator-lab/runs", "listAcceleratorLabRuns", "Inference optimization", "List the organization's Accelerator Lab runs, newest first, with their target, policy, and recorded evidence", "", "AcceleratorLabRunList", 200, false},
 	{"GET", "/optimization/campaigns", "listOptimizationCampaigns", "Inference optimization", "List durable evidence-gated optimization campaigns", "", "ObjectList", 200, false},
 	{"POST", "/optimization/campaigns", "createOptimizationCampaign", "Inference optimization", "Persist a bounded immutable proposal without mutating provider infrastructure", "OptimizationCampaignCreate", "Object", 201, true},
 	{"GET", "/optimization/campaigns/{id}", "getOptimizationCampaign", "Inference optimization", "Inspect predicted and measured campaign evidence", "", "OptimizationCampaignEnvelope", 200, false},
@@ -274,6 +275,9 @@ func Document() (map[string]any, error) {
 		}
 		if route.Path == "/catalog/hugging-face/search" {
 			parameters = append(parameters, huggingFaceSearchQueryParameters()...)
+		}
+		if route.Method == "GET" && route.Path == "/optimization/accelerator-lab/runs" {
+			parameters = append(parameters, acceleratorLabRunQueryParameters()...)
 		}
 		if route.Path == "/billing/webhooks/stripe" {
 			parameters = append(parameters, map[string]any{"name": "Stripe-Signature", "in": "header", "required": true, "description": "Stripe webhook HMAC signature; the request is unauthenticated by bearer token and grants balance only after verification.", "schema": map[string]any{"type": "string"}})
@@ -582,6 +586,9 @@ func schemas() map[string]any {
 		result[name] = schema
 	}
 	for name, schema := range notificationSchemas() {
+		result[name] = schema
+	}
+	for name, schema := range acceleratorLabRunSchemas() {
 		result[name] = schema
 	}
 	return result
