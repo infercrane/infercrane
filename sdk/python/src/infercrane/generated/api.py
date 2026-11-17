@@ -187,6 +187,10 @@ class ControlAPI:
         request_path = "/catalog/gpu-prices"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def list_accelerators(self) -> dict[str, Any]:
+        request_path = "/catalog/accelerators"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def list_public_g_p_u_prices(self) -> ObjectList:
         request_path = "/public/catalog/gpu-prices"
         return cast(ObjectList, self._transport.request("GET", request_path))

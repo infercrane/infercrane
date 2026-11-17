@@ -198,7 +198,9 @@ A task fails when any of these differ from the expectation:
 | `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
 | `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
 
-Current result: 18 of 18 plans as reviewed, rule set `diagnosis-technique-rules-v1`.
+Current result: 20 of 20 plans as reviewed, rule set `diagnosis-technique-rules-v2`. Version 2
+widened the FP8 gate to the reviewed AMD Instinct GPUs; two MI300X tasks check that the same
+diagnosis chooses the same plan there and that RunPod's MI300X name resolves to its 192 GB memory.
 
 | Task | Diagnosis | Expected setups after the control |
 | --- | --- | --- |
@@ -233,7 +235,7 @@ the rule table before you run the planner, and record the reason in `why`. Categ
 `kv_pressure`, `queueing`, `host_bound`, `prefill`, `prefix_reuse`, `decode_low_concurrency`,
 `decode_high_concurrency`, `gpu_profile`, `not_ready`, `reliability`, `recorded_gpu_run`,
 `publisher_checkpoint`, and `pinned_image_setups`, and the test fails if any of them loses its last
-task. A change to a rule, priority, or flag value must bump `diagnosis-technique-rules-v1` and
+task. A change to a rule, priority, or flag value must bump `diagnosis-technique-rules-v2` and
 explain each changed expectation in its task's `why`.
 
 ## Limits

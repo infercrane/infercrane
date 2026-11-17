@@ -415,7 +415,7 @@ func deriveArgs(control Candidate, technique technique, diagnosis Diagnosis, req
 		return nil, "The model's pinned config was not read or declares no native prediction head, which this technique needs."
 	}
 	if technique.nativeFP8 && !nativeFP8Accelerator(request.GPU) {
-		return nil, request.GPU + " is not an accelerator InferCrane knows runs FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell)."
+		return nil, request.GPU + " is not an accelerator InferCrane knows runs FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell, or AMD Instinct MI300X, MI325X, MI350X, or MI355X)."
 	}
 	if technique.id == TechniqueFP8Weights && quantizedModelName(control.Deployment.Model.ID) {
 		return nil, "The model's weights already look quantized, so FP8 weights would not apply."

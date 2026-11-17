@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/infercrane/infercrane/internal/provideridentity"
 )
 
 const SchemaV1 = "infercrane.optimization-capability/v1"
@@ -192,9 +194,13 @@ func normalizedAccelerators(values []string) []string {
 }
 
 // Provider resource labels are not hardware identities. Normalize only
-// explicit NVIDIA family aliases; a generic kubernetes resource such as
+// explicit NVIDIA family aliases and reviewed accelerator spellings (such as
+// RunPod's "AMD Instinct MI300X OAM"); a generic kubernetes resource such as
 // nvidia.com/gpu remains unknown and cannot satisfy an exact tuple.
 func normalizeAccelerator(value string) string {
+	if accelerator, reviewed := provideridentity.LookupAccelerator(value); reviewed {
+		return accelerator.Name
+	}
 	value = strings.ToUpper(strings.TrimSpace(value))
 	for _, prefix := range []string{"NVIDIA-", "NVIDIA_"} {
 		if strings.HasPrefix(value, prefix) {

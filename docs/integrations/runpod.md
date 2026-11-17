@@ -11,6 +11,9 @@ adapter, which does not require SSH inside the runtime image. Serverless deploym
 native endpoint lifecycle. InferCrane's base production stack does not require RunPod; enable it
 explicitly with `compose.production.runpod.yaml`.
 
+AMD Instinct MI300X and MI350X run through `runpod-pods` with the pinned ROCm vLLM image; SkyPilot and
+Serverless stay NVIDIA-only. See [AMD Instinct GPUs](/integrations/amd-instinct).
+
 <Warning>
 The commands in this guide can create billable GPU resources. The RunPod adapters have hermetic
 contract coverage, but the current elastic path remains **experimental** until the exact release,

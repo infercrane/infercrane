@@ -27,7 +27,10 @@ adapters remain unqualified.
 ## Check one exact serving combination
 
 There is no universal “supported model” flag. Qualification is the intersection of adapter,
-runtime, compute mode, runtime version, immutable model artifact, accelerator, and real evidence:
+runtime, compute mode, runtime version, immutable model artifact, accelerator, and real evidence.
+An accelerator's platform (`cuda`, or `rocm-gfx942` and `rocm-gfx950` for
+[AMD Instinct GPUs](/integrations/amd-instinct)) decides the runtime image and is qualified per
+provider and compute mode; `GET /api/v1/catalog/accelerators` lists both:
 
 ```bash
 infercrane integrations --output json

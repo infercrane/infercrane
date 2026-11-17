@@ -173,6 +173,35 @@ func TestLoadRejectsExcludedRuntimeAndCloud(t *testing.T) {
 	}
 }
 
+func TestLoadPlacesAMDInstinctGPUsOnlyWhereTheirPlatformIsQualified(t *testing.T) {
+	example, err := Load("../../examples/runpod-mi300x.yaml")
+	if err != nil || example.Resources.GPU != "MI300X" || example.Provider.Cloud != "runpod" || example.Model.Revision == "main" {
+		t.Fatalf("example=%#v err=%v", example, err)
+	}
+	for name, body := range map[string]string{
+		"runpod":     "resources: {gpu: MI300X}\nprovider: {cloud: runpod}",
+		"kubernetes": "resources: {gpu: AMD_Instinct_MI300X_OAM}\nprovider: {cloud: kubernetes}",
+		"sglang":     "runtime: {engine: sglang}\nresources: {gpu: MI355X}\nprovider: {cloud: kubernetes}",
+	} {
+		loaded, err := Load(writeSpec(t, "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\n"+body+"\n"))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		// SGLang stores its image in the spec, so it must be the gfx950 build.
+		if name == "sglang" && !strings.Contains(loaded.Runtime.Workload.Image, "rocm720-mi35x@sha256:") {
+			t.Fatalf("SGLang on MI355X stored %q", loaded.Runtime.Workload.Image)
+		}
+	}
+	for name, body := range map[string]string{
+		"aws":        "resources: {gpu: MI300X}\nprovider: {cloud: aws, region: eu-central-1}",
+		"serverless": "resources: {gpu: MI300X}\nprovider: {cloud: runpod}\ncompute: {mode: serverless}\nscaling: {min_replicas: 0, max_replicas: 1}",
+	} {
+		if _, err := Load(writeSpec(t, "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\n"+body+"\n")); err == nil || !strings.Contains(err.Error(), "rocm-gfx942 platform") {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+}
+
 func TestLoadPortableRuntimeContracts(t *testing.T) {
 	sglang, err := Load("../../examples/sglang.yaml")
 	if err != nil || sglang.Runtime.Engine != "sglang" || sglang.Runtime.Workload.Image == "" {

@@ -278,17 +278,23 @@ Guard, and events. `--diagnose` explicitly persists a fresh deterministic Doctor
 A field the control plane has not recorded prints as `none` (for example, no staged candidate plan)
 or `unknown`. JSON keeps the raw values and reports an unstaged candidate as `"candidate_plan": null`.
 
-### `telemetry collect dcgm`
+### `telemetry collect dcgm|amd`
 
 ```bash
 infercrane telemetry collect dcgm coder-production \
   --url http://127.0.0.1:9400/metrics \
   --selector deployment=coder-production \
   --replica replica-03 --ttl 2m
+
+infercrane telemetry collect amd qwen3-8b-mi300x \
+  --url http://127.0.0.1:5000/metrics \
+  --selector pod=qwen3-8b-mi300x-0
 ```
 
-The command parses a bounded, documented subset of DCGM Prometheus metrics locally and sends
-normalized content-free evidence through the authenticated control API. Use `--file SNAPSHOT` for
+`dcgm` reads NVIDIA's dcgm-exporter and `amd` reads the AMD Device Metrics Exporter (default port
+5000; `--metric-prefix` if it sets one). The command parses a bounded, documented subset of the
+exporter's Prometheus metrics locally and sends normalized content-free evidence through the
+authenticated control API. Use `--file SNAPSHOT` for
 offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
 TTL; arbitrary Prometheus metrics are not accepted.
 
