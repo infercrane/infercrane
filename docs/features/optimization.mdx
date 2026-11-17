@@ -230,6 +230,7 @@ what to collect, such as serving-engine metrics, before planning again.
 | Trace: ≥ 60% of matrix-multiply time below the roofline ridge (`gpu.memory_bound_gemm`), with shapes recorded for ≥ 50% of that time | FP8 weights | `--quantization fp8` |
 | Trace: ≥ 60% of matrix-multiply time above the ridge (`gpu.compute_bound_gemm`), with the same coverage | FP8 weights | as above |
 | Trace: attention ≥ 35% of kernel time (`gpu.attention_heavy`), on contexts of 7,000 tokens or more | FP8 KV cache | `--kv-cache-dtype fp8` (`fp8_e4m3`) |
+| Writing answers, first tokens on prompts of 1,024 tokens or more, attention or matrix-multiply kernels dominating the profile, or a trace's `gpu.attention_heavy` finding, on a reviewed AMD Instinct GPU (`accelerator.kernels_off_by_default`) | AMD AITER kernels | engine switch `VLLM_ROCM_USE_AITER=1` in `runtime.env` (SGLang's ROCm image already turns AITER on); see [AMD Instinct GPUs](/integrations/amd-instinct#turn-on-aiter-kernels-for-vllm) |
 
 Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
 When several rules choose the same change, it keeps its strongest priority plus a small bonus for
@@ -286,7 +287,9 @@ A chosen change is skipped, and the proposal records why, when:
   model yet. A [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves different
   model files, and a run cannot yet rank setups that serve different files, so it is left out;
 - the model's weights already look quantized, for FP8 weights;
-- the change is already in the starting setup, equals the engine default, or has an unknown default;
+- the change is already in the starting setup, equals the engine default, or has an unknown default.
+  An engine switch is checked the same way, against the starting setup's `runtime.env` or else the
+  default recorded for the pinned engine version;
 - it changes the GPU, the GPUs per server, or the endpoint's routing. Right-sizing is flagged when
   few requests run at once, and is planned as a separate run.
 

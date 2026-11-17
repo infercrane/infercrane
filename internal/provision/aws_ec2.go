@@ -320,6 +320,9 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	if spec.GPU != a.GPU {
 		return fmt.Errorf("configured AWS instance type %s is qualified for GPU %s, not %s", a.InstanceType, a.GPU, spec.GPU)
 	}
+	if _, err := engineEnvironment(spec); err != nil {
+		return err
+	}
 	configuredGPUCount := a.GPUCount
 	if configuredGPUCount == 0 {
 		configuredGPUCount = 1
@@ -851,7 +854,8 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 			}
 		}
 		image := spec.Workload.Image
-		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " --entrypoint " + quoted[0] + " " + shellQuote(image) + " " + strings.Join(quoted[1:], " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		engineArgs := containerEngineEnvironment(spec)
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" " + engineArgs + "-p " + fmt.Sprintf("%d:%d", port, port) + " --entrypoint " + quoted[0] + " " + shellQuote(image) + " " + strings.Join(quoted[1:], " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the

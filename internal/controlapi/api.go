@@ -4888,7 +4888,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "request_count_per_run": request.Requests, "profile_runs": request.Runs, "warmup_requests": request.WarmupRequests, "run_cooldown_seconds": request.Cooldown, "arrival_pattern": request.ArrivalPattern, "request_rate": request.RequestRate, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "confidence_95": measured.Confidence, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID, "replicas": benchmarkReplicaCount})
-	runtimeConfig, _ := json.Marshal(map[string]any{"args": revisionSpec.RuntimeArgs})
+	runtimeConfig, _ := json.Marshal(support.BenchmarkRuntimeConfig(revisionSpec.RuntimeArgs, revisionSpec.RuntimeEnv))
 	var gpuCount *int
 	if revisionSpec.GPU != "" {
 		count := revisionSpec.GPUCount

@@ -100,12 +100,13 @@
         "kv-sequence-cap"
       ],
       "must_not_propose": [
-        "batch-budget"
+        "batch-budget",
+        "aiter-kernels"
       ],
       "categories": [
         "kv_pressure"
       ],
-      "why": "The same evictions as on the H100 task, on an AMD Instinct MI300X. CDNA 3 runs FP8 in hardware and the pinned vLLM 0.22.1 ROCm image supports an FP8 (e4m3) KV cache, so the FP8 KV cache still comes first and the sequence cap second. The plan is identical because the rules read the diagnosis, not the vendor."
+      "why": "The same evictions as on the H100 task, on an AMD Instinct MI300X. CDNA 3 runs FP8 in hardware and the pinned vLLM 0.22.1 ROCm image supports an FP8 (e4m3) KV cache, so the FP8 KV cache still comes first and the sequence cap second. The plan is identical because the rules read the diagnosis, not the vendor. The AMD AITER kernels are not chosen: the diagnosis points at the KV cache or the queue, not at kernel time."
     },
     {
       "id": "l40s-kv-saturation-reviewed-profile",
@@ -257,12 +258,13 @@
       "must_not_propose": [
         "fp8-kv-cache",
         "fp8-weights",
-        "speculative-mtp"
+        "speculative-mtp",
+        "aiter-kernels"
       ],
       "categories": [
         "queueing"
       ],
-      "why": "RunPod's exact SKU name for the MI300X resolves to the reviewed 192 GB accelerator. vLLM 0.22.1 applies its 70 GB rule on ROCm too, so the defaults are already 1,024 sequences and 8,192 batched tokens, and the larger-batch setup raises them to 2,048 and 16,384. The small-memory values (512 and 8,192) would restate or lower the defaults and must not appear.",
+      "why": "RunPod's exact SKU name for the MI300X resolves to the reviewed 192 GB accelerator. vLLM 0.22.1 applies its 70 GB rule on ROCm too, so the defaults are already 1,024 sequences and 8,192 batched tokens, and the larger-batch setup raises them to 2,048 and 16,384. The small-memory values (512 and 8,192) would restate or lower the defaults and must not appear. The AMD AITER kernels are not chosen: the diagnosis points at the KV cache or the queue, not at kernel time.",
       "must_not_use_args": [
         "--max-num-seqs 512",
         "--max-num-batched-tokens 8192"
@@ -1637,6 +1639,228 @@
         "gpu_profile"
       ],
       "why": "On 9,000-token contexts the trace found attention taking 38% of kernel time, above its 35% threshold, so the KV reads attention performs are a large cost and an FP8 KV cache comes first. The trace's own finding replaces the coarser share rule for the same capture. Decode dominates with concurrency unreported, which weakly suggests FP8 weights next. Speculation needs low concurrency, which was not reported."
+    },
+    {
+      "id": "mi300x-decode-aiter-kernels-first",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "MI300X",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 1500
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "aiter-kernels",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "batch-budget",
+        "speculative-mtp"
+      ],
+      "categories": [
+        "accelerator_kernels",
+        "decode_high_concurrency"
+      ],
+      "why": "The H100 short-context decode task on an AMD Instinct MI300X. Writing answers is 85% of p95 request time, so the GPU's kernels are the work to speed up. vLLM 0.22.1 leaves AMD's AITER kernels off unless VLLM_ROCM_USE_AITER=1 (default False in vllm/envs.py; the pinned ROCm image does not set it), and AMD's vLLM optimization guide and the vLLM recipes' AMD preset both turn it on, so the AITER setup is measured first. It changes only that switch; FP8 weights follow as on the H100. FP8 KV cache and larger batches stay out for the same reasons as on the H100."
+    },
+    {
+      "id": "mi355x-long-prompts-aiter-then-bigger-chunks",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "MI355X",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "mean_input_tokens": 6000,
+            "p95_ttft": 2400,
+            "p95_latency": 3000
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "aiter-kernels",
+        "prefill-chunk-large"
+      ],
+      "categories": [
+        "accelerator_kernels",
+        "prefill"
+      ],
+      "why": "First tokens take 80% of p95 request time on 6,000-token prompts on an MI355X (CDNA 4, gfx950). Prompt processing is attention and matrix-multiply work, which AITER's kernels replace on this GPU and which vLLM 0.22.1 leaves off by default, so the AITER setup comes before the bigger prompt chunks the H100 long-prompt task chooses."
+    },
+    {
+      "id": "mi300x-short-prompts-no-aiter",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "MI300X",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "prefill-and-first-token",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "mean_input_tokens": 300,
+            "p95_ttft": 900,
+            "p95_latency": 1000
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "no_actionable_findings",
+      "expected_order": [
+        "control"
+      ],
+      "must_not_propose": [
+        "aiter-kernels",
+        "prefill-chunk-large"
+      ],
+      "categories": [
+        "accelerator_kernels",
+        "prefill"
+      ],
+      "why": "First tokens dominate, but prompts average 300 tokens, so first-token time is not prompt work and faster kernels for it are not the lever. Nothing is chosen on the MI300X either, and the plan asks for engine metrics.",
+      "expected_needed_evidence": [
+        "engine_metrics"
+      ]
+    },
+    {
+      "id": "h100-decode-never-aiter",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 1500
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "aiter-kernels"
+      ],
+      "categories": [
+        "accelerator_kernels",
+        "decode_high_concurrency"
+      ],
+      "why": "The MI300X decode task on an H100. AITER is AMD's kernel library and no engine switch is reviewed for the CUDA platform, so the rule does not fire and the plan is the H100 plan."
+    },
+    {
+      "id": "mi300x-sglang-decode-no-aiter-switch",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "MI300X",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 1500
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "sglang"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "aiter-kernels"
+      ],
+      "categories": [
+        "accelerator_kernels",
+        "decode_high_concurrency"
+      ],
+      "why": "The MI300X decode task on SGLang. SGLang's pinned ROCm image already sets SGLANG_USE_AITER=1 and no SGLang switch is reviewed, so the AITER rule has nothing to turn on and does not fire. FP8 weights remain, as for vLLM."
     }
   ]
 }

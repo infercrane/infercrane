@@ -2,9 +2,6 @@
 package planning
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -19,6 +16,7 @@ var nonNameCharacter = regexp.MustCompile(`[^a-z0-9]+`)
 type Input struct {
 	Name, Model, ModelRevision, ComputeMode, Cloud, ProviderAdapter, GPU, Region, Runtime, RuntimeVersion, Routing string
 	Targets, RuntimeArgs                                                                                           []string
+	RuntimeEnv                                                                                                     map[string]string
 	GPUCount, MinReplicas, MaxReplicas                                                                             int
 	Serving                                                                                                        servingcontract.Topology
 }
@@ -248,11 +246,9 @@ func Build(in Input) (Plan, error) {
 		return Plan{}, fmt.Errorf("serving topology: %w", err)
 	}
 
-	args, _ := json.Marshal(in.RuntimeArgs)
-	argsSum := sha256.Sum256(args)
 	p := Plan{Version: 1, Name: in.Name, Model: in.Model, ModelRevision: in.ModelRevision, Cloud: in.Cloud, ProviderAdapter: in.ProviderAdapter, GPU: in.GPU, GPUCount: in.GPUCount, Serving: in.Serving,
 		Region: in.Region, Runtime: in.Runtime, Routing: in.Routing, Targets: in.Targets,
-		RuntimeVersion: in.RuntimeVersion, RuntimeArgsDigest: "sha256:" + hex.EncodeToString(argsSum[:]),
+		RuntimeVersion: in.RuntimeVersion, RuntimeArgsDigest: support.RuntimeArgsDigest(in.RuntimeArgs, in.RuntimeEnv),
 		MinReplicas: in.MinReplicas, MaxReplicas: in.MaxReplicas,
 		Cost: Cost{Status: "unavailable", Reason: "live provider pricing is not configured; no estimate is fabricated"},
 		Readiness: Readiness{
