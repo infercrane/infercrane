@@ -56,7 +56,9 @@
       "review_state": "approved",
       "created_after": "2026-08-01",
       "formats": [
-        {"kind": "quantized_checkpoint", "tool": "quark", "scheme": "mxfp4", "review_state": "approved", "hardware": {"vendor": "amd", "architectures": ["cdna4"]}, "runtimes": ["sglang", "vllm"]}
+        {"kind": "quantized_checkpoint", "tool": "quark", "scheme": "mxfp4", "review_state": "approved", "hardware": {"vendor": "amd", "architectures": ["cdna4"]}, "runtimes": ["sglang", "vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "llm-compressor", "scheme": "w4a16", "review_state": "approved", "hardware": {"vendor": "amd", "architectures": ["cdna3", "cdna4"]}, "runtimes": ["vllm"]},
+        {"kind": "quantized_checkpoint", "tool": "llm-compressor", "scheme": "w8a8", "review_state": "approved", "hardware": {"vendor": "amd", "architectures": ["cdna3", "cdna4"]}, "runtimes": ["vllm"]}
       ]
     }
   ],
