@@ -60,8 +60,9 @@ counts are sent only if you route traffic through its local gateway. See
     infercrane observe qwen3-8b
     ```
 
-    Engine metrics (queue time, time to first token, KV-cache use) appear after two scrapes, about a
-    minute after the agent starts.
+    Running and waiting requests and KV-cache use appear with the first sync. Queue time and time to
+    first token come from the difference between two scrapes, so they appear about 30 seconds later,
+    once requests have been served.
   </Step>
 </Steps>
 
