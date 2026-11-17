@@ -17,7 +17,7 @@ The workspace complements commands and JSON output. Use it for investigation and
 | --- | --- |
 | Overview | Is inference serving, what changed, and why? |
 | Operations | What durable work is active, when will it retry, and can it be cancelled? |
-| Rollout | Which revision is active, is there a candidate, and what did Release Guard decide? |
+| Rollout | Which revision is active, is there a candidate revision, and what did Release Guard decide? |
 | Performance | What are latency, TTFT, throughput, errors, cold-start evidence, and benchmark history? |
 | Infrastructure | Which provider adapter, targets, replicas, and immutable model artifact are involved? |
 | Scaling | What are the bounds and why did capacity change? |
@@ -32,18 +32,18 @@ Press `Ctrl-K` or `:` to open the action palette. InferCrane only shows actions 
 Direct guarded actions include:
 
 - cooperatively cancel an active durable operation
-- evaluate Release Guard for the current candidate
-- promote only when the current candidate has a persisted accepting Guard decision
+- evaluate Release Guard for the current candidate revision
+- roll out the candidate revision, only when it has a persisted accepting Guard decision
 
-Every mutation shows its impact, requires a second confirmation, uses an idempotency key, and queues a durable control-plane operation. Release Guard evaluation explicitly warns that measured candidate traffic may incur provider cost. Closing the terminal never cancels queued work.
+Every mutation shows its impact, requires a second confirmation, uses an idempotency key, and queues a durable control-plane operation. Release Guard evaluation explicitly warns that measured traffic to the candidate revision may incur provider cost. Closing the terminal never cancels queued work.
 
 Complex authoring remains a CLI handoff. The palette copies exact commands for test requests,
-reproducible benchmarks, and semantic capacity plans. Candidate creation, rollback, rejection
-reasons, deletion plans, and administrative workflows remain explicit CLI/spec operations where
-inputs and diffs are easier to review.
+reproducible benchmarks, and semantic capacity plans. Creating a candidate revision, rolling back,
+rejection reasons, deletion plans, and administrative workflows remain explicit CLI/spec operations
+where inputs and diffs are easier to review.
 
 <Warning>
-Promotion is unavailable when an evaluation is missing, rejecting, or belongs to a previous candidate. InferCrane never treats historical acceptance as permission to promote a new revision.
+Rolling out is unavailable when an evaluation is missing, rejecting, or belongs to a previous candidate revision. InferCrane never treats historical acceptance as permission to roll out a new revision.
 </Warning>
 
 ## Read-only environments
