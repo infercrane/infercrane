@@ -20,6 +20,7 @@ import argparse
 import concurrent.futures
 import datetime as dt
 import hashlib
+import http.client
 import json
 import os
 import random
@@ -32,6 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -165,23 +167,79 @@ def cli_binary() -> str:
     return str(target)
 
 
-def cli(*args: str, capture: bool = True, check: bool = True) -> str:
-    current = state()
-    return run(cli_binary(), *args, capture=capture, check=check, env={"INFERCRANE_URL": f"http://127.0.0.1:{API_PORT}", "INFERCRANE_API_KEY": current["api_key"], "INFERCRANE_CONTEXT": ""})
+# On a loaded laptop the model servers restart and `kubectl port-forward` loses its tunnel,
+# so one dropped connection must not end a run that has been measuring for an hour. A call
+# is repeated only when repeating it cannot change anything twice: a read, a write with an
+# Idempotency-Key, or any request the control plane never received (connection refused).
+RECONNECT_WINDOW_S = 10 * 60
+TRANSIENT_STATUS = {502, 503, 504}
+
+
+def reconnect(what: str, since: float, attempt: int) -> None:
+    if time.monotonic() - since > RECONNECT_WINDOW_S:
+        fail(f"{what}: control plane http://127.0.0.1:{API_PORT} unreachable for {RECONNECT_WINDOW_S // 60} minutes; a running campaign keeps going in the cluster, continue later with: make poc-local-resume")
+    if attempt == 1:
+        log("network", f"{what}: control plane not answering (port-forward dropped?); reconnecting and retrying")
+    restart_port_forward()
+    time.sleep(min(30, 5 * attempt))
+
+
+def cli(*args: str, capture: bool = True, check: bool = True, repeatable: bool = True, landed: Callable[[], bool] | None = None) -> str:
+    """Runs the CLI against the port-forward. `repeatable=False` marks a write without an
+    idempotency key: it is retried only when the request never reached the control plane,
+    and `landed` reads the control plane back to settle a connection that dropped mid-request."""
+    env = dict(os.environ, INFERCRANE_URL=f"http://127.0.0.1:{API_PORT}", INFERCRANE_API_KEY=state()["api_key"], INFERCRANE_CONTEXT="")
+    command, since, attempt = [cli_binary(), *args], time.monotonic(), 0
+    while True:
+        if capture:
+            completed = subprocess.run(command, capture_output=True, text=True, env=env)
+            stdout, stderr = completed.stdout, completed.stderr
+        else:  # stream progress to the terminal and keep stderr to read the failure
+            process = subprocess.Popen(command, stderr=subprocess.PIPE, text=True, env=env)
+            lines = []
+            for line in process.stderr:
+                sys.stderr.write(line)
+                lines.append(line)
+            process.wait()
+            completed = subprocess.CompletedProcess(command, process.returncode)
+            stdout, stderr = "", "".join(lines)
+        dropped = completed.returncode != 0 and "control plane" in stderr and "is unreachable" in stderr
+        never_sent = dropped and "connection refused" in stderr
+        if not dropped or not (repeatable or never_sent):
+            break
+        attempt += 1
+        reconnect(f"infercrane {' '.join(args[:2])}", since, attempt)
+    if dropped and landed is not None and landed():
+        log("network", f"infercrane {' '.join(args[:2])}: the connection dropped, but the control plane recorded the request")
+        return stdout or ""
+    if check and completed.returncode != 0:
+        fail(f"infercrane {' '.join(args[:3])}… exited {completed.returncode}\n{(stderr or stdout or '').strip()[-1500:]}")
+    return stdout or ""
 
 
 def api(method: str, path: str, body: dict | None = None, headers: dict | None = None, timeout: float = 120) -> dict:
-    request = urllib.request.Request(f"http://127.0.0.1:{API_PORT}{path}", method=method, data=json.dumps(body).encode() if body is not None else None)
-    request.add_header("Authorization", f"Bearer {state()['api_key']}")
-    request.add_header("Content-Type", "application/json")
-    for key, value in (headers or {}).items():
-        request.add_header(key, value)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as error:
-        fail(f"{method} {path} returned {error.code}: {error.read().decode(errors='replace')[:800]}")
-    return json.loads(raw) if raw else {}
+    repeatable = method == "GET" or any(key.lower() == "idempotency-key" for key in (headers or {}))
+    data = json.dumps(body).encode() if body is not None else None
+    since, attempt = time.monotonic(), 0
+    while True:
+        request = urllib.request.Request(f"http://127.0.0.1:{API_PORT}{path}", method=method, data=data)
+        request.add_header("Authorization", f"Bearer {state()['api_key']}")
+        request.add_header("Content-Type", "application/json")
+        for key, value in (headers or {}).items():
+            request.add_header(key, value)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+            return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as error:
+            if not (repeatable and error.code in TRANSIENT_STATUS):
+                fail(f"{method} {path} returned {error.code}: {error.read().decode(errors='replace')[:800]}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError, http.client.HTTPException) as error:
+            reason = getattr(error, "reason", error)
+            if not repeatable and not isinstance(reason, ConnectionRefusedError):
+                fail(f"{method} {path}: the connection dropped after the request was sent ({reason}); check the control plane before repeating it")
+        attempt += 1
+        reconnect(f"{method} {path}", since, attempt)
 
 
 # ---------------------------------------------------------------- up
@@ -342,9 +400,21 @@ def deploy_baseline() -> None:
     spec = {"apiVersion": "infercrane.dev/v1", "kind": "Deployment", "name": BASELINE, "model": {"id": MODEL_ID, "revision": MODEL_REVISION}, "runtime": {"engine": "custom-oci", "version": "llama.cpp-server-086942d6", "args": [], "workload": workload()}, "compute": {"mode": "elastic"}, "resources": {"gpu": ACCELERATOR, "gpu_count": 1}, "provider": {"cloud": "kubernetes", "adapter": "kubernetes", "region": ""}, "scaling": {"min_replicas": 1, "max_replicas": 1}, "routing": {"strategy": "round-robin"}}
     path = STATE_DIR / "baseline.yaml"
     path.write_text(json.dumps(spec, indent=2))
-    log("deploy", f"current setup: {MODEL_ID} on llama.cpp with default settings ({BASELINE})")
     spec_digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
+    # `up` rebuilds the model image and Docker builds are not byte-reproducible, so a baseline
+    # left by an earlier `up` (or another checkout) has another image digest and its name
+    # cannot be deployed again. Say so before any work instead of failing on a conflict.
+    if state().get("baseline_spec") != spec_digest and deployment_exists(BASELINE):
+        fail(f"{BASELINE} was deployed from an earlier model image build; start from a clean cluster: make poc-local-down && make poc-local")
+    log("deploy", f"current setup: {MODEL_ID} on llama.cpp with default settings ({BASELINE})")
     cli("deploy", str(path), "--idempotency-key", f"{BASELINE}-{spec_digest}", "--wait", capture=False)
+    save({"baseline_spec": spec_digest})
+
+
+def deployment_exists(name: str) -> bool:
+    listing = api("GET", "/api/v1/deployments")
+    rows = listing.get("data", listing.get("deployments", [])) if isinstance(listing, dict) else listing
+    return any((row.get("name") if isinstance(row, dict) else row) == name for row in rows)
 
 
 # Public production traffic shape: Moonshot AI's Mooncake trace (FAST'25 release,
@@ -573,6 +643,11 @@ def service_for(deployment_name: str) -> str:
     return endpoints[0]
 
 
+def campaign_record(campaign: str) -> dict:
+    record = api("GET", f"/api/v1/optimization/campaigns/{campaign}")
+    return record.get("campaign", record)
+
+
 def inspect(campaign: str) -> dict:
     return json.loads(cli("optimize", "inspect", campaign, "--output", "json"))
 
@@ -730,7 +805,8 @@ def finish(campaign: str, labels: dict) -> None:
     qualified = [c for c in record.get("candidates", []) if c.get("state") == "qualified"]
     if qualified:
         winner = qualified[0]
-        cli("optimize", "activate", campaign, "--candidate", winner["id"])
+        promoted = lambda: any(c.get("id") == winner["id"] and c.get("state") in ("promoted", "observed") for c in campaign_record(campaign).get("candidates", []))  # noqa: E731
+        cli("optimize", "activate", campaign, "--candidate", winner["id"], repeatable=False, landed=promoted)
         log("rollout", f"activated {labels.get(winner.get('proposal_candidate_id', ''), winner['id'][:8])} as endpoint {OPTIMIZED}")
         record = inspect(campaign).get("campaign", record)
     summary(record, labels)
@@ -788,7 +864,8 @@ def run_poc(trace: str, requests_total: int) -> None:
     # The control plane splits the cap evenly across candidates and requires each share to cover
     # the hourly rate for the whole approval window, so the cap is rate x window x candidates.
     approval_cap = round(NOMINAL_HOURLY_USD * APPROVAL_HOURS * len(doc["candidates"]) * 1.05, 2)
-    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", f"{APPROVAL_HOURS}h")
+    approved = lambda: campaign_record(campaign).get("state") != "awaiting_approval"  # noqa: E731
+    cli("optimize", "approve", campaign, "--max-cost-usd", str(approval_cap), "--expires-in", f"{APPROVAL_HOURS}h", repeatable=False, landed=approved)
     log("approve", f"spend approved up to ${approval_cap} (stated laptop rate ${NOMINAL_HOURLY_USD}/h), valid {APPROVAL_HOURS} h")
     finish(campaign, labels)
 
@@ -811,7 +888,7 @@ def down() -> None:
     left = [name for name in run("docker", "ps", "-a", "--format", "{{.Names}}", capture=True).split() if name.startswith(CLUSTER) or name == REGISTRY]
     if left:
         fail(f"containers left behind: {left}")
-    for name in ("port_forward_pid", "campaign"):
+    for name in ("port_forward_pid", "campaign", "baseline_spec"):
         current.pop(name, None)
     if STATE_FILE.exists():
         STATE_FILE.write_text(json.dumps(current, indent=2))
