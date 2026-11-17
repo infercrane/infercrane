@@ -79,10 +79,8 @@ decode-heavy shapes.
 
 The public trace chooses token-shape experiments only. It does not supply a customer arrival rate,
 quality target, or production SLO, so InferCrane marks it `promotion_eligible: false`. Every
-candidate requires a representative customer replay before qualification or promotion. Use the
-remote Modal profiler in the [public trace PoC](/testing/chutes-public-workload-poc) only to
-reproduce or update the embedded artifact; normal product use does not download or rescan the
-dataset.
+candidate requires a representative customer replay before qualification or promotion. The prior
+ships as an embedded artifact; normal product use does not download or rescan the dataset.
 
 ### Start with any pinned open-weight model
 
@@ -757,6 +755,42 @@ your current setup. It can win a campaign when its answers hold and it is measur
 The persisted ranking lists the quantized artifacts it admitted under `derived_model_identities` in
 its input, and names each quantized row's artifact (`model_identity`) and lineage
 (`artifact_lineage`: `exact` or `publisher_declared`). Unmodified rows keep their earlier shape.
+
+### Prompt a decided setup yourself
+
+Scores say that answers agree. To read the answers, send your own prompt to the setup the run
+decided on, before you roll it out:
+
+```bash
+curl -N "$INFERCRANE_URL/api/v1/optimization/campaigns/RUN_ID/candidates/CANDIDATE_ID/chat/completions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"stream":true,"messages":[{"role":"user","content":"Summarize our refund policy in one sentence."}]}'
+```
+
+The body is an OpenAI chat completion request. `model` is ignored: the candidate serves the model it
+was measured with. Tools, `temperature`, and `max_tokens` pass through unchanged. The dashboard's
+Workbench uses this route to show the current setup and the candidate side by side.
+
+- **Which revision answers.** The request goes to the lowest-ordinal healthy replica of the exact
+  revision the run measured, addressed the same way the measurement and the answer check address it.
+  The response names it in `X-InferCrane-Deployment` and `X-InferCrane-Revision`.
+- **When it answers.** Only a candidate in `qualified`, `guard_passed`, `promoted`, or `observed`
+  answers. While the run is still provisioning, measuring, checking, or ranking a candidate, the
+  route returns `409 candidate_not_decided`, so a prompt never runs beside a measurement. A candidate
+  that lost, failed, or was cleaned up returns `409 candidate_not_running`. A decided candidate with
+  no healthy replica returns `503 candidate_unavailable` with `Retry-After`.
+- **Limits.** The request body is at most 1 MiB, the answer at most 8 MiB and five minutes, and one
+  organization runs at most two candidate prompts at once (`429 rate_limited` with `Retry-After`).
+- **What is kept.** Nothing. The request does not pass through the gateway, so it has no request
+  trace, does not count toward the endpoint's traffic or its request quota, and adds no per-request
+  charge. The candidate's compute is already billed while it runs. The control plane uses its own
+  server-side credential for the replica; that credential and the runtime's error text never reach
+  the caller. A runtime error keeps only its status: a 4xx becomes `422 candidate_rejected_request`,
+  a 429 stays `429`, and anything else becomes `502 candidate_upstream_error`.
+
+Any role that can read the run can prompt its decided candidate, the same rule as sending inference
+with an API key.
 
 ### How a campaign measures candidates
 

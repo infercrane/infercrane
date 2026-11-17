@@ -2,6 +2,9 @@
 
 Date: 2026-09-23
 
+Maintainer decision record for the campaign in this directory. It is not part of the
+published documentation.
+
 ## Decision
 
 The exact-target canary passed. Proceed to supplier qualification and the

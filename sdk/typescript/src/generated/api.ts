@@ -618,6 +618,16 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
   }
 
+  createOptimizationCandidateChatCompletion(id: string, candidate_id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/candidates/${encodeURIComponent(candidate_id)}/chat/completions`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createPlaygroundChatCompletion(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/playground/chat/completions';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listNotificationSubscriptions(): Promise<Record<string, JsonValue>> {
     const requestPath = '/notifications/subscriptions';
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
