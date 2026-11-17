@@ -68,7 +68,7 @@ func BaseCatalog() (*Registry, error) {
 	}
 	if err := registry.RegisterRuntime(RuntimeProfile{
 		Runtime: support.DefaultRuntime, ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.DefaultRuntimeVersion, Protocol: "openai",
-		DefaultWorkload: support.VLLMWorkload(),
+		DefaultWorkload: support.VLLMWorkload(), Images: runtimeImages(support.DefaultRuntime),
 		Capabilities: []Capability{
 			{Name: "buffered_chat", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestCompletionRewritesAlias"},
 			{Name: "completions", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestQualifiedProtocolSurfacesPreservePayloads"},
@@ -86,6 +86,7 @@ func BaseCatalog() (*Registry, error) {
 		Qualification: []Qualification{
 			{State: QualificationLocal, Environment: "docker-fake-vllm", Evidence: "make:dev-check-full"},
 			{State: QualificationDeferred, Environment: "real-vllm-gpu", Reason: "real GPU evidence remains bound to exact model, accelerator, provider, and workload tuples"},
+			{State: QualificationDeferred, Environment: "real-vllm-rocm-gpu", Reason: "the pinned vLLM 0.22.1 ROCm image has not served a model on an AMD Instinct GPU yet; MI300X, MI325X, MI350X, and MI355X evidence remains bound to exact model, accelerator, provider, and workload tuples"},
 		},
 	}); err != nil {
 		return nil, err
@@ -195,8 +196,8 @@ func PortableCatalog() (*Registry, error) {
 	}
 	sglang := RuntimeProfile{
 		Runtime: "sglang", ContractVersion: RuntimeContractV1, AdapterVersion: "builtin-v1", EngineVersion: support.SGLangRuntimeVersion, Protocol: "openai", Capabilities: common,
-		DefaultWorkload: support.SGLangWorkload(),
-		Qualification:   []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "the pinned 0.5.12 image passed recorded AWS lifecycle checks (Qwen3-8B on one L40S with five-request AIPerf samples, docs/testing/aws-real-evidence.md); those runs are not retained catalog evidence or performance qualification, and every other model, accelerator, provider, and workload tuple is unqualified"}},
+		DefaultWorkload: support.SGLangWorkload(), Images: runtimeImages("sglang"),
+		Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-sglang-rocm-gpu", Reason: "the pinned SGLang 0.5.12 ROCm images (mi30x for gfx942, mi35x for gfx950) have not served a model on an AMD Instinct GPU yet"}, {State: QualificationDeferred, Environment: "real-sglang-gpu", Reason: "the pinned 0.5.12 image passed recorded AWS lifecycle checks (Qwen3-8B on one L40S with five-request AIPerf samples, docs/testing/aws-real-evidence.md); those runs are not retained catalog evidence or performance qualification, and every other model, accelerator, provider, and workload tuple is unqualified"}},
 	}
 	custom := RuntimeProfile{Runtime: "custom-oci", ContractVersion: RuntimeContractV1, AdapterVersion: "declarative-v1", Protocol: "openai", Capabilities: common, Qualification: []Qualification{{State: QualificationSimulated, Environment: "hermetic-runtime-contract", Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"}, {State: QualificationDeferred, Environment: "real-custom-oci-gpu", Reason: "real GPU evidence remains bound to exact image, model, accelerator, provider, and workload tuples"}}}
 	for _, profile := range []RuntimeProfile{sglang, custom} {
@@ -489,4 +490,17 @@ func V1Catalog() (*Registry, error) {
 
 func providerBoundary(adapter, cloud string, mode ComputeMode, capabilities []Capability) ProviderProfile {
 	return ProviderProfile{Adapter: adapter, Cloud: cloud, ContractVersion: ProviderContractV1, AdapterVersion: "boundary-v1", Modes: []ComputeMode{mode}, Capabilities: capabilities, Qualification: []Qualification{{State: QualificationRegistered, Environment: "contract-boundary"}, {State: QualificationDeferred, Environment: "real-" + adapter, Reason: "awaiting executable local adapter and consolidated manual qualification"}}}
+}
+
+// runtimeImages are one built-in runtime's pinned images, CUDA first. Pinning
+// an image is not GPU qualification: a platform's real evidence stays bound
+// to an exact model, accelerator, provider, and workload tuple.
+func runtimeImages(runtime string) []support.RuntimeImage {
+	var out []support.RuntimeImage
+	for _, image := range support.RuntimeImages() {
+		if image.Runtime == runtime {
+			out = append(out, image)
+		}
+	}
+	return out
 }

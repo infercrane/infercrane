@@ -236,6 +236,9 @@ func Build(in Input) (Plan, error) {
 		if err := support.V1().ValidateProvider(in.Runtime, in.Cloud, in.ComputeMode, in.ProviderAdapter); err != nil {
 			return Plan{}, fmt.Errorf("support policy: %w", err)
 		}
+		if err := support.V1().ValidateAccelerator(in.Runtime, in.Cloud, in.ComputeMode, in.ProviderAdapter, in.GPU); err != nil {
+			return Plan{}, fmt.Errorf("support policy: %w", err)
+		}
 		if in.Cloud == "aws" && in.Region == "" {
 			return Plan{}, errors.New("AWS BYOC requires an explicit region")
 		}

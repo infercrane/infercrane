@@ -14,7 +14,6 @@ var acceleratorMemoryGiB = map[string]int{
 	"a100": 40, "a10040gb": 40, "a10080gb": 80, "a100sxm4": 40, "a800": 80,
 	"l40s": 48, "l40": 48, "l4": 24, "a10g": 24, "a10": 24, "a40": 48, "a6000": 48, "rtxa6000": 48, "rtx6000ada": 48,
 	"rtx4090": 24, "rtx5090": 32, "t4": 16, "v100": 16,
-	"mi300x": 192, "mi325x": 256, "mi355x": 288,
 }
 
 var memorySuffix = regexp.MustCompile(`([0-9]+)gb$`)
@@ -26,10 +25,14 @@ func NormalizedAccelerator(gpu string) string {
 	return strings.TrimPrefix(normalized, "nvidia")
 }
 
-// AcceleratorMemoryGiB returns an accelerator's device memory. A name that
-// ends in a size ("…80GB") is read from that size; any other unknown name
-// reports false rather than a guess.
+// AcceleratorMemoryGiB returns an accelerator's device memory. A reviewed
+// accelerator (LookupAccelerator) reports its own, under every provider
+// spelling; a name that ends in a size ("…80GB") is read from that size; any
+// other unknown name reports false rather than a guess.
 func AcceleratorMemoryGiB(gpu string) (int, bool) {
+	if accelerator, reviewed := LookupAccelerator(gpu); reviewed {
+		return accelerator.MemoryGiB, true
+	}
 	name := NormalizedAccelerator(gpu)
 	if memory, known := acceleratorMemoryGiB[name]; known {
 		return memory, true

@@ -45,7 +45,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 			normalized.RuntimeVersion = support.SGLangRuntimeVersion
 		}
 	}
-	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.Workload)
+	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.GPU, normalized.Workload)
 	normalized.Serving = normalized.Serving.Normalize()
 	if normalized.ComputeMode == "" {
 		if normalized.Cloud != "" || normalized.GPU != "" {
@@ -71,6 +71,9 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	if normalized.ComputeMode != "existing" {
 		if err := support.V1().ValidateProvider(normalized.Runtime, normalized.Cloud, normalized.ComputeMode, normalized.ProviderAdapter); err != nil {
+			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)
+		}
+		if err := support.V1().ValidateAccelerator(normalized.Runtime, normalized.Cloud, normalized.ComputeMode, normalized.ProviderAdapter, normalized.GPU); err != nil {
 			return domain.DeploymentRevision{}, fmt.Errorf("support policy: %w", err)
 		}
 	}

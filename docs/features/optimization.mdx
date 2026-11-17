@@ -234,8 +234,9 @@ A chosen change is skipped, and the proposal records why, when:
   through setups reviewed for that image;
 - the model name states 1B parameters or fewer, for speculation, or 1.5B or fewer, for lower weight
   precision;
-- the accelerator does not run FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell), for FP8 weights
-  and the FP8 KV cache;
+- the accelerator does not run FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell, or AMD Instinct
+  MI300X, MI325X, MI350X, or MI355X; see [AMD Instinct GPUs](/integrations/amd-instinct#how-the-optimizer-plans-on-amd)),
+  for FP8 weights and the FP8 KV cache;
 - the model's pinned config was not read or declares no native prediction head, for speculation
   (pass `--model-config config.json` to declare it);
 - the change needs a draft model or a 4-bit publisher checkpoint. No draft model is paired with a
@@ -1027,7 +1028,7 @@ covers these Hugging Face organizations:
 |---|---|---|---|
 | NVIDIA (`nvidia`) | Model Optimizer NVFP4, FP8, and mixed-precision checkpoints; EAGLE-3, DFlash, and DSpark speculators | NVIDIA Hopper and Blackwell | Approved formats, on a matching GPU |
 | Red Hat AI (`RedHatAI`) | LLM Compressor FP8, NVFP4, MXFP4, INT4, and W8A8 checkpoints; speculators for vLLM | NVIDIA | Not yet; the publisher is pending review |
-| AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | AMD Instinct (CDNA 3 and CDNA 4) | No; InferCrane cannot run AMD hardware yet |
+| AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | AMD Instinct (CDNA 3 and CDNA 4) | No; InferCrane [serves base models on AMD Instinct GPUs](/integrations/amd-instinct), but these builds are not reviewed for its pinned ROCm images, and the catalog still lists them as unsupported hardware |
 | Intel (`Intel`) and OpenVINO (`OpenVINO`) | AutoRound checkpoints and OpenVINO INT4, INT8, and NF4 exports | Intel CPU, GPU, and NPU | No; InferCrane cannot run Intel hardware yet |
 | Google (`google`) | Gemma quantization-aware-training checkpoints | NVIDIA through vLLM | Not yet; the publisher is pending review |
 | StepFun (`stepfun-ai`), Thinking Machines Lab (`thinkingmachines`), and LG AI Research (`LGAI-EXAONE`) | Model Optimizer builds of their own models that NVIDIA's Model Optimizer collection lists | NVIDIA Hopper and Blackwell | Not yet; each publisher is pending review |

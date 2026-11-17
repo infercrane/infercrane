@@ -542,6 +542,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/compute/connections", a.auth(authz.ManageSecrets, a.createComputeConnection))
 	mux.HandleFunc("DELETE /api/v1/compute/connections/{id}", a.auth(authz.ManageSecrets, a.deleteComputeConnection))
 	mux.HandleFunc("GET /api/v1/catalog/gpu-prices", a.auth(authz.Read, a.gpuPrices))
+	mux.HandleFunc("GET /api/v1/catalog/accelerators", a.auth(authz.Read, a.accelerators))
 	mux.HandleFunc("POST /api/v1/capacity/probes", a.auth(authz.Read, a.probeCapacity))
 	mux.HandleFunc("POST /api/v1/managed-deployment-quotes", a.auth(authz.Read, a.managedDeploymentQuote))
 	mux.HandleFunc("GET /api/v1/system/instances", a.auth(authz.Read, a.controlPlaneInstances))
