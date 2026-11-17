@@ -125,10 +125,10 @@ the same changes on an MI300X as on an H100. Three things depend on the GPU:
   ([AMD GPU guide](https://github.com/sgl-project/sglang/blob/v0.5.12/docs/platforms/amd_gpu.md#quantization-on-amd-gpus)).
   So FP8 weights and an FP8 KV cache can be chosen on all four GPUs.
 - **AITER kernels.** SGLang's ROCm images turn AMD's AITER kernels on by default
-  (`SGLANG_USE_AITER=1` in the image). vLLM 0.22.1 needs the environment variable
-  `VLLM_ROCM_USE_AITER=1`, which is off in the image. A deployment spec carries engine arguments,
-  not environment variables, so the optimizer does not plan AITER or a ROCm attention backend for
-  vLLM yet.
+  (`SGLANG_USE_AITER=1` in the image), so there is nothing to switch. vLLM 0.22.1 leaves them off
+  unless `VLLM_ROCM_USE_AITER=1` is set, and the pinned image does not set it. When the diagnosis
+  says the GPU's work is the bottleneck, the optimizer adds a setup that is the starting setup with
+  only that switch on. See [Turn on AITER kernels for vLLM](#turn-on-aiter-kernels-for-vllm).
 
 The custom kernel lab does not build HIP kernels yet; it still targets NVIDIA only.
 
@@ -157,6 +157,61 @@ and `gfx950`, and 19 on `gfx950` only. None seeds a setup yet:
 
 A seeded build is unmeasured like every other candidate. It is compared with the unmodified model
 on the same GPU before it can win.
+
+## Turn on AITER kernels for vLLM
+
+[AITER](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/inference-optimization/vllm-optimization.html)
+is AMD's library of fused attention, matrix-multiply, MoE, and RMSNorm kernels for MI300X, MI325X,
+and the MI350 Series. vLLM uses it only when `VLLM_ROCM_USE_AITER` is `1` or `true`; the default is
+off ([`vllm/envs.py` at v0.22.1](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/envs.py)),
+and the pinned image sets `AITER_ROCM_ARCH=gfx942;gfx950` but not the switch. Once it is on, vLLM's
+AITER sub-switches for linear layers, MoE, RMSNorm, MLA, and MHA default to on. AMD's vLLM
+optimization guide and the
+[vLLM recipes' AMD preset](https://github.com/vllm-project/recipes/blob/fa02ae800b4998a7985e3654116b602fb6c139df/SCHEMA.md)
+both set it.
+
+Set it in the deployment spec's `runtime.env`:
+
+```yaml
+runtime:
+  engine: vllm
+  version: 0.22.1
+  env:
+    VLLM_ROCM_USE_AITER: "1"
+resources: {gpu: MI300X}
+```
+
+`runtime.env` accepts only reviewed engine switches with reviewed values; see
+[Engine environment switches](/deployment-spec#engine-environment-switches). This one is reviewed
+for vLLM 0.22.1's pinned ROCm image on `rocm-gfx942` and `rocm-gfx950`, with the values `0` and `1`.
+On an NVIDIA GPU, on SGLang, or on another vLLM version or image it is refused. RunPod Pods,
+Kubernetes, AWS EC2, and GCP Compute pass it into the runtime container; SkyPilot, RunPod Serverless,
+and Kubernetes Dynamo cannot, so a deployment that sets it there is refused before anything is
+provisioned.
+
+### When the optimizer chooses it
+
+The rule `accelerator.kernels_off_by_default` fires only on a reviewed AMD Instinct GPU whose
+starting setup runs vLLM 0.22.1 with the switch off, and only when the diagnosis points at kernel
+time:
+
+| Diagnosis | Priority |
+|---|---|
+| Writing answers is the bottleneck | 75 |
+| First tokens are the bottleneck on prompts of 1,024 tokens or more | 75 |
+| Attention kernels ≥ 40% or matrix-multiply kernels ≥ 50% of profiled GPU time | 70 |
+| Trace: attention ≥ 35% of kernel time (`gpu.attention_heavy`) | 70 |
+
+When the profile capture has a trace analysis, its attention finding replaces the attention share,
+as it does for the FP8 KV cache rule.
+
+A full KV cache, a queue, or short prompts are not kernel time, so the rule does not fire for
+them. The setup changes only the switch: same flags, model, image, and GPU. Because it swaps the
+kernels that compute each layer, it needs the answer-quality check against the starting setup, like
+a precision change. A starting setup that already sets the switch is not changed again.
+
+AMD's guide reports speedups for AITER on its own hardware and models. InferCrane has not measured
+AITER on any GPU; the campaign decides whether it wins on your traffic.
 
 ## Measure on AMD
 
@@ -195,5 +250,6 @@ on the same GPU before it can win.
 - Other AMD GPUs (MI250X, MI300A, Radeon) are not recognized.
 - No publisher checkpoint has been loaded on an AMD GPU. Quark checkpoints cannot seed a setup yet
   (see [Publisher checkpoints for AMD](#publisher-checkpoints-for-amd)).
-- AITER and ROCm attention backends for vLLM are not planned (see above).
+- AITER for vLLM is planned but not measured. ROCm attention backend flags
+  (`--attention-backend`) and AITER sub-switches are not reviewed.
 - AMD memory, memory-controller, and profiler counters are not mapped.

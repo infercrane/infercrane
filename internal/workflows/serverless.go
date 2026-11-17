@@ -50,6 +50,9 @@ func ServerlessHandlers(store CloudStore, backend ServerlessBackend, artifactRes
 		if request.ComputeMode != "serverless" || request.Cloud != backend.Cloud || (request.ProviderAdapter != "" && request.ProviderAdapter != backend.Name) || request.MinReplicas != 0 || request.MaxReplicas < 1 {
 			return "", operations.Permanent("invalid_serverless_spec", fmt.Errorf("%s requires cloud=%s, compute_mode=serverless, min=0, and max>=1", backend.Name, backend.Cloud))
 		}
+		if err = refuseUnpassedRuntimeEnv(backend.Name, backend.Profile, request.RuntimeEnv); err != nil {
+			return "", err
+		}
 		resolved, err := store.ResolveForTenant(ctx, request.TenantID, request.Name)
 		if err != nil || (request.DeploymentID != "" && resolved.Deployment.ID != request.DeploymentID) {
 			return "", operations.Permanent("deployment_missing", fmt.Errorf("resolve desired deployment: %w", err))

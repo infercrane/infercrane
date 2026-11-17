@@ -11,12 +11,13 @@ import (
 	"github.com/infercrane/infercrane/internal/metrics"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/provideridentity"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 // DiagnosisRulesVersion identifies the rule set that maps a diagnosis to the
 // techniques worth measuring. A change to a rule, priority, gate, or flag
 // value changes this version.
-const DiagnosisRulesVersion = "diagnosis-technique-rules-v3"
+const DiagnosisRulesVersion = "diagnosis-technique-rules-v4"
 
 // Techniques the diagnosis rule set can choose. A technique is one change to
 // the starting setup; its candidate is measured against that setup.
@@ -39,6 +40,9 @@ const (
 	TechniqueParallelism      = "parallelism-layout"
 	TechniqueSpeculationTune  = "speculation-length"
 	TechniqueRightSizing      = "right-sizing"
+	// TechniqueAITER turns on AMD's AITER kernels in vLLM on a reviewed AMD
+	// Instinct accelerator through a reviewed engine environment variable.
+	TechniqueAITER = "aiter-kernels"
 )
 
 // Rule identifiers the planner adds to the readiness finding rules it reuses.
@@ -50,6 +54,9 @@ const (
 	RuleProfileGEMMHeavy        = "gpu_profile.gemm_heavy"
 	RuleProfileAttentionHeavy   = "gpu_profile.attention_heavy"
 	RuleProfileCommunicationBig = "gpu_profile.communication_heavy"
+	// RuleAcceleratorKernels fires when the GPU's work is the bottleneck on a
+	// reviewed accelerator whose tuned kernels the pinned engine leaves off.
+	RuleAcceleratorKernels = "accelerator.kernels_off_by_default"
 )
 
 // Planning thresholds. They choose what to measure, never what to ship.
@@ -83,6 +90,9 @@ const (
 
 type runtimeArg struct{ flag, value string }
 
+// engineVariable is one reviewed engine environment switch and its value.
+type engineVariable struct{ name, value string }
+
 // technique is one reviewed change. args holds the exact flags per built-in
 // engine and accelerator memory class; an engine without args can still rank
 // an existing candidate that applies the technique, but no candidate is
@@ -90,6 +100,9 @@ type runtimeArg struct{ flag, value string }
 type technique struct {
 	id, label string
 	args      map[string][]runtimeArg
+	// env holds the reviewed environment switches per built-in engine
+	// (support.EngineEnvironment). A technique sets either args or env.
+	env map[string][]engineVariable
 	// sizedArgs replaces args where the right value depends on the
 	// accelerator's memory class, because the engine's default does.
 	sizedArgs map[string]map[string][]runtimeArg
@@ -101,14 +114,17 @@ type technique struct {
 	lowersWeights    bool
 	speculative      bool
 	nativeFP8        bool
-	modelFeature     string
+	// changesKernels swaps the GPU kernels that compute each layer, so the
+	// answers can differ in the last digits and quality is checked.
+	changesKernels bool
+	modelFeature   string
 	// outOfScope explains why the technique is never a derived candidate.
 	outOfScope string
 }
 
 // techniqueOrder breaks priority ties and lists every technique once.
 var techniqueOrder = []string{
-	TechniqueFP8KVCache, TechniqueBatchBudget, TechniquePrefixCache, TechniquePrefixScheduling, TechniqueSpeculativeMTP,
+	TechniqueFP8KVCache, TechniqueBatchBudget, TechniqueAITER, TechniquePrefixCache, TechniquePrefixScheduling, TechniqueSpeculativeMTP,
 	TechniqueSpeculativeDraft, TechniqueFP8Weights, TechniqueInt4Weights, TechniqueLargePrefill, TechniqueKVSequenceCap,
 	TechniqueAPIServers, TechniqueStreamInterval, TechniqueCUDAGraphs, TechniqueAsyncScheduling, TechniquePrefixRouting, TechniqueParallelism,
 	TechniqueSpeculationTune, TechniqueRightSizing,
@@ -162,6 +178,8 @@ var techniques = map[string]technique{
 		outOfScope: "Changing how many GPUs each server uses changes the hardware, so it is planned as a separate run."},
 	TechniqueSpeculationTune: {id: TechniqueSpeculationTune, label: "Shorter speculation",
 		outOfScope: "Setups start from an untuned server without speculation, so there is no speculation length to shorten here."},
+	TechniqueAITER: {id: TechniqueAITER, label: "AMD AITER kernels", changesKernels: true,
+		env: map[string][]engineVariable{"vllm": {{"VLLM_ROCM_USE_AITER", "1"}}}},
 	TechniqueRightSizing: {id: TechniqueRightSizing, label: "A smaller or cheaper GPU",
 		outOfScope: "Few requests run at once, so this GPU may be larger than the traffic needs. Comparing GPUs needs capacity measured at your SLO, which is planned as a separate run."},
 }
@@ -200,7 +218,7 @@ type plannedChoice struct {
 // planTechniques applies every rule to the diagnosis and returns the chosen
 // techniques by expected benefit. It returns no choice for a window that is
 // not diagnosable: an unknown bottleneck is collected, never guessed.
-func planTechniques(diagnosis Diagnosis, objective string) []plannedChoice {
+func planTechniques(diagnosis Diagnosis, facts planContext) []plannedChoice {
 	if diagnosis.State != optimizationreadiness.StateProfileReady {
 		return nil
 	}
@@ -212,7 +230,7 @@ func planTechniques(diagnosis Diagnosis, objective string) []plannedChoice {
 	}
 	byTechnique := map[string][]contribution{}
 	order := 0
-	for _, outcome := range diagnosisOutcomes(diagnosis, objective) {
+	for _, outcome := range diagnosisOutcomes(diagnosis, facts) {
 		for _, pick := range outcome.picks {
 			byTechnique[pick.technique] = append(byTechnique[pick.technique], contribution{pick: pick, rule: outcome.rule, order: order, evidence: outcome.evidence})
 			order++
@@ -277,7 +295,8 @@ func expectedBenefit(priority int) string {
 // reads only values present in the diagnosis; a missing value never fires a
 // rule. Each rule chooses at most two changes a setup can carry, so a win
 // can be attributed to one change.
-func diagnosisOutcomes(d Diagnosis, objective string) []ruleOutcome {
+func diagnosisOutcomes(d Diagnosis, facts planContext) []ruleOutcome {
+	objective := facts.objective
 	var out []ruleOutcome
 	add := func(outcome ruleOutcome) {
 		if len(outcome.picks) > 0 {
@@ -366,6 +385,9 @@ func diagnosisOutcomes(d Diagnosis, objective string) []ruleOutcome {
 	}
 	if prefill := prefillOutcome(d); prefill != nil {
 		add(*prefill)
+	}
+	if kernels := acceleratorKernelOutcome(d, facts); kernels != nil {
+		add(*kernels)
 	}
 	if share, ok := d.kernelShare(KernelClassGEMM); ok && share >= gemmHeavyShare {
 		why := fmt.Sprintf("Matrix-multiply kernels took %s of sampled GPU time in the profile, so smaller weights speed up the largest share of work.", percentWords(share*100))
@@ -554,6 +576,102 @@ func decodeOutcome(d Diagnosis, longContext, throughputGoal bool) *ruleOutcome {
 	}
 	picks = append(picks, techniquePick{TechniqueFP8Weights, 60, cause + ", so smaller weights move fewer bytes per step."})
 	return &ruleOutcome{rule: RuleBottleneckDecode, evidence: evidence, picks: picks}
+}
+
+// planContext is what a rule may read beyond the diagnosis: the objective,
+// the starting setup's engine and version, and the accelerator it runs on.
+type planContext struct {
+	objective, engine, version, gpu string
+}
+
+// Planning priors for turning on an accelerator's own kernels: when the GPU's
+// work is the measured bottleneck, and when the profile shows the kernels
+// AITER replaces dominating GPU time.
+const (
+	acceleratorKernelBottleneckPriority = 75
+	acceleratorKernelProfilePriority    = 70
+)
+
+// acceleratorKernelOutcome chooses a reviewed accelerator's own kernels when
+// the GPU's work is the bottleneck: writing answers, first tokens of long
+// prompts, or attention and matrix-multiply kernels dominating the
+// profile. It fires only on a reviewed accelerator whose pinned engine has a
+// reviewed switch for those kernels (support.EngineEnvironment); on every
+// other GPU there is nothing to switch on. AMD documents AITER as fused
+// attention, GEMM, MoE, and RMSNorm kernels for MI300X/MI325X and MI350
+// Series GPUs, enabled in vLLM by VLLM_ROCM_USE_AITER=1, and the vLLM recipes'
+// AMD preset sets it; vLLM 0.22.1 leaves it off by default.
+func acceleratorKernelOutcome(d Diagnosis, facts planContext) *ruleOutcome {
+	accelerator, switchable := kernelSwitchAccelerator(facts)
+	if !switchable {
+		return nil
+	}
+	var evidence []ReasonEvidence
+	var causes []string
+	priority := 0
+	stage, words := "", ""
+	switch d.PrimaryBottleneck {
+	case optimizationreadiness.BottleneckDecode:
+		stage, words = "p95_generation", "Writing answers takes"
+	case optimizationreadiness.BottleneckPrefill:
+		// Short prompts' first-token time is not prompt work (prefillOutcome).
+		if mean, ok := d.signal("mean_input_tokens"); ok && mean >= chunkedPromptTokens {
+			stage, words = "p95_ttft", "First tokens take"
+		}
+	}
+	if stage != "" {
+		stageRows, share := stageEvidence(d, stage)
+		evidence = append(evidence, stageRows...)
+		if share == "" {
+			share = "most"
+		}
+		causes = append(causes, words+" "+share+" of p95 request time")
+		priority = acceleratorKernelBottleneckPriority
+	}
+	for _, kernel := range []struct {
+		class, words string
+		threshold    float64
+	}{{KernelClassAttention, "attention kernels", attentionHeavyShare}, {KernelClassGEMM, "matrix-multiply kernels", gemmHeavyShare}} {
+		// A trace analysis of the same capture measures attention directly,
+		// so its finding replaces the attention share, as for the FP8 KV
+		// cache rule.
+		if kernel.class == KernelClassAttention && d.trace() != nil {
+			continue
+		}
+		if share, ok := d.kernelShare(kernel.class); ok && share >= kernel.threshold {
+			evidence = append(evidence, profileEvidence(kernel.class, share, kernel.threshold)...)
+			causes = append(causes, fmt.Sprintf("%s took %s of sampled GPU time in the profile", kernel.words, percentWords(share*100)))
+			priority = max(priority, acceleratorKernelProfilePriority)
+		}
+	}
+	if finding, ok := d.traceFinding(TraceRuleAttentionHeavy); ok {
+		evidence = append(evidence, traceEvidence(d, finding)...)
+		causes = append(causes, fmt.Sprintf("attention took %s of kernel time in the GPU trace (limit %s)", percentWords(finding.Observed*100), percentWords(finding.Threshold*100)))
+		priority = max(priority, acceleratorKernelProfilePriority)
+	}
+	if priority == 0 {
+		return nil
+	}
+	cause := strings.Join(causes, ", and ")
+	why := fmt.Sprintf("%s. On the %s, %s %s runs its own attention and matrix-multiply kernels unless AMD's AITER kernels, built for this GPU, are switched on, so measuring with them on is worth a setup.", strings.ToUpper(cause[:1])+cause[1:], accelerator.Product, engineName(facts.engine), facts.version)
+	return &ruleOutcome{rule: RuleAcceleratorKernels, evidence: evidence, picks: []techniquePick{{TechniqueAITER, priority, why}}}
+}
+
+// kernelSwitchAccelerator reports the reviewed accelerator when every switch
+// of the kernel technique is reviewed for the starting setup's engine,
+// version, and the accelerator's platform.
+func kernelSwitchAccelerator(facts planContext) (provideridentity.Accelerator, bool) {
+	accelerator, reviewed := provideridentity.LookupAccelerator(facts.gpu)
+	variables := techniques[TechniqueAITER].env[facts.engine]
+	if !reviewed || len(variables) == 0 {
+		return provideridentity.Accelerator{}, false
+	}
+	for _, variable := range variables {
+		if _, ok := support.LookupEngineEnvironment(facts.engine, facts.version, accelerator.Platform, variable.name); !ok {
+			return provideridentity.Accelerator{}, false
+		}
+	}
+	return accelerator, true
 }
 
 // stageEvidence returns a stage's share of p95 latency when both are known.

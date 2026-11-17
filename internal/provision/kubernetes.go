@@ -327,6 +327,13 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	metadata := map[string]any{"name": name, "namespace": k.Namespace, "labels": labels, "annotations": map[string]any{"infercrane.dev/external-key": spec.ExternalKey, "infercrane.dev/provider-contract": "infercrane.provider/v1", "infercrane.dev/intent-hash": intentHash}}
 	workerSecret := map[string]any{"secretKeyRef": map[string]any{"name": k.WorkerSecretName, "key": k.WorkerSecretKey}}
 	environment := []any{map[string]any{"name": "INFERCRANE_WORKER_API_KEY", "valueFrom": workerSecret}, map[string]any{"name": "VLLM_API_KEY", "valueFrom": workerSecret}}
+	engineVariables, err := engineEnvironment(spec)
+	if err != nil {
+		return nil, err
+	}
+	for _, variable := range engineVariables {
+		environment = append(environment, map[string]any{"name": variable, "value": spec.RuntimeEnv[variable]})
+	}
 	gpuCount := spec.GPUCount
 	if gpuCount == 0 {
 		gpuCount = 1
@@ -400,7 +407,8 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 	} else if runtimecontract.ValidateImage(k.ImageDigest) != nil {
 		return errors.New("Kubernetes workload image must be pinned by sha256 digest")
 	}
-	return nil
+	_, err := engineEnvironment(spec)
+	return err
 }
 
 func (k Kubernetes) validateConfig() error {

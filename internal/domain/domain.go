@@ -67,6 +67,7 @@ type DeploymentRevisionSpec struct {
 	Runtime                string                   `json:"runtime"`
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
+	RuntimeEnv             map[string]string        `json:"runtime_env,omitempty"`
 	RoutingStrategy        string                   `json:"routing_strategy"`
 	MinReplicas            int                      `json:"min_replicas"`
 	MaxReplicas            int                      `json:"max_replicas"`

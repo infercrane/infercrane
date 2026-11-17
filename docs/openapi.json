@@ -2739,6 +2739,14 @@
             },
             "type": "array"
           },
+          "runtime_env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Reviewed engine environment switches for the runtime's pinned image on the GPU's platform, such as VLLM_ROCM_USE_AITER (0 or 1) for vLLM 0.22.1 on AMD Instinct MI300X, MI325X, MI350X, and MI355X. Any other name or value is rejected, and adapters that cannot pass it refuse the deployment before provisioning. Never put credentials here.",
+            "maxProperties": 8,
+            "type": "object"
+          },
           "runtime_version": {
             "type": "string"
           },
@@ -9003,6 +9011,13 @@
                       "engine_version": {
                         "type": "string"
                       },
+                      "env": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "description": "Reviewed engine environment switches the setup ran with; absent when none were set.",
+                        "type": "object"
+                      },
                       "hourly_usd_per_replica": {
                         "description": "Sourced hourly price divided by the quoted maximum replica count; null without a sourced price.",
                         "type": [
@@ -9128,6 +9143,13 @@
                       },
                       "engine_version": {
                         "type": "string"
+                      },
+                      "env": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "description": "Reviewed engine environment switches the setup ran with; absent when none were set.",
+                        "type": "object"
                       },
                       "hourly_usd_per_replica": {
                         "description": "Sourced hourly price divided by the quoted maximum replica count; null without a sourced price.",

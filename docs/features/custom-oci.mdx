@@ -52,6 +52,13 @@ custom image does not imply arbitrary artifact protocols.
 
 ## Runtime contract
 
+A custom OCI image carries its own environment. `runtime.env`, the reviewed
+[engine environment switches](/deployment-spec#engine-environment-switches), applies only to the
+built-in runtimes' pinned images and is refused for `custom-oci`. Adapters that run a workload pass
+InferCrane's own variables (`INFERCRANE_WORKER_API_KEY`, `VLLM_API_KEY`, cache paths) and, for a
+built-in runtime, its reviewed switches; nothing else from the revision reaches the container's
+environment.
+
 The image must be pinned by `@sha256`; a private registry with a port, such as
 `registry.internal:5000/team/runtime@sha256:...`, is accepted. The supported protocol and probe paths are deliberately
 narrow: OpenAI-compatible HTTP, `/health`, `/v1/models`, and `/metrics`. Client disconnect must
