@@ -79,10 +79,8 @@ decode-heavy shapes.
 
 The public trace chooses token-shape experiments only. It does not supply a customer arrival rate,
 quality target, or production SLO, so InferCrane marks it `promotion_eligible: false`. Every
-candidate requires a representative customer replay before qualification or promotion. Use the
-remote Modal profiler in the [public trace PoC](/testing/chutes-public-workload-poc) only to
-reproduce or update the embedded artifact; normal product use does not download or rescan the
-dataset.
+candidate requires a representative customer replay before qualification or promotion. The prior
+ships as an embedded artifact; normal product use does not download or rescan the dataset.
 
 ### Start with any pinned open-weight model
 

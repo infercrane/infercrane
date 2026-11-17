@@ -40,6 +40,33 @@ PostgreSQL-backed tests run when `INFERCRANE_TEST_DATABASE_URL` is set. `docker 
 postgres` starts development PostgreSQL, but it is intentionally not exposed on a host port; CI
 provides an isolated test service.
 
+## Release maintainers
+
+These steps are for InferCrane maintainers. Nobody needs them to run or operate a control plane,
+so they live here and not in the published documentation.
+
+Validate packaging metadata without publishing with `make release-check`. With `syft` installed,
+`make release-artifacts RELEASE_TAG=v1.0.0` creates and verifies four exact-version archives,
+checksums, archive SBOMs, and a generated Homebrew formula under `dist/`. It pushes no tag, image,
+package, or release. Publication follows the [publication runbook](.release/publication-runbook.md).
+
+Qualify one pinned AWS model family at a time without rerunning unrelated runtime paths:
+
+```console
+scripts/aws-performance-qualification.sh mistral --approve-paid-resources
+scripts/aws-performance-qualification.sh deepseek --approve-paid-resources
+scripts/aws-performance-qualification.sh granite --approve-paid-resources
+```
+
+Each run uses the same seven-profile matrix, the fixed-workload concurrency sweep, and an
+independent zero-resource inventory. These are paid, commit-bound qualification commands, not
+normal developer tests and not permission to publish a cross-model performance claim.
+
+Treat every page under `docs/` as published, whether or not it is in the navigation. Keep supplier
+cost, margins, and other InferCrane unit economics, launch-decision memos, PoC reports, and
+maintainer-only steps out of `docs/`. A campaign's decision record or test report belongs beside
+its tool under `tools/`.
+
 ## Pull requests
 
 Keep changes cohesive and explain the operational consequences. A pull request is complete when:
