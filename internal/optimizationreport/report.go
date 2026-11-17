@@ -1299,13 +1299,6 @@ func label(a *arm) string {
 	return a.label
 }
 
-func shortID(id string) string {
-	if len(id) > 8 {
-		return id[:8]
-	}
-	return id
-}
-
 func acceleratorOf(a *arm) string {
 	if a.bench != nil && strings.TrimSpace(a.bench.GPU) != "" {
 		return strings.TrimSpace(a.bench.GPU)
