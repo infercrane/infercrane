@@ -76,7 +76,9 @@ test-provider-contracts:
 
 test-optimizer-golden:
 	go test -race -count=1 -run 'Golden|Baseline' ./internal/optimizationevidence
+	go test -race -count=1 -run 'Golden|Diagnosis' ./internal/optimizer
 	go run ./cmd/infercrane optimize evidence golden --file internal/optimizationevidence/testdata/golden/manifest.json
+	go run ./cmd/infercrane optimize evidence golden --file internal/optimizationevidence/testdata/golden/planning.json
 
 test-simulated-clouds:
 	./scripts/test-simulated-clouds.sh

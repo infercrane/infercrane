@@ -587,6 +587,16 @@ KV-pressure, preemption, prefix-reuse, speculative-acceptance, and GPU memory,
 compute, host, and interconnect rules and returns the technique families worth
 measuring for the diagnosed bottleneck
 ([thresholds](/features/telemetry#diagnose-a-bottleneck-from-engine-signals)).
+A proposal that names `diagnosis_endpoint` closes the loop: the control plane
+reads that assessment and a recent GPU profile summary, binds them into the
+proposal input digest, and the planner's typed rule set
+(`diagnosis-technique-rules-v1` in `internal/optimizer`) keeps only the
+starting point and the one-change setups its rules choose, ordered by expected
+benefit with the reason recorded on each. Flags equal to the engine's resolved
+default are dropped, and when no rule applies only the starting point is
+measured while the plan names the evidence to collect
+([rules](/features/optimization#choose-setups-from-the-endpoint-diagnosis)).
+The plan chooses what to measure; the campaign's gates decide what wins.
 No request, engine, or DCGM telemetry opens the kernel gate: exact target-GPU
 profiling and the Amdahl policy remain mandatory.
 

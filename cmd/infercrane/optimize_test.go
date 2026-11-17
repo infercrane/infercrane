@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/spec"
@@ -308,5 +309,96 @@ func TestOptimizeCampaignActionsAcceptSubjectBeforeFlags(t *testing.T) {
 		if err != nil || !strings.Contains(output, `"id": "campaign-1"`) {
 			t.Fatalf("args=%v output=%q err=%v", args, output, err)
 		}
+	}
+}
+
+func TestOptimizeProposeWithDiagnosisAsksTheControlPlane(t *testing.T) {
+	window := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	diagnosis := &optimizer.Diagnosis{
+		Source: optimizer.DiagnosisSourceEndpointReadiness, Endpoint: "chat-production", AlgorithmVersion: "monitoring-stage-triage-v2",
+		WindowStart: window, WindowEnd: window.Add(time.Hour), State: "profile-ready", PrimaryBottleneck: "kv-cache-pressure", Confidence: "stage-and-engine-level",
+		Findings: []optimizer.DiagnosisFinding{{Rule: "kv_cache.preemption", Signal: "runtime_preemptions_per_completed_request", Observed: .08, Comparison: ">=", Threshold: .01, Unit: "ratio"}},
+		Signals:  map[string]float64{"runtime_requests_running_per_replica": 48},
+	}
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/optimization/proposals" {
+			t.Errorf("request=%s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected", http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+		}
+		delete(received, "diagnosis_endpoint")
+		encoded, _ := json.Marshal(received)
+		var request optimizer.Request
+		if err := json.Unmarshal(encoded, &request); err != nil {
+			t.Error(err)
+		}
+		request.Diagnosis = diagnosis
+		proposal, err := recipeSearchCatalog(t).Propose(r.Context(), request)
+		if err != nil {
+			t.Error(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"proposal": proposal})
+	}))
+	defer server.Close()
+	t.Setenv("INFERCRANE_URL", server.URL)
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_CONTEXT", "")
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	args := []string{"optimize", "propose", "acme/novel-open-model", "--model-revision", strings.Repeat("a", 40), "--provider", "runpod-pods", "--gpu", "H100", "--runtimes", "vllm", "--max-candidates", "3", "--diagnosis-endpoint", "chat-production"}
+	output, err := captureStdout(t, func() error { return run(context.Background(), args) })
+	if err != nil {
+		t.Fatalf("propose: %v\n%s", err, output)
+	}
+	if received == nil || !strings.Contains(output, "Diagnosis · chat-production") || !strings.Contains(output, "FP8 KV cache") || !strings.Contains(output, "not a measured result") {
+		t.Fatalf("output=%s", output)
+	}
+	jsonOutput, err := captureStdout(t, func() error { return run(context.Background(), append(args, "--output", "json")) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proposal optimizer.Proposal
+	if err = json.Unmarshal([]byte(jsonOutput), &proposal); err != nil || proposal.Diagnosis == nil || proposal.Candidates[1].Reason == nil || proposal.Candidates[1].Reason.Technique != optimizer.TechniqueFP8KVCache {
+		t.Fatalf("proposal=%s err=%v", jsonOutput, err)
+	}
+	if _, err = captureStdout(t, func() error {
+		return run(context.Background(), append(args, "--source", "aiconfigurator"))
+	}); err == nil || !strings.Contains(err.Error(), "--diagnosis-endpoint") {
+		t.Fatalf("estimator with a diagnosis err=%v", err)
+	}
+}
+
+func TestOptimizeEvidenceGoldenRunsThePlanningSuite(t *testing.T) {
+	manifest := filepath.Join("..", "..", "internal", "optimizationevidence", "testdata", "golden", "planning.json")
+	output, err := captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "golden", "--file", manifest})
+	})
+	if err != nil || !strings.Contains(output, "Planner golden suite") || !strings.Contains(output, "rtx4090-qwen3-0.6b-low-concurrency-no-change") || strings.Contains(output, "WRONG") {
+		t.Fatalf("output=%s err=%v", output, err)
+	}
+	body, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err = json.Unmarshal(body, &document); err != nil {
+		t.Fatal(err)
+	}
+	task := document["tasks"].([]any)[0].(map[string]any)
+	task["expected_order"] = []string{"control", "kv-sequence-cap", "fp8-kv-cache"}
+	document["tasks"] = []any{task}
+	broken := filepath.Join(t.TempDir(), "planning.json")
+	encoded, _ := json.Marshal(document)
+	if err = os.WriteFile(broken, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output, err = captureStdout(t, func() error {
+		return optimizeCommand(context.Background(), []string{"evidence", "golden", "--file", broken})
+	})
+	if err == nil || !strings.Contains(err.Error(), "0 of 1 plans") || !strings.Contains(output, "WRONG") {
+		t.Fatalf("a wrong plan did not fail the command: output=%s err=%v", output, err)
 	}
 }

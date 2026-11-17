@@ -99,6 +99,11 @@ type Request struct {
 	// QualityEvalSet optionally names an uploaded customer eval set by its
 	// sha256 digest. It replaces the built-in prompts in the answer check.
 	QualityEvalSet string `json:"quality_eval_set,omitempty"`
+	// Diagnosis is the endpoint's measured bottleneck evidence. When present,
+	// the planner derives candidates from the starting setup and orders them
+	// by what the diagnosis says is most likely to help. The control API
+	// reads it server-side; it is bound by the input digest.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
 }
 
 const (
@@ -217,7 +222,9 @@ type Candidate struct {
 	Limitations           []string         `json:"limitations"`
 	ModeledEvidence       *ModeledEvidence `json:"modeled_evidence,omitempty"`
 	ArtifactSeed          *ArtifactSeed    `json:"artifact_seed,omitempty"`
-	Deployment            DeploymentDraft  `json:"deployment"`
+	// Reason is set on every candidate of a diagnosis-ordered proposal.
+	Reason     *CandidateReason `json:"reason,omitempty"`
+	Deployment DeploymentDraft  `json:"deployment"`
 }
 
 // StartingPoint identifies the first deployable configuration selected from
@@ -240,8 +247,10 @@ type Proposal struct {
 	Warnings           []string       `json:"warnings,omitempty"`
 	StartingPoint      *StartingPoint `json:"starting_point,omitempty"`
 	PostDeployWorkflow []string       `json:"post_deploy_workflow,omitempty"`
-	Mutation           string         `json:"mutation"`
-	SelectionBoundary  string         `json:"selection_boundary"`
+	// Diagnosis is present when the input carried a diagnosis.
+	Diagnosis         *DiagnosisPlan `json:"diagnosis,omitempty"`
+	Mutation          string         `json:"mutation"`
+	SelectionBoundary string         `json:"selection_boundary"`
 }
 
 // Source creates candidate configurations. It may estimate or discover, but
@@ -300,6 +309,11 @@ func ValidateProposal(proposal Proposal) error {
 				return errors.New("publisher artifact candidate must deploy the exact unmeasured output identity")
 			}
 		}
+		if candidate.Reason != nil {
+			if err := validateCandidateReason(*candidate.Reason); err != nil {
+				return err
+			}
+		}
 		if _, duplicate := seenIDs[candidate.ID]; duplicate {
 			return errors.New("proposal candidate IDs must be unique")
 		}
@@ -340,12 +354,26 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	sum := sha256.Sum256(input)
 	proposal := Proposal{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Input: request, InputDigest: hex.EncodeToString(sum[:]), Mutation: "none", SelectionBoundary: "configuration candidates only; benchmark, quality, cost, and Release Guard evidence are required before qualification"}
 	applyWorkloadBoundary(&proposal)
+	if request.Diagnosis != nil {
+		// Plan every candidate first so the diagnosis ranks the whole set
+		// before the requested bound cuts it.
+		proposal.Input.MaxCandidates = maxProposalCandidates
+	}
 	proposal, err = s.proposeReviewed(proposal)
-	if err != nil || request.Search != SearchRecipes {
+	if err == nil && request.Search == SearchRecipes {
+		proposal, err = s.expandRecipeSearch(proposal)
+	}
+	if err != nil || request.Diagnosis == nil {
 		return proposal, err
 	}
-	return s.expandRecipeSearch(proposal)
+	proposal.Input = request
+	return applyDiagnosis(proposal)
 }
+
+const (
+	maxProposalCandidates     = 100
+	genericBaselineLimitation = "This baseline has no model-specific runtime arguments or kernel claims."
+)
 
 func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 	var err error
@@ -461,6 +489,10 @@ func normalizeRequest(request Request) Request {
 	request.WorkloadFingerprint = strings.TrimSpace(request.WorkloadFingerprint)
 	request.QualityCheck = strings.ToLower(strings.TrimSpace(request.QualityCheck))
 	request.QualityEvalSet = strings.ToLower(strings.TrimSpace(request.QualityEvalSet))
+	if request.Diagnosis != nil {
+		diagnosis := normalizeDiagnosis(*request.Diagnosis)
+		request.Diagnosis = &diagnosis
+	}
 	if request.QualityCheck == QualityCheckBuiltin {
 		// The default is stored as empty so existing proposal digests stay stable.
 		request.QualityCheck = ""
@@ -540,7 +572,7 @@ func validateRequest(request Request) error {
 	default:
 		return errors.New("workload_source must be reviewed_default, public_prior, or customer_observed")
 	}
-	if request.MaxCandidates < 1 || request.MaxCandidates > 100 {
+	if request.MaxCandidates < 1 || request.MaxCandidates > maxProposalCandidates {
 		return errors.New("max candidates must be between 1 and 100")
 	}
 	if request.GPUCount < 1 || request.GPUCount > 1024 {
@@ -586,6 +618,11 @@ func validateRequest(request Request) error {
 	}
 	if request.QualityEvalSet != "" && request.QualityCheck == QualityCheckCustomer {
 		return errors.New("quality_eval_set applies to the built-in answer check, not to customer_evidence")
+	}
+	if request.Diagnosis != nil {
+		if err := validateDiagnosis(*request.Diagnosis); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -904,7 +941,7 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 		required = append(required, "measured SLO metrics")
 	}
 	limitations := []string{
-		"This baseline has no model-specific runtime arguments or kernel claims.",
+		genericBaselineLimitation,
 		"The exact model, revision, tokenizer, runtime, GPU count, and workload must pass real qualification before production use.",
 		"GPU memory fit and model license/access were supplied by the operator and have not been inferred.",
 	}

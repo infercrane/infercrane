@@ -31,7 +31,7 @@ func TestApplyRecipeSearchReadsConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := optimizer.Request{ModelIdentity: "acme/model", ModelRevision: strings.Repeat("a", 40)}
-	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", path, false); err != nil {
+	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", path, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if request.Search != optimizer.SearchRecipes || len(request.ModelFeatures) != 1 || !strings.HasPrefix(request.ModelConfigDigest, "sha256:") {
@@ -55,13 +55,13 @@ func TestApplyRecipeSearchUsesNetworkOnlyWhenAllowed(t *testing.T) {
 	defer func() { modelConfigBaseURL = previous }()
 
 	request := optimizer.Request{ModelIdentity: "acme/model", ModelRevision: revision}
-	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", "", false); err != nil {
+	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", "", false, false); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 0 || len(request.ModelFeatures) != 0 {
 		t.Fatalf("network used without opt-in: requests=%d request=%+v", requests, request)
 	}
-	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", "", true); err != nil {
+	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "recipes", "", true, false); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 1 || len(request.ModelFeatures) != 1 {
@@ -83,7 +83,7 @@ func TestFetchPublicModelConfigRejectsUnsafeIdentity(t *testing.T) {
 
 func TestRecipeSearchRequiresSearchForConfigAndRejectsEstimator(t *testing.T) {
 	request := optimizer.Request{ModelIdentity: "acme/model"}
-	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", "config.json", false); err == nil {
+	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", "config.json", false, false); err == nil {
 		t.Fatal("--model-config without search was accepted")
 	}
 	request.Search = optimizer.SearchRecipes

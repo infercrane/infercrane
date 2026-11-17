@@ -38,6 +38,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/finops"
+	"github.com/infercrane/infercrane/internal/gpuprofile"
 	"github.com/infercrane/infercrane/internal/huggingfacesearch"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/intentplan"
@@ -1001,14 +1002,47 @@ func customerQualificationNote(qualification string) string {
 	}
 }
 
+// optimizationProposalBody is the proposal request plus the endpoint whose
+// recorded diagnosis orders the candidates. The diagnosis itself is read by
+// the server; a client cannot supply one.
+type optimizationProposalBody struct {
+	optimizer.Request
+	DiagnosisEndpoint string `json:"diagnosis_endpoint,omitempty"`
+}
+
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
-	var request optimizer.Request
-	if !decodeMutationBody(w, r, &request) {
+	var body optimizationProposalBody
+	if !decodeMutationBody(w, r, &body) {
 		return
 	}
+	request := body.Request
 	if strings.TrimSpace(request.ProviderAdapter) != "" {
 		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "provider_adapter is derived from the selected tenant compute connection")
 		return
+	}
+	if request.Diagnosis != nil {
+		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "diagnosis is read by the server; name the endpoint in diagnosis_endpoint instead")
+		return
+	}
+	if endpoint := strings.TrimSpace(body.DiagnosisEndpoint); endpoint != "" {
+		if len(endpoint) > 255 || strings.ContainsAny(endpoint, "/?#") {
+			writeError(w, http.StatusBadRequest, "invalid_optimization_request", "diagnosis_endpoint must be an endpoint name of at most 255 characters")
+			return
+		}
+		actor := r.Context().Value(identityKey{}).(domain.Principal)
+		diagnosis, err := a.endpointDiagnosis(r.Context(), actor.TenantID, endpoint)
+		switch {
+		case errors.Is(err, errDiagnosisUnsupported):
+			writeError(w, http.StatusNotImplemented, "capability_unavailable", "endpoint diagnosis is not supported by this store")
+			return
+		case errors.Is(err, domain.ErrNotFound):
+			writeError(w, http.StatusUnprocessableEntity, "diagnosis_endpoint_not_found", "diagnosis_endpoint was not found in the active workspace")
+			return
+		case err != nil:
+			writeError(w, http.StatusInternalServerError, "internal", "endpoint diagnosis could not be read")
+			return
+		}
+		request.Diagnosis = diagnosis
 	}
 	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
 	if request.ComputeConnectionID != "" {
@@ -1822,6 +1856,7 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 }
 
 func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality campaignQualityInputs) map[string]any {
+	recorded, recordedOK := readCampaignProposal(campaign.ProposalJSON)
 	candidates := make([]map[string]any, 0, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
 		targetEndpoint := campaign.TargetDeployment
@@ -1831,20 +1866,36 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 				targetEndpoint = draft.Name
 			}
 		}
-		candidates = append(candidates, map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt})
+		view := map[string]any{"id": candidate.ID, "proposal_candidate_id": candidate.ProposalCandidateID, "rank": candidate.Rank, "state": candidate.State, "evidence_state": candidate.EvidenceState, "target_endpoint": targetEndpoint, "deployment_spec": json.RawMessage(candidate.DeploymentSpecJSON), "predicted_evidence": json.RawMessage(candidate.PredictedEvidenceJSON), "actual_evidence": json.RawMessage(candidate.ActualEvidenceJSON), "deployment_name": candidate.DeploymentName, "revision_id": candidate.RevisionID, "benchmark_id": candidate.BenchmarkID, "quality_evidence_id": candidate.QualityEvidenceID, "lab_evaluation_id": candidate.LabEvaluationID, "release_guard_evaluation_id": candidate.ReleaseGuardEvaluationID, "optimized_artifact_id": candidate.OptimizedArtifactID, "failure_code": candidate.FailureCode, "quality": candidateQuality(campaign, candidate, quality), "created_at": candidate.CreatedAt, "updated_at": candidate.UpdatedAt}
+		if reason := recorded.Reasons[candidate.ProposalCandidateID]; reason != nil {
+			view["reason"] = reason
+		}
+		candidates = append(candidates, view)
 	}
 	proofBoundary := "modeled evidence cannot qualify; measured benchmark, quality, and cost evidence are required before human activation"
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
 	response := map[string]any{"id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
-	if recorded, ok := readCampaignProposal(campaign.ProposalJSON); ok {
+	if recordedOK {
 		response["warnings"] = recorded.Warnings
 		if recorded.Workload != nil {
 			response["workload"] = recorded.Workload
 		}
+		if recorded.Diagnosis != nil {
+			response["diagnosis"] = recorded.Diagnosis
+		}
 	}
 	return response
+}
+
+// campaignDiagnosisView is the diagnosis plan recorded on a campaign's
+// immutable proposal, with the monitoring window it was read from. It says
+// why each setup was chosen, not how it performed.
+type campaignDiagnosisView struct {
+	optimizer.DiagnosisPlan
+	WindowStart time.Time `json:"window_start"`
+	WindowEnd   time.Time `json:"window_end"`
 }
 
 // campaignWorkloadView is the load a campaign's immutable proposal bound it
@@ -1858,8 +1909,11 @@ type campaignWorkloadView struct {
 }
 
 type campaignProposalView struct {
-	Warnings []string
-	Workload *campaignWorkloadView
+	Warnings  []string
+	Workload  *campaignWorkloadView
+	Diagnosis *campaignDiagnosisView
+	// Reasons maps a proposal candidate ID to why it was proposed.
+	Reasons map[string]*optimizer.CandidateReason
 }
 
 // readCampaignProposal reads the warnings and bound workload recorded on a
@@ -1871,15 +1925,29 @@ func readCampaignProposal(proposalJSON string) (campaignProposalView, bool) {
 	var proposal struct {
 		Warnings []string `json:"warnings"`
 		Input    struct {
-			WorkloadProfile     string `json:"workload_profile"`
-			WorkloadSource      string `json:"workload_source"`
-			WorkloadFingerprint string `json:"workload_fingerprint"`
+			WorkloadProfile     string               `json:"workload_profile"`
+			WorkloadSource      string               `json:"workload_source"`
+			WorkloadFingerprint string               `json:"workload_fingerprint"`
+			Diagnosis           *optimizer.Diagnosis `json:"diagnosis"`
 		} `json:"input"`
+		Diagnosis  *optimizer.DiagnosisPlan `json:"diagnosis"`
+		Candidates []struct {
+			ID     string                     `json:"id"`
+			Reason *optimizer.CandidateReason `json:"reason"`
+		} `json:"candidates"`
 	}
 	if json.Unmarshal([]byte(proposalJSON), &proposal) != nil {
 		return campaignProposalView{}, false
 	}
-	view := campaignProposalView{Warnings: proposal.Warnings}
+	view := campaignProposalView{Warnings: proposal.Warnings, Reasons: map[string]*optimizer.CandidateReason{}}
+	for _, candidate := range proposal.Candidates {
+		if candidate.Reason != nil {
+			view.Reasons[candidate.ID] = candidate.Reason
+		}
+	}
+	if proposal.Diagnosis != nil && proposal.Input.Diagnosis != nil {
+		view.Diagnosis = &campaignDiagnosisView{DiagnosisPlan: *proposal.Diagnosis, WindowStart: proposal.Input.Diagnosis.WindowStart, WindowEnd: proposal.Input.Diagnosis.WindowEnd}
+	}
 	if view.Warnings == nil {
 		view.Warnings = []string{}
 	}
@@ -2768,8 +2836,7 @@ func (a API) endpointOptimizationReadiness(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	bucketSeconds := defaultMonitoringBucket(windowSeconds)
-	snapshot, err := store.EndpointMonitoring(r.Context(), actor.TenantID, r.PathValue("name"), time.Duration(windowSeconds)*time.Second, time.Duration(bucketSeconds)*time.Second)
+	assessment, snapshot, err := a.readinessAssessment(r.Context(), store, actor.TenantID, r.PathValue("name"), windowSeconds)
 	if errors.Is(err, domain.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
 		return
@@ -2778,15 +2845,62 @@ func (a API) endpointOptimizationReadiness(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "internal", "optimization readiness evidence could not be read")
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"assessment": assessment,
+		"window":     map[string]any{"start": snapshot.WindowStart, "end": snapshot.WindowEnd, "sample_count": snapshot.Evidence.SampleCount},
+	})
+}
+
+// readinessAssessment diagnoses one endpoint's monitoring window, including
+// this gateway instance's live admission state.
+func (a API) readinessAssessment(ctx context.Context, store monitoringStore, tenant, endpoint string, windowSeconds int) (optimizationreadiness.Assessment, domain.EndpointMonitoringSnapshot, error) {
+	bucketSeconds := defaultMonitoringBucket(windowSeconds)
+	snapshot, err := store.EndpointMonitoring(ctx, tenant, endpoint, time.Duration(windowSeconds)*time.Second, time.Duration(bucketSeconds)*time.Second)
+	if err != nil {
+		return optimizationreadiness.Assessment{}, domain.EndpointMonitoringSnapshot{}, err
+	}
 	if a.AdmissionState != nil {
-		if state, found := a.AdmissionState.State(actor.TenantID + "\x00" + snapshot.Endpoint); found {
+		if state, found := a.AdmissionState.State(tenant + "\x00" + snapshot.Endpoint); found {
 			snapshot.Admission = &domain.AdmissionMonitoring{CapacityState: state.CapacityState, Scope: state.Scope, InstanceID: a.GatewayInstanceID, Active: state.Active, Waiting: state.Waiting, MaxConcurrent: state.MaxConcurrent, MaxQueueDepth: state.MaxQueueDepth, Rejected: state.Rejected, QueueTimeouts: state.QueueTimeouts, ObservedAt: time.Now().UTC()}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"assessment": optimizationreadiness.Assess(snapshot, optimizationreadiness.DefaultPolicy()),
-		"window":     map[string]any{"start": snapshot.WindowStart, "end": snapshot.WindowEnd, "sample_count": snapshot.Evidence.SampleCount},
-	})
+	return optimizationreadiness.Assess(snapshot, optimizationreadiness.DefaultPolicy()), snapshot, nil
+}
+
+var errDiagnosisUnsupported = errors.New("endpoint diagnosis is not supported by this store")
+
+// diagnosisWindowSeconds is the monitoring window a proposal diagnoses, the
+// same default the readiness endpoint uses.
+const diagnosisWindowSeconds = 3600
+
+// endpointDiagnosis reads the evidence a proposal plans from: the endpoint's
+// readiness assessment (gateway stages, engine metrics, GPU profiling fields)
+// and, when one was recorded recently for the active revision, a summary of
+// its GPU profile. A missing profile stays absent; it is never inferred.
+func (a API) endpointDiagnosis(ctx context.Context, tenant, endpoint string) (*optimizer.Diagnosis, error) {
+	store, ok := a.Store.(monitoringStore)
+	if !ok {
+		return nil, errDiagnosisUnsupported
+	}
+	assessment, snapshot, err := a.readinessAssessment(ctx, store, tenant, endpoint, diagnosisWindowSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if assessment.Endpoint == "" {
+		assessment.Endpoint = endpoint
+	}
+	diagnosis := optimizer.DiagnosisFromAssessment(assessment, snapshot.WindowStart, snapshot.WindowEnd)
+	if profiles, ok := a.Store.(gpuProfileStore); ok {
+		profile, profileErr := profiles.EndpointGPUProfile(ctx, tenant, endpoint)
+		switch {
+		case profileErr == nil:
+			diagnosis.GPUProfile = optimizer.SummarizeGPUProfile(profile, time.Now().UTC(), optimizer.GPUProfileMaxAge)
+		case errors.Is(profileErr, gpuprofile.ErrNotRecorded), errors.Is(profileErr, domain.ErrNotFound):
+		default:
+			return nil, profileErr
+		}
+	}
+	return &diagnosis, nil
 }
 
 type operationalMeasurementRequest struct {

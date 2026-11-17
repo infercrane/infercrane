@@ -18,11 +18,14 @@ The suite replays files. It starts no servers and allocates no GPUs, so it costs
 make test-optimizer-golden
 ```
 
-The target runs the race-enabled Go tests and then prints the report:
+The target runs the race-enabled Go tests and then prints both reports, the evaluator's decisions
+and the [planner's choices](#planning-tasks):
 
 ```bash
 infercrane optimize evidence golden \
   --file internal/optimizationevidence/testdata/golden/manifest.json
+infercrane optimize evidence golden \
+  --file internal/optimizationevidence/testdata/golden/planning.json
 ```
 
 Add `--output json` for the full report, including each task's evaluator reason. The command exits
@@ -174,9 +177,69 @@ python3.12 tools/laptop-rehearsal/rehearse.py --requests 24 --output-dir /tmp/re
 Keep a run only when the drift between its two control runs is below 10%. The checked-in run drifted
 1.7%. An earlier attempt on a busy machine drifted 30% and was discarded.
 
+## Planning tasks
+
+The evaluator decides which measured setup wins. The planner decides which setups get measured at
+all. `planning.json` (schema `infercrane.dev/optimizer-planning-golden/v1`) fixes the planner's
+choices: each task is a proposal request with a recorded
+[endpoint diagnosis](/features/optimization#choose-setups-from-the-endpoint-diagnosis) and the
+order a reviewer would measure setups in. The same command detects the schema and runs the planner
+instead of the evaluator. `TestPlanningGoldenSuitePasses` runs it under `go test`.
+
+A task fails when any of these differ from the expectation:
+
+| Field | Checks |
+| --- | --- |
+| `expected_order` | Every proposed setup by rank: `control`, then techniques such as `fp8-kv-cache`. |
+| `expected_state` | The plan state: `applied`, `not_ready`, `reliability_blocked`, `no_actionable_findings`, or `no_starting_setup`. |
+| `must_not_propose` | Techniques no setup may apply. |
+| `must_not_use_args` | Flag fragments no setup other than the control may carry, such as a method that lost on recorded hardware. |
+| `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
+| `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
+
+Current result: 18 of 18 plans as reviewed, rule set `diagnosis-technique-rules-v1`.
+
+| Task | Diagnosis | Expected setups after the control |
+| --- | --- | --- |
+| `h100-kv-preemption-fp8-kv-first` | 8 evictions per 100 completed requests, 48 running | FP8 KV cache, fewer requests at once (32) |
+| `l40s-kv-saturation-reviewed-profile` | KV cache 97% full, 6 waiting | FP8 KV cache; the cap is skipped (concurrency not reported) |
+| `h100-engine-queue-larger-batches` | 640 ms engine queue, KV cache 41% used | Larger batches above the 80 GB defaults |
+| `l40s-sglang-queue-unknown-defaults` | Same queue on SGLang | Nothing: SGLang's batch defaults are not recorded |
+| `host-bound-api-servers-then-stream-interval` | SMs active 31% while requests wait | More API server processes, streaming in small groups |
+| `long-prompts-bigger-chunks` | 6,200-token prompts | Bigger prompt chunks; prefix cache skipped (on by default) |
+| `vllm-prefix-low-reuse-nothing-to-flag` | 82% shared prefixes, 9% cache hits, vLLM | Nothing: no vLLM flag addresses it |
+| `sglang-prefix-low-reuse-prefix-aware-scheduling` | Same reuse on SGLang | Prefix-aware scheduling |
+| `rtx4090-qwen3-0.6b-low-concurrency-no-change` | One request running, recorded RTX 4090 run | Nothing; right-sizing flagged |
+| `rtx4090-short-prompts-collect-engine-metrics` | First-token bound, 278-token prompts, no engine metrics | Nothing; asks for engine metrics |
+| `h100-high-concurrency-long-context-decode` | 64 running, 9,000-token contexts, throughput goal | FP8 KV cache, larger batches, FP8 weights |
+| `h100-high-concurrency-short-context-no-fp8-kv` | 64 running, 1,500-token contexts, interactive goal | FP8 weights only |
+| `b200-low-concurrency-checkpoint-not-rankable` | Two running on B200 | FP8 weights; the NVFP4 checkpoint is left out |
+| `h200-pinned-image-kv-fp8-first` | Evictions on the pinned SGLang image | The image's FP8 KV cache setup |
+| `h200-pinned-image-low-concurrency-speculation-first` | 1.5 running, prediction head declared | The image's speculation setups |
+| `not-ready-measures-only-the-control` | Too little traffic | Nothing; asks for traffic and engine metrics |
+| `reliability-blocked-measures-only-the-control` | 7% errors | Nothing; asks for fewer errors |
+| `gpu-profile-attention-heavy-long-context` | Attention 56% of profiled GPU time | FP8 KV cache, FP8 weights |
+
+The two RTX 4090 tasks come from the first real GPU run (Qwen3-0.6B, Vast through SkyPilot, a replay
+at one request at a time). vLLM defaults served 246 tok/s; n-gram speculation served 188 tok/s, and
+an FP8 KV cache with 2,048-token chunks served 193 tok/s. 2,048 is already vLLM's default under
+70 GB, so that arm changed only the KV cache. Both were hand-picked before the planner read a
+diagnosis. The tasks plan on RunPod Pods, because operator-declared clouds such as Vast are
+registered only when a control plane starts.
+
+To add a planning task, write the diagnosis from recorded readiness output, decide the order from
+the rule table before you run the planner, and record the reason in `why`. Categories are
+`kv_pressure`, `queueing`, `host_bound`, `prefill`, `prefix_reuse`, `decode_low_concurrency`,
+`decode_high_concurrency`, `gpu_profile`, `not_ready`, `reliability`, `recorded_gpu_run`,
+`publisher_checkpoint`, and `pinned_image_setups`, and the test fails if any of them loses its last
+task. A change to a rule, priority, or flag value must bump `diagnosis-technique-rules-v1` and
+explain each changed expectation in its task's `why`.
+
 ## Limits
 
 - The tasks replay screening evidence, mostly from one model and one workload family on H200.
 - The win rate rests on three expected promotions. Add tasks before reading much into it.
 - The suite checks decisions on recorded evidence. It does not check that a new campaign measures
   correctly; the campaign's own control runs and noise-floor checks do that.
+- Planning tasks check which setups are measured and in what order, not whether they win. Only the
+  two RTX 4090 tasks rest on a measured outcome; the rest encode the rule table.
