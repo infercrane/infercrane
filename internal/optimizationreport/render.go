@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
@@ -141,11 +142,24 @@ func NewView(r Report) View {
 		}
 		v.Evidence = append(v.Evidence, ViewField{strings.ReplaceAll(entry.Kind, "_", " "), value})
 	}
+	if eval := r.Quality.Eval; eval != "" && !evidenceNames(v.Evidence, eval) {
+		v.Evidence = append(v.Evidence, ViewField{"quality eval", eval})
+	}
 	v.Evidence = append(v.Evidence, ViewField{"this report", r.ReportDigest})
 	for _, field := range r.Unknown {
 		v.Unknown = append(v.Unknown, ViewField{field, unknownReason(r, field)})
 	}
 	return v
+}
+
+// evidenceNames reports whether an evidence entry already names value.
+func evidenceNames(fields []ViewField, value string) bool {
+	for _, field := range fields {
+		if strings.Contains(field.Value, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func subtitle(r Report) string {
@@ -184,10 +198,7 @@ func metricRow(metric Metric) ViewRow {
 }
 
 func qualityRow(quality Quality) ViewRow {
-	row := ViewRow{Label: "Answer quality", Baseline: orUnknown(quality.BaselineScore, score), Winner: orUnknown(quality.WinnerScore, score), Decision: quality.Verdict, Reason: quality.Reason}
-	if quality.Eval != "" {
-		row.Label += " (" + quality.Eval + ")"
-	}
+	row := ViewRow{Label: qualityLabel(quality), Baseline: orUnknown(quality.BaselineScore, score), Winner: orUnknown(quality.WinnerScore, score), Decision: quality.Verdict, Reason: quality.Reason}
 	switch {
 	case quality.Delta != nil:
 		row.Change = fmt.Sprintf("%+.3f", *quality.Delta)
@@ -210,6 +221,19 @@ func qualityRow(quality Quality) ViewRow {
 		row.Tone = "unknown"
 	}
 	return row
+}
+
+// qualityLabel names the answer-quality outcome in a few words: the built-in
+// check, or the eval suite's name. The full suite identity, whose version
+// carries a content digest, is listed under the evidence instead.
+func qualityLabel(quality Quality) string {
+	if quality.Source == domain.QualityEvidenceSourceInferCrane {
+		return "Answer quality · InferCrane answer check"
+	}
+	if name, _, _ := strings.Cut(quality.Eval, "@"); name != "" {
+		return "Answer quality · " + name
+	}
+	return "Answer quality"
 }
 
 func monthlyRow(monthly Monthly) ViewRow {

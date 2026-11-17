@@ -213,8 +213,14 @@ func renderOutcomeCards(v optimizationreport.View, t theme) string {
 	tones := make([]string, 0, len(v.Rows))
 	for _, row := range v.Rows {
 		var lines []string
-		for _, line := range wrapWords(row.Label, inner) {
-			lines = append(lines, t.muted(line))
+		labels := []string{row.Label}
+		if head, tail, ok := strings.Cut(row.Label, " · "); ok && lipgloss.Width(row.Label) > inner {
+			labels = []string{head, tail}
+		}
+		for _, label := range labels {
+			for _, line := range wrapWords(label, inner) {
+				lines = append(lines, t.muted(line))
+			}
 		}
 		current, winner := row.Baseline, row.Winner
 		paintValue := func(text string, strong bool) string {

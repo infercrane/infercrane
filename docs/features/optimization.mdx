@@ -438,6 +438,10 @@ WATCH band. The monthly projection assumes servers stay busy, so idle capacity
 is not included. It is only made for a campaign that replayed your traffic, and only when every
 replayed request recorded its output tokens.
 
+The answer-quality outcome is named after the check that produced it: `Answer quality · InferCrane
+answer check` for the built-in check, or `Answer quality · ` and the eval suite's name for your own
+eval. The full suite identity, with its version and content digest, is listed under the evidence.
+
 Anything missing or not comparable is `unknown`: never zero and never estimated. The report lists
 those fields under `unknown` and says why for each. If any setup ran on a simulated accelerator or a
 CPU, such as the laptop proof of concept, the report sets `simulated_accelerator` and every output
@@ -453,26 +457,29 @@ infercrane optimize report CAMPAIGN_ID --html result.html    # one self-containe
 In a terminal the report leads with the verdict, then one card per outcome: your current setup →
 the winner, the change in green when better and red when worse, the decision, and the noise band
 it was checked against. How it was measured and every setup measured follow as aligned tables, with
-each setup's runtime flags one per line. This is the report of a real RTX 4090 run in which no setup
-qualified, in an 80-column terminal:
+each setup's runtime flags one per line. This is the report of a real RTX 4090 run that kept the
+current setup, in an 80-column terminal (excerpt):
 
 ```text
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ● NO WINNER                                                                  │
-│ No setup qualified. Nothing changes in production.                           │
+│ ● CURRENT SETUP KEPT                                                         │
+│ Keep your current setup: nothing beat it by more than the measurement noise. │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
 ╭─────────────────────────────────────╮ ╭─────────────────────────────────────╮
-│ Cost per 1M output tokens           │ │ p95 time to first token             │
-│ $0.37 → unknown                     │ │ 315 ms → unknown                    │
-│ change unknown                      │ │ change unknown                      │
-│ └ no setup qualified                │ │ └ no setup qualified                │
+│ Requests/s                          │ │ Answer quality                      │
+│ 2.06 → 2.06                         │ │ InferCrane answer check             │
+│ no change  unchanged                │ │ unknown → 1.000                     │
+│                                     │ │ no change  ● UNKNOWN                │
+│                                     │ │ watch above 5.0% drop               │
+│                                     │ │ └ your current setup is kept, so    │
+│                                     │ │   answer quality is unchanged       │
 ╰─────────────────────────────────────╯ ╰─────────────────────────────────────╯
 
 Every setup measured ───────────────────────────────────────────────────────────
   SETUP                                             TOKENS/S  P95 TTFT  $/1M OUT
   ──────────────────────────────────────────────────────────────────────────────
-  vllm, default settings  CURRENT SETUP                  246    315 ms     $0.37
+  vllm, default settings  CURRENT SETUP, KEPT            246    315 ms     $0.37
     ● server removed
   vllm                                                   193    339 ms    $0.462
     --kv-cache-dtype fp8
