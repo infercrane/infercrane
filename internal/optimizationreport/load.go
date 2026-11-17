@@ -11,17 +11,16 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 )
 
-// evidenceRowLimit is the newest rows read per candidate deployment. A record
-// older than that is reported missing, which keeps the dependent field unknown.
-const evidenceRowLimit = 100
-
 // Store is the tenant-scoped, read-only evidence boundary of a report. Every
 // method filters by tenant, so a report never reads another tenant's records.
+// Evidence is read by the IDs the candidate runs recorded, never by deployment
+// name: a campaign deletes its candidate deployments at cleanup, and a deleted
+// deployment's name can be deployed again by something else.
 type Store interface {
 	OptimizationCampaign(context.Context, string, string) (domain.OptimizationCampaign, error)
-	BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error)
-	QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error)
-	ReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.ReleaseGuardEvaluation, error)
+	BenchmarksByIDs(context.Context, string, []string) (map[string]domain.BenchmarkResult, error)
+	QualityEvidenceByIDs(context.Context, string, []string) (map[string]domain.QualityEvidence, error)
+	ReleaseGuardEvaluationsByIDs(context.Context, string, []string) (map[string]domain.ReleaseGuardEvaluation, error)
 	ReplayTraceByDigest(context.Context, string, string) (domain.ReplayTrace, error)
 }
 
@@ -34,59 +33,21 @@ func Load(ctx context.Context, store Store, tenant, campaignID string) (Report, 
 	if err != nil {
 		return Report{}, err
 	}
-	evidence := Evidence{Campaign: campaign, Benchmarks: map[string]domain.BenchmarkResult{}, Quality: map[string]domain.QualityEvidence{}, ReleaseGuard: map[string]domain.ReleaseGuardEvaluation{}}
-	wanted := struct{ benchmarks, quality, guard map[string]bool }{map[string]bool{}, map[string]bool{}, map[string]bool{}}
-	deployments := []string{}
-	seen := map[string]bool{}
+	var benchmarkIDs, qualityIDs, guardIDs []string
 	for _, run := range campaign.Candidates {
-		if run.BenchmarkID != "" {
-			wanted.benchmarks[run.BenchmarkID] = true
-		}
-		if run.QualityEvidenceID != "" {
-			wanted.quality[run.QualityEvidenceID] = true
-		}
-		if run.ReleaseGuardEvaluationID != "" {
-			wanted.guard[run.ReleaseGuardEvaluationID] = true
-		}
-		if run.DeploymentName != "" && !seen[run.DeploymentName] {
-			seen[run.DeploymentName] = true
-			deployments = append(deployments, run.DeploymentName)
-		}
+		benchmarkIDs = append(benchmarkIDs, run.BenchmarkID)
+		qualityIDs = append(qualityIDs, run.QualityEvidenceID)
+		guardIDs = append(guardIDs, run.ReleaseGuardEvaluationID)
 	}
-	for _, name := range deployments {
-		if len(wanted.benchmarks) > len(evidence.Benchmarks) {
-			rows, lookupErr := store.BenchmarksForDeployment(ctx, tenant, name, evidenceRowLimit)
-			if lookupErr != nil && !errors.Is(lookupErr, domain.ErrNotFound) {
-				return Report{}, fmt.Errorf("read campaign benchmarks: %w", lookupErr)
-			}
-			for _, row := range rows {
-				if wanted.benchmarks[row.ID] {
-					evidence.Benchmarks[row.ID] = row
-				}
-			}
-		}
-		if len(wanted.quality) > len(evidence.Quality) {
-			rows, lookupErr := store.QualityEvidenceForDeployment(ctx, tenant, name, evidenceRowLimit)
-			if lookupErr != nil && !errors.Is(lookupErr, domain.ErrNotFound) {
-				return Report{}, fmt.Errorf("read campaign quality evidence: %w", lookupErr)
-			}
-			for _, row := range rows {
-				if wanted.quality[row.ID] {
-					evidence.Quality[row.ID] = row
-				}
-			}
-		}
-		if len(wanted.guard) > len(evidence.ReleaseGuard) {
-			rows, lookupErr := store.ReleaseGuardEvaluations(ctx, tenant, name, evidenceRowLimit)
-			if lookupErr != nil && !errors.Is(lookupErr, domain.ErrNotFound) {
-				return Report{}, fmt.Errorf("read campaign Release Guard evidence: %w", lookupErr)
-			}
-			for _, row := range rows {
-				if wanted.guard[row.ID] {
-					evidence.ReleaseGuard[row.ID] = row
-				}
-			}
-		}
+	evidence := Evidence{Campaign: campaign}
+	if evidence.Benchmarks, err = store.BenchmarksByIDs(ctx, tenant, benchmarkIDs); err != nil {
+		return Report{}, fmt.Errorf("read campaign benchmarks: %w", err)
+	}
+	if evidence.Quality, err = store.QualityEvidenceByIDs(ctx, tenant, qualityIDs); err != nil {
+		return Report{}, fmt.Errorf("read campaign quality evidence: %w", err)
+	}
+	if evidence.ReleaseGuard, err = store.ReleaseGuardEvaluationsByIDs(ctx, tenant, guardIDs); err != nil {
+		return Report{}, fmt.Errorf("read campaign Release Guard evidence: %w", err)
 	}
 	if digest, bound := replayDigest(campaign); bound {
 		if digest == "" {

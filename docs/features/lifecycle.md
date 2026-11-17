@@ -132,7 +132,10 @@ Provider deletion is not proven solely by a missing database row. Never erase Po
 Once a delete, or the cleanup after a cancelled first deploy, has finished, the same name can be
 deployed again. The new deployment gets a new ID, a new endpoint, and, for a managed deployment, a
 new prepaid hold. The deleted deployment keeps its events, revisions, evidence, and settled hold
-under its old ID, so history from the two deployments is never mixed.
+under its old ID, so history from the two deployments is never mixed. Lookups by name, such as the
+deployment page, its benchmarks, and its quality evidence, show only the live deployment. An
+optimization report reads its candidates' evidence by record ID, so it still shows results measured
+on candidate deployments that cleanup deleted.
 
 A name stays taken while its deletion is still running. Submitting it again returns a conflict that
 says the deletion is in progress; wait for the delete operation to finish. A name is also taken while
