@@ -93,3 +93,21 @@ func TestCandidateLabelsTellEqualSetupsApartAndSurviveAnUnreadableProposal(t *te
 		t.Fatalf("label without any spec = %q", got)
 	}
 }
+
+func TestCandidateLabelsNameReviewedEngineSwitchesAwayFromTheirDefault(t *testing.T) {
+	aiter := labelCandidate("a", "vllm", nil)
+	aiter.Deployment.Runtime.Env = map[string]string{"VLLM_ROCM_USE_AITER": "1"}
+	off := labelCandidate("b", "vllm", nil)
+	off.Deployment.Runtime.Env = map[string]string{"VLLM_ROCM_USE_AITER": "0"}
+	unknown := labelCandidate("c", "vllm", []string{"--kv-cache-dtype", "fp8"})
+	unknown.Deployment.Runtime.Env = map[string]string{"UNREVIEWED": "1", "VLLM_ROCM_USE_AITER": "1"}
+	labels := CandidateLabels(labelCampaign(t, labelCandidate("control", "vllm", nil), aiter, off, unknown))
+	// The switch at its recorded default is the engine's defaults; the label
+	// never names an unreviewed variable.
+	want := map[string]string{"run-control": "vLLM defaults (setup 1)", "run-a": "AMD AITER kernels", "run-b": "vLLM defaults (setup 3)", "run-c": "FP8 KV cache, AMD AITER kernels"}
+	for id, label := range want {
+		if labels[id] != label {
+			t.Fatalf("label[%s] = %q, want %q (all: %v)", id, labels[id], label, labels)
+		}
+	}
+}

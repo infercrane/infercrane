@@ -2,12 +2,14 @@ package optimizationcampaign
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 // labelFeatures are the proposal feature names whose source may carry a
@@ -60,7 +62,7 @@ func candidateLabel(candidate optimizer.Candidate) string {
 	}
 	draft := candidate.Deployment
 	args := append(append([]string(nil), draft.Runtime.Args...), draft.Runtime.Workload.Command...)
-	techniques := flagTechniques(args)
+	techniques := append(flagTechniques(args), environmentTechniques(draft.Runtime.Env)...)
 	for _, feature := range candidate.Features {
 		if feature.Name == "quantization" && strings.TrimSpace(feature.State) != "" {
 			techniques = append([]string{strings.ToUpper(strings.TrimSpace(feature.State)) + " checkpoint"}, techniques...)
@@ -73,10 +75,23 @@ func candidateLabel(candidate optimizer.Candidate) string {
 	if engine == "" {
 		return ""
 	}
+	// A reviewed switch at its recorded default changes nothing.
 	if len(draft.Runtime.Args) == 0 {
 		return engine + " defaults"
 	}
 	return truncateLabel(engine + " " + strings.Join(draft.Runtime.Args, " "))
+}
+
+// environmentTechniques names each reviewed engine switch set away from its
+// recorded default, in name order. An unreviewed variable adds nothing.
+func environmentTechniques(env map[string]string) []string {
+	var out []string
+	for _, variable := range support.EngineEnvironment() {
+		if value, set := env[variable.Name]; set && value != variable.Default && variable.Label != "" && !slices.Contains(out, variable.Label) {
+			out = append(out, variable.Label)
+		}
+	}
+	return out
 }
 
 // flagTechniques reads the serving flags InferCrane recognizes. Unrecognized

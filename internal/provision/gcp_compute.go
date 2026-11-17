@@ -336,6 +336,9 @@ func (g GCPCompute) validate(spec ReplicaSpec) error {
 	if spec.GPU != g.GPUType {
 		return fmt.Errorf("configured machine is qualified for GPU %s, not %s", g.GPUType, spec.GPU)
 	}
+	if _, err := engineEnvironment(spec); err != nil {
+		return err
+	}
 	if spec.GPUCount < 0 || spec.GPUCount > 1024 {
 		return errors.New("GCP GPU count must be between 1 and 1024")
 	}
@@ -711,7 +714,7 @@ func (g GCPCompute) startup(spec ReplicaSpec, port int) string {
 		"infercrane_stage gpu_driver_ready\n" +
 		cachedImageBootstrap(image) + artifactBootstrap +
 		"infercrane_stage runtime_start\n" +
-		"docker run -d --restart=unless-stopped $gpu_run_args " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + entrypoint + " " + shellQuote(image) + arguments + "\n" +
+		"docker run -d --restart=unless-stopped $gpu_run_args " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" " + containerEngineEnvironment(spec) + "-p " + fmt.Sprintf("%d:%d", port, port) + entrypoint + " " + shellQuote(image) + arguments + "\n" +
 		"infercrane_stage runtime_container_started\n"
 }
 

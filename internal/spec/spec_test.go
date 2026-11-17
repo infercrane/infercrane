@@ -202,6 +202,23 @@ func TestLoadPlacesAMDInstinctGPUsOnlyWhereTheirPlatformIsQualified(t *testing.T
 	}
 }
 
+func TestLoadAdmitsOnlyReviewedEngineEnvironment(t *testing.T) {
+	base := "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\nprovider: {cloud: runpod, adapter: runpod-pods}\n"
+	loaded, err := Load(writeSpec(t, base+"resources: {gpu: MI300X}\nruntime: {engine: vllm, version: 0.22.1, env: {VLLM_ROCM_USE_AITER: \"1\"}}\n"))
+	if err != nil || loaded.Runtime.Env["VLLM_ROCM_USE_AITER"] != "1" {
+		t.Fatalf("spec=%#v err=%v", loaded.Runtime, err)
+	}
+	for name, body := range map[string]string{
+		"CUDA GPU":   "resources: {gpu: H100}\nruntime: {env: {VLLM_ROCM_USE_AITER: \"1\"}}",
+		"credential": "resources: {gpu: MI300X}\nruntime: {env: {HF_TOKEN: hf_pasted}}",
+		"value":      "resources: {gpu: MI300X}\nruntime: {env: {VLLM_ROCM_USE_AITER: \"true\"}}",
+	} {
+		if _, err := Load(writeSpec(t, base+body+"\n")); err == nil || !strings.Contains(err.Error(), "runtime.env") || strings.Contains(err.Error(), "hf_pasted") {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+}
+
 func TestLoadPortableRuntimeContracts(t *testing.T) {
 	sglang, err := Load("../../examples/sglang.yaml")
 	if err != nil || sglang.Runtime.Engine != "sglang" || sglang.Runtime.Workload.Image == "" {

@@ -43,9 +43,12 @@ type ReplicaSpec struct {
 	GPUCount                                                                int
 	RequestID                                                               string
 	RuntimeArgs                                                             []string
-	Port                                                                    int
-	Workload                                                                runtimecontract.Workload
-	Serving                                                                 servingcontract.Topology
+	// RuntimeEnv holds reviewed engine switches (support.EngineEnvironment).
+	// It is omitted when empty so intent hashes of existing replicas hold.
+	RuntimeEnv map[string]string `json:",omitempty"`
+	Port       int
+	Workload   runtimecontract.Workload
+	Serving    servingcontract.Topology
 }
 type ProviderHandle struct{ RequestID, ResourceID, ExternalKey string }
 type Observation struct {
@@ -145,6 +148,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	}
 	if spec.GPUCount < 1 || spec.GPUCount > 1024 {
 		return ProviderHandle{}, errors.New("GPU count must be between 1 and 1024")
+	}
+	if err := refuseEngineEnvironment("SkyPilot", spec); err != nil {
+		return ProviderHandle{}, err
 	}
 	// SkyPilot reaches its node over SSH, and InferCrane builds SSH-capable
 	// runtime images only for the CUDA platform.

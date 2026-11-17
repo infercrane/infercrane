@@ -28,6 +28,7 @@ import (
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
@@ -142,9 +143,12 @@ type DeploymentDraft struct {
 		Revision string `json:"revision" yaml:"revision"`
 	} `json:"model" yaml:"model"`
 	Runtime struct {
-		Engine   string                   `json:"engine" yaml:"engine"`
-		Version  string                   `json:"version" yaml:"version"`
-		Args     []string                 `json:"args" yaml:"args"`
+		Engine  string   `json:"engine" yaml:"engine"`
+		Version string   `json:"version" yaml:"version"`
+		Args    []string `json:"args" yaml:"args"`
+		// Env holds reviewed engine switches (support.EngineEnvironment). It is
+		// omitted when empty so existing candidate identities do not change.
+		Env      map[string]string        `json:"env,omitempty" yaml:"env,omitempty"`
 		Workload runtimecontract.Workload `json:"workload,omitzero" yaml:"workload,omitempty"`
 	} `json:"runtime" yaml:"runtime"`
 	Compute struct {
@@ -314,6 +318,9 @@ func ValidateProposal(proposal Proposal) error {
 			if candidate.Deployment.Model.ID != candidate.ArtifactSeed.OutputRepository || candidate.Deployment.Model.Revision != candidate.ArtifactSeed.OutputRevision || candidate.EvidenceState != EvidenceUnmeasured {
 				return errors.New("publisher artifact candidate must deploy the exact unmeasured output identity")
 			}
+		}
+		if err := support.ValidateRuntimeEnv(candidate.Deployment.Runtime.Engine, candidate.Deployment.Runtime.Version, candidate.Deployment.Resources.GPU, candidate.Deployment.Runtime.Workload, candidate.Deployment.Runtime.Env); err != nil {
+			return fmt.Errorf("proposal candidate runtime env: %w", err)
 		}
 		if candidate.Reason != nil {
 			if err := validateCandidateReason(*candidate.Reason); err != nil {

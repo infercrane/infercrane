@@ -104,6 +104,10 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if err := spec.Workload.Validate(); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
+	engineVariables, err := engineEnvironment(spec)
+	if err != nil {
+		return ProviderHandle{}, err
+	}
 	name := r.Handle(spec.ExternalKey).ResourceID
 	pods, err := r.list(ctx)
 	if err != nil {
@@ -139,6 +143,9 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, fmt.Errorf("%w: RunPod container disk must be between 50 and 2048 GiB", ErrInvalidReplicaSpec)
 	}
 	environment := map[string]string{"INFERCRANE_WORKER_API_KEY": r.WorkerAPIKey, "VLLM_API_KEY": r.WorkerAPIKey}
+	for _, variable := range engineVariables {
+		environment[variable] = spec.RuntimeEnv[variable]
+	}
 	if r.HFTokenSecret != "" {
 		if !validRunPodIdentifier(r.HFTokenSecret) {
 			return ProviderHandle{}, fmt.Errorf("%w: RunPod Hugging Face secret name is invalid", ErrInvalidReplicaSpec)
@@ -408,6 +415,7 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 	}
 	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] == "" || pod.Environment["VLLM_API_KEY"] == "")
 	secretMismatch := hfTokenSecret != "" && len(pod.Environment) > 0 && pod.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_"+hfTokenSecret+" }}"
+	engineMismatch := len(pod.Environment) > 0 && !engineEnvironmentMatches(pod.Environment, spec.RuntimeEnv)
 	actualVolumeID := ""
 	if pod.NetworkVolume != nil {
 		actualVolumeID = pod.NetworkVolume.ID
@@ -418,7 +426,7 @@ func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, 
 	}
 	requestedDataCenterID := runPodDataCenterConstraint(spec.Region)
 	regionMismatch := requestedDataCenterID != "" && actualDataCenterID != "" && actualDataCenterID != requestedDataCenterID
-	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != RunPodGPUTypeID(spec.GPU)) || credentialMismatch || secretMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
+	if image != spec.Workload.Image || pod.GPUCount != spec.GPUCount || (actualGPU != "" && actualGPU != RunPodGPUTypeID(spec.GPU)) || credentialMismatch || secretMismatch || engineMismatch || actualVolumeID != volumeID || regionMismatch || !equalStrings(pod.DockerEntrypoint, command[:1]) || !equalStrings(pod.DockerStartCmd, command[1:]) {
 		return fmt.Errorf("%w: existing RunPod Pod does not match immutable workload intent", ErrInvalidReplicaSpec)
 	}
 	return nil

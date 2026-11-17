@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/autoscale"
@@ -144,14 +145,14 @@ func (s *Store) AutoscalingSLOEvidence(ctx context.Context, deploymentID string,
 		evidence.P95LatencyMS = &latency.Float64
 	}
 
-	var tenant, modelIdentity, runtimeName, runtimeVersion, runtimeArgs string
+	var tenant, modelIdentity, runtimeName, runtimeVersion, runtimeArgs, runtimeEnv string
 	var provider, region, gpu, computeMode string
 	var gpuCount int
-	err := s.QueryRowContext(ctx, `SELECT d.tenant_id,COALESCE(a.model_identity,''),COALESCE(r.spec_json->>'runtime',''),COALESCE(r.spec_json->>'runtime_version',''),COALESCE(r.spec_json->'runtime_args','[]'::jsonb)::text,COALESCE(NULLIF(r.spec_json->>'provider_adapter',''),r.spec_json->>'cloud',''),COALESCE(r.spec_json->>'region',''),COALESCE(r.spec_json->>'gpu',''),COALESCE((r.spec_json->>'gpu_count')::integer,CASE WHEN COALESCE(r.spec_json->>'gpu','')='' THEN 0 ELSE 1 END),COALESCE(r.spec_json->>'compute_mode','elastic') FROM deployments d JOIN deployment_revisions r ON r.id=d.active_revision_id LEFT JOIN model_artifacts a ON a.id=r.model_artifact_id WHERE d.id=?`, deploymentID).Scan(&tenant, &modelIdentity, &runtimeName, &runtimeVersion, &runtimeArgs, &provider, &region, &gpu, &gpuCount, &computeMode)
+	err := s.QueryRowContext(ctx, `SELECT d.tenant_id,COALESCE(a.model_identity,''),COALESCE(r.spec_json->>'runtime',''),COALESCE(r.spec_json->>'runtime_version',''),COALESCE(r.spec_json->'runtime_args','[]'::jsonb)::text,COALESCE(r.spec_json->'runtime_env','{}'::jsonb)::text,COALESCE(NULLIF(r.spec_json->>'provider_adapter',''),r.spec_json->>'cloud',''),COALESCE(r.spec_json->>'region',''),COALESCE(r.spec_json->>'gpu',''),COALESCE((r.spec_json->>'gpu_count')::integer,CASE WHEN COALESCE(r.spec_json->>'gpu','')='' THEN 0 ELSE 1 END),COALESCE(r.spec_json->>'compute_mode','elastic') FROM deployments d JOIN deployment_revisions r ON r.id=d.active_revision_id LEFT JOIN model_artifacts a ON a.id=r.model_artifact_id WHERE d.id=?`, deploymentID).Scan(&tenant, &modelIdentity, &runtimeName, &runtimeVersion, &runtimeArgs, &runtimeEnv, &provider, &region, &gpu, &gpuCount, &computeMode)
 	if err != nil {
 		return evidence, err
 	}
-	evidence.ComparisonBoundary = "immutable model + runtime/version/args + provider/region + GPU topology + one replica"
+	evidence.ComparisonBoundary = "immutable model + runtime/version/args/env + provider/region + GPU topology + one replica"
 	if modelIdentity == "" || runtimeName == "" || provider == "" || gpu == "" {
 		return evidence, nil
 	}
@@ -166,9 +167,11 @@ func (s *Store) AutoscalingSLOEvidence(ctx context.Context, deploymentID string,
 		return evidence, err
 	}
 	var actualConfig struct {
-		Args json.RawMessage `json:"args"`
+		Args json.RawMessage   `json:"args"`
+		Env  map[string]string `json:"env"`
 	}
-	if json.Unmarshal([]byte(benchmarkRuntimeConfig), &actualConfig) != nil || string(actualConfig.Args) != runtimeArgs || succeeded > benchmarkSamples {
+	var revisionEnv map[string]string
+	if json.Unmarshal([]byte(benchmarkRuntimeConfig), &actualConfig) != nil || string(actualConfig.Args) != runtimeArgs || json.Unmarshal([]byte(runtimeEnv), &revisionEnv) != nil || !maps.Equal(actualConfig.Env, revisionEnv) || succeeded > benchmarkSamples {
 		return evidence, nil
 	}
 	evidence.BenchmarkID, evidence.BenchmarkSamples = benchmarkID, benchmarkSamples

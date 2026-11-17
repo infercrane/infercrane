@@ -2,8 +2,6 @@ package workflows
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,6 +50,7 @@ type CloudRequest struct {
 	ImmutableModelRevision string                   `json:"immutable_model_revision,omitempty"`
 	RevisionID             string                   `json:"revision_id,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
+	RuntimeEnv             map[string]string        `json:"runtime_env,omitempty"`
 	Port                   int                      `json:"port,omitempty"`
 	MinReplicas            int                      `json:"min_replicas,omitempty"`
 	MaxReplicas            int                      `json:"max_replicas,omitempty"`
@@ -184,6 +183,9 @@ func (r *CloudRequest) Validate() error {
 		if err := r.Workload.Validate(); err != nil {
 			return fmt.Errorf("runtime workload: %w", err)
 		}
+	}
+	if err := support.ValidateRuntimeEnv(r.Runtime, r.RuntimeVersion, r.GPU, r.Workload, r.RuntimeEnv); err != nil {
+		return err
 	}
 	// An operator-declared SkyPilot cloud is admitted only by its exact adapter identity.
 	if err := support.V1().ValidateProvider(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter); err != nil {
@@ -453,6 +455,9 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("provider_backend_unavailable", err)
 		}
+		if err = refuseUnpassedRuntimeEnv(backend.Name, backend.Profile, request.RuntimeEnv); err != nil {
+			return "", err
+		}
 		runtimeBackend, err := runtimes.ForRuntime(request.Runtime)
 		if err != nil {
 			return "", operations.Permanent("runtime_backend_unavailable", err)
@@ -702,7 +707,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -710,6 +715,9 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		backend, backendErr := backends.ForAdapter(request.Cloud, request.Runtime, request.ProviderAdapter)
 		if backendErr != nil {
 			return "", operations.Permanent("provider_backend_unavailable", backendErr)
+		}
+		if envErr := refuseUnpassedRuntimeEnv(backend.Name, backend.Profile, request.RuntimeEnv); envErr != nil {
+			return "", envErr
 		}
 		runtimeBackend, runtimeErr := runtimes.ForRuntime(request.Runtime)
 		if runtimeErr != nil {
@@ -1097,6 +1105,9 @@ func mustJSON(value any) string {
 }
 
 func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (targetName, endpoint, resourceID string, resultErr error) {
+	if err := refuseUnpassedRuntimeEnv(backend.Name, backend.Profile, request.RuntimeEnv); err != nil {
+		return "", "", "", err
+	}
 	started := time.Now().UTC()
 	stageDurationsJSON := "{}"
 	provider, capacity, workerAPIKey, err := backend.resolveProvider(ctx, request.TenantID, request.ComputeConnectionID, request.DeploymentID)
@@ -1132,9 +1143,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		if request.ImmutableModelRevision != "" {
 			modelIdentity = request.Model + "@" + request.ImmutableModelRevision
 		}
-		args, _ := json.Marshal(request.RuntimeArgs)
-		argsSum := sha256.Sum256(args)
-		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgsDigest: "sha256:" + hex.EncodeToString(argsSum[:]), ModelIdentity: modelIdentity, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StageDurationsJSON: stageDurationsJSON, StartedAt: started})
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgsDigest: support.RuntimeArgsDigest(request.RuntimeArgs, request.RuntimeEnv), ModelIdentity: modelIdentity, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StageDurationsJSON: stageDurationsJSON, StartedAt: started})
 	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
@@ -1185,7 +1194,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, RuntimeEnv: request.RuntimeEnv, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)
@@ -1409,6 +1418,16 @@ func collectProviderFields(value any, fields map[string]string) {
 			collectProviderFields(item, fields)
 		}
 	}
+}
+
+// refuseUnpassedRuntimeEnv stops a revision that sets engine environment
+// variables before anything is provisioned on an adapter that would drop
+// them: a replica started without its reviewed switches is not the revision.
+func refuseUnpassedRuntimeEnv(adapter string, profile integration.ProviderProfile, env map[string]string) error {
+	if len(env) == 0 || integration.Supports(profile, integration.CapabilityEngineEnvironment) {
+		return nil
+	}
+	return operations.Permanent("runtime_env_unsupported", fmt.Errorf("provider adapter %q does not pass engine environment variables to the runtime; remove runtime env or choose an adapter that declares the engine_environment capability", adapter))
 }
 
 func decodeCloudRequest(operation domain.Operation) (CloudRequest, error) {

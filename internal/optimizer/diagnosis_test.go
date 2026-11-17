@@ -405,7 +405,7 @@ func TestDiagnosisPlansAMDInstinctGPUsFromTheirReviewedIdentity(t *testing.T) {
 	if !strings.Contains(strings.Join(kv, " "), "--kv-cache-dtype fp8") {
 		t.Fatalf("no FP8 KV cache setup on MI300X: %+v", proposal.Diagnosis)
 	}
-	if proposal.Diagnosis == nil || proposal.Diagnosis.RulesVersion != "diagnosis-technique-rules-v3" {
+	if proposal.Diagnosis == nil || proposal.Diagnosis.RulesVersion != DiagnosisRulesVersion {
 		t.Fatalf("rules version=%+v", proposal.Diagnosis)
 	}
 }
@@ -565,6 +565,178 @@ func TestSummarizeGPUProfileGroupsKernelTime(t *testing.T) {
 	for name, class := range map[string]string{"BatchDecodeWithPagedKVCacheKernel": KernelClassAttention, "fused_moe_kernel": KernelClassGEMM, "Marlin<256>": KernelClassGEMM, "cross_device_reduce_1stage": KernelClassCommunication, "silu_and_mul_kernel": KernelClassOther} {
 		if got := KernelClass(name); got != class {
 			t.Errorf("%s classified %s, want %s", name, got, class)
+		}
+	}
+}
+
+func decodeDiagnosis() *Diagnosis {
+	return testDiagnosis(optimizationreadiness.BottleneckDecode, map[string]float64{optimizationreadiness.SignalRunningPerReplica: 64, "p95_generation": 2600, "p95_latency": 3000, "mean_input_tokens": 800})
+}
+
+func TestDiagnosisPlansAITERKernelsOnlyOnReviewedAMDAccelerators(t *testing.T) {
+	source := catalogSource(t)
+	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "MI355X"} {
+		proposal, err := source.Propose(context.Background(), genericRequest(gpu, decodeDiagnosis()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if order := reasonOrder(proposal); strings.Join(order, ",") != "control,aiter-kernels,fp8-weights" {
+			t.Fatalf("%s order=%v plan=%+v", gpu, order, proposal.Diagnosis)
+		}
+		if err := ValidateProposal(proposal); err != nil {
+			t.Fatalf("%s: %v", gpu, err)
+		}
+		control, aiter := proposal.Candidates[0], proposal.Candidates[1]
+		if len(control.Deployment.Runtime.Env) != 0 || aiter.Deployment.Runtime.Env["VLLM_ROCM_USE_AITER"] != "1" || len(aiter.Deployment.Runtime.Env) != 1 {
+			t.Fatalf("%s env control=%v aiter=%v", gpu, control.Deployment.Runtime.Env, aiter.Deployment.Runtime.Env)
+		}
+		// Only the kernels change: same flags, model, image, and GPU.
+		if strings.Join(aiter.Deployment.Runtime.Args, " ") != strings.Join(control.Deployment.Runtime.Args, " ") || aiter.Deployment.Model != control.Deployment.Model || aiter.Deployment.Resources != control.Deployment.Resources {
+			t.Fatalf("%s AITER setup changed more than the kernels: %+v", gpu, aiter.Deployment)
+		}
+		if !contains(aiter.RequiredEvidence, "answer quality check against the starting setup because this setup swaps the GPU kernels that compute each layer") {
+			t.Fatalf("%s AITER setup skips the quality check: %v", gpu, aiter.RequiredEvidence)
+		}
+		planned := plannedTechnique(t, proposal, TechniqueAITER)
+		if planned.Priority != acceleratorKernelBottleneckPriority || !contains(planned.Rules, RuleAcceleratorKernels) || !strings.Contains(planned.Reason, "87% of p95 request time") || !strings.Contains(planned.Reason, "AMD's AITER kernels") {
+			t.Fatalf("%s planned=%+v", gpu, planned)
+		}
+		if classified := classifyCandidate(aiter); !contains(classified, TechniqueAITER) {
+			t.Fatalf("%s AITER setup classified as %v", gpu, classified)
+		}
+	}
+	// The same diagnosis on NVIDIA, on an unreviewed AMD GPU, or on SGLang,
+	// whose ROCm image already turns AITER on, never names AITER.
+	for _, request := range []Request{genericRequest("H100", decodeDiagnosis()), genericRequest("MI250X", decodeDiagnosis())} {
+		proposal, err := source.Propose(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, planned := range proposal.Diagnosis.Techniques {
+			if planned.Technique == TechniqueAITER {
+				t.Fatalf("%s planned AITER: %+v", request.GPU, proposal.Diagnosis)
+			}
+		}
+	}
+	// A full KV cache or a queue is not kernel time, so AITER is not chosen.
+	for _, diagnosis := range []*Diagnosis{preemptionDiagnosis(), testDiagnosis(optimizationreadiness.BottleneckQueueing, nil)} {
+		proposal, err := source.Propose(context.Background(), genericRequest("MI300X", diagnosis))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if contains(reasonOrder(proposal), TechniqueAITER) {
+			t.Fatalf("%s chose AITER: %v", diagnosis.PrimaryBottleneck, reasonOrder(proposal))
+		}
+	}
+}
+
+func TestDiagnosisAITERFromKernelProfileAndLongPromptsOnly(t *testing.T) {
+	source := catalogSource(t)
+	profiled := testDiagnosis(optimizationreadiness.BottleneckUnattributed, nil)
+	profiled.GPUProfile = &GPUProfileSummary{CaptureID: "capture-mi300x", Tool: "torch-profiler", Revision: 1, CapturedAt: diagnosisWindow, KernelSeconds: 12, Shares: map[string]float64{KernelClassGEMM: 0.62, KernelClassAttention: 0.2, KernelClassOther: 0.18}}
+	proposal, err := source.Propose(context.Background(), genericRequest("MI300X", profiled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned := plannedTechnique(t, proposal, TechniqueAITER)
+	if planned.Priority != acceleratorKernelProfilePriority || !strings.Contains(planned.Reason, "Matrix-multiply kernels took 62% of sampled GPU time") || len(planned.CandidateIDs) != 1 {
+		t.Fatalf("profile planned=%+v", planned)
+	}
+	// A trace analysis of the capture replaces the attention share with its
+	// own finding, as it does for the FP8 KV cache rule.
+	attention := GPUTraceFinding{Rule: TraceRuleAttentionHeavy, Observed: .41, Comparison: ">=", Threshold: .35, Unit: "ratio"}
+	traced := traceDiagnosis(optimizationreadiness.BottleneckUnattributed, nil, traceSummary("attention", nil, attention))
+	traced.GPUProfile.Shares = map[string]float64{KernelClassAttention: .5, KernelClassGEMM: .3, KernelClassOther: .2}
+	proposal, err = source.Propose(context.Background(), genericRequest("MI300X", traced))
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned = plannedTechnique(t, proposal, TechniqueAITER)
+	if planned.Priority != acceleratorKernelProfilePriority || !strings.HasPrefix(planned.Reason, "Attention took 41% of kernel time in the GPU trace (limit 35%).") || strings.Contains(planned.Reason, "sampled GPU time") {
+		t.Fatalf("trace planned=%+v", planned)
+	}
+	traced.GPUProfile.Trace.Findings = nil
+	proposal, err = source.Propose(context.Background(), genericRequest("MI300X", traced))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(reasonOrder(proposal), TechniqueAITER) {
+		t.Fatalf("a trace without an attention finding chose AITER from the profile share: %v", reasonOrder(proposal))
+	}
+	// Short prompts' first-token time is not prompt work, so it chooses nothing.
+	short := testDiagnosis(optimizationreadiness.BottleneckPrefill, map[string]float64{"mean_input_tokens": 300, "p95_ttft": 900, "p95_latency": 1000})
+	proposal, err = source.Propose(context.Background(), genericRequest("MI300X", short))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(reasonOrder(proposal), TechniqueAITER) {
+		t.Fatalf("short prompts chose AITER: %v", reasonOrder(proposal))
+	}
+	long := testDiagnosis(optimizationreadiness.BottleneckPrefill, map[string]float64{"mean_input_tokens": 6000, "p95_ttft": 900, "p95_latency": 1000})
+	proposal, err = source.Propose(context.Background(), genericRequest("MI300X", long))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order := reasonOrder(proposal); strings.Join(order, ",") != "control,aiter-kernels,prefill-chunk-large" {
+		t.Fatalf("long prompts order=%v", order)
+	}
+}
+
+func TestDeriveEnvSkipsNoOpsAgainstTheRecordedDefault(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("MI300X", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := proposal.Candidates[0]
+	request := Request{GPU: "MI300X"}
+	env, why := deriveEnv(control, techniques[TechniqueAITER], request)
+	if why != "" || env["VLLM_ROCM_USE_AITER"] != "1" {
+		t.Fatalf("env=%v why=%q", env, why)
+	}
+	// The derived map is a copy; the starting setup is unchanged.
+	if control.Deployment.Runtime.Env != nil {
+		t.Fatalf("starting setup env changed: %v", control.Deployment.Runtime.Env)
+	}
+	on := control
+	on.Deployment.Runtime.Env = map[string]string{"VLLM_ROCM_USE_AITER": "1"}
+	if _, why = deriveEnv(on, techniques[TechniqueAITER], request); why != "The starting setup already uses this change." {
+		t.Fatalf("already on: %q", why)
+	}
+	// Setting the switch to the engine's recorded default (off) is a no-op.
+	off := technique{id: "aiter-off", env: map[string][]engineVariable{"vllm": {{"VLLM_ROCM_USE_AITER", "0"}}}}
+	if _, why = deriveEnv(control, off, request); !strings.Contains(why, "already vLLM 0.22.1's default on MI300X") {
+		t.Fatalf("default: %q", why)
+	}
+	for name, test := range map[string]struct {
+		mutate func(*Candidate)
+		gpu    string
+		want   string
+	}{
+		"NVIDIA":         {func(*Candidate) {}, "H100", "not an accelerator InferCrane has reviewed"},
+		"engine version": {func(c *Candidate) { c.Deployment.Runtime.Version = "0.23.0" }, "MI300X", "not reviewed for vLLM 0.23.0 on MI300X"},
+		"custom image": {func(c *Candidate) {
+			c.Deployment.Runtime.Workload.Image, c.Deployment.Runtime.Workload.Command = "registry.internal:5000/team/vllm@sha256:"+strings.Repeat("c", 64), []string{"vllm", "serve"}
+		}, "MI300X", "pinned custom image"},
+	} {
+		candidate := control
+		test.mutate(&candidate)
+		if _, why := deriveEnv(candidate, techniques[TechniqueAITER], Request{GPU: test.gpu}); !strings.Contains(why, test.want) {
+			t.Fatalf("%s: %q", name, why)
+		}
+	}
+}
+
+func TestProposalValidationRejectsUnreviewedEngineEnvironment(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("MI300X", decodeDiagnosis()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range []map[string]string{{"HF_TOKEN": "hf_x"}, {"VLLM_ROCM_USE_AITER": "true"}} {
+		tampered := proposal
+		tampered.Candidates = append([]Candidate(nil), proposal.Candidates...)
+		tampered.Candidates[1].Deployment.Runtime.Env = env
+		if err := ValidateProposal(tampered); err == nil || !strings.Contains(err.Error(), "runtime env") {
+			t.Fatalf("env %v accepted: %v", env, err)
 		}
 	}
 }
