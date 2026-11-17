@@ -17196,6 +17196,72 @@
         ]
       }
     },
+    "/api/v1/optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions": {
+      "post": {
+        "operationId": "createOptimizationCandidateChatCompletion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one chat completion to the exact revision of a decided candidate; refused while the run is still measuring it, never recorded as a request trace",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/optimization/campaigns/{id}/report": {
       "get": {
         "operationId": "getOptimizationCampaignReport",
@@ -17724,6 +17790,52 @@
         "summary": "Compile bounded user intent into an editable reviewed configuration",
         "tags": [
           "Planning"
+        ]
+      }
+    },
+    "/api/v1/playground/chat/completions": {
+      "post": {
+        "operationId": "createPlaygroundChatCompletion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatCompletionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one chat completion to an endpoint as the authenticated control-plane principal, on the same routing, admission, quota, billing and recording path as /v1/chat/completions",
+        "tags": [
+          "Inference"
         ]
       }
     },

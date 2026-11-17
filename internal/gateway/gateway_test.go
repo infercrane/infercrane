@@ -733,6 +733,85 @@ func TestCopyResponseStopsAtTerminalSSEMarker(t *testing.T) {
 	}
 }
 
+func TestServeChatAsRunsTheGatewayPathForAnAuthenticatedPrincipal(t *testing.T) {
+	var upstreamAuthorization string
+	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+		upstreamAuthorization = r.Header.Get("Authorization")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["model"] != "upstream-model" || body["tools"] == nil {
+			t.Errorf("upstream payload = %v", body)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n"))}, nil
+	})}
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "tenant-a", DeploymentID: "d1", Alias: "support", UpstreamModel: "upstream-model", RouterURL: "http://router"})
+	directory.Put(routes.Snapshot{TenantID: "tenant-b", DeploymentID: "d2", Alias: "private", UpstreamModel: "other", RouterURL: "http://router"})
+	recorded := &captureRecorder{}
+	quota := &denyRequestQuota{}
+	gateway := &Gateway{Routes: directory, APIKey: "secret", Client: client, Recorder: recorded, Telemetry: &Telemetry{}}
+	member := domain.Principal{ID: "user_1", TenantID: "tenant-a", Role: "viewer", Kind: "human"}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", strings.NewReader(`{"model":"support","stream":true,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"weather"}}]}`))
+	request.Header.Set("Authorization", "Bearer member-session-token")
+	response := httptest.NewRecorder()
+	gateway.ServeChatAs(response, request, member)
+	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("X-Request-ID"), "req_") || !strings.Contains(response.Body.String(), "[DONE]") {
+		t.Fatalf("response=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if upstreamAuthorization != "" {
+		t.Fatalf("member credential reached the runtime: %q", upstreamAuthorization)
+	}
+	recorded.mu.Lock()
+	record := recorded.record
+	recorded.mu.Unlock()
+	if record.TenantID != "tenant-a" || record.RequestID != response.Header().Get("X-Request-ID") || !record.Streaming {
+		t.Fatalf("record=%+v", record)
+	}
+	if gateway.Telemetry.requests.Load() != 1 {
+		t.Fatalf("observed requests=%d", gateway.Telemetry.requests.Load())
+	}
+
+	// Another tenant's endpoint is an unknown alias, exactly as on /v1.
+	foreign := httptest.NewRecorder()
+	gateway.ServeChatAs(foreign, httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", strings.NewReader(`{"model":"private","messages":[]}`)), member)
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("foreign endpoint response=%d %s", foreign.Code, foreign.Body.String())
+	}
+
+	// The tenant quota applies to a member as it does to an API key.
+	gateway.RequestAuthorizer = quota
+	limited := httptest.NewRecorder()
+	gateway.ServeChatAs(limited, httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", strings.NewReader(`{"model":"support","messages":[]}`)), member)
+	if limited.Code != http.StatusTooManyRequests || quota.tenant != "tenant-a" || limited.Header().Get("Retry-After") == "" {
+		t.Fatalf("limited response=%d tenant=%q headers=%v", limited.Code, quota.tenant, limited.Header())
+	}
+}
+
+func TestServeChatAsRefusesMissingIdentityScopeAndForeignEndpoints(t *testing.T) {
+	directory := routes.New()
+	directory.Put(routes.Snapshot{TenantID: "tenant-a", Alias: "support", RouterURL: "http://router"})
+	gateway := &Gateway{Routes: directory, Client: &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		t.Error("a refused request reached the runtime")
+		return nil, errors.New("unreachable")
+	})}}
+	for name, test := range map[string]struct {
+		principal domain.Principal
+		status    int
+	}{
+		"no identity":       {domain.Principal{}, http.StatusUnauthorized},
+		"no tenant":         {domain.Principal{ID: "p", Role: "admin"}, http.StatusUnauthorized},
+		"no read scope":     {domain.Principal{ID: "p", TenantID: "tenant-a", Role: "operator", Scopes: []string{"deploy"}}, http.StatusForbidden},
+		"endpoint restrict": {domain.Principal{ID: "p", TenantID: "tenant-a", Role: "viewer", EndpointNames: []string{"other"}}, http.StatusForbidden},
+	} {
+		response := httptest.NewRecorder()
+		gateway.ServeChatAs(response, httptest.NewRequest(http.MethodPost, "/api/v1/playground/chat/completions", strings.NewReader(`{"model":"support","messages":[]}`)), test.principal)
+		if response.Code != test.status {
+			t.Errorf("%s: response=%d %s", name, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestAuthentication(t *testing.T) {
 	handler := (&Gateway{Routes: routes.New(), APIKey: "secret"}).Handler()
 	recorder := httptest.NewRecorder()

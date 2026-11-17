@@ -351,6 +351,12 @@ type API struct {
 	ProductVersion        string
 	GatewayInstanceID     string
 	OptimizationCosts     optimizationcampaign.CostAuthority
+	// Inference serves a chat completion for an authenticated principal on
+	// the gateway's own path; nil disables POST /playground/chat/completions.
+	Inference PlaygroundInference
+	// CandidatePrompts sends bounded single prompts to a decided campaign
+	// candidate; nil disables the candidate chat route.
+	CandidatePrompts      *CandidatePrompts
 	AcceleratorLabEnabled bool
 	AcceleratorLabCatalog acceleratorlab.CapabilityCatalog
 	AdmissionState        interface {
@@ -575,6 +581,8 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
+	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions", a.auth(authz.Read, a.optimizationCandidateChat))
+	mux.HandleFunc("POST /api/v1/playground/chat/completions", a.auth(authz.Read, a.playgroundChat))
 	mux.HandleFunc("GET /api/v1/notifications/subscriptions", a.auth(authz.Read, a.notificationSubscriptions))
 	mux.HandleFunc("POST /api/v1/notifications/subscriptions", a.auth(authz.ManageSecrets, a.createNotificationSubscription))
 	mux.HandleFunc("PATCH /api/v1/notifications/subscriptions/{id}", a.auth(authz.ManageSecrets, a.updateNotificationSubscription))
