@@ -400,9 +400,21 @@ def deploy_baseline() -> None:
     spec = {"apiVersion": "infercrane.dev/v1", "kind": "Deployment", "name": BASELINE, "model": {"id": MODEL_ID, "revision": MODEL_REVISION}, "runtime": {"engine": "custom-oci", "version": "llama.cpp-server-086942d6", "args": [], "workload": workload()}, "compute": {"mode": "elastic"}, "resources": {"gpu": ACCELERATOR, "gpu_count": 1}, "provider": {"cloud": "kubernetes", "adapter": "kubernetes", "region": ""}, "scaling": {"min_replicas": 1, "max_replicas": 1}, "routing": {"strategy": "round-robin"}}
     path = STATE_DIR / "baseline.yaml"
     path.write_text(json.dumps(spec, indent=2))
-    log("deploy", f"current setup: {MODEL_ID} on llama.cpp with default settings ({BASELINE})")
     spec_digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
+    # `up` rebuilds the model image and Docker builds are not byte-reproducible, so a baseline
+    # left by an earlier `up` (or another checkout) has another image digest and its name
+    # cannot be deployed again. Say so before any work instead of failing on a conflict.
+    if state().get("baseline_spec") != spec_digest and deployment_exists(BASELINE):
+        fail(f"{BASELINE} was deployed from an earlier model image build; start from a clean cluster: make poc-local-down && make poc-local")
+    log("deploy", f"current setup: {MODEL_ID} on llama.cpp with default settings ({BASELINE})")
     cli("deploy", str(path), "--idempotency-key", f"{BASELINE}-{spec_digest}", "--wait", capture=False)
+    save({"baseline_spec": spec_digest})
+
+
+def deployment_exists(name: str) -> bool:
+    listing = api("GET", "/api/v1/deployments")
+    rows = listing.get("data", listing.get("deployments", [])) if isinstance(listing, dict) else listing
+    return any((row.get("name") if isinstance(row, dict) else row) == name for row in rows)
 
 
 # Public production traffic shape: Moonshot AI's Mooncake trace (FAST'25 release,
@@ -876,7 +888,7 @@ def down() -> None:
     left = [name for name in run("docker", "ps", "-a", "--format", "{{.Names}}", capture=True).split() if name.startswith(CLUSTER) or name == REGISTRY]
     if left:
         fail(f"containers left behind: {left}")
-    for name in ("port_forward_pid", "campaign"):
+    for name in ("port_forward_pid", "campaign", "baseline_spec"):
         current.pop(name, None)
     if STATE_FILE.exists():
         STATE_FILE.write_text(json.dumps(current, indent=2))
