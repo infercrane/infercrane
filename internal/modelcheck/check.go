@@ -560,6 +560,9 @@ func memoryFit(model Model, task string, options EvaluateOptions) MemoryFit {
 	required := chosen.PerGPURequiredBytes * int64(chosen.GPUCount)
 	fit.State, fit.GPU, fit.GPUCount, fit.GPUMemoryGiB, fit.RequiredBytes = Fits, &chosen.GPU, &chosen.GPUCount, &chosen.GPUMemoryGiB, &required
 	fit.Reason = fmt.Sprintf("Weights plus KV cache for %d requests at %d tokens fit %d × %s, the fewest and smallest priced GPUs that hold them.", concurrency, contextTokens, chosen.GPUCount, chosen.GPU)
+	if task == TaskEmbeddings {
+		fit.Reason = fmt.Sprintf("The weights fit %d × %s, the fewest and smallest priced GPUs that hold them; an embedding model keeps no KV cache.", chosen.GPUCount, chosen.GPU)
+	}
 	return fit
 }
 
