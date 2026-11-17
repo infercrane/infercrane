@@ -10,7 +10,7 @@ import (
 // the bottleneck signals when the engine reported any, and the evidence.
 func HTML(r Report) ([]byte, error) {
 	var out bytes.Buffer
-	if err := pageTemplate.Execute(&out, newView(r)); err != nil {
+	if err := pageTemplate.Execute(&out, NewView(r)); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
@@ -64,8 +64,8 @@ footer{color:var(--muted);font-size:12.5px;margin-top:32px}
 <section aria-label="Outcomes" class="cards">
 {{range .Rows}}<div class="card">
 <div class="label">{{.Label}}</div>
-<div class="value">{{.Winner}}</div>
-<div class="was">current setup: {{.Baseline}}</div>
+<div class="value">{{.Lead}}</div>
+<div class="was">{{.LeadNote}}</div>
 <span class="pill {{.Tone}}">{{.Change}}{{if .Decision}} · {{.Decision}}{{end}}</span>
 {{if .Noise}}<div class="note">{{.Noise}}</div>{{end}}
 {{if .Reason}}<div class="note">{{.Reason}}</div>{{end}}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -101,7 +102,7 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 		}
 		return ProvisionResult{}, operations.Retryable("optimization_replay_lookup_failed", err)
 	}
-	if err = d.authorizeCost(ctx, candidate.TenantID, draft, budget); err != nil {
+	if err = d.authorizeCost(ctx, candidate, draft, budget); err != nil {
 		return ProvisionResult{}, err
 	}
 	if campaign.Intent == IntentEvolveEndpoint {
@@ -306,9 +307,10 @@ func (d CompositeDriver) provisionNewEndpoint(ctx context.Context, campaign doma
 	request := draftCloudRequest(draft)
 	request.Name = candidateDeploymentName(draft.Name, candidate.ID)
 	request.TenantID, request.Actor = candidate.TenantID, "optimization-campaign"
-	// A candidate is measured directly against its replicas, so it never gets
-	// an endpoint of its own. The customer sees only the endpoint activation
-	// publishes for the winner, and cleanup has no endpoint to leave behind.
+	// A candidate is measured directly against its replicas, so converge
+	// publishes no endpoint for it. The endpoint row the deployment trigger
+	// creates is left out of the customer's endpoint list; the customer sees
+	// only the endpoint activation publishes for the winner.
 	request.NoEndpoint = true
 	encoded, _ := json.Marshal(request)
 	kind := workflows.ConvergeKind
@@ -374,8 +376,23 @@ func (d CompositeDriver) inputs(ctx context.Context, candidateID string, candida
 	return campaign, draft, nil
 }
 
-func (d CompositeDriver) authorizeCost(ctx context.Context, tenant string, draft optimizer.DeploymentDraft, budget Budget) error {
-	return AuthorizeCost(ctx, d.Costs, tenant, draft, budget, d.now())
+// authorizeCost authorizes the provider mutation and keeps the quote that
+// authorized it, so the run's spend can be estimated from the bound rate. A
+// failed write only leaves spend unknown; it never blocks the mutation.
+func (d CompositeDriver) authorizeCost(ctx context.Context, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft, budget Budget) error {
+	quote, err := authorizeQuote(ctx, d.Costs, candidate.TenantID, draft, budget, d.now())
+	if err != nil {
+		return err
+	}
+	recorder, ok := d.Store.(CostQuoteRecorder)
+	if !ok {
+		return nil
+	}
+	encoded, _ := json.Marshal(CostQuoteRecord{HourlyUSD: quote.HourlyUSD, MaxReplicas: max(draft.Scaling.MaxReplicas, 1), Source: quote.Source, ObservedAt: quote.ObservedAt.UTC(), Locked: quote.Locked})
+	if recordErr := recorder.RecordOptimizationCandidateCostQuote(ctx, candidate.TenantID, candidate.CampaignID, candidate.ID, string(encoded)); recordErr != nil {
+		slog.Warn("optimization candidate cost quote was not recorded", "campaign_id", candidate.CampaignID, "candidate_id", candidate.ID, "error", recordErr)
+	}
+	return nil
 }
 
 // AuthorizeCost proves that one candidate's exact maximum execution tuple is
@@ -383,31 +400,36 @@ func (d CompositeDriver) authorizeCost(ctx context.Context, tenant string, draft
 // The API calls this before approval; the durable driver repeats it immediately
 // before every provider mutation so a stale preflight cannot become authority.
 func AuthorizeCost(ctx context.Context, costs CostAuthority, tenant string, draft optimizer.DeploymentDraft, budget Budget, now time.Time) error {
+	_, err := authorizeQuote(ctx, costs, tenant, draft, budget, now)
+	return err
+}
+
+func authorizeQuote(ctx context.Context, costs CostAuthority, tenant string, draft optimizer.DeploymentDraft, budget Budget, now time.Time) (CostQuote, error) {
 	if costs == nil {
-		return operations.Permanent("optimization_cost_authority_unavailable", errors.New("fresh sourced execution pricing is required before provider mutation"))
+		return CostQuote{}, operations.Permanent("optimization_cost_authority_unavailable", errors.New("fresh sourced execution pricing is required before provider mutation"))
 	}
 	if strings.TrimSpace(tenant) == "" {
-		return operations.Permanent("optimization_cost_authority_invalid", errors.New("tenant identity is required for execution pricing"))
+		return CostQuote{}, operations.Permanent("optimization_cost_authority_invalid", errors.New("tenant identity is required for execution pricing"))
 	}
 	now = now.UTC()
 	quote, err := costs.Quote(ctx, tenant, draft, budget.ExpiresAt)
 	if err != nil {
 		if errors.Is(err, pricing.ErrUnavailable) {
-			return operations.Retryable("optimization_cost_quote_unavailable", err)
+			return CostQuote{}, operations.Retryable("optimization_cost_quote_unavailable", err)
 		}
-		return operations.Permanent("optimization_cost_quote_unavailable", err)
+		return CostQuote{}, operations.Permanent("optimization_cost_quote_unavailable", err)
 	}
 	if quote.Source == "" || quote.ObservedAt.IsZero() || quote.ObservedAt.After(now.Add(maximumCostQuoteObservationDelay)) || quote.ValidUntil.Before(now) || quote.HourlyUSD <= 0 || math.IsNaN(quote.HourlyUSD) || math.IsInf(quote.HourlyUSD, 0) {
-		return operations.Permanent("optimization_cost_quote_invalid", errors.New("execution cost quote must be fresh, sourced, finite, and positive"))
+		return CostQuote{}, operations.Permanent("optimization_cost_quote_invalid", errors.New("execution cost quote must be fresh, sourced, finite, and positive"))
 	}
 	projected := quote.HourlyUSD * budget.ExpiresAt.Sub(now).Hours()
 	if quote.HardMaximumCostUSD > 0 && quote.HardMaximumCostUSD < projected {
 		projected = quote.HardMaximumCostUSD
 	}
 	if projected > budget.MaxCostUSD {
-		return operations.Permanent("optimization_cost_cap_exceeded", fmt.Errorf("maximum authorized candidate spend $%.2f is below sourced worst-case $%.2f", budget.MaxCostUSD, projected))
+		return CostQuote{}, operations.Permanent("optimization_cost_cap_exceeded", fmt.Errorf("maximum authorized candidate spend $%.2f is below sourced worst-case $%.2f", budget.MaxCostUSD, projected))
 	}
-	return nil
+	return quote, nil
 }
 
 func (d CompositeDriver) budgetContext(ctx context.Context, budget Budget) (context.Context, context.CancelFunc) {

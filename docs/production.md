@@ -108,18 +108,17 @@ in the deployment secret manager.
 The default Model API catalog is a deliberately small discovery shelf. It publishes model identity
 and explicit unknown states, not managed availability or price claims. A hosted operator can load a
 strict `model-api-catalog/v1` file with `INFERCRANE_MODEL_API_CATALOG_FILE` to attach internal supply
-contracts and InferCrane rate cards. Treat that file as an operational secret: it may contain
-procurement routing, but the customer API collapses it to one `infercrane-standard` service offer,
+contracts and InferCrane rate cards. Treat that file as an operational secret: it names the upstream
+offers behind each model. The customer API collapses it to one `infercrane-standard` service offer,
 standardizes price provenance, and omits internal offer IDs, regions, adapters, URLs, credentials,
 and supplier identities. Invalid or incomplete priced entries fail control-plane startup.
 
-Customer-wallet bindings additionally require an internal input/output cost basis, provenance, an
-RFC3339 rate-card expiry, and a minimum gross-margin floor of at least 15%. The retail rate must
-satisfy that floor for each charged token dimension. Authorization fails before supplier
-transmission when the immutable rate card has expired. Public catalog responses also stop emitting
-expired pricing and downgrade availability to unknown until a fresh contract is installed. See
-[Managed Model API architecture](/architecture/managed-model-apis) for supply lanes, prepaid loss
-limits, and the evidence boundary for capacity-derived pricing.
+Customer-wallet bindings additionally require a complete rate card with an RFC3339 expiry; the
+control API rejects an incomplete one. Authorization fails before supplier transmission when the
+immutable rate card has expired. Public catalog responses also stop emitting expired pricing and
+downgrade availability to unknown until a fresh contract is installed. See
+[Managed Model API architecture](/architecture/managed-model-apis) for supply lanes, prepaid
+credit, and the evidence boundary for capacity-derived pricing.
 
 For a single-host first installation, copy `.env.production.example` to a private path, replace
 every example secret and URL, then render and start the maintained production stack:
@@ -262,11 +261,6 @@ not performance or reliability substitutes for vLLM and vLLM Router.
 Before rollout, qualify the exact PostgreSQL, vLLM, vLLM Router, model, GPU, and provider versions
 with sustained load, streaming cancellation, worker loss, database failover, pod termination,
 and soak tests. Capacity limits must be based on those measurements rather than defaults.
-
-Release maintainers can validate packaging metadata without publishing with `make release-check`.
-With `syft` installed, `make release-artifacts RELEASE_TAG=v1.0.0` creates and
-verifies four exact-version archives, checksums, archive SBOMs, and a generated Homebrew formula
-under `dist/`. It pushes no tag, image, package, or release.
 
 The control-plane API accepts the bootstrap bearer secret or hashed tenant-scoped credentials:
 

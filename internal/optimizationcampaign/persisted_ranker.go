@@ -36,13 +36,26 @@ func (r PersistedRanker) Rank(ctx context.Context, candidate domain.Optimization
 	if err = json.Unmarshal([]byte(campaign.ProposalJSON), &proposal); err != nil {
 		return RankingResult{}, fmt.Errorf("decode immutable campaign proposal: %w", err)
 	}
-	artifactIdentity, err := measuredArtifactIdentity(proposal)
+	lineage, err := optimizer.ProposalLineage(proposal)
 	if err != nil {
 		return RankingResult{}, err
 	}
-	benchmarks, err := r.Store.BenchmarksForModel(ctx, candidate.TenantID, artifactIdentity, 500)
-	if err != nil {
-		return RankingResult{}, err
+	// Benchmarks are stored by the artifact each candidate served, so a
+	// campaign with a derived artifact reads the base model's rows and each
+	// derived artifact's rows.
+	var benchmarks []domain.BenchmarkResult
+	seen := map[string]struct{}{}
+	for _, identity := range append([]string{lineage.Base}, lineage.Derived()...) {
+		rows, readErr := r.Store.BenchmarksForModel(ctx, candidate.TenantID, identity, 500)
+		if readErr != nil {
+			return RankingResult{}, readErr
+		}
+		for _, row := range rows {
+			if _, duplicate := seen[row.ID]; !duplicate {
+				seen[row.ID] = struct{}{}
+				benchmarks = append(benchmarks, row)
+			}
+		}
 	}
 	ranking, err := RankMeasuredCampaign(campaign, benchmarks)
 	if err != nil {

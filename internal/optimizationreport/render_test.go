@@ -2,6 +2,7 @@ package optimizationreport
 
 import (
 	"encoding/json"
+	"html"
 	"strings"
 	"testing"
 
@@ -26,8 +27,8 @@ func orderedIn(t *testing.T, text string, parts ...string) {
 func TestTextLeadsWithOutcomesThenEvidence(t *testing.T) {
 	text := Text(Assemble(winnerFixture().evidence()))
 	orderedIn(t, text,
-		"Roll out “vllm, --max-num-seqs 256”",
-		"Cost per 1M output tokens", "p95 time to first token", "Output tokens/s per user", "Output tokens/s per GPU", "Requests/s", "Answer quality (gsm8k@1)", "Monthly cost at your traffic",
+		"Roll out “Up to 256 concurrent requests”",
+		"Cost per 1M output tokens", "p95 time to first token", "Output tokens/s per user", "Output tokens/s per GPU", "Requests/s", "Answer quality · gsm8k", "Monthly cost at your traffic",
 		"How it was measured", "Noise band: ±3.0% on output throughput", "Load: a replay of your traffic",
 		"Every setup measured", "Bottleneck signals", "\nWinning setup\n", "\nYour current setup\n", "\nEvidence\n", "this report")
 	for _, want := range []string{"−23.1%", "better  noise ±3.0%", "no real difference  noise ±8.0%", "3 of the winner, taken in turns", "PASS", "730-hour month", "--max-num-seqs 256", "1 × H100 · aws eu-central-1 elastic · 1–2 replicas"} {
@@ -114,5 +115,54 @@ func TestFormatting(t *testing.T) {
 	}
 	if duration(7260) != "2h 1m" || duration(95) != "1m 35s" || grouped(1234567) != "1,234,567" {
 		t.Fatal("duration or grouping formatting changed")
+	}
+}
+
+// The answer-quality outcome is named in a few words in the table and the
+// cards. The suite identity, whose version carries a digest, stays in the
+// evidence: a quality evidence entry already names it, or the report adds it.
+func TestAnswerQualityLabelIsShortAndTheSuiteStaysInEvidence(t *testing.T) {
+	const digestSuite = "infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af"
+	tests := []struct {
+		name         string
+		quality      Quality
+		evidence     []EvidenceDigest
+		label        string
+		evidenceName string
+	}{
+		{name: "built-in check", quality: Quality{Source: "infercrane", Eval: digestSuite}, evidence: []EvidenceDigest{{Kind: "winner_quality", Digest: "sha256:aa", Subject: digestSuite + " signed by sha256:7018"}}, label: "Answer quality · InferCrane answer check", evidenceName: "winner quality"},
+		{name: "customer eval", quality: Quality{Source: "customer", Eval: "gsm8k@3"}, label: "Answer quality · gsm8k", evidenceName: "quality eval"},
+		{name: "Release Guard eval", quality: Quality{Basis: BasisReleaseGuard, Eval: "support-tickets@2@sha256:0123"}, evidence: []EvidenceDigest{{Kind: "release_guard", ID: "rg-1", Digest: "sha256:bb", Subject: "decision accept"}}, label: "Answer quality · support-tickets", evidenceName: "quality eval"},
+		{name: "no eval", quality: Quality{Verdict: "UNKNOWN"}, label: "Answer quality"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.quality.Evals = []QualityEval{}
+			report := Report{SchemaVersion: SchemaVersion, CampaignID: "c1", Quality: test.quality, Appendix: Appendix{Evidence: test.evidence}, ReportDigest: "sha256:cc"}
+			view := NewView(report)
+			if got := view.Rows[len(view.Rows)-2].Label; got != test.label {
+				t.Fatalf("label = %q, want %q", got, test.label)
+			}
+			text := Text(report)
+			table, evidence, _ := strings.Cut(text, "\nEvidence\n")
+			if eval := test.quality.Eval; eval != "" {
+				if strings.Contains(table, eval) {
+					t.Fatalf("the suite identity is in the outcome table:\n%s", text)
+				}
+				if !strings.Contains(evidence, eval) || !strings.Contains(evidence, test.evidenceName) {
+					t.Fatalf("evidence lacks %q under %q:\n%s", eval, test.evidenceName, text)
+				}
+				if strings.Count(evidence, eval) != 1 {
+					t.Fatalf("evidence names the suite %d times:\n%s", strings.Count(evidence, eval), text)
+				}
+			}
+			page, err := HTML(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(page), `<div class="label">`+html.EscapeString(test.label)+`</div>`) {
+				t.Fatalf("HTML card label is not %q", test.label)
+			}
+		})
 	}
 }

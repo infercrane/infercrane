@@ -70,7 +70,7 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 			return campaign, false, err
 		}
 		candidate.TenantID, candidate.CampaignID = campaign.TenantID, campaign.ID
-		if _, err = tx.ExecContext(ctx, `INSERT INTO optimization_candidate_runs(id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json,predicted_evidence_json,actual_evidence_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?)`, candidate.ID, candidate.TenantID, candidate.CampaignID, candidate.ProposalCandidateID, candidate.Rank, optimizationcampaign.CandidateProposed, candidate.EvidenceState, candidate.DeploymentSpecJSON, candidate.PredictedEvidenceJSON, candidate.ActualEvidenceJSON, stamp, stamp); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO optimization_candidate_runs(id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json,predicted_evidence_json,actual_evidence_json,state_entered_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,jsonb_build_object(?::text,?::text),?,?)`, candidate.ID, candidate.TenantID, candidate.CampaignID, candidate.ProposalCandidateID, candidate.Rank, optimizationcampaign.CandidateProposed, candidate.EvidenceState, candidate.DeploymentSpecJSON, candidate.PredictedEvidenceJSON, candidate.ActualEvidenceJSON, optimizationcampaign.CandidateProposed, stamp, stamp, stamp); err != nil {
 			return campaign, false, err
 		}
 	}
@@ -187,7 +187,7 @@ func (s *Store) OptimizationCampaigns(ctx context.Context, tenant string, limit 
 }
 
 func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID string) ([]domain.OptimizationCandidateRun, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(lab_evaluation_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(lab_evaluation_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),state_entered_at::text,measurement_progress::text,cost_quote::text,created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID s
 	for rows.Next() {
 		var row domain.OptimizationCandidateRun
 		var created, updated string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.LabEvaluationID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &created, &updated); err != nil {
+		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.LabEvaluationID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &row.StateEnteredAtJSON, &row.MeasurementProgressJSON, &row.CostQuoteJSON, &created, &updated); err != nil {
 			return nil, err
 		}
 		row.CreatedAt, row.UpdatedAt = parseTime(created), parseTime(updated)
@@ -261,7 +261,7 @@ func (s *Store) CancelOptimizationCampaign(ctx context.Context, tenant, id strin
 		}
 		return domain.OptimizationCampaign{}, domain.ErrConflict
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','qualified','guarding','guard_passed')`, optimizationcampaign.CandidateCancelled, stamp, tenant, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE optimization_candidate_runs SET state=?,evidence_state='stale',state_entered_at=`+enteredState+`,updated_at=? WHERE tenant_id=? AND campaign_id=? AND state IN ('proposed','provisioning','ready','measuring','validating','ranked','qualified','guarding','guard_passed')`, optimizationcampaign.CandidateCancelled, optimizationcampaign.CandidateCancelled, optimizationcampaign.CandidateCancelled, stamp, stamp, tenant, id); err != nil {
 		return domain.OptimizationCampaign{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -419,7 +419,7 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	// block it, or the candidate never reaches cleanup and its paid resources
 	// stay allocated.
 	failClosed := to == optimizationcampaign.CandidateFailed
-	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),lab_evaluation_id=COALESCE(NULLIF(?,''),c.lab_evaluation_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND (? OR campaign.approval_expires_at>NOW())))`, to, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.LabEvaluationID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup, failClosed)
+	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs c SET state=?,state_entered_at=`+enteredStateAs("c")+`,evidence_state=CASE WHEN c.evidence_state='modeled' AND ?='unmeasured' THEN 'modeled' ELSE ? END,actual_evidence_json=COALESCE(NULLIF(?,'')::jsonb,c.actual_evidence_json),deployment_name=COALESCE(NULLIF(?,''),c.deployment_name),revision_id=COALESCE(NULLIF(?,''),c.revision_id),benchmark_id=COALESCE(NULLIF(?,''),c.benchmark_id),quality_evidence_id=COALESCE(NULLIF(?,''),c.quality_evidence_id),lab_evaluation_id=COALESCE(NULLIF(?,''),c.lab_evaluation_id),release_guard_evaluation_id=COALESCE(NULLIF(?,''),c.release_guard_evaluation_id),optimized_artifact_id=COALESCE(NULLIF(?,''),c.optimized_artifact_id),failure_code=COALESCE(NULLIF(?,''),c.failure_code),updated_at=? FROM optimization_campaigns campaign WHERE c.tenant_id=? AND c.campaign_id=? AND c.id=? AND c.state=? AND campaign.id=c.campaign_id AND campaign.tenant_id=c.tenant_id AND ((? AND campaign.state IN ('running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed','cancelled','failed','cleaned')) OR (NOT ? AND campaign.state IN ('approved','running','ranked','qualified','guard_passed','rejected','inconclusive','promoted','observed') AND campaign.cancel_requested=FALSE AND (? OR campaign.approval_expires_at>NOW())))`, to, to, to, stamp, evidence, evidence, updates.ActualEvidenceJSON, updates.DeploymentName, updates.RevisionID, updates.BenchmarkID, updates.QualityEvidenceID, updates.LabEvaluationID, updates.ReleaseGuardEvaluationID, updates.OptimizedArtifactID, updates.FailureCode, stamp, tenant, campaignID, candidateID, from, cleanup, cleanup, failClosed)
 	if err != nil {
 		return domain.OptimizationCandidateRun{}, err
 	}
@@ -457,4 +457,80 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 		}
 	}
 	return domain.OptimizationCandidateRun{}, fmt.Errorf("%w: candidate", domain.ErrNotFound)
+}
+
+// enteredState records the first time a candidate enters a state. Candidate
+// states never repeat, so an existing entry is kept rather than overwritten.
+// Its placeholders are the state twice, then the timestamp. The jsonb ?
+// operator is avoided because rebind treats every question mark as a
+// placeholder.
+var enteredState = enteredStateAs("optimization_candidate_runs")
+
+func enteredStateAs(table string) string {
+	return `CASE WHEN ` + table + `.state_entered_at->>? IS NOT NULL THEN ` + table + `.state_entered_at ELSE ` + table + `.state_entered_at || jsonb_build_object(?::text,?::text) END`
+}
+
+// maxMeasurementProgressBytes bounds one candidate's live measurement record.
+// A measurement has at most a few warmups and interleaved runs.
+const maxMeasurementProgressBytes = 32 << 10
+
+// RecordOptimizationMeasurementProgress replaces a measuring candidate's live
+// measurement record. It writes only while the candidate is measuring, so a
+// late write from a superseded worker cannot overwrite a finished candidate;
+// it reports whether the record was written.
+func (s *Store) RecordOptimizationMeasurementProgress(ctx context.Context, tenant, campaignID, candidateID, progressJSON string) (bool, error) {
+	if len(progressJSON) > maxMeasurementProgressBytes || !json.Valid([]byte(progressJSON)) {
+		return false, errors.New("measurement progress must be bounded valid JSON")
+	}
+	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs SET measurement_progress=?::jsonb WHERE tenant_id=? AND campaign_id=? AND id=? AND state=?`, progressJSON, tenant, campaignID, candidateID, optimizationcampaign.CandidateMeasuring)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	return count > 0, nil
+}
+
+// RecordOptimizationCandidateCostQuote keeps the first sourced quote that
+// authorized a candidate's provider mutation. Later retries re-authorize with
+// fresh quotes but never replace the rate the candidate was bound to.
+func (s *Store) RecordOptimizationCandidateCostQuote(ctx context.Context, tenant, campaignID, candidateID, quoteJSON string) error {
+	if len(quoteJSON) > 4096 || !json.Valid([]byte(quoteJSON)) {
+		return errors.New("cost quote must be bounded valid JSON")
+	}
+	_, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs SET cost_quote=?::jsonb WHERE tenant_id=? AND campaign_id=? AND id=? AND cost_quote='{}'::jsonb`, quoteJSON, tenant, campaignID, candidateID)
+	return err
+}
+
+// OptimizationReplicaSpans returns when each replica of a candidate's capacity
+// was created and, once deleted, when it was removed. A revision selects the
+// replicas of that exact revision; otherwise every replica of the named
+// deployment created at or after since is returned.
+func (s *Store) OptimizationReplicaSpans(ctx context.Context, tenant, deploymentName, revisionID string, since time.Time) ([]domain.ReplicaSpan, error) {
+	query := `SELECT r.id,r.created_at,CASE WHEN r.lifecycle_state='deleted' THEN r.updated_at END FROM replicas r JOIN deployments d ON d.id=r.deployment_id AND d.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.revision_id=? ORDER BY r.created_at`
+	values := []any{tenant, revisionID}
+	if revisionID == "" {
+		query = `SELECT r.id,r.created_at,CASE WHEN r.lifecycle_state='deleted' THEN r.updated_at END FROM replicas r JOIN deployments d ON d.id=r.deployment_id AND d.tenant_id=r.tenant_id WHERE r.tenant_id=? AND d.name=? AND d.created_at>=? ORDER BY r.created_at`
+		values = []any{tenant, deploymentName, since.UTC()}
+	}
+	rows, err := s.QueryContext(ctx, query, values...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ReplicaSpan
+	for rows.Next() {
+		var span domain.ReplicaSpan
+		var created string
+		var ended sql.NullString
+		if err = rows.Scan(&span.ReplicaID, &created, &ended); err != nil {
+			return nil, err
+		}
+		span.CreatedAt = parseTime(created)
+		if ended.Valid {
+			value := parseTime(ended.String)
+			span.DeletedAt = &value
+		}
+		out = append(out, span)
+	}
+	return out, rows.Err()
 }

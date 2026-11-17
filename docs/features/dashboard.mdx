@@ -18,6 +18,12 @@ reads PostgreSQL or provider credentials directly.
 - fleet attention, stable endpoints, and concrete deployments;
 - durable operations with reconnectable timelines and cooperative cancellation;
 - Request Inspector and deterministic Doctor findings;
+- the Workbench: send a prompt to an endpoint and read the streamed answer with its time to first
+  token, token counts, and request ID; compare two endpoints, or an endpoint and a run's decided
+  setup, side by side; paste tool definitions and see whether the model's tool call matches the
+  schema; and copy the request as cURL, Python, or TypeScript. The browser never holds an API key:
+  the console server calls `POST /api/v1/playground/chat/completions` as the signed-in member
+  ([Gateway](/features/gateway#prompts-from-the-dashboard));
 - endpoint monitoring for request rate, errors, fallback, TTFT, queueing, latency, and reported token throughput;
 - typed freshness, source, sample count, and availability for every monitoring measurement;
 - Release Guard, benchmark, replay, revision, and replica evidence where available;
@@ -47,9 +53,9 @@ served. The primary paths are ordered by intent:
    bearer credential in the browser or endpoint URL.
 3. **Use a Model API** selects a hosted InferCrane product, creates one API key, and uses the same
    OpenAI-compatible endpoint across the catalog. The customer surface shows only the InferCrane
-   rate, capability, limit, and availability contract. Procurement routing, internal offer IDs,
-   credentials, and upstream rate provenance remain inside the control plane. Prepaid reservation
-   happens before a managed request can leave InferCrane.
+   rate, capability, limit, and availability contract. It does not name the upstream that serves a
+   request or show its offer IDs and credentials. Prepaid reservation happens before a managed
+   request can leave InferCrane.
 
 Teams that want to pay infrastructure vendors directly use the separate **Your infrastructure**
 path. Connecting infrastructure does not make that vendor part of the Model API product catalog,

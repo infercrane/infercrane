@@ -174,6 +174,30 @@ func (g *Gateway) models(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) completions(w http.ResponseWriter, r *http.Request) {
 	g.proxyInference(w, r, "chat", "chat/completions")
 }
+
+// ServeChatAs serves one chat completion for a principal the control plane
+// has already authenticated, such as a signed-in dashboard member. Only the
+// proof of identity differs from POST /v1/chat/completions: routing, endpoint
+// restrictions, admission, quota, billing and request recording are the same
+// code path, and routing still reads no PostgreSQL.
+func (g *Gateway) ServeChatAs(w http.ResponseWriter, r *http.Request, principal domain.Principal) {
+	if principal.ID == "" || principal.TenantID == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		openAIError(w, "Invalid API key", http.StatusUnauthorized, "authentication_error")
+		return
+	}
+	if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, authz.Read) {
+		openAIError(w, "API key is not allowed to invoke inference", http.StatusForbidden, "permission_error")
+		return
+	}
+	serve := func(w http.ResponseWriter, r *http.Request) {
+		g.completions(w, r.WithContext(context.WithValue(r.Context(), principalKey{}, principal)))
+	}
+	if g.Telemetry != nil {
+		serve = g.Telemetry.Observe(serve)
+	}
+	serve(w, r)
+}
 func (g *Gateway) chatBatch(w http.ResponseWriter, r *http.Request) {
 	g.proxyInference(w, r, "batch", "chat/completions/batch")
 }

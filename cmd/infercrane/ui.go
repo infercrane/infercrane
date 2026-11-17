@@ -426,16 +426,17 @@ type uiStyles struct {
 	title, label, subtle, selected, healthyText, warningText, failureText lipgloss.Style
 }
 
+// newUIStyles takes the full-screen views' colors from the CLI's shared
+// instrument palette (style.go), so every command looks the same.
 func newUIStyles(dark bool) uiStyles {
-	choose := lipgloss.LightDark(dark)
+	background := "light"
+	if dark {
+		background = "dark"
+	}
+	p := styledTheme(80, background).palette()
 	styles := uiStyles{
-		accent:  choose(lipgloss.Color("#1D4ED8"), lipgloss.Color("#60A5FA")),
-		healthy: choose(lipgloss.Color("#087F5B"), lipgloss.Color("#44D7B6")),
-		warning: choose(lipgloss.Color("#9A6700"), lipgloss.Color("#F5B942")),
-		failure: choose(lipgloss.Color("#CF222E"), lipgloss.Color("#FF5667")),
-		muted:   choose(lipgloss.Color("#626A73"), lipgloss.Color("#9CA3AD")),
-		text:    choose(lipgloss.Color("#16181B"), lipgloss.Color("#F3F1EA")),
-		border:  choose(lipgloss.Color("#D0D7DE"), lipgloss.Color("#30363D")),
+		accent: p.info, healthy: p.healthy, warning: p.warning, failure: p.failure, muted: p.muted, border: p.line,
+		text: lipgloss.LightDark(dark)(lipgloss.Color("#0a0a0a"), lipgloss.Color("#ededed")),
 	}
 	styles.title = lipgloss.NewStyle().Foreground(styles.text).Bold(true)
 	styles.label = lipgloss.NewStyle().Foreground(styles.muted).Width(14)

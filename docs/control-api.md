@@ -36,6 +36,8 @@ Errors are stable JSON objects:
 | `GET /cli/sessions` | viewer | List the caller's active CLI keys with device and last use; admins see every member's. |
 | `DELETE /cli/sessions/{id}` | owner or admin | Revoke a CLI key. |
 | `DELETE /cli/sessions/current` | CLI key | Revoke the calling CLI key (`infercrane logout`); other credentials get `409 not_cli_session`. |
+| `POST /playground/chat/completions` | viewer | Send one OpenAI chat completion to an endpoint as the authenticated principal. The body, routing, admission, quota, billing, request recording, `X-Request-ID`, and OpenAI-shaped inference errors are those of `POST /v1/chat/completions`; only authentication differs, so a signed-in dashboard member can test an endpoint without an API key. See [Gateway](/features/gateway#prompts-from-the-dashboard). |
+| `POST /optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions` | viewer | Send one chat completion to the exact revision of a decided candidate. Refused with `409` while the run is still measuring it. See [Prompt a decided setup yourself](/features/optimization#prompt-a-decided-setup-yourself). |
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `GET /compute/providers` | viewer | Return execution readiness per provider. `workspace_owned` is computed for the caller and is true only when it may deploy and optimize there without a compute connection. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
@@ -62,6 +64,7 @@ Errors are stable JSON objects:
 | `GET /operations/{id}` | viewer | Inspect durable progress and result. |
 | `GET /operations/{id}/events` | viewer | List ordered durable operation progress events. |
 | `POST /operations/{id}/cancel` | operator | Request cooperative cancellation. |
+| `GET /optimization/accelerator-lab/runs` | viewer | List the organization's Accelerator Lab runs, newest first; optional `campaign_id` (exact) and `limit` (1 to 100, default 20). Returns target, policy, and recorded evidence with digests only; `result_state` is `pending`, `recorded`, or `unreadable`. |
 | `GET /targets` | viewer | List registered tenant targets. |
 | `POST /targets` | operator | Register an existing HTTP(S) inference target. |
 | `GET /orphans` | viewer | List unowned provisioned resources. |

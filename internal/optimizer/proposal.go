@@ -327,6 +327,11 @@ func ValidateProposal(proposal Proposal) error {
 			return errors.New("proposal starting point is incomplete or does not reference a candidate")
 		}
 	}
+	// A campaign measures every candidate against one control, so the
+	// candidates must serve one base model or artifacts built from it.
+	if _, err := ProposalLineage(proposal); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -765,8 +770,14 @@ func (s CatalogSource) expandCheckpointCandidates(baselines []Candidate, request
 			revision = embeddedRevision
 		}
 	}
+	// A pinned revision is the base model every candidate serves. The
+	// reviewed recipe's revision applies only when the request pins none, as
+	// in proposeReviewed; otherwise the proposal would mix two base revisions.
 	if entry, found := findRecipe(s.Recipes, model); found {
-		model, revision = entry.Model, entry.Revision
+		model = entry.Model
+		if revision == "" {
+			revision = entry.Revision
+		}
 	}
 	for _, compatible := range matchingCompatibility(s.Integrations.Compatibility, request) {
 		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
@@ -875,10 +886,10 @@ func validateArtifactSeed(seed ArtifactSeed) error {
 	if seed.CatalogID == "" || seed.Publisher == "" || !slices.Contains(checkpointcatalog.QuantizationTools(), seed.Tool) || seed.ToolVersion == "" || seed.Algorithm == "" || seed.BaseRepository == "" || seed.OutputRepository == "" || seed.LicenseSPDX == "" || len(seed.AcceleratorArchitectures) == 0 || !strings.HasPrefix(seed.SourceURL, "https://huggingface.co/") {
 		return errors.New("publisher artifact candidate has incomplete provenance")
 	}
-	if seed.LineageState != "exact" && seed.LineageState != "publisher_declared" {
+	if seed.LineageState != LineageExact && seed.LineageState != LineagePublisherDeclared {
 		return errors.New("publisher artifact candidate has an unsupported lineage state")
 	}
-	if seed.LineageState == "exact" && !immutableModelRevision(seed.BaseRevision) {
+	if seed.LineageState == LineageExact && !immutableModelRevision(seed.BaseRevision) {
 		return errors.New("publisher artifact exact lineage requires an immutable base revision")
 	}
 	if !immutableModelRevision(seed.OutputRevision) || !sha256Digest(seed.ManifestDigest) || !sha256Digest(seed.ModelCardDigest) || seed.LicenseDigest != "" && !sha256Digest(seed.LicenseDigest) {

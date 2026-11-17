@@ -11,6 +11,9 @@
 | [pgx](https://github.com/jackc/pgx) | PostgreSQL connectivity | MIT | Go driver |
 | [yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) | Deployment files | Apache-2.0 / MIT | Go library |
 | [Cobra](https://github.com/spf13/cobra) | CLI command tree, help, suggestions, and completion | Apache-2.0 | Go library |
+| [Bubble Tea](https://github.com/charmbracelet/bubbletea) | Full-screen terminal views (`ui`, `optimize watch`) | MIT | Go library |
+| [Lip Gloss](https://github.com/charmbracelet/lipgloss) | Terminal styling, cards, and layout for human CLI output | MIT | Go library |
+| [colorprofile](https://github.com/charmbracelet/colorprofile), [x/term](https://github.com/charmbracelet/x), [x/ansi](https://github.com/charmbracelet/x) | Terminal color depth, TTY and width detection, and ANSI-aware text width; already used by Lip Gloss | MIT | Go libraries |
 | [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework) | Terraform protocol and resource implementation | MPL-2.0 | Separate provider module; communicates only with the control API |
 | [Terraform Plugin Testing](https://github.com/hashicorp/terraform-plugin-testing) | Real protocol CRUD/import acceptance | MPL-2.0 | Development-only provider test dependency |
 | [Terraform CLI](https://github.com/hashicorp/terraform) | Protocol acceptance runner | BSL-1.1 for current releases | Downloaded, checksum-verified development tool; never linked, embedded, or redistributed |

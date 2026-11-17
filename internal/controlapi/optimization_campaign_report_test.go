@@ -62,6 +62,11 @@ func (f *fakeReportStore) ReleaseGuardEvaluationsByIDs(_ context.Context, tenant
 	return map[string]domain.ReleaseGuardEvaluation{}, nil
 }
 
+func (f *fakeReportStore) LabEvaluationsByIDs(_ context.Context, tenant string, _ []string) (map[string]domain.LabEvaluation, error) {
+	f.saw(tenant)
+	return map[string]domain.LabEvaluation{}, nil
+}
+
 func (f *fakeReportStore) ReplayTraceByDigest(_ context.Context, tenant, _ string) (domain.ReplayTrace, error) {
 	f.saw(tenant)
 	return domain.ReplayTrace{}, domain.ErrNotFound

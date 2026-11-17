@@ -95,3 +95,35 @@ func (s *Store) ReleaseGuardEvaluationsByIDs(ctx context.Context, tenant string,
 	}
 	return out, rows.Err()
 }
+
+// LabEvaluationsByIDs returns the tenant's Lab evaluations with the given
+// IDs, keyed by ID. A campaign ranking is one: it keeps each candidate's
+// ranking decision after cleanup rewrites the candidate states.
+func (s *Store) LabEvaluationsByIDs(ctx context.Context, tenant string, ids []string) (map[string]domain.LabEvaluation, error) {
+	if tenant == "" {
+		tenant = "global"
+	}
+	unique, err := evidenceIDs(ids, "Lab evaluation")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]domain.LabEvaluation, len(unique))
+	if len(unique) == 0 {
+		return out, nil
+	}
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,model_identity,algorithm_version,input_json::text,results_json::text,input_digest,created_at FROM lab_evaluations WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var value domain.LabEvaluation
+		var created string
+		if err = rows.Scan(&value.ID, &value.TenantID, &value.ModelIdentity, &value.AlgorithmVersion, &value.InputJSON, &value.ResultsJSON, &value.InputDigest, &created); err != nil {
+			return nil, err
+		}
+		value.CreatedAt = parseTime(created)
+		out[value.ID] = value
+	}
+	return out, rows.Err()
+}

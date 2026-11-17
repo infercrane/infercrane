@@ -1155,7 +1155,7 @@ func TestWaitFailureIncludesDurableErrorAndInspectionCommand(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := waitForOperation(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-failed", false)
+	_, err := waitForOperation(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-failed", progressNone)
 	if err == nil || !strings.Contains(err.Error(), "[provider_ensure_failed]") || !strings.Contains(err.Error(), "4/120 attempts") || !strings.Contains(err.Error(), "infercrane operation op-failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1168,7 +1168,7 @@ func TestWaitTimeoutDisconnectsWithoutCancellingDurableOperation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-running", false)
+	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-running", progressNone)
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "operation op-running continues") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1180,7 +1180,7 @@ func TestWaitTimeoutDuringControlPlanePollStillExplainsDurability(t *testing.T) 
 	}))
 	defer server.Close()
 
-	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-slow", false)
+	_, err := waitForOperationWithin(context.Background(), 20*time.Millisecond, config.Config{ControlURL: server.URL, APIKey: "secret"}, "op-slow", progressNone)
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "operation op-slow continues safely") || strings.Contains(err.Error(), "is unreachable") {
 		t.Fatalf("unexpected error: %v", err)
 	}

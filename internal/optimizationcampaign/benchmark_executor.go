@@ -51,6 +51,9 @@ type BenchmarkExecutor struct {
 	Now          func() time.Time
 	// Entropy supplies the per-measurement seed base; nil uses crypto/rand.
 	Entropy io.Reader
+	// Progress records each invocation while the candidate measures; nil
+	// records nothing. It is display evidence and never affects the result.
+	Progress MeasurementProgressSink
 }
 
 func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, profile performanceprofile.Profile) (domain.BenchmarkResult, error) {
@@ -107,7 +110,11 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 		return domain.BenchmarkResult{}, err
 	}
 	started := e.now()
-	measured, err := measureInterleaved(ctx, runs, target, control, controlEvidence)
+	var tracker *progressTracker
+	if e.Progress != nil {
+		tracker = newProgressTracker(e.Progress, candidate, e.now)
+	}
+	measured, err := measureInterleaved(ctx, runs, target, control, controlEvidence, tracker)
 	ended := e.now()
 	if err != nil {
 		return domain.BenchmarkResult{}, err

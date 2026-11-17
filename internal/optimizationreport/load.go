@@ -21,6 +21,7 @@ type Store interface {
 	BenchmarksByIDs(context.Context, string, []string) (map[string]domain.BenchmarkResult, error)
 	QualityEvidenceByIDs(context.Context, string, []string) (map[string]domain.QualityEvidence, error)
 	ReleaseGuardEvaluationsByIDs(context.Context, string, []string) (map[string]domain.ReleaseGuardEvaluation, error)
+	LabEvaluationsByIDs(context.Context, string, []string) (map[string]domain.LabEvaluation, error)
 	ReplayTraceByDigest(context.Context, string, string) (domain.ReplayTrace, error)
 }
 
@@ -33,11 +34,12 @@ func Load(ctx context.Context, store Store, tenant, campaignID string) (Report, 
 	if err != nil {
 		return Report{}, err
 	}
-	var benchmarkIDs, qualityIDs, guardIDs []string
+	var benchmarkIDs, qualityIDs, guardIDs, rankingIDs []string
 	for _, run := range campaign.Candidates {
 		benchmarkIDs = append(benchmarkIDs, run.BenchmarkID)
 		qualityIDs = append(qualityIDs, run.QualityEvidenceID)
 		guardIDs = append(guardIDs, run.ReleaseGuardEvaluationID)
+		rankingIDs = append(rankingIDs, run.LabEvaluationID)
 	}
 	evidence := Evidence{Campaign: campaign}
 	if evidence.Benchmarks, err = store.BenchmarksByIDs(ctx, tenant, benchmarkIDs); err != nil {
@@ -48,6 +50,9 @@ func Load(ctx context.Context, store Store, tenant, campaignID string) (Report, 
 	}
 	if evidence.ReleaseGuard, err = store.ReleaseGuardEvaluationsByIDs(ctx, tenant, guardIDs); err != nil {
 		return Report{}, fmt.Errorf("read campaign Release Guard evidence: %w", err)
+	}
+	if evidence.Rankings, err = store.LabEvaluationsByIDs(ctx, tenant, rankingIDs); err != nil {
+		return Report{}, fmt.Errorf("read campaign rankings: %w", err)
 	}
 	if digest, bound := replayDigest(campaign); bound {
 		if digest == "" {

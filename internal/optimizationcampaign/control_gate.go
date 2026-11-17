@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
@@ -268,13 +269,17 @@ type annotatedRow struct {
 	lab.Candidate
 	CandidateID      string `json:"candidate_id"`
 	CampaignDecision string `json:"campaign_decision,omitempty"`
+	// ArtifactLineage is set only on a row that served an artifact derived
+	// from the control's model, such as a quantized checkpoint: exact, or
+	// publisher_declared when the source revision is unknown.
+	ArtifactLineage string `json:"artifact_lineage,omitempty"`
 	ControlAssessment
 }
 
 // annotateEvaluation persists the gate beside Lab's rows. Selection follows
 // the campaign decision, so a reader never sees Lab's point-estimate winner
 // marked selected after the gate kept the control.
-func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, evidenceToCandidate map[string]string, gate controlGate, decisions, reasons map[string]string) (domain.LabEvaluation, error) {
+func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, evidenceToCandidate, derivedLineage map[string]string, gate controlGate, decisions, reasons map[string]string) (domain.LabEvaluation, error) {
 	annotated := make([]annotatedRow, 0, len(rows))
 	for _, row := range rows {
 		candidateID := evidenceToCandidate[row.EvidenceID]
@@ -282,7 +287,7 @@ func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, e
 		if reason := reasons[candidateID]; reason != "" && row.Comparable {
 			row.SelectionReason = reason
 		}
-		annotated = append(annotated, annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ControlAssessment: gate.assessments[candidateID]})
+		annotated = append(annotated, annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ArtifactLineage: derivedLineage[candidateID], ControlAssessment: gate.assessments[candidateID]})
 	}
 	encoded, err := json.Marshal(annotated)
 	if err != nil {
@@ -291,4 +296,26 @@ func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, e
 	evaluation.ResultsJSON = string(encoded)
 	evaluation.AlgorithmVersion = lab.AlgorithmVersion + "+" + RankingAlgorithmVersion
 	return evaluation, nil
+}
+
+// RankingDecisions reads the campaign decision per candidate ID back from a
+// persisted ranking. The ranking is immutable and outlives cleanup, which
+// rewrites every candidate state, so it is what still says which candidate a
+// finished campaign selected. A candidate the ranking did not decide is
+// absent.
+func RankingDecisions(evaluation domain.LabEvaluation) (map[string]string, error) {
+	var rows []struct {
+		CandidateID      string `json:"candidate_id"`
+		CampaignDecision string `json:"campaign_decision"`
+	}
+	if err := json.Unmarshal([]byte(evaluation.ResultsJSON), &rows); err != nil {
+		return nil, fmt.Errorf("decode campaign ranking: %w", err)
+	}
+	decisions := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if row.CandidateID != "" && row.CampaignDecision != "" {
+			decisions[row.CandidateID] = strings.ToUpper(row.CampaignDecision)
+		}
+	}
+	return decisions, nil
 }

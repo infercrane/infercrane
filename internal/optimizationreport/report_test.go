@@ -43,6 +43,7 @@ type fixture struct {
 	arms                     []armFixture
 	replay                   *domain.ReplayTrace
 	guard                    map[string]domain.ReleaseGuardEvaluation
+	rankings                 map[string]domain.LabEvaluation
 }
 
 func hourly(value float64) *float64 { return &value }
@@ -74,7 +75,7 @@ func (f fixture) evidence() Evidence {
 	}
 	proposalJSON, _ := json.Marshal(proposal)
 	campaign := domain.OptimizationCampaign{ID: "campaign-1", TenantID: "tenant-a", InputDigest: strings.Repeat("c", 64), ModelIdentity: fixtureModel, Objective: f.objective, Intent: f.intent, State: f.state, ProposalJSON: string(proposalJSON)}
-	evidence := Evidence{Benchmarks: map[string]domain.BenchmarkResult{}, Quality: map[string]domain.QualityEvidence{}, ReleaseGuard: f.guard, Replay: f.replay}
+	evidence := Evidence{Benchmarks: map[string]domain.BenchmarkResult{}, Quality: map[string]domain.QualityEvidence{}, ReleaseGuard: f.guard, Rankings: f.rankings, Replay: f.replay}
 	workloadSource := "synthetic_profile"
 	if f.source == optimizer.WorkloadSourceCustomerObserved {
 		workloadSource = "customer_replay"
@@ -188,7 +189,7 @@ func TestAssembleComparesWinnerWithBaselineMeasuredInTheSameWindow(t *testing.T)
 	if report.Outcome.Kind != OutcomeWinnerSelected || report.Outcome.WinnerCandidateID != "winner" || report.Outcome.BaselineCandidateID != "control" || !report.Finished {
 		t.Fatalf("outcome = %+v finished=%v", report.Outcome, report.Finished)
 	}
-	if report.Outcome.Headline != "Roll out “vllm, --max-num-seqs 256”: it measured better than your current setup on the same traffic." {
+	if report.Outcome.Headline != "Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic." {
 		t.Fatalf("headline = %q", report.Outcome.Headline)
 	}
 	if report.SimulatedAccelerator || report.Banner != "" {
@@ -280,7 +281,7 @@ func TestActivatedWinnerHeadlineAndRankingDigest(t *testing.T) {
 	f.state, f.arms[1].state = optimizationcampaign.CampaignPromoted, optimizationcampaign.CandidatePromoted
 	f.arms[0].labID, f.arms[1].labID = "lab-row-7", "lab-row-7"
 	report := Assemble(f.evidence())
-	if !report.Outcome.Activated || report.Outcome.Headline != "“vllm, --max-num-seqs 256” is live: it measured better than your previous setup on the same traffic." {
+	if !report.Outcome.Activated || report.Outcome.Headline != "“Up to 256 concurrent requests” is live: it measured better than your previous setup on the same traffic." {
 		t.Fatalf("outcome = %+v", report.Outcome)
 	}
 	for _, entry := range report.Appendix.Evidence {
@@ -652,7 +653,7 @@ func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T
 	}
 	text := Text(report)
 	for _, want := range []string{
-		"vllm, default settings [current setup, kept] · kept · nothing to activate",
+		"vLLM defaults [current setup, kept] · kept · nothing to activate",
 		"· rejected · throughput got worse by 24% (noise ±7.3%), latency got worse by 55% (noise ±6.9%)",
 		"· rejected · throughput got worse by 25% (noise ±1.7%), first-token time got worse by 14% (noise ±5.1%)",
 	} {
@@ -668,5 +669,156 @@ func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T
 	ngram := report.Candidates[1]
 	if len(ngram.Regressions) != 2 || ngram.Regressions[0].Basis != optimizationcampaign.RegressionBasisDriftedControl || ngram.VersusBaseline != nil {
 		t.Fatalf("ngram = %+v", ngram)
+	}
+}
+
+// ranking is a persisted campaign ranking in the shape the ranker writes:
+// one row per ranked candidate with its campaign decision.
+func ranking(id string, decisions map[string]string) domain.LabEvaluation {
+	rows := []map[string]any{}
+	for candidate, decision := range decisions {
+		rows = append(rows, map[string]any{"candidate_id": candidate, "campaign_decision": decision, "selected": decision == optimizationcampaign.RankSelect})
+	}
+	encoded, _ := json.Marshal(rows)
+	return domain.LabEvaluation{ID: id, TenantID: "tenant-a", ResultsJSON: string(encoded)}
+}
+
+// cleanedFixture is winnerFixture after cleanup: every candidate is cleaned
+// and only the persisted ranking still says which one the campaign selected.
+// The control and the winner were ranked together; "same" lost earlier.
+func cleanedFixture(selected string) fixture {
+	f := winnerFixture()
+	f.state = optimizationcampaign.CampaignCleaned
+	labID := f.arms[0].labID
+	decisions := map[string]string{}
+	for index := range f.arms {
+		f.arms[index].state = optimizationcampaign.CandidateCleaned
+		if f.arms[index].labID == "" {
+			continue
+		}
+		decisions[f.arms[index].id] = optimizationcampaign.RankSupersede
+		f.arms[index].failure = "measured_candidate_superseded"
+		if f.arms[index].id == selected {
+			decisions[f.arms[index].id] = optimizationcampaign.RankSelect
+			f.arms[index].failure = ""
+		}
+	}
+	f.rankings = map[string]domain.LabEvaluation{labID: ranking(labID, decisions)}
+	return f
+}
+
+// cardValues returns the large value of every outcome card on the HTML page.
+func cardValues(t *testing.T, report Report) []string {
+	t.Helper()
+	page, err := HTML(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := []string{}
+	for _, part := range strings.Split(string(page), `<div class="value">`)[1:] {
+		values = append(values, part[:strings.Index(part, "</div>")])
+	}
+	return values
+}
+
+func TestCleanedCampaignStillReportsTheBaselineItKept(t *testing.T) {
+	report := Assemble(cleanedFixture("control").evidence())
+	if report.Outcome.Kind != OutcomeBaselineKept || report.Outcome.Activated || report.Outcome.BaselineCandidateID != "control" || report.Outcome.WinnerCandidateID != "control" {
+		t.Fatalf("outcome = %+v", report.Outcome)
+	}
+	if report.Outcome.Headline != "Keep your current setup: nothing beat it by more than the measurement noise." {
+		t.Fatalf("headline = %q", report.Outcome.Headline)
+	}
+	for _, metric := range report.Metrics {
+		if metric.Decision != DecisionUnchanged || metric.Baseline == nil || metric.Winner == nil || *metric.Baseline != *metric.Winner {
+			t.Fatalf("kept baseline metric after cleanup = %+v", metric)
+		}
+	}
+	if metric := metricByKey(t, report, MetricTTFTP95); !near(metric.Baseline, 410) {
+		t.Fatalf("kept p95 TTFT = %+v", metric)
+	}
+	if report.Quality.Basis != BasisBaselineKept || report.Monthly.Decision != DecisionUnchanged || report.Candidates[0].Role != "baseline_kept" {
+		t.Fatalf("quality=%+v monthly=%+v candidates=%+v", report.Quality, report.Monthly, report.Candidates)
+	}
+	if values := cardValues(t, report); slices.Contains(values, "unknown") || values[1] != "410 ms" {
+		t.Fatalf("outcome cards = %v", values)
+	}
+}
+
+func TestCleanedCampaignReportsAWinnerThatWasNeverRolledOut(t *testing.T) {
+	waiting := Assemble(winnerFixture().evidence())
+	for name, f := range map[string]fixture{
+		"approval ended": func() fixture {
+			f := cleanedFixture("winner")
+			f.arms[1].failure = "approval_expired_before_activation"
+			return f
+		}(),
+		"cancelled before cleanup": func() fixture {
+			f := cleanedFixture("winner")
+			f.state, f.arms[1].state, f.arms[1].failure = optimizationcampaign.CampaignCancelled, optimizationcampaign.CandidateCancelled, "execution_cancelled"
+			return f
+		}(),
+		"evolution guard accepted": func() fixture {
+			f := cleanedFixture("winner")
+			f.intent, f.arms[1].guardID = optimizationcampaign.IntentEvolveEndpoint, "guard-1"
+			f.guard = map[string]domain.ReleaseGuardEvaluation{"guard-1": {ID: "guard-1", Decision: "ACCEPT", MetricsJSON: `{}`}}
+			return f
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			report := Assemble(f.evidence())
+			if report.Outcome.Kind != OutcomeWinnerSelected || report.Outcome.WinnerCandidateID != "winner" || report.Outcome.Activated {
+				t.Fatalf("outcome = %+v", report.Outcome)
+			}
+			want := "“Up to 256 concurrent requests” was the best setup found but was not rolled out: it measured better than your current setup on the same traffic; "
+			if !strings.HasPrefix(report.Outcome.Headline, want) || strings.Contains(Text(report), "Roll out") {
+				t.Fatalf("headline = %q", report.Outcome.Headline)
+			}
+			why := map[string]string{"approval ended": "its server was removed because the approval ended.", "cancelled before cleanup": "its server is being removed because the run was cancelled.", "evolution guard accepted": "its server was removed."}[name]
+			if !strings.HasSuffix(report.Outcome.Headline, why) {
+				t.Fatalf("headline does not say what happened to the server: %q", report.Outcome.Headline)
+			}
+			for index, metric := range report.Metrics {
+				if before := waiting.Metrics[index]; !near(metric.Winner, *before.Winner) || !near(metric.Baseline, *before.Baseline) || metric.Decision != before.Decision {
+					t.Fatalf("metric after cleanup = %+v, before = %+v", metric, before)
+				}
+			}
+			if report.Candidates[1].Role != "winner" {
+				t.Fatalf("candidates = %+v", report.Candidates)
+			}
+		})
+	}
+}
+
+func TestCleanedCampaignWithoutAProvenWinnerStaysWithoutOne(t *testing.T) {
+	for name, mutate := range map[string]func(*fixture){
+		"no ranking recorded":     func(f *fixture) { f.rankings = nil },
+		"ranking selected none":   func(f *fixture) { f.rankings = cleanedFixture("nobody").rankings },
+		"gate failed it":          func(f *fixture) { f.arms[1].failure = "quality_gate_rejected" },
+		"answers failed":          func(f *fixture) { f.arms[1].quality.Passed = false },
+		"never measured":          func(f *fixture) { f.arms[1].tps = 0 },
+		"not released":            func(f *fixture) { f.arms[1].state = optimizationcampaign.CandidateRejected },
+		"evolution without guard": func(f *fixture) { f.intent = optimizationcampaign.IntentEvolveEndpoint },
+		"evolution guard rejected": func(f *fixture) {
+			f.intent, f.arms[1].guardID = optimizationcampaign.IntentEvolveEndpoint, "guard-1"
+			f.guard = map[string]domain.ReleaseGuardEvaluation{"guard-1": {ID: "guard-1", Decision: "REJECT", MetricsJSON: `{}`}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := cleanedFixture("winner")
+			mutate(&f)
+			report := Assemble(f.evidence())
+			if report.Outcome.Kind != OutcomeNoWinner || report.Outcome.WinnerCandidateID != "" || report.Outcome.Headline != "No setup qualified. Nothing changes in production." {
+				t.Fatalf("outcome = %+v", report.Outcome)
+			}
+			ttft := metricByKey(t, report, MetricTTFTP95)
+			if !near(ttft.Baseline, 410) || ttft.Winner != nil {
+				t.Fatalf("p95 TTFT = %+v", ttft)
+			}
+			// The cards lead with what the current setup measured.
+			if values := cardValues(t, report); values[1] != "410 ms" || !strings.Contains(Text(report), "410 ms") {
+				t.Fatalf("outcome cards = %v", values)
+			}
+		})
 	}
 }

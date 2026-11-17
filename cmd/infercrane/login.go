@@ -173,7 +173,11 @@ func loginCommand(ctx context.Context, args []string) error {
 	if expires <= 0 {
 		expires = clilogin.RequestTTL
 	}
-	fmt.Fprintf(loginOutput, "%s Your one-time code: %s\n", terminalColor("33", "!"), terminalColor("1", started.UserCode))
+	progress := plainTheme
+	if file, ok := loginOutput.(*os.File); ok {
+		progress = themeFor(file, *output)
+	}
+	fmt.Fprintf(loginOutput, "%s Your one-time code: %s\n", progress.tone(toneWatch, "!"), progress.title(started.UserCode))
 	fmt.Fprintln(loginOutput, "  Check that the dashboard shows the same code before you approve.")
 	opened := false
 	if !*noBrowser {
@@ -215,7 +219,7 @@ func loginCommand(ctx context.Context, args []string) error {
 	if who == "" {
 		who = exchange.Principal.Name
 	}
-	fmt.Printf("%s Signed in to %s as %s (%s, tenant %s)\n", terminalColor("32", "✓"), target.ControlURL, who, exchange.Principal.Role, exchange.Principal.TenantID)
+	fmt.Printf("%s Signed in to %s as %s (%s, tenant %s)\n", outputTheme(*output).tone(toneGood, "✓"), target.ControlURL, who, exchange.Principal.Role, exchange.Principal.TenantID)
 	fmt.Printf("  Context    %s\n", stored.Context)
 	if stored.Store == config.CredentialFromConfigFile {
 		reason := "no OS keychain was available"
@@ -346,7 +350,7 @@ func logoutCommand(ctx context.Context, args []string) error {
 		fmt.Println(string(encoded))
 		return nil
 	}
-	fmt.Printf("%s Signed out of %s (context %s)\n", terminalColor("32", "✓"), target.ControlURL, cleared.Context)
+	fmt.Printf("%s Signed out of %s (context %s)\n", outputTheme(*output).tone(toneGood, "✓"), target.ControlURL, cleared.Context)
 	switch revocation {
 	case "revoked":
 		fmt.Println("  The key was revoked on the control plane.")
