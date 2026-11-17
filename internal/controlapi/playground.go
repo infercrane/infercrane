@@ -110,17 +110,17 @@ func (a API) playgroundChat(w http.ResponseWriter, r *http.Request) {
 func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(candidatePromptStore)
 	if !ok || a.CandidatePrompts == nil {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "candidate prompts are not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "setup prompts are not configured")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaign, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be loaded")
 		return
 	}
 	var candidate domain.OptimizationCandidateRun
@@ -131,14 +131,14 @@ func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if candidate.ID == "" {
-		writeError(w, http.StatusNotFound, "not_found", "optimization candidate was not found")
+		writeError(w, http.StatusNotFound, "not_found", "setup was not found")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, candidatePromptBodyLimit))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "candidate prompts are limited to 1 MiB")
+			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "setup prompts are limited to 1 MiB")
 			return
 		}
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body could not be read")
@@ -160,22 +160,22 @@ func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 	target, err := optimizationcampaign.CandidateChatTarget(r.Context(), store, backends, candidate)
 	switch {
 	case errors.Is(err, optimizationcampaign.ErrCandidateUndecided):
-		writeError(w, http.StatusConflict, "candidate_not_decided", "a candidate can be prompted once the run has decided, so a prompt never runs beside a measurement")
+		writeError(w, http.StatusConflict, "candidate_not_decided", "a setup can be prompted once the run has decided, so a prompt never runs beside a measurement")
 		return
 	case errors.Is(err, optimizationcampaign.ErrCandidateStopped):
-		writeError(w, http.StatusConflict, "candidate_not_running", "this candidate is no longer running")
+		writeError(w, http.StatusConflict, "candidate_not_running", "this setup is no longer running")
 		return
 	case errors.Is(err, optimizationcampaign.ErrCandidateUnreachable):
 		w.Header().Set("Retry-After", "5")
-		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the candidate has no healthy replica to answer right now")
+		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the setup has no healthy replica to answer right now")
 		return
 	case err != nil:
-		writeError(w, http.StatusInternalServerError, "internal", "candidate could not be resolved")
+		writeError(w, http.StatusInternalServerError, "internal", "setup could not be resolved")
 		return
 	}
 	url, err := openaicompat.Endpoint(target.Endpoint, "chat/completions")
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the candidate's address is not usable")
+		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the setup's address is not usable")
 		return
 	}
 	release, ok := a.CandidatePrompts.acquire(actor.TenantID)
@@ -197,7 +197,7 @@ func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the candidate's address is not usable")
+		writeError(w, http.StatusServiceUnavailable, "candidate_unavailable", "the setup's address is not usable")
 		return
 	}
 	upstream.Header.Set("Content-Type", "application/json")
@@ -209,10 +209,10 @@ func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 	response, err := a.CandidatePrompts.client().Do(upstream)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			writeError(w, http.StatusGatewayTimeout, "candidate_timeout", "the candidate did not answer in time")
+			writeError(w, http.StatusGatewayTimeout, "candidate_timeout", "the setup did not answer in time")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "candidate_upstream_error", "the candidate could not be reached")
+		writeError(w, http.StatusBadGateway, "candidate_upstream_error", "the setup could not be reached")
 		return
 	}
 	defer response.Body.Close()

@@ -1513,7 +1513,7 @@ func (a API) kernelOpportunities(w http.ResponseWriter, r *http.Request) {
 func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -1536,7 +1536,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	if request.Proposal.Input.ComputeConnectionID != "" && actor.ID != "bootstrap" {
 		if a.ComputeConnections == nil {
-			writeError(w, http.StatusConflict, "compute_connection_required", "optimization campaign storage cannot validate the selected compute connection")
+			writeError(w, http.StatusConflict, "compute_connection_required", "optimization run storage cannot validate the selected compute connection")
 			return
 		}
 		connection, connectionErr := a.ComputeConnections.Get(r.Context(), actor.TenantID, request.Proposal.Input.ComputeConnectionID)
@@ -1575,7 +1575,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 	for _, candidate := range request.Proposal.Candidates {
 		deployment, marshalErr := json.Marshal(candidate.Deployment)
 		if marshalErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "candidate deployment could not be encoded")
+			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "setup deployment could not be encoded")
 			return
 		}
 		predictedFields := map[string]any{}
@@ -1594,7 +1594,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		}
 		predicted, marshalErr := json.Marshal(predictedFields)
 		if marshalErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "candidate planning evidence could not be encoded")
+			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "setup planning evidence could not be encoded")
 			return
 		}
 		candidates = append(candidates, domain.OptimizationCandidateRun{ProposalCandidateID: candidate.ID, Rank: candidate.Rank, EvidenceState: string(candidate.EvidenceState), DeploymentSpecJSON: string(deployment), PredictedEvidenceJSON: string(predicted), ActualEvidenceJSON: `{}`})
@@ -1605,7 +1605,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be persisted")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be persisted")
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.create", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
@@ -1620,17 +1620,17 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaign, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be loaded")
 		return
 	}
 	response := optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID])
@@ -1670,17 +1670,17 @@ func (a API) campaignSpend(ctx context.Context, tenant string, campaign domain.O
 func (a API) optimizationCampaignReport(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationreport.Store)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign reports are not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run reports are not configured")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	report, err := optimizationreport.Load(r.Context(), store, actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign report could not be assembled")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run report could not be assembled")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report": report})
@@ -1745,14 +1745,14 @@ func (a API) runAcceleratorLab(w http.ResponseWriter, r *http.Request) {
 func (a API) optimizationCampaigns(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaigns, err := store.OptimizationCampaigns(r.Context(), actor.TenantID, limit)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaigns could not be listed")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization runs could not be listed")
 		return
 	}
 	data := make([]map[string]any, 0, len(campaigns))
@@ -1770,7 +1770,7 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	}
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	var request struct {
@@ -1788,22 +1788,22 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	expiresAt := time.Now().UTC().Add(time.Duration(request.ExpiresInSeconds) * time.Second).Truncate(time.Second)
 	pending, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded for cost authorization")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be loaded for cost authorization")
 		return
 	}
 	if len(pending.Candidates) == 0 {
-		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization campaign has no bounded candidates")
+		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization run has no bounded setups")
 		return
 	}
 	perCandidateBudget := request.MaxCostUSD / float64(len(pending.Candidates))
 	for _, candidate := range pending.Candidates {
 		var draft optimizer.DeploymentDraft
 		if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) != nil {
-			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "campaign candidate deployment specification is invalid")
+			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "a setup's deployment specification is invalid")
 			return
 		}
 		if computeErr := a.validateOptimizationCompute(r.Context(), actor, draft); computeErr != nil {
@@ -1817,11 +1817,11 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	}
 	campaign, err := store.ApproveOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"), actor.Name, request.MaxCostUSD, expiresAt)
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if errors.Is(err, domain.ErrConflict) {
-		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization campaign cannot be approved from its current state")
+		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization run cannot be approved from its current state")
 		return
 	}
 	if err != nil {
@@ -1835,7 +1835,7 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	executionRequest, _ := json.Marshal(optimizationcampaign.ExecuteRequest{TenantID: actor.TenantID, CampaignID: campaign.ID, Candidates: candidateIDs})
 	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-execute:" + campaign.ID, RequestJSON: string(executionRequest), MaxAttempts: 2000})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "optimization_execution_enqueue_failed", "campaign was approved but durable execution could not be queued; retry the same approval")
+		writeError(w, http.StatusInternalServerError, "optimization_execution_enqueue_failed", "run was approved but durable execution could not be queued; retry the same approval")
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
@@ -1845,21 +1845,21 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaign, err := store.CancelOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if errors.Is(err, domain.ErrConflict) {
-		writeError(w, http.StatusConflict, "campaign_state_conflict", "promoted, observed, or cleaned campaigns cannot be cancelled")
+		writeError(w, http.StatusConflict, "campaign_state_conflict", "rolled-out, observed, or cleaned runs cannot be cancelled")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be cancelled")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be cancelled")
 		return
 	}
 	candidateIDs := make([]string, 0, len(campaign.Candidates))
@@ -1869,7 +1869,7 @@ func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 	cleanupRequest, _ := json.Marshal(optimizationcampaign.ExecuteRequest{TenantID: actor.TenantID, CampaignID: campaign.ID, Candidates: candidateIDs})
 	cleanup, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.CleanupKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-cleanup:" + campaign.ID, RequestJSON: string(cleanupRequest), MaxAttempts: 1000})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "optimization_cleanup_enqueue_failed", "campaign cancellation was persisted but durable cleanup could not be queued; retry cancellation")
+		writeError(w, http.StatusInternalServerError, "optimization_cleanup_enqueue_failed", "run cancellation was persisted but durable cleanup could not be queued; retry cancellation")
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.cancel", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
@@ -1879,7 +1879,7 @@ func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationCampaignStore)
 	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization campaign storage is not configured")
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run storage is not configured")
 		return
 	}
 	var request struct {
@@ -1891,11 +1891,11 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	campaign, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization campaign was not found")
+		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization campaign could not be loaded")
+		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be loaded")
 		return
 	}
 	var selected domain.OptimizationCandidateRun
@@ -1910,11 +1910,11 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 		expected = optimizationcampaign.CandidateGuardPassed
 	}
 	if selected.ID == "" {
-		writeError(w, http.StatusNotFound, "candidate_not_found", "optimization candidate was not found in this campaign")
+		writeError(w, http.StatusNotFound, "candidate_not_found", "setup was not found in this run")
 		return
 	}
 	if selected.State != expected && selected.State != optimizationcampaign.CandidatePromoted && selected.State != optimizationcampaign.CandidateObserved {
-		writeError(w, http.StatusConflict, "candidate_not_qualified", "candidate must reach the campaign's measured proof boundary before activation")
+		writeError(w, http.StatusConflict, "candidate_not_qualified", "setup must reach the run's measured proof boundary before activation")
 		return
 	}
 	if selected.State == optimizationcampaign.CandidatePromoted || selected.State == optimizationcampaign.CandidateObserved {
@@ -1922,13 +1922,13 @@ func (a API) activateOptimizationCampaign(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if campaign.ApprovalExpiresAt == nil || !campaign.ApprovalExpiresAt.After(time.Now().UTC()) {
-		writeError(w, http.StatusConflict, "optimization_approval_expired", "campaign approval expired; candidate cannot be activated")
+		writeError(w, http.StatusConflict, "optimization_approval_expired", "run approval expired; setup cannot be activated")
 		return
 	}
 	payload, _ := json.Marshal(optimizationcampaign.ActivateRequest{TenantID: actor.TenantID, CampaignID: campaign.ID, CandidateID: selected.ID, Actor: actor.Name})
 	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.ActivateKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-activate:" + campaign.ID + ":" + selected.ID, RequestJSON: string(payload), MaxAttempts: 240})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "optimization_activation_enqueue_failed", "qualified candidate activation could not be queued; retry the same request")
+		writeError(w, http.StatusInternalServerError, "optimization_activation_enqueue_failed", "qualified setup activation could not be queued; retry the same request")
 		return
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.activate", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
@@ -3533,7 +3533,7 @@ func (a API) setEndpointPlanSlot(w http.ResponseWriter, r *http.Request, slot st
 			return
 		}
 		if !accepted {
-			writeError(w, http.StatusConflict, "release_guard_required", "candidate plan promotion requires a current PASS decision for the active/candidate pair")
+			writeError(w, http.StatusConflict, "release_guard_required", "rolling out the staged plan requires a current PASS decision for the active and staged plans")
 			return
 		}
 	}
@@ -4773,7 +4773,7 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		selector = "active"
 	} else if selector == "candidate" {
 		if deployment.CandidateRevisionID == "" {
-			writeError(w, http.StatusConflict, "candidate_unavailable", "deployment has no candidate revision")
+			writeError(w, http.StatusConflict, "candidate_unavailable", "deployment has no staged revision")
 			return
 		}
 		selectedRevisionID = deployment.CandidateRevisionID
@@ -5532,7 +5532,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if request.NoEndpoint {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: no_endpoint is reserved for optimization campaign candidates")
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body is invalid: no_endpoint is reserved for optimization run setups")
 		return
 	}
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
