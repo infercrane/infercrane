@@ -80,8 +80,8 @@ InferCrane also retained candidates that failed quality, latency, cost, or repro
 instead of turning an attractive microbenchmark into a release claim.
 
 Those are screening measurements from one run of 24 requests at concurrency 12. They belong only
-to the recorded 4K-input/512-output workload and exact pinned hardware and runtime tuple. See the [decision record](docs/testing/qwen38-openrouter-launch-decision-2026-09-23.md)
-and [raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json),
+to the recorded 4K-input/512-output workload and exact pinned hardware and runtime tuple. See the
+[raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json),
 or browse the compact [benchmark index](BENCHMARKS.md).
 
 ## Install

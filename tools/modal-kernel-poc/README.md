@@ -1,5 +1,9 @@
 # Modal GPU proof
 
+Recorded results from these tools are in
+[Public trace workload PoC](chutes-public-workload-poc.md) and
+[Qwen3-0.6B H100 optimization PoC](qwen3-0.6b-h100-poc.md).
+
 Derive a compact workload profile from the public 91 GB Chutes trace without
 downloading the dataset to the local machine:
 

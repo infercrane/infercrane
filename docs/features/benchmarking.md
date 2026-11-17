@@ -159,20 +159,6 @@ Optimization campaigns use a stricter method than a single `infercrane benchmark
 three runs per arm, the campaign control interleaved with each candidate, and a noise floor before
 a gain counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
 
-Maintainers can qualify one pinned AWS model family at a time without rerunning unrelated runtime
-paths:
-
-```console
-scripts/aws-performance-qualification.sh mistral --approve-paid-resources
-scripts/aws-performance-qualification.sh deepseek --approve-paid-resources
-scripts/aws-performance-qualification.sh granite --approve-paid-resources
-```
-
-Each run uses the same seven-profile matrix, the fixed-workload concurrency sweep, and an independent
-zero-resource inventory. These are paid,
-commit-bound qualification commands, not normal developer tests and not permission to publish a
-cross-model performance claim.
-
 InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects
 unknown units instead of silently mislabeling evidence. Percentiles reconstructed from those records
 use the nearest-rank definition. Small samples remain visibly weak evidence: Release Guard separately

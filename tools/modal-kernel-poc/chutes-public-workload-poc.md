@@ -1,9 +1,7 @@
----
-title: Public trace workload PoC
-description: Remote-only profiling of the 6.12B-request Chutes trace and real L40S screening of two pinned Qwen models.
----
-
 # Public trace workload PoC
+
+Remote-only profiling of the 6.12B-request Chutes trace and real L40S screening of two pinned Qwen
+models. This is a maintainer test report. It is not part of the published documentation.
 
 InferCrane can now use a large public serving trace to choose realistic screening shapes without
 downloading the 91 GB dataset or model weights to the operator's laptop.
@@ -88,7 +86,7 @@ time. It cannot replace a customer's privacy-preserving production profile: the 
 model mix, aggregate rate, semantic tasks, and SLOs are not portable.
 
 The machine-readable inputs and measurements are stored in
-[`evidence/chutes-public-workload-2026-09-20.json`](./evidence/chutes-public-workload-2026-09-20.json)
+[`evidence/chutes-public-workload-2026-09-20.json`](../../docs/testing/evidence/chutes-public-workload-2026-09-20.json)
 and
-[`evidence/chutes-qwen-l40s-screen-2026-09-20.json`](./evidence/chutes-qwen-l40s-screen-2026-09-20.json).
+[`evidence/chutes-qwen-l40s-screen-2026-09-20.json`](../../docs/testing/evidence/chutes-qwen-l40s-screen-2026-09-20.json).
 The Modal evidence records zero active GPU tasks after completion.
