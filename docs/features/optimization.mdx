@@ -937,7 +937,9 @@ the server, and how many finished runs were dropped.
 
 **Only a server that is really lost is replaced.** InferCrane asks the provider and the runtime
 about the server that failed. A server the provider reports ready and whose runtime still serves the
-model is left alone, and one the provider is restarting in place is waited for. Otherwise the server
+model is left alone, and one the provider is restarting in place is waited for. A server the provider
+reports ready but whose runtime does not answer is lost only after at least three failed checks over
+at least a minute, so a network blip does not cost a replacement. Otherwise the server
 is deleted, the provider is checked until it no longer lists it, and only then is the setup's exact
 revision provisioned again, through the same path that provisioned it first. The replacement gets a
 new provider identity; the lost server's record is kept for audit and for the spend estimate. The
@@ -961,7 +963,8 @@ servers until the approval ends. What the window does not cover is a provider's 
 starting a server. InferCrane has no sourced minimum billing period for any provider, so each
 replacement reserves one full hour at the quoted rate. Before every replacement the setup's spend is
 authorized again with a fresh sourced quote: its share of the cap must cover its servers from approval
-until the approval ends, plus one hour for this and each earlier replacement. Approval returns
+until the approval ends, plus one hour for this and each earlier replacement, at the higher of the
+fresh rate and the rate its first servers were bound to. Approval returns
 `machine_replacements_covered`, the number of lost servers per setup the cap covers, from 0 to 2.
 
 **The run stops cleanly when it cannot recover.** A setup that stops is marked `failed` and its
@@ -972,7 +975,7 @@ servers are removed; nothing waits for the approval to end.
 | `optimization_machine_lost_repeatedly` | A third server of this setup was lost. A run replaces at most two per setup. |
 | `optimization_replacement_not_covered` | The cap does not cover another replacement at the current sourced price. |
 | `optimization_machine_replacement_failed` | The replacement server could not be provisioned. |
-| `optimization_measurement_interrupted_repeatedly` | Measuring stopped a fifth time, whether or not a server was lost. |
+| `optimization_measurement_interrupted_repeatedly` | Measuring stopped a fifth time, whether or not a server was lost. Only this setup stops; the run goes on. |
 | `optimization_control_lost` | The control's server was lost and could not be replaced. No later setup can be compared, so every remaining setup fails with this code before it provisions or spends. Setups already measured keep their evidence and are ranked as usual. The control keeps its place in the ranking; a server it still holds is removed with it when the run ends. |
 
 **Interruptible capacity is not used.** Optimization runs only on capacity billed at its regular

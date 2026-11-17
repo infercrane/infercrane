@@ -146,11 +146,17 @@ func AuthorizeCostCoverage(ctx context.Context, costs CostAuthority, tenant stri
 // authorizeReplacement re-authorizes a setup's spend immediately before a
 // replacement machine is requested, with a fresh sourced quote. Its share
 // must cover the setup billing from approval until expiry plus the reserve
-// for this and every earlier replacement.
+// for this and every earlier replacement, at the higher of the fresh rate and
+// the rate its first servers were bound to.
 func (d CompositeDriver) authorizeReplacement(ctx context.Context, campaign domain.OptimizationCampaign, owner domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft, budget Budget, number int) error {
 	quote, err := authorizeQuote(ctx, d.Costs, owner.TenantID, draft, budget, d.now())
 	if err != nil {
 		return err
+	}
+	// The setup's earlier servers billed at the rate that first authorized
+	// them. A cheaper fresh quote must not make that time look cheaper.
+	if bound, ok := decodeCostQuote(owner.CostQuoteJSON); ok && bound.HourlyUSD > quote.HourlyUSD {
+		quote.HourlyUSD = bound.HourlyUSD
 	}
 	since := owner.CreatedAt
 	if campaign.ApprovedAt != nil {
@@ -196,12 +202,14 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 	if !found {
 		return operations.Permanent("optimization_recovery_invalid", errors.New("interrupted machine belongs to no candidate of this run"))
 	}
-	// Giving up on the run's control stops the whole run: the marker on the
-	// control makes every later setup fail before it spends.
+	// Giving up on the run's control after its server was confirmed lost
+	// stops the whole run: the marker on the control makes every later setup
+	// fail before it spends. Giving up for any other reason stops only the
+	// measured setup.
 	control, hasControl := CampaignControl(campaign)
-	giveUp := func(code string, cause error) error {
+	giveUp := func(code string, cause error, confirmedLoss bool) error {
 		pending.GaveUp, pending.Stage = code, ""
-		if hasControl && control.ID == owner.ID {
+		if confirmedLoss && hasControl && control.ID == owner.ID {
 			marker, _ := json.Marshal(MachineReplacement{LostReplicaID: "stopped:" + measured.ID, State: ReplacementGivenUp, MeasuredCandidateID: measured.ID, FailureCode: code, At: d.now()})
 			if _, err := recorder.RecordOptimizationMachineReplacement(ctx, owner.TenantID, owner.CampaignID, owner.ID, string(marker), machineReplacementMarkerLimit); err != nil {
 				return operations.Retryable("optimization_recovery_record_failed", err)
@@ -221,7 +229,7 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 		return save()
 	}
 	if pending.Sequence > maxMeasurementInterruptions {
-		return giveUp(FailureMeasurementInterrupted, fmt.Errorf("the measurement stopped %d times; the limit is %d", pending.Sequence, maxMeasurementInterruptions))
+		return giveUp(FailureMeasurementInterrupted, fmt.Errorf("the measurement stopped %d times; the limit is %d", pending.Sequence, maxMeasurementInterruptions), false)
 	}
 	draft, err := candidateDraft(owner)
 	if err != nil {
@@ -248,13 +256,13 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 		if err = childComplete(removal, "lost machine check"); err != nil {
 			var failure operations.Failure
 			if errors.As(err, &failure) && !failure.Retryable {
-				return giveUp(FailureMachineReplacementFailed, err)
+				return giveUp(FailureMachineReplacementFailed, err, false)
 			}
 			return err
 		}
 		var removed workflows.RemoveLostReplicaResult
 		if json.Unmarshal([]byte(removal.ResultJSON), &removed) != nil || removed.ReplicaID != pending.ReplicaID {
-			return giveUp(FailureMachineReplacementFailed, errors.New("lost machine check returned no result for the interrupted machine"))
+			return giveUp(FailureMachineReplacementFailed, errors.New("lost machine check returned no result for the interrupted machine"), false)
 		}
 		if !removed.Lost {
 			return resolve(RecoveryMachineServing)
@@ -274,24 +282,24 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 	if entry == nil {
 		number := MachineReplacementsUsed(entries) + 1
 		if number > MaxMachineReplacements {
-			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup already replaced %d lost machines; the limit is %d", number-1, MaxMachineReplacements))
+			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup already replaced %d lost machines; the limit is %d", number-1, MaxMachineReplacements), true)
 		}
 		if err = d.authorizeReplacement(ctx, campaign, owner, draft, budget, number); err != nil {
 			var failure operations.Failure
 			if errors.As(err, &failure) && !failure.Retryable {
-				return giveUp(FailureReplacementNotCovered, err)
+				return giveUp(FailureReplacementNotCovered, err, true)
 			}
 			return err
 		}
 		entry = &MachineReplacement{LostReplicaID: pending.ReplicaID, Number: number, State: ReplacementProvisioning, MeasuredCandidateID: measured.ID, At: d.now()}
 		if err = d.recordReplacement(ctx, recorder, owner, *entry); errors.Is(err, domain.ErrConflict) {
-			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup reached its limit of %d replaced machines", MaxMachineReplacements))
+			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup reached its limit of %d replaced machines", MaxMachineReplacements), true)
 		} else if err != nil {
 			return err
 		}
 	}
 	if entry.State == ReplacementFailed {
-		return giveUp(FailureMachineReplacementFailed, errors.New("the replacement machine could not be provisioned"))
+		return giveUp(FailureMachineReplacementFailed, errors.New("the replacement machine could not be provisioned"), true)
 	}
 	replacement, err := d.enqueueReplacement(ctx, campaign, owner, draft, entry.Number)
 	if err != nil {
@@ -310,7 +318,7 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 			if recordErr := d.recordReplacement(ctx, recorder, owner, *entry); recordErr != nil {
 				return recordErr
 			}
-			return giveUp(FailureMachineReplacementFailed, err)
+			return giveUp(FailureMachineReplacementFailed, err, true)
 		}
 		return err
 	}

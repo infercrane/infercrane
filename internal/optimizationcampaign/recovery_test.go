@@ -346,3 +346,24 @@ func TestReplacementWorstCaseCountsTheWindowAndOneReservePerReplacement(t *testi
 		t.Fatalf("a provider hard maximum bounds every replacement: %d", got)
 	}
 }
+
+func TestInterruptionLimitOnAControlRunStopsOnlyTheMeasuredSetup(t *testing.T) {
+	h := newRecoveryHarness(t, IntentNewEndpoint, ArmControl, maxMeasurementInterruptions+1)
+	_, err := h.measure(t)
+	assertPermanentCode(t, err, FailureMeasurementInterrupted)
+	if ControlLost(h.store.campaign) || len(h.store.operations) != 0 {
+		t.Fatalf("a control never found lost was marked lost: %s", h.candidate("control-12345678").MachineReplacementsJSON)
+	}
+}
+
+func TestReplacementIsPricedAtTheBoundRateWhenTheFreshQuoteIsLower(t *testing.T) {
+	h := newRecoveryHarness(t, IntentNewEndpoint, ArmCandidate, 1)
+	// The setup's servers were bound at $3/h; the fresh quote is $1.50/h. A
+	// $5 share covers the window plus one reserve at $1.50 but not at $3.
+	h.store.campaign.Candidates[1].CostQuoteJSON = `{"hourly_usd":3,"max_replicas":1,"source":"provider-price-list"}`
+	h.budget.MaxCostUSD = 5
+	_, _ = h.measure(t)
+	h.finish(removalKey("candidate-12345678", 1), lostResult("replica-lost-candidate", true))
+	_, err := h.measure(t)
+	assertPermanentCode(t, err, FailureReplacementNotCovered)
+}

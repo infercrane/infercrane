@@ -34,6 +34,13 @@ const (
 	// replica that its provider reports ready and whose runtime still serves
 	// the model.
 	ReplicaRemoveLostKind = "deployment.replica.remove-lost"
+
+	// A replica its provider still reports ready is lost only when its
+	// runtime failed to serve on this many attempts spread over at least
+	// lostRuntimeConfirmWindow. One failed probe can be a network blip
+	// between the control plane and the server.
+	lostRuntimeConfirmAttempts = 3
+	lostRuntimeConfirmWindow   = time.Minute
 )
 
 // RemoveLostReplicaRequest names one replica of one deployment. The handler
@@ -1348,8 +1355,9 @@ func replicaTargetName(name, revisionID string, candidate bool, ordinal int) str
 
 // removeLostReplica deletes one replica whose machine is gone or no longer
 // serves. The provider and the runtime decide: a replica the provider reports
-// ready and whose runtime serves the model is left alone, and one the
-// provider is restarting in place is waited for. Removal deletes the provider
+// ready and whose runtime serves the model is left alone, one the provider is
+// restarting in place is waited for, and one whose runtime stopped answering
+// is lost only after repeated checks over a bounded window. Removal deletes the provider
 // resource, waits until the provider no longer lists it, releases its target,
 // and only then marks the replica deleted, so a retry repeats unfinished work
 // and never leaves a target behind.
@@ -1450,6 +1458,10 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 			if _, present := models[spec.Model]; ready && present {
 				_ = checkpoint(ctx, store, operation, "replica.recover", "succeeded", map[string]string{"replica_id": replica.ID}, 95, "Machine still serves; nothing was removed")
 				return result(false), nil
+			}
+			if operation.Attempt < lostRuntimeConfirmAttempts || (!operation.CreatedAt.IsZero() && time.Since(operation.CreatedAt) < lostRuntimeConfirmWindow) {
+				_ = checkpoint(ctx, store, operation, "replica.recover", "waiting", observation, 40, "Provider reports the machine ready but its runtime did not answer; checking again")
+				return "", operations.Retryable("replica_runtime_unconfirmed", errors.New("the runtime did not answer; a single failed check does not prove the machine is lost"))
 			}
 		}
 		details := observation.Details

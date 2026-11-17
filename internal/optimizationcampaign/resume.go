@@ -12,6 +12,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 )
 
 const (
@@ -22,8 +23,8 @@ const (
 	// resumeInvocationGap separates each resumed segment's invocation
 	// numbers from every number an earlier segment may have used, including
 	// runs whose checkpoint write was lost. A segment makes at most nine
-	// invocations, so a surviving server never sees a seed or replay prefix
-	// namespace twice.
+	// invocations and starts only after its start is stored, so a surviving
+	// server never sees a seed or replay prefix namespace twice.
 	resumeInvocationGap = 64
 
 	SegmentCompleted   = "completed"
@@ -174,8 +175,13 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 	remaining := measurementRunsPerArm - len(state.CandidateRuns)
 	state.Segments = append(state.Segments, MeasurementSegment{StartedAt: s.now(), FirstInvocation: state.InvocationBase + state.NextInvocation})
 	segment := &state.Segments[len(state.Segments)-1]
+	// Nothing is sent until the segment's start is stored: a resume adds the
+	// invocation gap to the stored counter, so an unstored start could hand a
+	// surviving server seeds it has already seen.
+	if s.sink != nil && !s.save() {
+		return measurement{}, operations.Retryable("optimization_checkpoint_failed", errors.New("the measurement checkpoint could not be stored before measuring"))
+	}
 	s.tracker.planSegment(s.control != nil, remaining, resumed)
-	s.save()
 
 	invoke := func(kind, arm string, target armTarget, requests int) (benchmark.Result, error) {
 		result, err := s.tracker.run(kind, arm, requests, func() (benchmark.Result, error) { return s.runs.run(ctx, target, requests) })

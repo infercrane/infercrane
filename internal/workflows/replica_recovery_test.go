@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/operations"
@@ -170,5 +171,28 @@ func TestReplicaTargetNameIsStableAcrossReplacements(t *testing.T) {
 	}
 	if got := replicaTargetName("qwen", "revision-abcdefghij", false, 0); got != "qwen-r0" {
 		t.Fatalf("active target = %q", got)
+	}
+}
+
+func TestOneFailedRuntimeCheckNeverRemovesAMachineTheProviderReportsReady(t *testing.T) {
+	store, provider, _, silent := recoveryFixture(t)
+	handlers := QualifiedCloudHandlers(store, provider, fakeInspector{ready: false})
+	request, _ := json.Marshal(RemoveLostReplicaRequest{TenantID: "global", Name: "qwen-opt-12345678", DeploymentID: "deployment-1", ReplicaID: silent.ID})
+	for attempt := 1; attempt < lostRuntimeConfirmAttempts; attempt++ {
+		_, err := handlers[ReplicaRemoveLostKind](t.Context(), domain.Operation{ID: "remove", LeaseOwner: "worker", LeaseGeneration: 1, Attempt: attempt, CreatedAt: time.Now().Add(-time.Hour), RequestJSON: string(request)})
+		var failure operations.Failure
+		if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "replica_runtime_unconfirmed" || provider.DeleteCalls != 0 || store.replicas[silent.ID].LifecycleState == "failed" {
+			t.Fatalf("attempt %d: err=%v deletes=%d replica=%+v", attempt, err, provider.DeleteCalls, store.replicas[silent.ID])
+		}
+	}
+	// Enough attempts, but not yet over the window.
+	if _, err := handlers[ReplicaRemoveLostKind](t.Context(), domain.Operation{ID: "remove", LeaseOwner: "worker", LeaseGeneration: 1, Attempt: lostRuntimeConfirmAttempts, CreatedAt: time.Now(), RequestJSON: string(request)}); err == nil || provider.DeleteCalls != 0 {
+		t.Fatalf("removed inside the confirmation window: err=%v deletes=%d", err, provider.DeleteCalls)
+	}
+	raw, err := handlers[ReplicaRemoveLostKind](t.Context(), domain.Operation{ID: "remove", LeaseOwner: "worker", LeaseGeneration: 1, Attempt: lostRuntimeConfirmAttempts, CreatedAt: time.Now().Add(-2 * lostRuntimeConfirmWindow), RequestJSON: string(request)})
+	var result RemoveLostReplicaResult
+	_ = json.Unmarshal([]byte(raw), &result)
+	if err != nil || !result.Lost || provider.DeleteCalls != 1 || store.replicas[silent.ID].LifecycleState != "deleted" {
+		t.Fatalf("a runtime silent over the whole window is lost: result=%+v err=%v deletes=%d", result, err, provider.DeleteCalls)
 	}
 }

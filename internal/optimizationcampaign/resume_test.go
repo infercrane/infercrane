@@ -18,6 +18,8 @@ type checkpointSinkFixture struct {
 	writes int
 	last   string
 	err    error
+	// failAfter fails every write after that many succeeded; zero never fails.
+	failAfter int
 }
 
 func (s *checkpointSinkFixture) RecordOptimizationMeasurementCheckpoint(_ context.Context, tenant, campaign, candidate, checkpointJSON string) (bool, error) {
@@ -26,8 +28,8 @@ func (s *checkpointSinkFixture) RecordOptimizationMeasurementCheckpoint(_ contex
 	if tenant != "tenant" || campaign != "campaign" || candidate == "" {
 		return false, errors.New("checkpoint written for the wrong candidate")
 	}
-	if s.err != nil {
-		return false, s.err
+	if s.err != nil || (s.failAfter > 0 && s.writes >= s.failAfter) {
+		return false, errors.New("database unavailable")
 	}
 	s.writes++
 	s.last = checkpointJSON
@@ -230,12 +232,36 @@ func TestRecoveredControlStillStartingIsWaitedFor(t *testing.T) {
 	}
 }
 
+func TestNothingIsMeasuredUntilTheSegmentStartIsStored(t *testing.T) {
+	const warm = 1.0
+	fixture, runner, sink := sequencedFixture(t, map[string][]float64{controlEndpoint: {warm, 100}, candidateEndpoint: {warm, 0}})
+	sink.err = errors.New("database unavailable")
+	_, err := fixture.executor.Run(t.Context(), fixture.campaign, fixture.candidate, fixture.profile)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "optimization_checkpoint_failed" || len(runner.configs) != 0 {
+		t.Fatalf("err=%v invocations=%d", err, len(runner.configs))
+	}
+}
+
 func TestLostCheckpointWriteStillReportsTheInterruption(t *testing.T) {
 	const warm = 1.0
 	fixture, _, sink := sequencedFixture(t, map[string][]float64{controlEndpoint: {warm, 100}, candidateEndpoint: {warm, 0}})
-	sink.err = errors.New("database unavailable")
+	sink.failAfter = 1
 	if interrupted := interruptedRun(t, fixture); interrupted.Persisted {
 		t.Fatal("an unstored checkpoint must be reported as not persisted")
+	}
+}
+
+func TestControlServerMetricsRequestIsRecorded(t *testing.T) {
+	const warm = 1.0
+	fixture, _, _ := sequencedFixture(t, map[string][]float64{
+		controlEndpoint:   {warm, 100, 101, 100, 101},
+		candidateEndpoint: {warm, 130, 131, 129},
+	})
+	fixture.campaign.Candidates[0].DeploymentSpecJSON = measurementDraft("control", true)
+	_, workload := fixture.run(t)
+	if evidence := measuredEvidence(t, workload); !evidence.Control.ServerMetrics {
+		t.Fatalf("the control's metrics request was lost: %+v", evidence.Control)
 	}
 }
 

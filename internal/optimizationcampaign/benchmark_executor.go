@@ -104,6 +104,9 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
+	if control != nil {
+		controlEvidence.ServerMetrics = control.serverMetrics
+	}
 	state, err := e.checkpoint(campaign, candidate, profile, target, controlEvidence, plan)
 	if err != nil {
 		return domain.BenchmarkResult{}, err
