@@ -122,6 +122,9 @@ func TestCompareReportsDeltasAndKeepsUnknownsUnknown(t *testing.T) {
 	if overlap := metrics["overlapped_share"]; overlap.Base != nil || overlap.Improved != nil {
 		t.Fatalf("a single-GPU capture has no overlap to compare: %+v", overlap)
 	}
+	if roof := metrics["memory_bound_share"]; roof.Base != nil || roof.Head != nil || roof.Improved != nil {
+		t.Fatalf("a roofline with an unknown position is not compared: %+v", roof)
+	}
 	if same := metrics["host_wait_share"]; same.Improved != nil {
 		t.Fatalf("an unchanged value is neither better nor worse: %+v", same)
 	}

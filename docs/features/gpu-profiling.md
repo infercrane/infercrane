@@ -75,7 +75,9 @@ and an excerpt of the busiest second (at most 20,000 events).
 
 `--dcgm-url http://127.0.0.1:9400/metrics` samples [DCGM Exporter](#continuous-signals) once a second
 while the trace records and keeps SM active, SM occupancy, tensor active, DRAM active, PCIe, and
-NVLink throughput beside the analysis. A field the exporter does not send stays unknown.
+NVLink throughput beside the analysis. A field the exporter does not send stays unknown. These are
+NVIDIA DCGM fields: AMD Instinct GPUs report no equivalent that InferCrane maps yet, so their hardware
+counters stay unknown.
 
 ## Analyze traces you already have
 
@@ -154,16 +156,31 @@ infercrane profile coder --compare gpc-BEFORE,gpc-AFTER --output json
 
 A comparison puts two analyzed captures side by side, for example the starting point and the
 revision an optimization run rolled out: GPU busy and idle, idle waiting on the host, short launches,
-launch delay, communication under compute, step p50 and p95, decode share, and memory-bound share.
+launch delay, communication under compute, step p50 and p95, decode share, and memory-bound share
+(only when both captures place the roofline).
 Kernel time is compared per second of capture, so captures of different lengths compare. A change of
 two points or less on a share (two percent on other values) is reported as no clear change, and a
 value that one side did not measure stays unknown. Different accelerators, GPU counts, or profilers are
 named as warnings.
 
+![Before and after in the dashboard (example data): revision 17 against the serving revision 18, each metric's change and verdict, kernel time per second of capture, and the unknown rows left unjudged](/images/gpu-profiling/compare-dark.jpg)
+
 `--open` opens the capture in the dashboard: Observe › Profiling leads with the verdict, and with
 **Advanced** on it shows the utilization and roofline charts, the top kernels, a zoomable timeline of
 the busiest second with an **Open in Perfetto UI** button, the flame graph, and the comparison. The
 trace files are standard Kineto JSON, so they also open directly in [Perfetto UI](https://ui.perfetto.dev).
+
+The screenshots below show the dashboard's example data, not a measurement.
+
+![Observe › Profiling with Advanced on: the verdict, key numbers, utilization with DCGM counters, roofline, engine steps, kernel categories, and top kernels, all marked Example data](/images/gpu-profiling/summary-light.png)
+
+![The timeline zoomed to 25 ms of the busiest excerpt: engine steps above a lane per GPU stream and host thread, with Open in Perfetto UI and Download trace](/images/gpu-profiling/timeline-zoomed-light.png)
+
+![The flame graph from host operators through the launch call to each kernel](/images/gpu-profiling/flame-light.png)
+
+With nothing recorded, the dashboard shows the command and the overhead first:
+
+![The GPU profile with nothing recorded: the infercrane profile command, the vLLM flag, and a note that the profiler slows the replica](/images/gpu-profiling/not-recorded-light.png)
 
 ### JSON output
 

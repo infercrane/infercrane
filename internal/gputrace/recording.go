@@ -77,8 +77,9 @@ func Profile(trace *Trace, options Options, capture Capture) (gpuprofile.Recordi
 func CaptureFromTrace(trace *Trace, tool, toolVersion string, end time.Time) Capture {
 	window := time.Duration(0)
 	if len(trace.Kernels) > 0 {
-		p := prepare(trace)
-		window = time.Duration(p.window.end)
+		for _, kernel := range trace.Kernels {
+			window = max(window, time.Duration(kernel.End))
+		}
 		if trace.OriginKnown {
 			started := time.Unix(0, trace.OriginNS).UTC()
 			return Capture{Tool: tool, ToolVersion: toolVersion, StartedAt: started, EndedAt: started.Add(max(window, time.Millisecond))}

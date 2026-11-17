@@ -113,7 +113,14 @@ var compareMetrics = []metricSpec{
 		}
 		return ptr(a.Phases.Decode.Share)
 	}},
-	{"memory_bound_share", "Matrix-multiply time below the memory roof", "ratio", "lower", func(a Analysis) *float64 { return a.Roofline.MemoryBoundShare }},
+	// A roofline whose position is unknown covers too little matrix-multiply
+	// time to stand for the capture, so it is not compared.
+	{"memory_bound_share", "Matrix-multiply time below the memory roof", "ratio", "lower", func(a Analysis) *float64 {
+		if a.Roofline.Position == "unknown" {
+			return nil
+		}
+		return a.Roofline.MemoryBoundShare
+	}},
 }
 
 // Compare reads base and head side by side. Both need an analysis.
