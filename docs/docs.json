@@ -135,6 +135,7 @@
               "features/release-guard",
               "features/explanations",
               "features/telemetry",
+              "features/gpu-profiling",
               "features/benchmarking",
               "features/cold-starts",
               "features/artifact-cache",

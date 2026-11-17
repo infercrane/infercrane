@@ -325,6 +325,10 @@ func runLegacy(ctx context.Context, args []string) error {
 	if args[0] == "discover" {
 		return discoverCommand(ctx, args[1:])
 	}
+	if args[0] == "profile" && profileIsLocal(args[1:]) {
+		// Analyzing without recording needs no control plane or sign-in.
+		return profileCommand(ctx, config.Config{}, args[1:])
+	}
 	if !isPublicCommand(args[0]) {
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -367,6 +371,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return observeCommand(ctx, cfg, args[1:])
 	case "telemetry":
 		return telemetryCommand(ctx, cfg, args[1:])
+	case "profile":
+		return profileCommand(ctx, cfg, args[1:])
 	case "inbox":
 		return inboxCommand(ctx, cfg, args[1:])
 	case "deploy":

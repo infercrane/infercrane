@@ -2866,6 +2866,10 @@
       "GPUProfile": {
         "additionalProperties": false,
         "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/GPUProfileAnalysis",
+            "description": "Required in v2, absent in v1."
+          },
           "capture": {
             "additionalProperties": false,
             "properties": {
@@ -2952,7 +2956,11 @@
             "type": "integer"
           },
           "schema_version": {
-            "const": "infercrane.gpu-profile/v1",
+            "description": "v1 carries call stacks only; v2 adds the trace analysis and an optional timeline excerpt.",
+            "enum": [
+              "infercrane.gpu-profile/v1",
+              "infercrane.gpu-profile/v2"
+            ],
             "type": "string"
           },
           "stacks": {
@@ -2965,6 +2973,10 @@
           },
           "timeline": {
             "$ref": "#/components/schemas/GPUProfileTimeline"
+          },
+          "timeline_excerpt": {
+            "$ref": "#/components/schemas/GPUTimelineExcerpt",
+            "description": "v2 only: the busiest part of the capture for a timeline viewer."
           },
           "unavailable_layers": {
             "description": "Layers this capture could not record, for example sass and stall without PC sampling.",
@@ -2996,6 +3008,1142 @@
           "stacks",
           "unavailable_layers",
           "recorded_at"
+        ],
+        "type": "object"
+      },
+      "GPUProfileAnalysis": {
+        "additionalProperties": false,
+        "description": "gpu-trace-analysis-v1: where GPU time goes in one capture. Shares are 0..1; null is unknown and the section's reason says why.",
+        "properties": {
+          "algorithm_version": {
+            "const": "gpu-trace-analysis-v1",
+            "type": "string"
+          },
+          "categories": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "enum": [
+                    "attention",
+                    "gemm",
+                    "communication",
+                    "memory",
+                    "norm",
+                    "activation",
+                    "sampling",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "count": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kernel_ms": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "category",
+                "count",
+                "kernel_ms",
+                "share"
+              ],
+              "type": "object"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "comparison": {
+                  "enum": [
+                    "\u003e=",
+                    "\u003c=",
+                    "\u003e",
+                    "\u003c"
+                  ],
+                  "type": "string"
+                },
+                "observed": {
+                  "type": "number"
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "sentence": {
+                  "type": "string"
+                },
+                "threshold": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "comparison",
+                "observed",
+                "rule",
+                "sentence",
+                "threshold",
+                "unit"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "hardware": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "interval_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "series": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "field": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "items": {
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "maxItems": 600,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "unit",
+                        "values"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 8,
+                    "type": "array"
+                  },
+                  "source": {
+                    "const": "dcgm-exporter",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "interval_ms",
+                  "series",
+                  "source"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "idle": {
+            "additionalProperties": false,
+            "properties": {
+              "bubbles": {
+                "additionalProperties": false,
+                "properties": {
+                  "count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "max_us": {
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "p50_us": {
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "p95_us": {
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "top": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "cause": {
+                          "enum": [
+                            "host_wait",
+                            "launch_gap",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        "device": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "duration_us": {
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "start_ms": {
+                          "minimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "cause",
+                        "device",
+                        "duration_us",
+                        "start_ms"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 10,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "count",
+                  "max_us",
+                  "p50_us",
+                  "p95_us",
+                  "top"
+                ],
+                "type": "object"
+              },
+              "host_wait_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "idle_ms": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "launch_gap_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "other_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bubbles",
+              "host_wait_share",
+              "idle_ms",
+              "launch_gap_share",
+              "other_share",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "launch": {
+            "additionalProperties": false,
+            "properties": {
+              "graph_launches": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "host_launch_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "launch_delay_p50_us": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "launch_delay_p95_us": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "launches": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "per_second": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "short_kernel_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "graph_launches",
+              "host_launch_share",
+              "launch_delay_p50_us",
+              "launch_delay_p95_us",
+              "launches",
+              "per_second",
+              "reason",
+              "short_kernel_share"
+            ],
+            "type": "object"
+          },
+          "overlap": {
+            "additionalProperties": false,
+            "properties": {
+              "communication_ms": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "overlapped_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "communication_ms",
+              "overlapped_share",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "phases": {
+            "additionalProperties": false,
+            "properties": {
+              "decode": {
+                "additionalProperties": false,
+                "properties": {
+                  "gpu_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "share": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "steps": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "gpu_ms",
+                  "share",
+                  "steps"
+                ],
+                "type": "object"
+              },
+              "mixed": {
+                "additionalProperties": false,
+                "properties": {
+                  "gpu_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "share": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "steps": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "gpu_ms",
+                  "share",
+                  "steps"
+                ],
+                "type": "object"
+              },
+              "prefill": {
+                "additionalProperties": false,
+                "properties": {
+                  "gpu_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "share": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "steps": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "gpu_ms",
+                  "share",
+                  "steps"
+                ],
+                "type": "object"
+              },
+              "source": {
+                "enum": [
+                  "annotations",
+                  "kernel_names",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "unknown": {
+                "additionalProperties": false,
+                "properties": {
+                  "gpu_ms": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "share": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "steps": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "gpu_ms",
+                  "share",
+                  "steps"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "decode",
+              "mixed",
+              "prefill",
+              "source",
+              "unknown"
+            ],
+            "type": "object"
+          },
+          "roofline": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "covered_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "memory_bound_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "peak": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "compute_tflops": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "memory_tbps": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "precision": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "description": "Vendor datasheet the peak comes from, or operator.",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "compute_tflops",
+                      "memory_tbps",
+                      "precision",
+                      "source"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "points": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "achieved_tflops": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "bound": {
+                      "enum": [
+                        "memory",
+                        "compute"
+                      ],
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "category": {
+                      "enum": [
+                        "attention",
+                        "gemm",
+                        "communication",
+                        "memory",
+                        "norm",
+                        "activation",
+                        "sampling",
+                        "other"
+                      ],
+                      "type": "string"
+                    },
+                    "flops": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "intensity": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "kernel_ms": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "achieved_tflops",
+                    "bound",
+                    "bytes",
+                    "category",
+                    "flops",
+                    "intensity",
+                    "kernel_ms",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              "position": {
+                "enum": [
+                  "memory_bound",
+                  "compute_bound",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "ridge_flop_per_byte": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "accelerator",
+              "covered_share",
+              "memory_bound_share",
+              "peak",
+              "points",
+              "position",
+              "reason",
+              "ridge_flop_per_byte"
+            ],
+            "type": "object"
+          },
+          "steps": {
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "items": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "duration_ms": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "gpu_busy_ms": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "kernels": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "phase": {
+                      "enum": [
+                        "prefill",
+                        "decode",
+                        "mixed",
+                        "unknown"
+                      ],
+                      "type": "string"
+                    },
+                    "start_ms": {
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "duration_ms",
+                    "gpu_busy_ms",
+                    "kernels",
+                    "phase",
+                    "start_ms"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              "marker": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "p50_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "p95_ms": {
+                "minimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "annotations",
+                  "idle_gaps",
+                  "none"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "count",
+              "items",
+              "marker",
+              "p50_ms",
+              "p95_ms",
+              "reason",
+              "source"
+            ],
+            "type": "object"
+          },
+          "top_kernels": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "enum": [
+                    "attention",
+                    "gemm",
+                    "communication",
+                    "memory",
+                    "norm",
+                    "activation",
+                    "sampling",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "count": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "max_us": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "mean_us": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "total_ms": {
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "category",
+                "count",
+                "max_us",
+                "mean_us",
+                "name",
+                "phase",
+                "share",
+                "total_ms"
+              ],
+              "type": "object"
+            },
+            "maxItems": 25,
+            "type": "array"
+          },
+          "trace": {
+            "additionalProperties": false,
+            "properties": {
+              "cpu_ops_recorded": {
+                "type": "boolean"
+              },
+              "devices": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "engine": {
+                "enum": [
+                  "vllm",
+                  "sglang",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "engine_version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "format": {
+                "enum": [
+                  "kineto",
+                  "rocprofv3",
+                  "nsys"
+                ],
+                "type": "string"
+              },
+              "kernels": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "launches_recorded": {
+                "type": "boolean"
+              },
+              "shapes_recorded": {
+                "type": "boolean"
+              },
+              "streams": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "truncated": {
+                "description": "The trace held more events than one analysis reads.",
+                "type": "boolean"
+              },
+              "window_ms": {
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "cpu_ops_recorded",
+              "devices",
+              "engine",
+              "engine_version",
+              "format",
+              "kernels",
+              "launches_recorded",
+              "shapes_recorded",
+              "streams",
+              "truncated",
+              "window_ms"
+            ],
+            "type": "object"
+          },
+          "utilization": {
+            "additionalProperties": false,
+            "properties": {
+              "bucket_ms": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "busy_series": {
+                "items": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "maxItems": 600,
+                "type": "array"
+              },
+              "busy_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "compute_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "idle_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "non_compute_share": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "bucket_ms",
+              "busy_series",
+              "busy_share",
+              "compute_share",
+              "idle_share",
+              "non_compute_share"
+            ],
+            "type": "object"
+          },
+          "verdict": {
+            "additionalProperties": false,
+            "properties": {
+              "bottleneck": {
+                "enum": [
+                  "host-launch",
+                  "communication",
+                  "memory-bandwidth",
+                  "compute",
+                  "attention",
+                  "busy",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "evidence": {
+                "description": "The measured values the sentence rests on.",
+                "maxLength": 400,
+                "type": "string"
+              },
+              "sentence": {
+                "maxLength": 280,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "bottleneck",
+              "evidence",
+              "sentence"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "algorithm_version",
+          "categories",
+          "findings",
+          "hardware",
+          "idle",
+          "launch",
+          "overlap",
+          "phases",
+          "roofline",
+          "steps",
+          "top_kernels",
+          "trace",
+          "utilization",
+          "verdict"
+        ],
+        "type": "object"
+      },
+      "GPUProfileComparison": {
+        "additionalProperties": false,
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/GPUProfileSummary"
+          },
+          "categories": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "base_ms_per_s": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "base_share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "category": {
+                  "enum": [
+                    "attention",
+                    "gemm",
+                    "communication",
+                    "memory",
+                    "norm",
+                    "activation",
+                    "sampling",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "head_ms_per_s": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "head_share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "base_ms_per_s",
+                "base_share",
+                "category",
+                "head_ms_per_s",
+                "head_share"
+              ],
+              "type": "object"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "head": {
+            "$ref": "#/components/schemas/GPUProfileSummary"
+          },
+          "kernels": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "base_ms_per_s": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "category": {
+                  "enum": [
+                    "attention",
+                    "gemm",
+                    "communication",
+                    "memory",
+                    "norm",
+                    "activation",
+                    "sampling",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "head_ms_per_s": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "base_ms_per_s",
+                "category",
+                "head_ms_per_s",
+                "name"
+              ],
+              "type": "object"
+            },
+            "maxItems": 15,
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "better": {
+                  "enum": [
+                    "higher",
+                    "lower",
+                    ""
+                  ],
+                  "type": "string"
+                },
+                "delta": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "head": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "improved": {
+                  "description": "Null when either side is unknown or the change is within two points or two percent.",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "metric": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "base",
+                "better",
+                "delta",
+                "head",
+                "improved",
+                "label",
+                "metric",
+                "unit"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          }
+        },
+        "required": [
+          "base",
+          "categories",
+          "head",
+          "kernels",
+          "metrics",
+          "warnings"
         ],
         "type": "object"
       },
@@ -3085,6 +4233,10 @@
         "additionalProperties": false,
         "description": "One content-free GPU profile capture: sampled GPU time attributed to root-first stacks of interned frames.",
         "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/GPUProfileAnalysis",
+            "description": "Required in v2, absent in v1."
+          },
           "capture": {
             "additionalProperties": false,
             "properties": {
@@ -3151,7 +4303,11 @@
             "type": "array"
           },
           "schema_version": {
-            "const": "infercrane.gpu-profile/v1",
+            "description": "v1 carries call stacks only; v2 adds the trace analysis and an optional timeline excerpt.",
+            "enum": [
+              "infercrane.gpu-profile/v1",
+              "infercrane.gpu-profile/v2"
+            ],
             "type": "string"
           },
           "stacks": {
@@ -3164,6 +4320,10 @@
           },
           "timeline": {
             "$ref": "#/components/schemas/GPUProfileTimeline"
+          },
+          "timeline_excerpt": {
+            "$ref": "#/components/schemas/GPUTimelineExcerpt",
+            "description": "v2 only: the busiest part of the capture for a timeline viewer."
           },
           "unavailable_layers": {
             "description": "Layers this capture could not record, for example sass and stall without PC sampling.",
@@ -3219,6 +4379,139 @@
         ],
         "type": "object"
       },
+      "GPUProfileSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "accelerator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active": {
+            "description": "The capture belongs to the deployment's serving revision.",
+            "type": "boolean"
+          },
+          "busy_share": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "gpus": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "pattern": "^gpc-[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "tool_version": {
+            "type": "string"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "bottleneck": {
+                    "enum": [
+                      "host-launch",
+                      "communication",
+                      "memory-bandwidth",
+                      "compute",
+                      "attention",
+                      "busy",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "description": "The measured values the sentence rests on.",
+                    "maxLength": 400,
+                    "type": "string"
+                  },
+                  "sentence": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "bottleneck",
+                  "evidence",
+                  "sentence"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "accelerator",
+          "active",
+          "busy_share",
+          "deployment",
+          "ended_at",
+          "gpus",
+          "id",
+          "recorded_at",
+          "revision",
+          "schema_version",
+          "started_at",
+          "tool",
+          "tool_version",
+          "verdict"
+        ],
+        "type": "object"
+      },
+      "GPUProfileSummaryList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GPUProfileSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "GPUProfileTimeline": {
         "additionalProperties": false,
         "properties": {
@@ -3257,6 +4550,143 @@
         "required": [
           "bucket_seconds",
           "buckets"
+        ],
+        "type": "object"
+      },
+      "GPUTimelineExcerpt": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "enum": [
+                "attention",
+                "gemm",
+                "communication",
+                "memory",
+                "norm",
+                "activation",
+                "sampling",
+                "other",
+                "launch"
+              ],
+              "type": "string"
+            },
+            "maxItems": 4000,
+            "type": "array"
+          },
+          "duration_ms": {
+            "maximum": 2000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "events": {
+            "description": "[lane, name, start_us, duration_us], start relative to the excerpt.",
+            "items": {
+              "items": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            },
+            "maxItems": 20000,
+            "type": "array"
+          },
+          "lanes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "device": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "gpu",
+                    "host"
+                  ],
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "stream": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "device",
+                "kind",
+                "label",
+                "stream"
+              ],
+              "type": "object"
+            },
+            "maxItems": 128,
+            "type": "array"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 4000,
+            "type": "array"
+          },
+          "start_ms": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "duration_us": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "phase": {
+                  "enum": [
+                    "prefill",
+                    "decode",
+                    "mixed",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                "start_us": {
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "duration_us",
+                "phase",
+                "start_us"
+              ],
+              "type": "object"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "categories",
+          "duration_ms",
+          "events",
+          "lanes",
+          "names",
+          "start_ms",
+          "steps",
+          "truncated"
         ],
         "type": "object"
       },
@@ -15965,6 +17395,176 @@
           }
         ],
         "summary": "Read the newest content-free GPU profile capture of the active revision behind an endpoint",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/gpu-profiles": {
+      "get": {
+        "operationId": "listEndpointGPUProfiles",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPUProfileSummaryList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List every retained GPU profile capture behind an endpoint, including revisions that no longer serve",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/gpu-profiles/compare": {
+      "get": {
+        "operationId": "compareEndpointGPUProfiles",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The earlier capture, for example the starting point.",
+            "in": "query",
+            "name": "base",
+            "required": true,
+            "schema": {
+              "pattern": "^gpc-[0-9a-f]{32}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The later capture, for example after an optimization rolled out.",
+            "in": "query",
+            "name": "head",
+            "required": true,
+            "schema": {
+              "pattern": "^gpc-[0-9a-f]{32}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPUProfileComparison"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Compare two analyzed GPU profile captures behind an endpoint, for example before and after a rollout",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/gpu-profiles/{id}": {
+      "get": {
+        "operationId": "getEndpointGPUProfileByID",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GPUProfile"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one retained GPU profile capture behind an endpoint",
         "tags": [
           "Monitoring"
         ]

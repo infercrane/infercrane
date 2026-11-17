@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/gpuprofile"
+	"github.com/infercrane/infercrane/internal/gputrace"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 )
 
@@ -144,30 +145,11 @@ func SummarizeGPUProfile(profile gpuprofile.Profile, now time.Time, maxAge time.
 	return summary
 }
 
-// KernelClass groups a CUDA kernel by its name. Names are matched on stable
-// fragments shared by the common attention (FlashAttention, FlashInfer,
-// paged and Triton attention), matrix-multiply (cuBLAS, CUTLASS, Marlin,
-// MoE), and collective (NCCL, custom all-reduce) kernels.
+// KernelClass groups a GPU kernel by its name into attention, GEMM,
+// communication, or other, using the same vocabulary as the trace analysis
+// (gputrace.Category) folded into the four classes a plan reads.
 func KernelClass(name string) string {
-	lower := strings.ToLower(name)
-	has := func(fragments ...string) bool {
-		for _, fragment := range fragments {
-			if strings.Contains(lower, fragment) {
-				return true
-			}
-		}
-		return false
-	}
-	switch {
-	case has("nccl", "allreduce", "all_reduce", "allgather", "all_gather", "reducescatter", "reduce_scatter", "cross_device_reduce", "custom_ar"):
-		return KernelClassCommunication
-	case has("attn", "attention", "fmha", "flash_fwd", "flash_bwd", "paged", "batchdecode", "batchprefill", "reshape_and_cache", "merge_attn", "mla_"):
-		return KernelClassAttention
-	case has("gemm", "gemv", "matmul", "cutlass", "cublas", "xmma", "wgmma", "marlin", "machete", "nvjet", "fused_moe", "splitk"):
-		return KernelClassGEMM
-	default:
-		return KernelClassOther
-	}
+	return gputrace.DiagnosisClass(name)
 }
 
 func normalizeDiagnosis(diagnosis Diagnosis) Diagnosis {
