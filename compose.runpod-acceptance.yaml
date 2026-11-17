@@ -10,9 +10,9 @@ services:
     command:
       - |
         umask 077
-        rm -f /home/app/.runpod/config.toml
-        runpod config "$$(cat /runpod-key)" >/dev/null
-        mkdir -p /home/app/.sky
+        # The control-plane entrypoint writes the RunPod client config from
+        # RUNPOD_API_KEY_FILE; this step only prepares the shared volumes.
+        mkdir -p /home/app/.runpod /home/app/.sky
         chown -R 10001:10001 /home/app/.runpod /home/app/.sky
     volumes:
       - ${RUNPOD_KEY_FILE:?set RUNPOD_KEY_FILE}:/runpod-key:ro
@@ -57,7 +57,7 @@ services:
       INFERCRANE_SKYPILOT_API: ${INFERCRANE_SKYPILOT_API:-disabled}
       RUNPOD_API_KEY_FILE: /runpod-key
       INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID: ${INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID:-}
-      INFERCRANE_RUNPOD_REST_URL: http://runpod-fault-proxy:8090/v1
+      INFERCRANE_RUNPOD_REST_URL: http://runpod-fault-proxy:8090/v2
       INFERCRANE_RUNPOD_CONTAINER_DISK_GIB: ${INFERCRANE_RUNPOD_CONTAINER_DISK_GIB:-100}
       INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY: ${INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY:-prefer}
       INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON: ${INFERCRANE_RUNPOD_NETWORK_VOLUMES_JSON:-}

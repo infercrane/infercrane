@@ -184,9 +184,18 @@ docker compose --env-file /private/path/infercrane.env \
 ```
 
 The overlay mounts the RunPod key read-only and persists only the provider client's local state.
-The entrypoint configures the RunPod client without printing the key. Native RunPod Pods remain
-available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an explicit provider
-manifest in an operator-owned overlay.
+The entrypoint writes the RunPod client configuration (`~/.runpod/config.toml`, mode 600) without
+printing the key; it no longer runs `runpod config`, which the `runpod` 2.x CLI removed. Native
+RunPod Pods remain available while `INFERCRANE_SKYPILOT_API=disabled`; SkyPilot starts only for an
+explicit provider manifest in an operator-owned overlay.
+
+Native RunPod Pods and Serverless endpoints use RunPod's REST API v2 at `https://api.runpod.io/v2`.
+`INFERCRANE_RUNPOD_REST_URL` overrides that base, for example to route through the acceptance
+fault proxy; leave it unset in production. RunPod retired REST v1 (`https://rest.runpod.io/v1`) on
+2026-11-15 and that host no longer resolves, so a control plane built before this change cannot
+create, observe, or delete RunPod resources. Upgrade it, then check the RunPod inventory for
+resources it could not delete (see [RunPod](/integrations/runpod#check-for-leftover-resources)).
+RunPod's GPU price feed and stock check use `https://api.runpod.io/graphql`, which is a separate API.
 
 InferCrane-paid GPU deployments remain disabled unless
 `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` is set explicitly in that private environment file.

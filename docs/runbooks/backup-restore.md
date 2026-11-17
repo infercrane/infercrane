@@ -80,15 +80,19 @@ region, and namespace as the deployment:
   <Tab title="RunPod">
     ```bash
     runpod_key=$(tr -d '\r\n' < "$RUNPOD_KEY_FILE")
+    # RunPod REST v2 pages at 1000 items; a second page fails instead of
+    # passing as a complete inventory.
     curl -fsS -H "Authorization: Bearer $runpod_key" \
-      https://rest.runpod.io/v1/pods |
-      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
-        {id,name,desiredStatus}] | sort_by(.id)' \
+      'https://api.runpod.io/v2/pods?limit=1000' |
+      jq -S 'if .pagination.hasNextPage then error("more pages") else .pods end |
+        [.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,status}] | sort_by(.id)' \
       > "$evidence/provider-pods.json"
     curl -fsS -H "Authorization: Bearer $runpod_key" \
-      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' |
-      jq -S '[.[] | select((.name // "") | startswith("infercrane-")) |
-        {id,name,workersMin,workersMax}] | sort_by(.id)' \
+      'https://api.runpod.io/v2/serverless?limit=1000' |
+      jq -S 'if .pagination.hasNextPage then error("more pages") else .endpoints end |
+        [.[] | select((.name // "") | startswith("infercrane-")) |
+        {id,name,workers}] | sort_by(.id)' \
       > "$evidence/provider-endpoints.json"
     unset runpod_key
     ```
