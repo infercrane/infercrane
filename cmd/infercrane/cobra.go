@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"strings"
 
-	"github.com/infercrane/infercrane/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -512,6 +510,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("max-cost-usd", "", "hard maximum campaign spend for approval")
 		stringFlag("expires-in", "1h", "paid-resource approval validity")
 		stringFlag("candidate", "", "exact qualified candidate to activate")
+		boolFlag("yes", "approve without the confirmation prompt")
 		intFlag("max-candidates", 10, "maximum candidates")
 		intFlag("limit", 20, "maximum campaigns to list")
 		boolFlag("include-simulated", "include simulated compatibility")
@@ -613,7 +612,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--output", "--once", "--html"},
+		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
@@ -631,60 +630,28 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"environment": {"--to", "--policy", "--idempotency-key", "--yes", "--output"},
 	}
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		source, cancel := newCompletionSource(cmd)
+		defer cancel()
+		if name, flagPrefix, valuePrefix, ok := pendingFlag(cmd, args, toComplete); ok {
+			values, known := completeFlagValue(source, command, args, name, valuePrefix)
+			if !known {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+			for index := range values {
+				values[index] = flagPrefix + values[index]
+			}
+			return values, cobra.ShellCompDirectiveNoFileComp
+		}
 		if strings.HasPrefix(toComplete, "-") {
-			return flags[command], cobra.ShellCompDirectiveNoFileComp
+			// Cobra already offers the registered flags, with their help text.
+			var extra []string
+			for _, flag := range flags[command] {
+				if cmd.Flags().Lookup(strings.TrimPrefix(flag, "--")) == nil {
+					extra = append(extra, flag)
+				}
+			}
+			return matching(extra, toComplete), cobra.ShellCompDirectiveNoFileComp
 		}
-		switch command {
-		case "endpoint":
-			if len(args) == 0 {
-				actions := []string{"list", "inspect", "create", "bind", "plan", "guard", "stage", "promote", "delete"}
-				var values []string
-				for _, action := range actions {
-					if strings.HasPrefix(action, toComplete) {
-						values = append(values, action)
-					}
-				}
-				return values, cobra.ShellCompDirectiveNoFileComp
-			}
-			if args[0] == "list" || args[0] == "create" {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			cfg, err := config.LoadClient()
-			if err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			var response struct {
-				Data []endpointView `json:"data"`
-			}
-			if err = controlJSON(cmd.Context(), cfg, http.MethodGet, "/api/v1/endpoints", "", nil, &response); err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			values := make([]string, 0, len(response.Data))
-			for _, endpoint := range response.Data {
-				if strings.HasPrefix(endpoint.Name, toComplete) {
-					values = append(values, endpoint.Name+"\t"+endpoint.ObservedState)
-				}
-			}
-			return values, cobra.ShellCompDirectiveNoFileComp
-		case "request", "status", "observe", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
-			cfg, err := config.LoadClient()
-			if err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			var response struct {
-				Data []deploymentSummary `json:"data"`
-			}
-			if err = controlJSON(cmd.Context(), cfg, http.MethodGet, "/api/v1/deployments", "", nil, &response); err != nil {
-				return nil, cobra.ShellCompDirectiveNoFileComp
-			}
-			values := make([]string, 0, len(response.Data))
-			for _, deployment := range response.Data {
-				if strings.HasPrefix(deployment.Name, toComplete) {
-					values = append(values, deployment.Name+"\t"+deployment.ObservedState)
-				}
-			}
-			return values, cobra.ShellCompDirectiveNoFileComp
-		}
-		return nil, cobra.ShellCompDirectiveDefault
+		return completePositional(source, command, positional(cmd, args), toComplete)
 	}
 }

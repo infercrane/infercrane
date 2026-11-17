@@ -17,15 +17,65 @@ The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell
 - `status --watch --output json` emits one JSON document per state refresh.
 - `logs --output json` emits JSON Lines: one event object per line, including while `--follow` streams new events. Parse it line by line, not as one document.
 - Mutation commands accept `--idempotency-key`; generated keys are printed in human and JSON output and attached to uncertain-request errors. Reuse the same key after an uncertain result.
-- `--wait` polls persisted operation state and prints only changed progress. Closing the client does not cancel server-side work; the operation ID and exact `infercrane operation watch ID` resume command are printed before waiting begins.
+- `--wait` polls persisted operation state and prints only changed progress. In a terminal it redraws one progress line with a spinner and prints a line as each phase finishes; otherwise it prints one line per change on stderr. Closing the client does not cancel server-side work; the operation ID and exact `infercrane operation watch ID` resume command are printed before waiting begins.
 - `--wait-timeout 20m` bounds the local watcher without cancelling the durable operation. Resume with `infercrane operation watch ID`; cancel only with `infercrane operation cancel ID`.
 - JSON failures contain `code`, `category`, `message`, `retryable`, `remediation`, and provider HTTP status when available.
 - Command help is available before authentication: `infercrane COMMAND --help` never contacts the control plane.
 - `infercrane --context NAME COMMAND` selects a context for one invocation.
-- `--no-color`, before or after the command, and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated.
+- `--no-color`, before or after the command, and the standard `NO_COLOR` environment variable disable ANSI styling. Redirected output and JSON are never decorated. See [Terminal output](#terminal-output).
 - When a dashboard is configured, human output from `deploy`, `apply`, `endpoint create`, `rollout`, `optimize create|approve|report`, and `auth status` ends with `View in dashboard → URL`. See [Sign in the CLI](/features/cli-login#dashboard-links).
 
 <SafeRetry />
+
+## Terminal output
+
+In a terminal, human output is styled like the dashboard: state badges such as `● SERVING`,
+before → after changes in green when better and red when worse, aligned tables with relative
+times, and cards for `optimize report`. Every color repeats a word that is printed next to it, and
+unknown values stay `unknown`. Layouts fit an 80-column terminal and use the extra width of a
+wider one.
+
+Output stays plain, with no ANSI escape codes and no prompts, when:
+
+- stdout is redirected or piped, as it is for scripts, CI, and coding agents;
+- `NO_COLOR` or `--no-color` is set;
+- `TERM=dumb`;
+- `--output json` is used.
+
+Plain and JSON output are exactly what earlier versions printed, so anything that parses them
+keeps working.
+
+Colors follow the terminal's background when it sets `COLORFGBG`. Otherwise the CLI uses mid-tone
+colors that read on dark and light backgrounds. It never queries the terminal, so a command never
+waits on one.
+
+For example, `infercrane optimize list` in an 80-column terminal:
+
+```text
+CAMPAIGN                          STATE                CREATED
+──────────────────────────────────────────────────────────────
+83ccd598540e2dd1f9c897040c1ea503  ● RANKED              2h ago
+  Qwen/Qwen3-0.6B · interactive
+4f1c2d9e0b7a4e63a1d2c3b4a5f60718  ● AWAITING APPROVAL   4m ago
+  meta-llama/Llama-3.1-8B-Instruct · cost-efficiency
+```
+
+and `infercrane deploy MODEL --wait` while it runs:
+
+```text
+  ✓ CHECKING CAPACITY     1s
+  ✓ WAITING FOR CAPACITY  2s
+  ✓ PREPARING ARTIFACT    1s
+⠙ ━━━━━━━━────  70%  STARTING RUNTIME  starting vllm  1m53s · check 5/120
+```
+
+Two commands ask before they act, and only in a terminal:
+
+- `delete DEPLOYMENT` without `--yes` shows the deletion plan and asks you to type the deployment
+  name. Without a terminal, or with `--output json`, it still requires `--yes`.
+- `optimize approve` shows the spend cap, when the approval expires, and every setup the run
+  starts, then asks `Approve spending up to $25.00? [y/N]`. `--yes` approves without asking.
+  Without a terminal it approves as before, without a prompt.
 
 ## Configure and diagnose
 
@@ -126,9 +176,24 @@ infercrane completion fish
 infercrane completion powershell
 ```
 
-Homebrew installs generated completions automatically. Completion is read-only and may suggest
-deployment names from the configured control plane; an unavailable control plane produces no
-completion error or mutation.
+Homebrew installs generated completions automatically. Completion suggests real values from the
+configured control plane:
+
+| What you type | Suggestions |
+|---|---|
+| `status`, `delete`, `logs`, and other deployment commands | deployment names, with state and model |
+| `endpoint inspect` and other endpoint actions | endpoint names, with state |
+| `optimize report`, `inspect`, `results`, `watch`, `approve`, `activate`, `cancel` | optimization run IDs, with model and state |
+| `optimize activate RUN --candidate` | that run's setup IDs, with state |
+| `optimize propose`, `deploy`, `plan`, `apply` | catalog models |
+| `--gpu`, `--region`, `--provider`, `--cloud` | values from the sourced GPU price catalog, narrowed by the provider and GPU already typed |
+| `--target-deployment` | deployment names |
+| `--objective`, `--output`, `--compute`, `--strategy` | their fixed values |
+
+zsh and fish show the description next to each value. Completion only reads, gives up after 1.5
+seconds, and stays silent when the control plane is unreachable or the CLI is not signed in: it
+never prints an error and never mutates anything. A GPU or region suggestion says where it is
+offered, not that capacity is available.
 
 ### `doctor`
 
@@ -378,7 +443,9 @@ infercrane operation watch ACTIVATION_OPERATION_ID
 infercrane optimize cancel CAMPAIGN_ID
 ```
 
-Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
+In a terminal, `optimize approve` first shows the spend cap, when the approval expires, and every
+setup the run starts, and asks before approving. `--yes` skips the question; scripts, pipes, and
+`--output json` never see it. Approval retries do not extend the first persisted expiry. Creation and inspection allocate no
 infrastructure. The default `new_endpoint` intent stops at human activation after qualification.
 `--target-deployment` selects `evolve_endpoint`, which must stop at Release Guard and human
 promotion. `optimize activate` is the explicit boundary in both cases: it marks the qualified new
@@ -901,7 +968,8 @@ infercrane delete qwen-prod \
 infercrane orphans
 ```
 
-`--plan` is side-effect-free. `--yes` is required for mutation. After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
+`--plan` is side-effect-free. `--yes` is required for mutation, except in a terminal, where
+`delete` without `--yes` shows the plan and asks you to type the deployment name instead. After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
 
 ## Tenant administration
 

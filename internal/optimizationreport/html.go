@@ -10,7 +10,7 @@ import (
 // the bottleneck signals when the engine reported any, and the evidence.
 func HTML(r Report) ([]byte, error) {
 	var out bytes.Buffer
-	if err := pageTemplate.Execute(&out, newView(r)); err != nil {
+	if err := pageTemplate.Execute(&out, NewView(r)); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil

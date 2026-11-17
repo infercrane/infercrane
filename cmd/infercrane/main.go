@@ -1995,9 +1995,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	if *wait {
 		if *output == "human" {
-			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", *name, response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
+			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", *name, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), response.Operation.ID)
 		}
-		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, true)
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, progressFor(*output))
 		if err != nil {
 			return err
 		}
@@ -2008,7 +2008,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "endpoint": *endpointName, "base_url": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment       %s\nStable endpoint  %s\nBase URL         %s\nModel            %s\nRuntime          %s\nProvider         %s\nCompute          %s\nOperation        %s\nStatus           %s\nRetry key        %s\n", *name, *endpointName, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment       %s\nStable endpoint  %s\nBase URL         %s\nModel            %s\nRuntime          %s\nProvider         %s\nCompute          %s\nOperation        %s\nStatus           %s\nRetry key        %s\n", *name, *endpointName, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), *idempotencyKey)
 		if response.Operation.Status == "succeeded" {
 			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *endpointName, *name)
 		} else {
@@ -2148,6 +2148,10 @@ func listDeployments(ctx context.Context, cfg config.Config, args []string) erro
 	if *output != "human" {
 		return errors.New("--output must be human or json")
 	}
+	if t := outputTheme(*output); t.styled {
+		fmt.Print(renderDeploymentList(t, response.Data, time.Now()))
+		return nil
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tMODEL\tRUNTIME\tROUTING\tSTATUS")
 	for _, r := range response.Data {
@@ -2222,9 +2226,13 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 				lifecycle.ServingState, lifecycle.ConvergenceState = d.ObservedState, "unknown"
 				lifecycle.ReadyReplicas, lifecycle.DesiredReplicas = healthy, d.MinReplicas
 			}
-			fmt.Printf("%s  %s · %s\nModel        %s\nRuntime      %s\nServing      %s\nConvergence  %s\nReady        %d/%d\nCapacity     %d\nProvisioning %d\nDraining     %d\nCandidate    %s\nRouting      %s\nRevision     %s\nRequests/s   %.2f\nError rate   %.1f%%\n", emptyAs(d.Name, name), terminalStatus(emptyAs(lifecycle.ServingState, "unknown")), terminalStatus(emptyAs(lifecycle.ConvergenceState, "unknown")), emptyAs(d.Model, "unknown"), emptyAs(d.Runtime, "unknown"), emptyAs(lifecycle.ServingState, "unknown"), emptyAs(lifecycle.ConvergenceState, "unknown"), lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, capacity, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, emptyAs(lifecycle.CandidateState, "none"), emptyAs(d.RoutingStrategy, "unknown"), emptyAs(d.ActiveRevisionID, "none"), view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
-			if lifecycle.BlockingOperationID != "" {
-				fmt.Printf("Operation    %s (%s)\n", lifecycle.BlockingOperationID, lifecycle.BlockingOperationKind)
+			t := outputTheme(*output)
+			if t.styled && *watch {
+				fmt.Print("\x1b[H\x1b[2J")
+			}
+			fmt.Print(renderDeploymentStatus(t, emptyAs(d.Name, name), view, lifecycle, capacity))
+			if t.styled && *watch {
+				fmt.Println("\n" + t.muted("Refreshing every 2s · Ctrl-C to stop"))
 			}
 		} else {
 			return errors.New("--output must be human or json")
@@ -2238,6 +2246,54 @@ func statusCommand(ctx context.Context, cfg config.Config, args []string) error 
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// renderDeploymentStatus is the human view of one deployment. Plain output
+// keeps the CLI's original lines so scripts reading it keep working.
+func renderDeploymentStatus(t theme, name string, view deploymentView, lifecycle lifecycleStatusView, capacity int) string {
+	d := view.Deployment
+	serving, convergence := emptyAs(lifecycle.ServingState, "unknown"), emptyAs(lifecycle.ConvergenceState, "unknown")
+	if !t.styled {
+		out := fmt.Sprintf("%s  %s · %s\nModel        %s\nRuntime      %s\nServing      %s\nConvergence  %s\nReady        %d/%d\nCapacity     %d\nProvisioning %d\nDraining     %d\nCandidate    %s\nRouting      %s\nRevision     %s\nRequests/s   %.2f\nError rate   %.1f%%\n", name, t.badge(serving), t.badge(convergence), emptyAs(d.Model, "unknown"), emptyAs(d.Runtime, "unknown"), serving, convergence, lifecycle.ReadyReplicas, lifecycle.DesiredReplicas, capacity, lifecycle.ProvisioningReplicas, lifecycle.DrainingReplicas, emptyAs(lifecycle.CandidateState, "none"), emptyAs(d.RoutingStrategy, "unknown"), emptyAs(d.ActiveRevisionID, "none"), view.RequestStats.RequestsPerSecond, view.RequestStats.ErrorRate*100)
+		if lifecycle.BlockingOperationID != "" {
+			out += fmt.Sprintf("Operation    %s (%s)\n", lifecycle.BlockingOperationID, lifecycle.BlockingOperationKind)
+		}
+		return out
+	}
+	readyTone := toneWatch
+	if lifecycle.DesiredReplicas > 0 && lifecycle.ReadyReplicas >= lifecycle.DesiredReplicas {
+		readyTone = toneGood
+	}
+	var b strings.Builder
+	b.WriteString(t.title(name) + "  " + t.badge(serving) + "  " + t.badge(convergence) + "\n")
+	b.WriteString(t.muted(emptyAs(d.Model, "unknown")+" · "+emptyAs(d.Runtime, "unknown")) + "\n\n")
+	names := []string{"Ready", "Capacity", "Provisioning", "Draining", "Candidate", "Routing", "Revision", "Requests/s", "Error rate"}
+	values := []string{
+		fmt.Sprintf("%d/%d replicas", lifecycle.ReadyReplicas, lifecycle.DesiredReplicas),
+		strconv.Itoa(capacity), strconv.Itoa(lifecycle.ProvisioningReplicas), strconv.Itoa(lifecycle.DrainingReplicas),
+		emptyAs(lifecycle.CandidateState, "none"), emptyAs(d.RoutingStrategy, "unknown"), emptyAs(d.ActiveRevisionID, "none"),
+		fmt.Sprintf("%.2f", view.RequestStats.RequestsPerSecond), fmt.Sprintf("%.1f%%", view.RequestStats.ErrorRate*100),
+	}
+	if lifecycle.BlockingOperationID != "" {
+		names = append(names, "Operation")
+		values = append(values, lifecycle.BlockingOperationID+" ("+lifecycle.BlockingOperationKind+")")
+	}
+	b.WriteString(t.definitions(0, 12, names, values, func(index int, text string) string {
+		switch names[index] {
+		case "Ready":
+			return t.tone(readyTone, text)
+		case "Candidate", "Revision":
+			if text == "none" {
+				return t.muted(text)
+			}
+		case "Routing":
+			if text == "unknown" {
+				return t.muted(text)
+			}
+		}
+		return text
+	}))
+	return b.String()
 }
 
 func fetchDeployment(ctx context.Context, cfg config.Config, name string) (deploymentView, error) {
@@ -2263,8 +2319,8 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
 		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
+	actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence", "delete the endpoint InferCrane created for the deployment unless another backend is bound to it", "release the deployment name so it can be deployed again"}
 	if *planOnly {
-		actions := []string{"withdraw deployment from new routing", "delete every provider resource and verify inventory absence", "delete the endpoint InferCrane created for the deployment unless another backend is bound to it", "release the deployment name so it can be deployed again"}
 		if *output == "json" {
 			encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "actions": actions}, "", "  ")
 			fmt.Println(string(encoded))
@@ -2277,7 +2333,12 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		return nil
 	}
 	if !*yes {
-		return errors.New("deletion requires --yes; run with --plan first")
+		if !promptAllowed(*output) {
+			return errors.New("deletion requires --yes; run with --plan first")
+		}
+		if err := confirmDeletion(ctx, cfg, outputTheme(*output), name, actions); err != nil {
+			return err
+		}
 	}
 	if *idempotencyKey == "" {
 		*idempotencyKey = fmt.Sprintf("cli-delete-%s-%d", name, time.Now().UnixNano())
@@ -2290,9 +2351,9 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	if *wait {
 		if *output == "human" {
-			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", name, response.Operation.ID, terminalStatus(response.Operation.Status), response.Operation.ID)
+			fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\n\nYou can close this terminal safely. Resume with:\n  infercrane operation watch %s\n\n", name, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), response.Operation.ID)
 		}
-		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, true)
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, progressFor(*output))
 		if err != nil {
 			return err
 		}
@@ -2302,7 +2363,7 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", name, response.Operation.ID, terminalStatus(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", name, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), *idempotencyKey)
 	}
 	return nil
 }
@@ -2400,21 +2461,30 @@ func (e *ControlError) Error() string {
 	return detail
 }
 
-func waitForOperation(ctx context.Context, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
+func waitForOperation(ctx context.Context, cfg config.Config, id string, progress progressMode) (operation domain.Operation, err error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var tracker *operationTracker
+	if progress == progressLive {
+		tracker = newOperationTracker(os.Stderr, themeFor(os.Stderr, "human"))
+		defer func() { tracker.done(operation, time.Now()) }()
+	}
 	var lastRendered *domain.Operation
 	var lastPrinted time.Time
 	for {
-		var operation domain.Operation
-		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &operation); err != nil {
+		var current domain.Operation
+		if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/operations/"+url.PathEscape(id), "", nil, &current); err != nil {
 			if ctx.Err() != nil {
-				return operation, watcherStoppedError(ctx.Err(), id)
+				return current, watcherStoppedError(ctx.Err(), id)
 			}
 			return domain.Operation{}, err
 		}
+		operation = current
 		now := time.Now()
-		if printProgress && shouldRenderOperationProgress(lastRendered, operation, lastPrinted, now) {
+		switch {
+		case tracker != nil:
+			tracker.update(operation, now)
+		case progress == progressLines && shouldRenderOperationProgress(lastRendered, operation, lastPrinted, now):
 			fmt.Fprintln(os.Stderr, renderOperationProgress(operation, now))
 			copy := operation
 			lastRendered = &copy
@@ -2455,13 +2525,13 @@ func watcherStoppedError(cause error, id string) error {
 	return &WatcherStoppedError{Cause: cause, OperationID: id}
 }
 
-func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg config.Config, id string, printProgress bool) (domain.Operation, error) {
+func waitForOperationWithin(parent context.Context, timeout time.Duration, cfg config.Config, id string, progress progressMode) (domain.Operation, error) {
 	if timeout <= 0 {
-		return waitForOperation(parent, cfg, id, printProgress)
+		return waitForOperation(parent, cfg, id, progress)
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	return waitForOperation(ctx, cfg, id, printProgress)
+	return waitForOperation(ctx, cfg, id, progress)
 }
 
 func operationCommand(ctx context.Context, cfg config.Config, args []string) error {
@@ -2503,7 +2573,7 @@ func operationCommand(ctx context.Context, cfg config.Config, args []string) err
 	}
 	var op domain.Operation
 	if watch {
-		op, err = waitForOperationWithin(ctx, *waitTimeout, cfg, operationID, true)
+		op, err = waitForOperationWithin(ctx, *waitTimeout, cfg, operationID, progressFor(*output))
 		if err != nil {
 			return err
 		}
@@ -3984,7 +4054,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			return err
 		}
 		if *wait {
-			operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
+			operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, progressForHuman(*output))
 			if err != nil {
 				return err
 			}
@@ -4088,7 +4158,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 		return err
 	}
 	if *wait {
-		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, *output == "human")
+		operation, err := waitForOperationWithin(ctx, *waitTimeout, cfg, response.Operation.ID, progressForHuman(*output))
 		if err != nil {
 			return err
 		}

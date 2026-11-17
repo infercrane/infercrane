@@ -342,7 +342,7 @@ infercrane optimize create llama-3.1-8b-instruct \
   --objective interactive --max-candidates 3
 
 infercrane optimize inspect CAMPAIGN_ID
-infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h
+infercrane optimize approve CAMPAIGN_ID --max-cost-usd 20 --expires-in 1h   # asks first in a terminal; --yes skips
 infercrane operation watch OPERATION_ID
 infercrane optimize results CAMPAIGN_ID
 infercrane optimize activate CAMPAIGN_ID --candidate CANDIDATE_ID
@@ -445,10 +445,46 @@ shows the fixed banner **CPU run: proves the pipeline, not GPU speed**. Per-GPU 
 labelled per simulated accelerator.
 
 ```bash
-infercrane optimize report CAMPAIGN_ID                       # plain text
+infercrane optimize report CAMPAIGN_ID                       # cards in a terminal, plain text when piped
 infercrane optimize report CAMPAIGN_ID --output json         # the API report, unchanged
 infercrane optimize report CAMPAIGN_ID --html result.html    # one self-contained page to share
 ```
+
+In a terminal the report leads with the verdict, then one card per outcome: your current setup →
+the winner, the change in green when better and red when worse, the decision, and the noise band
+it was checked against. How it was measured and every setup measured follow as aligned tables, with
+each setup's runtime flags one per line. This is the report of a real RTX 4090 run in which no setup
+qualified, in an 80-column terminal:
+
+```text
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ● NO WINNER                                                                  │
+│ No setup qualified. Nothing changes in production.                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─────────────────────────────────────╮ ╭─────────────────────────────────────╮
+│ Cost per 1M output tokens           │ │ p95 time to first token             │
+│ $0.37 → unknown                     │ │ 315 ms → unknown                    │
+│ change unknown                      │ │ change unknown                      │
+│ └ no setup qualified                │ │ └ no setup qualified                │
+╰─────────────────────────────────────╯ ╰─────────────────────────────────────╯
+
+Every setup measured ───────────────────────────────────────────────────────────
+  SETUP                                             TOKENS/S  P95 TTFT  $/1M OUT
+  ──────────────────────────────────────────────────────────────────────────────
+  vllm, default settings  CURRENT SETUP                  246    315 ms     $0.37
+    ● server removed
+  vllm                                                   193    339 ms    $0.462
+    --kv-cache-dtype fp8
+    --max-num-batched-tokens 2048
+    ● server removed
+    p95 time to first token +14.1% against your current setup (noise ±5.1%):
+    worse
+```
+
+The cards show the same values as the plain text, including every `unknown` and its reason.
+Piped or redirected output, `NO_COLOR`, and `TERM=dumb` print the plain text unchanged. See
+[Terminal output](/cli#terminal-output).
 
 The HTML page has no scripts or external resources. It shows outcome cards first, then how the
 setups were measured and every setup's result. Next come the engine's cache, queue, and preemption
