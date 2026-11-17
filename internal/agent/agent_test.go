@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -230,16 +231,33 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 		if err != nil || response.StatusCode != http.StatusOK {
 			t.Fatalf("post: %v %v", response, err)
 		}
+		// Read to the end: closing a stream early is a client cancellation.
+		_, _ = io.ReadAll(response.Body)
 		response.Body.Close()
 	}
 	if response, err := http.Get(server.URL + "/v1/models"); err != nil || response.StatusCode != http.StatusOK {
 		t.Fatalf("models pass-through: %v %v", response, err)
 	}
+	// Each shape is recorded after its response is written, so two
+	// back-to-back requests may be recorded in either order.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := shapes.stats(); pending >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	recorded := shapes.take(10)
 	if len(recorded) != 2 {
 		t.Fatalf("shapes: %+v", recorded)
 	}
-	if recorded[0].SharedPrefixHash == "" || recorded[0].SharedPrefixHash != recorded[1].SharedPrefixHash || !recorded[1].Streaming || recorded[0].Streaming {
+	streamed := 0
+	for _, shape := range recorded {
+		if shape.Streaming {
+			streamed++
+		}
+	}
+	if recorded[0].SharedPrefixHash == "" || recorded[0].SharedPrefixHash != recorded[1].SharedPrefixHash || streamed != 1 {
 		t.Fatalf("hashes and streaming: %+v", recorded)
 	}
 	for _, shape := range recorded {
@@ -259,6 +277,11 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 		t.Fatalf("upstream down: %v %v", response, err)
 	}
 	response.Body.Close()
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(5 * time.Millisecond) {
+		if pending, _ := shapes.stats(); pending >= 1 {
+			break
+		}
+	}
 	if failed := shapes.take(10); len(failed) != 1 || failed[0].ErrorType != "upstream_unreachable" || failed[0].StatusCode != http.StatusBadGateway {
 		t.Fatalf("failure shape: %+v", failed)
 	}

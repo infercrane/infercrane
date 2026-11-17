@@ -156,6 +156,7 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 		ollama.URL:   {agentprotocol.EngineOllama, "0.12.10", "qwen3:8b", "qwen3-8b"},
 		lmstudio.URL: {agentprotocol.EngineLMStudio, "", "qwen2.5-7b-instruct", "qwen2.5-7b-instruct"},
 	}
+	var vllmEndpoint, ollamaEndpoint string
 	for _, server := range view.Servers {
 		expected, ok := want[server.Address]
 		if !ok {
@@ -164,13 +165,23 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 		if server.Engine != expected.engine || server.EngineVersion != expected.version || server.Model != expected.model || !server.Registered || server.Health != "healthy" {
 			t.Fatalf("server %s = %+v, want %+v", server.Address, server, expected)
 		}
-		if server.Address == ollama.URL {
-			// Ollama's model name collides with vLLM's; the agent prefixes
-			// its own name instead of guessing.
-			expected.endpoint = "laptop-qwen3-8b"
-		}
-		if server.Endpoint != expected.endpoint {
-			t.Fatalf("endpoint for %s = %s, want %s", server.Address, server.Endpoint, expected.endpoint)
+		switch server.Address {
+		case vllm.URL, ollama.URL:
+			// Their models share a name. Whichever registers second (servers
+			// register in key order, and the ports are random) gets the
+			// agent's name as a prefix instead of a guess.
+			if server.Endpoint != "qwen3-8b" && server.Endpoint != "laptop-qwen3-8b" {
+				t.Fatalf("endpoint for %s = %s", server.Address, server.Endpoint)
+			}
+			if server.Address == vllm.URL {
+				vllmEndpoint = server.Endpoint
+			} else {
+				ollamaEndpoint = server.Endpoint
+			}
+		default:
+			if server.Endpoint != expected.endpoint {
+				t.Fatalf("endpoint for %s = %s, want %s", server.Address, server.Endpoint, expected.endpoint)
+			}
 		}
 		switch server.Engine {
 		case agentprotocol.EngineOllama, agentprotocol.EngineLMStudio:
@@ -182,6 +193,9 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 				t.Fatalf("%s metrics unavailable: %+v", server.Engine, server)
 			}
 		}
+	}
+	if vllmEndpoint == ollamaEndpoint {
+		t.Fatalf("vLLM and Ollama share endpoint %s", vllmEndpoint)
 	}
 	if view.Hardware.State != "partial" || len(view.Hardware.Accelerators) != 1 || view.Hardware.Accelerators[0].Vendor != "amd" || view.Hardware.Accelerators[0].MemoryMiB == nil || *view.Hardware.Accelerators[0].MemoryMiB != 24560 {
 		t.Fatalf("hardware: %+v", view.Hardware)
@@ -211,11 +225,17 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 		t.Fatalf("the engine did not receive the requests: %d %v", vllm.Completions(), vllm.Prompts)
 	}
 
+	// Each shape is recorded just after its response is written.
+	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(5 * time.Millisecond) {
+		if pending, _ := runner.PendingShapes(); pending >= 2 {
+			break
+		}
+	}
 	// The second scrape after traffic gives window values.
 	if err := runner.Step(ctx); err != nil {
 		t.Fatalf("step: %v", err)
 	}
-	served := store.serverByEndpoint("qwen3-8b")
+	served := store.serverByEndpoint(vllmEndpoint)
 	relayed := map[string]float64{}
 	for _, row := range store.measurementsFor(served.TargetID) {
 		relayed[row.Name] = row.Value
@@ -258,7 +278,7 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 			t.Fatalf("no relayed measurements for %s", name)
 		}
 	}
-	if rows := store.measurementsFor(store.serverByEndpoint("laptop-qwen3-8b").TargetID); len(rows) != 0 {
+	if rows := store.measurementsFor(store.serverByEndpoint(ollamaEndpoint).TargetID); len(rows) != 0 {
 		t.Fatalf("Ollama has no engine metrics, yet rows were stored: %+v", rows)
 	}
 
@@ -284,13 +304,13 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 
 	// Deleting an agent's endpoint makes the running agent register the
 	// server again instead of relaying into the void.
-	store.deleteEndpoint("laptop-qwen3-8b")
+	store.deleteEndpoint(ollamaEndpoint)
 	for step := 0; step < 2; step++ {
 		if err := runner.Step(ctx); err != nil {
 			t.Fatalf("step after delete: %v", err)
 		}
 	}
-	if again := store.serverByEndpoint("laptop-qwen3-8b"); again.TargetID == "" {
+	if again := store.serverByEndpoint(ollamaEndpoint); again.TargetID == "" {
 		t.Fatal("the deleted endpoint was not registered again")
 	}
 
@@ -321,7 +341,7 @@ func TestAgentObservesLocalServersThroughOutboundSyncOnly(t *testing.T) {
 	if err := runner.Step(ctx); !errors.Is(err, agent.ErrRevoked) && !errors.Is(err, agent.ErrUnauthenticated) {
 		t.Fatalf("revoked agent kept syncing: %v", err)
 	}
-	if served = store.serverByEndpoint("qwen3-8b"); served.Health != "unhealthy" {
+	if served = store.serverByEndpoint(vllmEndpoint); served.Health != "unhealthy" {
 		t.Fatalf("revoked agent's server health = %s", served.Health)
 	}
 }
