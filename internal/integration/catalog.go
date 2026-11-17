@@ -14,6 +14,7 @@ func SkyPilotProviderProfile(cloud, adapter string) ProviderProfile {
 			{Name: "capacity_preflight", State: CapabilityUnknown, Detail: "provider-specific read-only stock and quota signals must be registered separately"},
 			{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
 			{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestInventoryFiltersOwnedResources"},
+			{Name: CapabilityEngineEnvironment, State: CapabilityUnsupported, Detail: "SkyPilot launches run the CUDA platform only, where no engine environment variable is reviewed; a revision that sets one is refused before launch"},
 		},
 		Qualification: []Qualification{
 			{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractSkyPilotLifecycle"},
@@ -40,6 +41,7 @@ func BaseCatalog() (*Registry, error) {
 				{Name: "provider_native_scale_to_zero", State: CapabilitySupported, Evidence: "go:test/internal/workflows#TestServerlessConvergeRegistersScaleToZeroEndpointWithoutWarmingWorker"},
 				{Name: "stream_cancellation", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestClientCancellationPropagatesToRuntime"},
 				{Name: "warm_workers", State: CapabilitySupported, Evidence: "go:test/internal/gateway#TestServerlessNonzeroWorkerEvidenceClassifiesWarmRequest"},
+				{Name: CapabilityEngineEnvironment, State: CapabilityUnsupported, Detail: "the serverless worker image is CUDA only and takes no engine environment from a revision; a revision that sets one is refused before the endpoint is created"},
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-provider-contract", Evidence: "go:test/internal/provision#TestProviderContractRunPodServerlessLifecycleAndLostResponseAdoption"},
@@ -110,6 +112,7 @@ func providerCatalog() (*Registry, error) {
 				{Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 				{Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
 				{Name: "native_http_endpoint", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
+				{Name: CapabilityEngineEnvironment, State: CapabilitySupported, Detail: "reviewed engine variables are set in the Pod env and checked on adoption", Evidence: "go:test/internal/provision#TestProviderAdaptersPassOrRefuseEngineEnvironment"},
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-runpod-rest", Evidence: "go:test/internal/provision#TestRunPodPodsLifecycleIsReplaySafeAndPreservesImmutableWorkload"},
@@ -144,6 +147,7 @@ func providerCatalog() (*Registry, error) {
 				{Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestAWSEC2RejectsMutableImageBeforeAWSCall"},
 				{Name: "private_network", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestAWSEC2LifecycleIsIdempotentPrivateAndTagged"},
 				{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
+				{Name: CapabilityEngineEnvironment, State: CapabilitySupported, Detail: "reviewed engine variables are passed to the runtime container in user data", Evidence: "go:test/internal/provision#TestProviderAdaptersPassOrRefuseEngineEnvironment"},
 			},
 			Qualification: []Qualification{
 				{State: QualificationLocal, Environment: "hermetic-aws-cli", Evidence: "go:test/internal/conformance#TestAWSEC2ProviderContractConformance"},
@@ -239,6 +243,7 @@ func KubernetesCatalog() (*Registry, error) {
 			{Name: "namespaced_rbac", State: CapabilitySupported, Evidence: "script:scripts/test-kubernetes-manifests.sh"},
 			{Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestKubernetesProviderAdoptsLostResponseAndRepairsPartialOwnerSet"},
 			{Name: "server_side_apply", State: CapabilitySupported, Evidence: "script:scripts/test-kubernetes-kind.sh"},
+			{Name: CapabilityEngineEnvironment, State: CapabilitySupported, Detail: "reviewed engine variables are set in the runtime container env and covered by the intent hash", Evidence: "go:test/internal/provision#TestProviderAdaptersPassOrRefuseEngineEnvironment"},
 			{Name: "advanced_disaggregated_runtime", State: CapabilityUnsupported, Detail: "KServe LLMInferenceService, llm-d, and Dynamo own routing or scheduling and require a future explicit routing contract"},
 		},
 		Qualification: []Qualification{
@@ -440,7 +445,7 @@ func V1Catalog() (*Registry, error) {
 	for _, profile := range profiles {
 		if profile.Adapter == "gcp-compute" {
 			profile.AdapterVersion = "builtin-v1"
-			profile.Capabilities = []Capability{{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "capacity_preflight", State: CapabilitySupported, Detail: "read-only exact-zone support and GPU quota blockers; current stock remains unknown", Evidence: "go:test/internal/provision#TestGCPComputeProbeLaunchHeadroomDoesNotClaimStockOrDeployability"}, {Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeRejectsMutableContainerBeforeProviderCall"}, {Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "private_network", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "workload_identity", State: CapabilitySupported, Detail: "attached service account; no static service-account key", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}}
+			profile.Capabilities = []Capability{{Name: "adoption", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "capacity_preflight", State: CapabilitySupported, Detail: "read-only exact-zone support and GPU quota blockers; current stock remains unknown", Evidence: "go:test/internal/provision#TestGCPComputeProbeLaunchHeadroomDoesNotClaimStockOrDeployability"}, {Name: "idempotent_delete", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "immutable_workload", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeRejectsMutableContainerBeforeProviderCall"}, {Name: "orphan_inventory", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "private_network", State: CapabilitySupported, Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: "workload_identity", State: CapabilitySupported, Detail: "attached service account; no static service-account key", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {Name: CapabilityEngineEnvironment, State: CapabilitySupported, Detail: "reviewed engine variables are passed to the runtime container in the startup script and covered by the intent digest", Evidence: "go:test/internal/provision#TestProviderAdaptersPassOrRefuseEngineEnvironment"}}
 			profile.Qualification = []Qualification{{State: QualificationLocal, Environment: "hermetic-gcloud", Evidence: "go:test/internal/provision#TestGCPComputeLifecycleIsPrivateIdempotentAndAdoptable"}, {State: QualificationDeferred, Environment: "real-gcp-compute", Reason: "awaiting consolidated manual qualification"}}
 		}
 		if err = registry.RegisterProvider(profile); err != nil {
@@ -459,6 +464,7 @@ func V1Catalog() (*Registry, error) {
 			{Name: "dynamo_planner_autoscaling", State: CapabilityUnsupported, Detail: "registered in the serving contract but fails closed until DGDSA ownership is qualified"},
 			{Name: "lmcache", State: CapabilityUnsupported, Detail: "registered with exact vLLM argument translation; compile fails closed until lifecycle qualification"},
 			{Name: "hicache", State: CapabilityUnsupported, Detail: "registered in the serving contract but not emitted by this adapter"},
+			{Name: CapabilityEngineEnvironment, State: CapabilityUnsupported, Detail: "Dynamo components are not given engine environment variables yet; a revision that sets one is refused before the graph is applied"},
 		},
 		Qualification: []Qualification{
 			{State: QualificationLocal, Environment: "hermetic-kubectl", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},

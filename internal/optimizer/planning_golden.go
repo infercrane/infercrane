@@ -45,6 +45,10 @@ const (
 	PlanningPublisherCheckpoint   = "publisher_checkpoint"
 	PlanningPinnedImageSetups     = "pinned_image_setups"
 	PlanningGPUTrace              = "gpu_trace"
+	// PlanningAcceleratorKernels covers turning on an accelerator's own
+	// kernels through a reviewed engine switch, and every case where it must
+	// not be chosen.
+	PlanningAcceleratorKernels = "accelerator_kernels"
 )
 
 // RequiredPlanningCategories lists every situation the suite must cover.
@@ -52,6 +56,7 @@ var RequiredPlanningCategories = []string{
 	PlanningKVPressure, PlanningQueueing, PlanningHostBound, PlanningPrefill, PlanningPrefixReuse,
 	PlanningDecodeLowConcurrency, PlanningDecodeHighConcurrency, PlanningGPUProfile, PlanningNotReady,
 	PlanningReliability, PlanningRecordedGPURun, PlanningPublisherCheckpoint, PlanningPinnedImageSetups, PlanningGPUTrace,
+	PlanningAcceleratorKernels,
 }
 
 type PlanningGoldenManifest struct {

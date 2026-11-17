@@ -569,6 +569,21 @@ func normalizeRuntime(profile RuntimeProfile) RuntimeProfile {
 	return profile
 }
 
+// CapabilityEngineEnvironment is a provider adapter passing a revision's
+// reviewed engine environment variables to the runtime container.
+const CapabilityEngineEnvironment = "engine_environment"
+
+// Supports reports a capability the profile declares as supported. An
+// absent, unknown, or unsupported declaration is not support.
+func Supports(profile ProviderProfile, capability string) bool {
+	for _, declared := range profile.Capabilities {
+		if declared.Name == capability {
+			return declared.State == CapabilitySupported
+		}
+	}
+	return false
+}
+
 func HasMode(profile ProviderProfile, mode ComputeMode) bool {
 	for _, declared := range profile.Modes {
 		if declared == mode {

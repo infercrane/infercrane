@@ -567,7 +567,7 @@ func planCommand(ctx context.Context, cfg config.Config, args []string) error {
 		}
 		in = planning.Input{Name: file.Name, Model: file.Model.ID, ModelRevision: file.Model.Revision, ComputeMode: file.Compute.Mode, Cloud: file.Provider.Cloud, ProviderAdapter: file.Provider.Adapter,
 			GPU: file.Resources.GPU, GPUCount: file.Resources.GPUCount, Region: file.Provider.Region, Runtime: file.Runtime.Engine,
-			RuntimeVersion: file.Runtime.Version, RuntimeArgs: file.Runtime.Args, Routing: file.Routing.Strategy,
+			RuntimeVersion: file.Runtime.Version, RuntimeArgs: file.Runtime.Args, RuntimeEnv: file.Runtime.Env, Routing: file.Routing.Strategy,
 			MinReplicas: file.Scaling.MinReplicas, MaxReplicas: file.Scaling.MaxReplicas, Serving: file.Serving}
 	} else if *targets != "" {
 		if *computeMode == "serverless" {
@@ -1985,6 +1985,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	})
 	strategy := "round-robin"
 	runtimeArgs := []string{}
+	var runtimeEnv map[string]string
 	var runtimeWorkload runtimecontract.Workload
 	var servingTopology servingcontract.Topology
 	runtimeEngine := *runtimeFlag
@@ -2012,6 +2013,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		*region = file.Provider.Region
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
+		runtimeEnv = file.Runtime.Env
 		runtimeWorkload = file.Runtime.Workload
 		servingTopology = file.Serving
 		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
@@ -2073,7 +2075,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
 			ComputeConnectionID: selfServe.connectionID, BillingMode: selfServe.billingMode, ManagedRuntimeSeconds: selfServe.runtimeSeconds}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
@@ -4190,7 +4192,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			}
 			revisionSpec = domain.DeploymentRevisionSpec{
 				Model: candidate.Model.ID, ModelRevision: candidate.Model.Revision,
-				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args,
+				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args, RuntimeEnv: candidate.Runtime.Env,
 				RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
 				AutoscalingEnabled: candidate.Scaling.MaxReplicas > candidate.Scaling.MinReplicas, ComputeMode: candidate.Compute.Mode,
 				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, GPUCount: candidate.Resources.GPUCount, Region: candidate.Provider.Region,

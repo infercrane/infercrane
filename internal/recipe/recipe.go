@@ -12,23 +12,24 @@ import (
 )
 
 type Payload struct {
-	SchemaVersion     string          `json:"schema_version"`
-	Name              string          `json:"name"`
-	Version           string          `json:"version"`
-	ModelRepository   string          `json:"model_repository"`
-	ModelRevision     string          `json:"model_revision"`
-	ModelIdentity     string          `json:"model_identity"`
-	Runtime           string          `json:"runtime"`
-	RuntimeVersion    string          `json:"runtime_version"`
-	RuntimeArgs       []string        `json:"runtime_args,omitempty"`
-	Provider          string          `json:"provider"`
-	ProviderAdapter   string          `json:"provider_adapter,omitempty"`
-	Region            string          `json:"region,omitempty"`
-	GPU               string          `json:"gpu"`
-	ComputeMode       string          `json:"compute_mode"`
-	Workload          any             `json:"workload,omitempty"`
-	BenchmarkID       string          `json:"benchmark_id"`
-	BenchmarkWorkload json.RawMessage `json:"benchmark_workload"`
+	SchemaVersion     string            `json:"schema_version"`
+	Name              string            `json:"name"`
+	Version           string            `json:"version"`
+	ModelRepository   string            `json:"model_repository"`
+	ModelRevision     string            `json:"model_revision"`
+	ModelIdentity     string            `json:"model_identity"`
+	Runtime           string            `json:"runtime"`
+	RuntimeVersion    string            `json:"runtime_version"`
+	RuntimeArgs       []string          `json:"runtime_args,omitempty"`
+	RuntimeEnv        map[string]string `json:"runtime_env,omitempty"`
+	Provider          string            `json:"provider"`
+	ProviderAdapter   string            `json:"provider_adapter,omitempty"`
+	Region            string            `json:"region,omitempty"`
+	GPU               string            `json:"gpu"`
+	ComputeMode       string            `json:"compute_mode"`
+	Workload          any               `json:"workload,omitempty"`
+	BenchmarkID       string            `json:"benchmark_id"`
+	BenchmarkWorkload json.RawMessage   `json:"benchmark_workload"`
 }
 
 type Provenance struct {
@@ -56,7 +57,7 @@ func Build(name, version, infercraneVersion string, artifact domain.ModelArtifac
 	if !json.Valid([]byte(benchmark.WorkloadJSON)) {
 		return domain.ModelRecipe{}, errors.New("recipe benchmark workload is invalid")
 	}
-	payload := Payload{SchemaVersion: "infercrane.recipe/v1", Name: name, Version: version, ModelRepository: artifact.Repository, ModelRevision: artifact.ImmutableRevision, ModelIdentity: artifact.ModelIdentity, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, Provider: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, Region: spec.Region, GPU: spec.GPU, ComputeMode: spec.ComputeMode, Workload: spec.Workload, BenchmarkID: benchmark.ID, BenchmarkWorkload: json.RawMessage(benchmark.WorkloadJSON)}
+	payload := Payload{SchemaVersion: "infercrane.recipe/v1", Name: name, Version: version, ModelRepository: artifact.Repository, ModelRevision: artifact.ImmutableRevision, ModelIdentity: artifact.ModelIdentity, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, Provider: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, Region: spec.Region, GPU: spec.GPU, ComputeMode: spec.ComputeMode, Workload: spec.Workload, BenchmarkID: benchmark.ID, BenchmarkWorkload: json.RawMessage(benchmark.WorkloadJSON)}
 	provenance := Provenance{SourceDeployment: benchmark.DeploymentName, SourceRevision: revision.ID, ArtifactID: artifact.ID, BenchmarkTool: benchmark.Tool, BenchmarkVersion: benchmark.ToolVersion, InferCraneVersion: infercraneVersion, EvidenceClass: "measured"}
 	payloadJSON, _ := json.Marshal(payload)
 	provenanceJSON, _ := json.Marshal(provenance)

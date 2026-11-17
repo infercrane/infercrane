@@ -79,3 +79,38 @@ inference passports. SkyPilot, GCP Compute, and Kubernetes compile the exact cou
 resources. AWS EC2 binds the count to `INFERCRANE_AWS_GPU_COUNT` for the configured instance type and
 rejects a mismatch before creating paid capacity. Serverless currently supports one accelerator per
 worker and rejects any other count explicitly.
+
+## Engine environment switches
+
+`runtime.env` sets a few reviewed engine switches through the runtime container's environment, for
+example AMD's AITER kernels for vLLM:
+
+```yaml
+runtime:
+  engine: vllm
+  version: 0.22.1
+  env:
+    VLLM_ROCM_USE_AITER: "1"
+resources:
+  gpu: MI300X
+```
+
+It is not a general environment. Each name is reviewed for one engine version, its pinned image,
+and the accelerator platforms listed, with a fixed set of values read from the engine's source:
+
+| Name | Runtime | Platforms | Values | Default |
+|---|---|---|---|---|
+| `VLLM_ROCM_USE_AITER` | vLLM 0.22.1, pinned image | `rocm-gfx942`, `rocm-gfx950` | `0`, `1` | `0` |
+
+Anything else is refused when the spec is loaded, when the control API receives the deployment, and
+again in the provider adapter: another name or value, a custom image, another engine version, a GPU
+on another platform, or more than 8 entries. A refused value is not repeated in the error, so a
+credential pasted here does not reach logs. Credentials never go in `runtime.env`; the worker key
+and model tokens reach the runtime through their own references.
+
+RunPod Pods, Kubernetes, AWS EC2, and GCP Compute pass the switches to the runtime container.
+RunPod Pods, Kubernetes, and GCP Compute also compare them when adopting an existing replica, so a
+running replica with different switches is not adopted. SkyPilot, RunPod Serverless, and Dynamo on Kubernetes cannot pass them, and a revision
+that sets any is refused before anything is provisioned. The API field is `runtime_env` on
+`POST /api/v1/deployments`. The switches are part of the immutable revision: changing one creates a
+candidate, and benchmark rows record them next to the engine arguments.

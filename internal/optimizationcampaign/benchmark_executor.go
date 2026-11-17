@@ -159,7 +159,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, fmt.Errorf("encode campaign workload evidence: %w", err)
 	}
-	runtimeConfig, _ := json.Marshal(map[string]any{"args": draft.Runtime.Args})
+	runtimeConfig, _ := json.Marshal(support.BenchmarkRuntimeConfig(draft.Runtime.Args, draft.Runtime.Env))
 	costMetadata, _ := json.Marshal(map[string]any{"available": true, "hourly": quote.HourlyUSD, "currency": "USD", "billing_unit": "hour", "source": quote.Source, "evidence_class": "provider_reported", "observed_at": quote.ObservedAt, "valid_until": quote.ValidUntil, "rate_locked": quote.Locked, "revision_id": revision.ID})
 	gpuCount := draft.Resources.GPUCount
 	if gpuCount == 0 {

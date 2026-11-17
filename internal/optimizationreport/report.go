@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"sort"
@@ -261,25 +262,27 @@ type Appendix struct {
 
 // Setup is one exact serving configuration.
 type Setup struct {
-	CandidateID      string   `json:"candidate_id"`
-	Label            string   `json:"label"`
-	Model            string   `json:"model"`
-	Engine           string   `json:"engine"`
-	EngineVersion    string   `json:"engine_version"`
-	Args             []string `json:"args"`
-	Image            string   `json:"image,omitempty"`
-	Accelerator      string   `json:"accelerator"`
-	AcceleratorCount *int     `json:"accelerator_count"`
-	AcceleratorClass string   `json:"accelerator_class"`
-	Provider         string   `json:"provider"`
-	Region           string   `json:"region,omitempty"`
-	ComputeMode      string   `json:"compute_mode,omitempty"`
-	MinReplicas      int      `json:"min_replicas"`
-	MaxReplicas      int      `json:"max_replicas"`
-	DeploymentName   string   `json:"deployment_name,omitempty"`
-	RevisionID       string   `json:"revision_id,omitempty"`
-	HourlyUSD        *float64 `json:"hourly_usd_per_replica"`
-	PriceSource      string   `json:"price_source,omitempty"`
+	CandidateID   string   `json:"candidate_id"`
+	Label         string   `json:"label"`
+	Model         string   `json:"model"`
+	Engine        string   `json:"engine"`
+	EngineVersion string   `json:"engine_version"`
+	Args          []string `json:"args"`
+	// Env is the setup's reviewed engine environment; absent when none is set.
+	Env              map[string]string `json:"env,omitempty"`
+	Image            string            `json:"image,omitempty"`
+	Accelerator      string            `json:"accelerator"`
+	AcceleratorCount *int              `json:"accelerator_count"`
+	AcceleratorClass string            `json:"accelerator_class"`
+	Provider         string            `json:"provider"`
+	Region           string            `json:"region,omitempty"`
+	ComputeMode      string            `json:"compute_mode,omitempty"`
+	MinReplicas      int               `json:"min_replicas"`
+	MaxReplicas      int               `json:"max_replicas"`
+	DeploymentName   string            `json:"deployment_name,omitempty"`
+	RevisionID       string            `json:"revision_id,omitempty"`
+	HourlyUSD        *float64          `json:"hourly_usd_per_replica"`
+	PriceSource      string            `json:"price_source,omitempty"`
 }
 
 // EvidenceDigest names one persisted record the report rests on.
@@ -1276,6 +1279,9 @@ func setup(a *arm) *Setup {
 		result.Engine, result.EngineVersion, result.Image = draft.Runtime.Engine, draft.Runtime.Version, draft.Runtime.Workload.Image
 		if draft.Runtime.Args != nil {
 			result.Args = append(result.Args, draft.Runtime.Args...)
+		}
+		if len(draft.Runtime.Env) > 0 {
+			result.Env = maps.Clone(draft.Runtime.Env)
 		}
 		result.Provider, result.Region, result.ComputeMode = draft.Provider.Cloud, draft.Provider.Region, draft.Compute.Mode
 		result.MinReplicas, result.MaxReplicas = draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas

@@ -962,7 +962,7 @@ func TestHuggingFaceCatalogIncludesReviewedAndUnmeasuredPublisherCandidates(t *t
 		`"output_revision":"3431dde3247c13b5957f682b1e3c6fcae2566079"`,
 		`"publisher_builds":[`,
 		`"repository":"amd/DeepSeek-V4.1-Flash-Quark-PTPC-FP8"`,
-		`"product_support":"unsupported_hardware"`,
+		`"product_support":"runnable"`,
 		`"revision":"c48dca0146b56d64c8116dbb6fcace8b7cc835f8"`,
 	} {
 		if !strings.Contains(body, expected) {

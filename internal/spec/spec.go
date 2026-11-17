@@ -21,9 +21,11 @@ type Deployment struct {
 		Revision string `yaml:"revision"`
 	} `yaml:"model"`
 	Runtime struct {
-		Engine   string                   `yaml:"engine"`
-		Version  string                   `yaml:"version"`
-		Args     []string                 `yaml:"args"`
+		Engine  string   `yaml:"engine"`
+		Version string   `yaml:"version"`
+		Args    []string `yaml:"args"`
+		// Env is a small set of reviewed engine switches (support.EngineEnvironment).
+		Env      map[string]string        `yaml:"env,omitempty"`
 		Workload runtimecontract.Workload `yaml:"workload"`
 	} `yaml:"runtime"`
 	Compute struct {
@@ -121,6 +123,9 @@ func Load(path string) (Deployment, error) {
 		if out.Compute.Mode != "elastic" {
 			return out, fmt.Errorf("custom OCI workloads require compute.mode elastic")
 		}
+	}
+	if err := support.ValidateRuntimeEnv(out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU, out.Runtime.Workload, out.Runtime.Env); err != nil {
+		return out, fmt.Errorf("runtime.env: %w", err)
 	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")
