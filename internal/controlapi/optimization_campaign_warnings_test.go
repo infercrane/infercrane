@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/apicontract"
@@ -128,24 +129,33 @@ func assertCampaignWarnings(t *testing.T, label string, body []byte, field strin
 
 // assertMatchesDocumentedSchema keeps the response and the OpenAPI contract in
 // lockstep: every returned key is documented and every required key is present.
-func assertMatchesDocumentedSchema(t *testing.T, name string, object map[string]any) {
-	t.Helper()
+type documentedSchema struct {
+	Required   []string       `json:"required"`
+	Properties map[string]any `json:"properties"`
+}
+
+// documentedSchemas builds the OpenAPI document once per test binary.
+var documentedSchemas = sync.OnceValues(func() (map[string]documentedSchema, error) {
 	data, err := apicontract.Marshal()
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	var document struct {
 		Components struct {
-			Schemas map[string]struct {
-				Required   []string       `json:"required"`
-				Properties map[string]any `json:"properties"`
-			} `json:"schemas"`
+			Schemas map[string]documentedSchema `json:"schemas"`
 		} `json:"components"`
 	}
-	if err = json.Unmarshal(data, &document); err != nil {
+	err = json.Unmarshal(data, &document)
+	return document.Components.Schemas, err
+})
+
+func assertMatchesDocumentedSchema(t *testing.T, name string, object map[string]any) {
+	t.Helper()
+	schemas, err := documentedSchemas()
+	if err != nil {
 		t.Fatal(err)
 	}
-	schema, ok := document.Components.Schemas[name]
+	schema, ok := schemas[name]
 	if !ok {
 		t.Fatalf("OpenAPI document has no %s schema", name)
 	}

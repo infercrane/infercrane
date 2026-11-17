@@ -467,6 +467,10 @@ class ControlAPI:
         request_path = "/optimization/accelerator-lab/runs"
         return cast(OperationEnvelope, self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
+    def list_accelerator_lab_runs(self) -> dict[str, Any]:
+        request_path = "/optimization/accelerator-lab/runs"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def list_optimization_campaigns(self) -> ObjectList:
         request_path = "/optimization/campaigns"
         return cast(ObjectList, self._transport.request("GET", request_path))

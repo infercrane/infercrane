@@ -1,6 +1,863 @@
 {
   "components": {
     "schemas": {
+      "AcceleratorLabRun": {
+        "additionalProperties": false,
+        "properties": {
+          "campaign_id": {
+            "type": "string"
+          },
+          "candidate_id": {
+            "description": "Empty when the stored request cannot be read.",
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Durable operation ID.",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "policy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_state": {
+            "description": "pending: the worker has not recorded a result. unreadable: the stored result does not decode or has another schema version.",
+            "enum": [
+              "pending",
+              "recorded",
+              "unreadable"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "Durable operation status as stored.",
+            "type": "string"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "candidate_id",
+          "status",
+          "progress",
+          "message",
+          "error_code",
+          "created_at",
+          "updated_at",
+          "completed_at",
+          "target",
+          "policy",
+          "result_state",
+          "result"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunExperiment": {
+        "additionalProperties": false,
+        "properties": {
+          "build": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "artifact_digests": {
+                    "description": "Content digests of the built artifacts. Their storage locations are not exposed.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "builder": {
+                    "type": "string"
+                  },
+                  "builder_version": {
+                    "type": "string"
+                  },
+                  "checks": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "receipt_digest": {
+                    "type": "string"
+                  },
+                  "source_digest": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "builder",
+                  "builder_version",
+                  "source_digest",
+                  "status",
+                  "checks",
+                  "receipt_digest",
+                  "artifact_digests"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidate_id": {
+            "type": "string"
+          },
+          "failure_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generated": {
+            "description": "True when the experiment's source was generated rather than supplied.",
+            "type": "boolean"
+          },
+          "operator_family": {
+            "type": "string"
+          },
+          "qualification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasons": {
+            "description": "URIs inside a reason are replaced with [uri redacted].",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "research": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AcceleratorLabRunResearch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "type": "string"
+              },
+              "implementation_id": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "implementation_id",
+              "revision",
+              "license",
+              "backend"
+            ],
+            "type": "object"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "operator_family",
+          "state",
+          "failure_code",
+          "reasons",
+          "source",
+          "generated",
+          "build",
+          "qualification",
+          "research"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunList": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary": {
+            "type": "string"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AcceleratorLabRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "boundary"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_generated_kernels": {
+            "type": "boolean"
+          },
+          "max_cost_usd": {
+            "type": "number"
+          },
+          "max_memory_regression_percent": {
+            "type": "number"
+          },
+          "min_amdahl_ceiling": {
+            "type": "number"
+          },
+          "min_hotspot_fraction": {
+            "type": "number"
+          },
+          "min_kernel_speedup": {
+            "type": "number"
+          },
+          "require_hidden_shapes": {
+            "type": "boolean"
+          },
+          "require_quality": {
+            "type": "boolean"
+          },
+          "require_sanitizer": {
+            "type": "boolean"
+          },
+          "require_serving_replay": {
+            "type": "boolean"
+          },
+          "target_end_to_end_speedup": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "max_cost_usd",
+          "min_hotspot_fraction",
+          "min_amdahl_ceiling",
+          "target_end_to_end_speedup",
+          "min_kernel_speedup",
+          "max_memory_regression_percent",
+          "require_hidden_shapes",
+          "require_sanitizer",
+          "require_serving_replay",
+          "require_quality",
+          "allow_generated_kernels"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmark_evidence_id": {
+            "type": "string"
+          },
+          "build_artifact_digest": {
+            "type": "string"
+          },
+          "correctness_passed": {
+            "type": "boolean"
+          },
+          "cost_regression_percent": {
+            "type": "number"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "end_to_end_speedup": {
+            "type": "number"
+          },
+          "hardware": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "type": "string"
+              },
+              "compute_capability": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "vendor",
+              "accelerator",
+              "compute_capability"
+            ],
+            "type": "object"
+          },
+          "hidden_shapes_passed": {
+            "type": "boolean"
+          },
+          "kernel_speedup": {
+            "type": "number"
+          },
+          "measured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "memory_regression_percent": {
+            "type": "number"
+          },
+          "profiler_artifact_digest": {
+            "type": "string"
+          },
+          "quality_evidence_id": {
+            "type": "string"
+          },
+          "quality_passed": {
+            "type": "boolean"
+          },
+          "runtime_image_digest": {
+            "type": "string"
+          },
+          "sanitizer_passed": {
+            "type": "boolean"
+          },
+          "serving_replay_measured": {
+            "type": "boolean"
+          },
+          "workload_digest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "correctness_passed",
+          "hidden_shapes_passed",
+          "sanitizer_passed",
+          "quality_passed",
+          "serving_replay_measured",
+          "kernel_speedup",
+          "end_to_end_speedup",
+          "memory_regression_percent",
+          "cost_regression_percent",
+          "build_artifact_digest",
+          "profiler_artifact_digest",
+          "benchmark_evidence_id",
+          "quality_evidence_id",
+          "measured_at",
+          "hardware",
+          "runtime_image_digest",
+          "workload_digest",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunResearch": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "backend": {
+                  "type": "string"
+                },
+                "baseline_median_us": {
+                  "type": "number"
+                },
+                "candidate_median_us": {
+                  "type": "number"
+                },
+                "completed_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "correctness": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "determinism": {
+                      "type": "boolean"
+                    },
+                    "edge_cases": {
+                      "type": "boolean"
+                    },
+                    "numerical_stability": {
+                      "type": "boolean"
+                    },
+                    "sanitizer": {
+                      "type": "boolean"
+                    },
+                    "shape_sweep": {
+                      "type": "boolean"
+                    },
+                    "smoke": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "smoke",
+                    "shape_sweep",
+                    "numerical_stability",
+                    "determinism",
+                    "edge_cases",
+                    "sanitizer"
+                  ],
+                  "type": "object"
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "end_to_end_speedup": {
+                  "type": "number"
+                },
+                "iteration": {
+                  "type": "integer"
+                },
+                "kernel_speedup": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "iteration",
+                "source_revision",
+                "backend",
+                "correctness",
+                "baseline_median_us",
+                "candidate_median_us",
+                "kernel_speedup",
+                "end_to_end_speedup",
+                "decision",
+                "reason",
+                "completed_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "best_end_to_end_speedup": {
+            "type": "number"
+          },
+          "best_kernel_speedup": {
+            "type": "number"
+          },
+          "best_source_revision": {
+            "type": "string"
+          },
+          "receipt_digest": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "best_source_revision",
+          "best_kernel_speedup",
+          "best_end_to_end_speedup",
+          "receipt_digest",
+          "attempts"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_usd": {
+            "type": "number"
+          },
+          "evidence_state": {
+            "type": "string"
+          },
+          "experiments": {
+            "items": {
+              "$ref": "#/components/schemas/AcceleratorLabRunExperiment"
+            },
+            "type": "array"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "plan": {
+            "additionalProperties": false,
+            "properties": {
+              "algorithm_version": {
+                "type": "string"
+              },
+              "candidates": {
+                "items": {
+                  "additionalProperties": true,
+                  "description": "The kernel planner's candidate as recorded.",
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "registry_version": {
+                "type": "string"
+              },
+              "rejected": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "hotspot_id": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "hotspot_id",
+                    "reason"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "selection_boundary": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "algorithm_version",
+              "registry_version",
+              "selection_boundary",
+              "candidates",
+              "rejected"
+            ],
+            "type": "object"
+          },
+          "profile": {
+            "additionalProperties": false,
+            "properties": {
+              "artifact_digest": {
+                "type": "string"
+              },
+              "captured_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "hotspots": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "device_time_fraction": {
+                      "type": "number"
+                    },
+                    "dtypes": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "family": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "invocations": {
+                      "description": "Null when the profiler did not record it.",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "mean_duration_us": {
+                      "description": "Null when the profiler did not record it.",
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "shapes": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "family",
+                    "device_time_fraction",
+                    "mean_duration_us",
+                    "invocations",
+                    "shapes",
+                    "dtypes"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "runtime_image_digest": {
+                "type": "string"
+              },
+              "tool": {
+                "type": "string"
+              },
+              "tool_version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "tool",
+              "tool_version",
+              "captured_at",
+              "runtime_image_digest",
+              "artifact_digest",
+              "hotspots"
+            ],
+            "type": "object"
+          },
+          "schema_version": {
+            "const": "infercrane.accelerator-lab-result/v1",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "winner_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schema_version",
+          "input_digest",
+          "state",
+          "evidence_state",
+          "winner_id",
+          "cost_usd",
+          "profile",
+          "plan",
+          "experiments",
+          "limitations"
+        ],
+        "type": "object"
+      },
+      "AcceleratorLabRunTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "hardware": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerator": {
+                "type": "string"
+              },
+              "compute_capability": {
+                "type": "string"
+              },
+              "vendor": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "vendor",
+              "accelerator",
+              "compute_capability"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repository",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "runtime": {
+            "additionalProperties": false,
+            "properties": {
+              "image_digest": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version",
+              "image_digest"
+            ],
+            "type": "object"
+          },
+          "topology": {
+            "additionalProperties": false,
+            "properties": {
+              "accelerators": {
+                "type": "integer"
+              },
+              "decode_replicas": {
+                "type": "integer"
+              },
+              "expert_parallel": {
+                "type": "integer"
+              },
+              "mode": {
+                "type": "string"
+              },
+              "nodes": {
+                "type": "integer"
+              },
+              "pipeline_parallel": {
+                "type": "integer"
+              },
+              "prefill_replicas": {
+                "type": "integer"
+              },
+              "tensor_parallel": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "mode",
+              "nodes",
+              "accelerators",
+              "tensor_parallel",
+              "pipeline_parallel",
+              "expert_parallel"
+            ],
+            "type": "object"
+          },
+          "workload": {
+            "additionalProperties": false,
+            "properties": {
+              "batch_size": {
+                "type": "integer"
+              },
+              "concurrency": {
+                "type": "integer"
+              },
+              "digest": {
+                "type": "string"
+              },
+              "input_tokens": {
+                "type": "integer"
+              },
+              "modality": {
+                "type": "string"
+              },
+              "output_tokens": {
+                "type": "integer"
+              },
+              "phase": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "digest",
+              "modality",
+              "phase",
+              "batch_size",
+              "concurrency",
+              "input_tokens",
+              "output_tokens"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "model",
+          "runtime",
+          "hardware",
+          "topology",
+          "workload"
+        ],
+        "type": "object"
+      },
       "AdmissionMonitoring": {
         "additionalProperties": false,
         "properties": {
@@ -15914,6 +16771,64 @@
       }
     },
     "/api/v1/optimization/accelerator-lab/runs": {
+      "get": {
+        "operationId": "listAcceleratorLabRuns",
+        "parameters": [
+          {
+            "description": "Exact campaign ID. Omit to list runs from every campaign.",
+            "in": "query",
+            "name": "campaign_id",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum runs returned, newest first.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceleratorLabRunList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the organization's Accelerator Lab runs, newest first, with their target, policy, and recorded evidence",
+        "tags": [
+          "Inference optimization"
+        ]
+      },
       "post": {
         "operationId": "runAcceleratorLab",
         "parameters": [
