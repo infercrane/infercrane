@@ -317,11 +317,10 @@ func ValidateEntry(entry Entry) error {
 	if entry.Hardware.Vendor == "" || !slices.Contains([]string{SupportRunnable, SupportUnsupported, SupportUnknown}, entry.Hardware.ProductSupport) {
 		return errors.New("hardware vendor and product support are required")
 	}
-	if entry.Hardware.Vendor != "nvidia" && entry.Hardware.ProductSupport == SupportRunnable {
-		return errors.New("only NVIDIA hardware is runnable by the product today")
-	}
-	if entry.Hardware.ProductSupport == SupportRunnable && len(entry.Hardware.Architectures) == 0 {
-		return errors.New("runnable hardware requires explicit architectures")
+	if entry.Hardware.ProductSupport == SupportRunnable {
+		if err := validateRunnable(entry.Hardware); err != nil {
+			return err
+		}
 	}
 	if entry.License.Tag == "" || entry.License.State != LicenseApproved && entry.License.State != LicenseUnresolved || entry.License.State == LicenseApproved && entry.License.SPDX == "" {
 		return errors.New("license tag and resolution state are required")
@@ -459,23 +458,6 @@ func versionParts(version string) []int {
 		parts = append(parts, value)
 	}
 	return parts
-}
-
-// AcceleratorArchitecture maps a concrete NVIDIA GPU name to the architecture
-// family the catalog uses. Unknown or non-NVIDIA names return "".
-func AcceleratorArchitecture(gpu string) string {
-	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(gpu))
-	for _, marker := range []string{"gb200", "gb300", "b200", "b300", "rtxpro6000", "rtx5090"} {
-		if strings.Contains(normalized, marker) {
-			return "blackwell"
-		}
-	}
-	for _, marker := range []string{"gh200", "h100", "h200", "h800", "h20"} {
-		if strings.Contains(normalized, marker) {
-			return "hopper"
-		}
-	}
-	return ""
 }
 
 func containsFold(values []string, value string) bool {

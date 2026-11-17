@@ -132,6 +132,30 @@ the same changes on an MI300X as on an H100. Three things depend on the GPU:
 
 The custom kernel lab does not build HIP kernels yet; it still targets NVIDIA only.
 
+### Publisher checkpoints for AMD
+
+AMD publishes quantized checkpoints on Hugging Face, and the
+[reviewed checkpoint catalog](/features/optimization#seed-candidates-from-publisher-checkpoints)
+tracks them. The catalog records each build against the compiler targets it runs on: a format the
+policy reviews for CDNA 3 is `gfx942` (MI300X, MI325X), and one for CDNA 4 is `gfx950` (MI350X,
+MI355X). A build is offered only on a GPU with one of its targets, so an MXFP4 build for CDNA 4 is
+never proposed on an MI300X.
+
+A build can seed a setup when every catalog gate passes and the pinned ROCm image of one of its
+reviewed runtimes is at least the engine version its model card states. A build whose card needs a
+newer engine stays in the catalog with that reason, for example `vllm needs 0.28.0 or newer,
+pinned 0.22.1`. Today:
+
+- LLM Compressor builds (W4A16, W8A8) run on vLLM and can seed a setup on a matching GPU. In the
+  catalog reviewed on 2026-11-12, every AMD LLM Compressor build states a newer vLLM than 0.22.1,
+  so none seeds a setup yet.
+- Quark builds (MXFP4, PTPC-FP8, INT4) stay catalog-only: Quark is not yet a tool whose
+  checkpoints can seed a setup.
+- DFlash speculators stay catalog-only, as on NVIDIA.
+
+A seeded build is unmeasured like every other candidate. It is compared with the unmodified model
+on the same GPU before it can win.
+
 ## Measure on AMD
 
 - **AIPerf** load and answer-quality checks call the OpenAI-compatible endpoint, so they run
@@ -167,7 +191,7 @@ The custom kernel lab does not build HIP kernels yet; it still targets NVIDIA on
 - No AMD run exists. The smallest qualification run (one MI300X, Qwen3-8B, about an hour) is
   planned and needs approval before any GPU is rented.
 - Other AMD GPUs (MI250X, MI300A, Radeon) are not recognized.
-- Publisher checkpoints built for AMD (Quark MXFP4, PTPC-FP8) cannot seed a setup yet; they are not
-  reviewed for the pinned images.
+- No publisher checkpoint has been loaded on an AMD GPU. Quark checkpoints cannot seed a setup yet
+  (see [Publisher checkpoints for AMD](#publisher-checkpoints-for-amd)).
 - AITER and ROCm attention backends for vLLM are not planned (see above).
 - AMD memory, memory-controller, and profiler counters are not mapped.

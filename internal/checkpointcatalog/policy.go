@@ -15,7 +15,10 @@ const PolicySchemaVersion = "infercrane.checkpoint-catalog-policy/v1"
 
 // Policy holds the human review decisions the sync tool applies. Approving a
 // publisher or a format is a reviewed policy change; everything else is
-// derived from the recorded snapshot.
+// derived from the recorded snapshot. RunnableHardware lists the CUDA vendor's
+// architecture families the product runs; any other vendor is runnable
+// through its reviewed accelerators (provideridentity.Accelerators), not
+// through the policy.
 type Policy struct {
 	SchemaVersion      string              `json:"schema_version"`
 	ReviewedAt         string              `json:"reviewed_at"`
@@ -129,8 +132,13 @@ func ValidatePolicy(policy Policy) error {
 		return errors.New("checkpoint catalog policy requires a schema, review date, runnable hardware, and publishers")
 	}
 	for _, target := range policy.RunnableHardware {
-		if target.Vendor != "nvidia" || len(target.Architectures) == 0 {
-			return errors.New("the product can run only explicit NVIDIA architectures today")
+		if target.Vendor != CUDAVendor || len(target.Architectures) == 0 {
+			return fmt.Errorf("runnable_hardware lists explicit %s architecture families; other vendors are runnable through reviewed accelerators", CUDAVendor)
+		}
+		for _, architecture := range target.Architectures {
+			if !slices.Contains(RunnableArchitectures(CUDAVendor), architecture) {
+				return fmt.Errorf("runnable_hardware names %q, which no GPU name maps to", architecture)
+			}
 		}
 	}
 	for _, rule := range policy.ApprovedLicenses {
@@ -229,23 +237,29 @@ func (publisher PublisherPolicy) Format(kind, tool, scheme string) (FormatPolicy
 	return FormatPolicy{}, false
 }
 
-// Runnable reports whether the product can run this hardware target today.
+// Runnable reports whether the product can run every architecture of a
+// resolved hardware target (see ResolveArchitectures). The CUDA vendor's
+// families come from runnable_hardware; any other vendor's come from its
+// reviewed accelerators, so a vendor without them is never runnable.
 func (policy Policy) Runnable(target HardwareTarget) bool {
-	if len(target.Architectures) == 0 {
-		return false
-	}
-	for _, runnable := range policy.RunnableHardware {
-		if runnable.Vendor != target.Vendor {
-			continue
-		}
-		for _, architecture := range target.Architectures {
-			if !slices.Contains(runnable.Architectures, architecture) {
-				return false
+	allowed := RunnableArchitectures(target.Vendor)
+	if target.Vendor == CUDAVendor {
+		allowed = nil
+		for _, runnable := range policy.RunnableHardware {
+			if runnable.Vendor == target.Vendor {
+				allowed = runnable.Architectures
 			}
 		}
-		return true
 	}
-	return false
+	if len(target.Architectures) == 0 || len(allowed) == 0 {
+		return false
+	}
+	for _, architecture := range target.Architectures {
+		if !slices.Contains(allowed, architecture) {
+			return false
+		}
+	}
+	return true
 }
 
 // License resolves an upstream license tag for a repository.

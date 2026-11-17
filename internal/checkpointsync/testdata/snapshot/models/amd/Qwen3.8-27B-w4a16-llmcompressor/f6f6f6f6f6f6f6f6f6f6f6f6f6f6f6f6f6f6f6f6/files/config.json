@@ -1,0 +1,17 @@
+{
+ "quantization_config": {
+  "quant_method": "compressed-tensors",
+  "format": "mixed-precision",
+  "version": "0.12.3",
+  "config_groups": {
+   "group_0": {
+    "format": "pack-quantized",
+    "weights": {
+     "num_bits": 4,
+     "type": "int",
+     "group_size": 128
+    }
+   }
+  }
+ }
+}

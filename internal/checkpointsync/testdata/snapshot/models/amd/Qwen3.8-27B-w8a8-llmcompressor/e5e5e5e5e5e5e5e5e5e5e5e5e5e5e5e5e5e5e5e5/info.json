@@ -1,0 +1,48 @@
+{
+ "id": "amd/Qwen3.8-27B-w8a8-llmcompressor",
+ "sha": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+ "createdAt": "2026-10-28T09:00:00.000Z",
+ "lastModified": "2026-11-08T09:00:00.000Z",
+ "private": false,
+ "disabled": false,
+ "gated": false,
+ "library_name": "transformers",
+ "pipeline_tag": "text-generation",
+ "tags": [],
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "Qwen/Qwen3.8-27B"
+  ]
+ },
+ "config": {
+  "architectures": [
+   "X"
+  ],
+  "model_type": "x",
+  "quantization_config": {
+   "quant_method": "compressed-tensors"
+  }
+ },
+ "siblings": [
+  {
+   "rfilename": "README.md",
+   "blobId": "0000000000000000000000000000000000000001",
+   "size": 126
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "0000000000000000000000000000000000000002",
+   "size": 339
+  },
+  {
+   "rfilename": "model.safetensors",
+   "blobId": "0000000000000000000000000000000000000003",
+   "size": 1000002,
+   "lfs": {
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000009",
+    "size": 1000002
+   }
+  }
+ ]
+}

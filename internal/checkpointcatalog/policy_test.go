@@ -56,3 +56,50 @@ func TestPolicySelectionRuleIsReviewedAndBounded(t *testing.T) {
 		t.Fatal("a policy without the selection rule was accepted")
 	}
 }
+
+func TestPolicyRunsAMDThroughReviewedAcceleratorsOnly(t *testing.T) {
+	raw, err := os.ReadFile("policy.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*Policy){
+		"AMD in runnable_hardware": func(p *Policy) {
+			p.RunnableHardware = append(p.RunnableHardware, HardwareTarget{Vendor: "amd", Architectures: []string{"gfx942"}})
+		},
+		"Intel in runnable_hardware": func(p *Policy) {
+			p.RunnableHardware = append(p.RunnableHardware, HardwareTarget{Vendor: "intel", Architectures: []string{"gpu"}})
+		},
+		"family no GPU name maps to": func(p *Policy) {
+			p.RunnableHardware[0].Architectures = append(p.RunnableHardware[0].Architectures, "ampere")
+		},
+		"runnable without families": func(p *Policy) { p.RunnableHardware[0].Architectures = nil },
+	} {
+		policy, _, err := DecodePolicy(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(&policy)
+		if err := ValidatePolicy(policy); err == nil {
+			t.Errorf("%s: policy was accepted", name)
+		}
+	}
+	policy, _, err := DecodePolicy(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		target HardwareTarget
+		want   bool
+	}{
+		{HardwareTarget{Vendor: "amd", Architectures: ResolveArchitectures("amd", []string{"cdna3", "cdna4"})}, true},
+		{HardwareTarget{Vendor: "amd", Architectures: []string{"gfx950"}}, true},
+		{HardwareTarget{Vendor: "amd", Architectures: []string{"gfx942", "cdna5"}}, false},
+		{HardwareTarget{Vendor: "amd"}, false},
+		{HardwareTarget{Vendor: "nvidia", Architectures: []string{"hopper", "blackwell"}}, true},
+		{HardwareTarget{Vendor: "intel", Architectures: []string{"gpu"}}, false},
+	} {
+		if got := policy.Runnable(test.target); got != test.want {
+			t.Errorf("Runnable(%+v) = %v, want %v", test.target, got, test.want)
+		}
+	}
+}

@@ -4,8 +4,8 @@
   "snapshot": {
     "source": "https://huggingface.co/api/models",
     "fetched_at": "2026-11-11T12:00:00Z",
-    "digest": "sha256:3360aeda5c4ed09f9509f0eb2eaabfaf62c6d3ee7e3a8c84a46d51af0d253e39",
-    "policy_digest": "sha256:04a9159f339bbc2d79b7e902fd5c11ee23a7b59d149d67e21b00802a9cae1094"
+    "digest": "sha256:686b0d7608a1f5b7ba9d1a1cebdebbc26fab77516241f4f8852e350be89272f0",
+    "policy_digest": "sha256:23b2438987b3770c9422934e9ee1f8975574e2d68614e8d509ac6e1a3ba38b9f"
   },
   "publishers": [
     {
@@ -57,8 +57,8 @@
       },
       "hardware": {
         "vendor": "amd",
-        "architectures": ["cdna4"],
-        "product_support": "unsupported_hardware"
+        "architectures": ["gfx950"],
+        "product_support": "runnable"
       },
       "runtimes": ["sglang", "vllm"],
       "engine_requirements": [
@@ -95,14 +95,132 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["targets amd hardware the product cannot run yet", "tool quark cannot seed product candidates yet"]
+        "blockers": ["tool quark cannot seed product candidates yet"]
       },
       "source_url": "https://huggingface.co/amd/GLM-5.3-Flash-Quark-MXFP4",
       "limitations": [
         "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
         "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
-        "Targets amd hardware, which InferCrane cannot run yet.",
         "sglang needs sgl-project/sglang#36607, which is not in a reviewed release.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "amd-qwen38-27b-w4a16-llmcompressor-f6f6f6f6",
+      "kind": "quantized_checkpoint",
+      "publisher": "amd",
+      "repository": "amd/Qwen3.8-27B-w4a16-llmcompressor",
+      "revision": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6",
+      "revision_state": "current",
+      "created_at": "2026-10-29T09:00:00.000Z",
+      "last_modified": "2026-11-08T09:00:00.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "quantization": {
+        "tool": "llm-compressor",
+        "tool_version": "0.12.3",
+        "method": "compressed-tensors",
+        "scheme": "w4a16"
+      },
+      "hardware": {
+        "vendor": "amd",
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["vllm"],
+      "engine_requirements": [
+        {
+          "engine": "vllm",
+          "state": "minimum_version",
+          "minimum_version": "0.28.0"
+        }
+      ],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:7881aac09c08de4ba35f7e73e7de6ef31236bc0c7c3e27b4eb496b69762b7a14",
+        "model_card_digest": "sha256:e2984fd79b1dc1fe6eca26e1c0e9ebe252b63f4af28e8c2f01a8dd763b2ddb08",
+        "file_count": 3,
+        "size_bytes": 1000420
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "catalog_only",
+        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+      },
+      "source_url": "https://huggingface.co/amd/Qwen3.8-27B-w4a16-llmcompressor",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
+        "No license file at the pinned revision; the license comes from the model card metadata."
+      ]
+    },
+    {
+      "id": "amd-qwen38-27b-w8a8-llmcompressor-e5e5e5e5",
+      "kind": "quantized_checkpoint",
+      "publisher": "amd",
+      "repository": "amd/Qwen3.8-27B-w8a8-llmcompressor",
+      "revision": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+      "revision_state": "current",
+      "created_at": "2026-10-28T09:00:00.000Z",
+      "last_modified": "2026-11-08T09:00:00.000Z",
+      "base": {
+        "repository": "Qwen/Qwen3.8-27B",
+        "lineage": "publisher_declared",
+        "screening_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+        "screening_revision_source": "https://huggingface.co/api/models/Qwen/Qwen3.8-27B"
+      },
+      "quantization": {
+        "tool": "llm-compressor",
+        "tool_version": "0.12.3",
+        "method": "compressed-tensors",
+        "scheme": "w8a8"
+      },
+      "hardware": {
+        "vendor": "amd",
+        "architectures": ["gfx942", "gfx950"],
+        "product_support": "runnable"
+      },
+      "runtimes": ["vllm"],
+      "engine_requirements": [
+        {
+          "engine": "vllm",
+          "state": "minimum_version",
+          "minimum_version": "0.11.0"
+        }
+      ],
+      "license": {
+        "tag": "apache-2.0",
+        "spdx": "Apache-2.0",
+        "state": "approved"
+      },
+      "artifact": {
+        "format": "safetensors",
+        "manifest_digest": "sha256:6be9384dc1934c5a1a180e82ee2d8655f78f48ba3d472261c2b190e87c7d44ee",
+        "model_card_digest": "sha256:46a8072bed4d632748f42072efee0f8a2de661f2ebcc367524466e22d4b232a9",
+        "file_count": 3,
+        "size_bytes": 1000467
+      },
+      "review": {
+        "state": "approved"
+      },
+      "eligibility": {
+        "state": "candidate"
+      },
+      "source_url": "https://huggingface.co/amd/Qwen3.8-27B-w8a8-llmcompressor",
+      "limitations": [
+        "Publisher-reported results are unmeasured priors; InferCrane has no workload, quality, cost, or release qualification for this build.",
+        "The publisher declares the base repository but not an exact base revision; the screening revision is the base head in the snapshot.",
         "No license file at the pinned revision; the license comes from the model card metadata."
       ]
     },

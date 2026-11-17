@@ -1074,7 +1074,7 @@ covers these Hugging Face organizations:
 |---|---|---|---|
 | NVIDIA (`nvidia`) | Model Optimizer NVFP4, FP8, and mixed-precision checkpoints; EAGLE-3, DFlash, and DSpark speculators | NVIDIA Hopper and Blackwell | Approved formats, on a matching GPU |
 | Red Hat AI (`RedHatAI`) | LLM Compressor FP8, NVFP4, MXFP4, INT4, and W8A8 checkpoints; speculators for vLLM | NVIDIA | Not yet; the publisher is pending review |
-| AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | AMD Instinct (CDNA 3 and CDNA 4) | No; InferCrane [serves base models on AMD Instinct GPUs](/integrations/amd-instinct), but these builds are not reviewed for its pinned ROCm images, and the catalog still lists them as unsupported hardware |
+| AMD (`amd`) | Quark MXFP4, PTPC-FP8, and INT4 checkpoints; LLM Compressor builds; DFlash speculators | [AMD Instinct](/integrations/amd-instinct) CDNA 3 (`gfx942`: MI300X, MI325X) and CDNA 4 (`gfx950`: MI350X, MI355X) | LLM Compressor builds, on a matching GPU, when the pinned ROCm vLLM meets the version the model card states. Quark checkpoints and speculators do not seed candidates yet |
 | Intel (`Intel`) and OpenVINO (`OpenVINO`) | AutoRound checkpoints and OpenVINO INT4, INT8, and NF4 exports | Intel CPU, GPU, and NPU | No; InferCrane cannot run Intel hardware yet |
 | Google (`google`) | Gemma quantization-aware-training checkpoints | NVIDIA through vLLM | Not yet; the publisher is pending review |
 | StepFun (`stepfun-ai`), Thinking Machines Lab (`thinkingmachines`), and LG AI Research (`LGAI-EXAONE`) | Model Optimizer builds of their own models that NVIDIA's Model Optimizer collection lists | NVIDIA Hopper and Blackwell | Not yet; each publisher is pending review |
@@ -1134,13 +1134,21 @@ A catalog entry seeds a proposal candidate only when every condition holds:
   `internal/checkpointcatalog/policy.json`.
 - It is a quantized checkpoint. Speculators are catalogued with their target models, but
   speculative-decoding candidates need acceptance-rate and output-parity gates first.
-- It targets NVIDIA hardware that InferCrane runs, and the requested GPU is one of the declared
-  architectures. An NVFP4 checkpoint never matches a Hopper GPU.
+- It targets hardware that InferCrane runs, and the requested GPU is one of the declared
+  architectures: an NVIDIA family (Hopper, Blackwell) or the compiler target of a reviewed AMD
+  Instinct GPU (`gfx942` for MI300X and MI325X, `gfx950` for MI350X and MI355X). An NVFP4
+  checkpoint never matches a Hopper GPU, and an MXFP4 build for CDNA 4 never matches an MI300X.
+  The policy may name AMD architectures by generation (`cdna3`, `cdna4`); the planner records
+  the compiler targets of the reviewed GPUs of that generation. A vendor with no reviewed GPU,
+  such as Intel, stays `unsupported_hardware`.
 - Its license resolves to an approved SPDX identifier. A tag such as `other` stays unresolved until
   a reviewer records the terms.
-- The pinned engine version meets every requirement in the model card. A card that needs an
-  unmerged engine pull request keeps the build off that engine until a reviewer records the release
-  that contains the change.
+- The pinned engine version meets every requirement in the model card. The planner compares the
+  card with the pinned image of each reviewed runtime on the build's platform, CUDA or
+  [ROCm](/integrations/amd-instinct#pinned-runtime-images). When no runtime's image is new enough, the entry stays catalog-only with that
+  reason, for example `no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer,
+  pinned 0.22.1`. A card that needs an unmerged engine pull request keeps the build off that
+  engine until a reviewer records the release that contains the change.
 - For `exact` lineage, the campaign pins the stated base revision.
 
 The unmodified setup each checkpoint is compared with serves the revision you pinned. A reviewed
@@ -1148,8 +1156,8 @@ recipe's revision is used only when you pin none, so one proposal never mixes tw
 model.
 
 The catalog records the blockers for every other entry. `GET /api/v1/catalog/hugging-face/models`
-lists each base model's publisher builds under `publisher_builds`, including AMD and Intel builds
-marked `unsupported_hardware`, but proposes none of them.
+lists each base model's publisher builds under `publisher_builds`, including Intel builds marked
+`unsupported_hardware`, but proposes none of them.
 
 ### Refresh the catalog
 
@@ -1200,6 +1208,9 @@ Review rules:
 - When a newer revision is blocked, for example by an unreleased engine change, the previously
   pinned revision stays a candidate until the newer one passes.
 - A repository that disappears upstream is removed from the catalog.
+- Eligibility depends on the pinned runtime images and the reviewed GPUs. After either changes,
+  plan the latest snapshot again so blockers name the current pins. Until then, a proposal still
+  checks the pinned engine version before it uses a build.
 
 ## What the first planner knows
 

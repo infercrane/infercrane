@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
+	"github.com/infercrane/infercrane/internal/provideridentity"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const (
@@ -383,9 +385,10 @@ func (p *planner) build(info ModelInfo, files fileReader) (checkpointcatalog.Ent
 	if entry.Runtimes == nil {
 		entry.Runtimes = []string{}
 	}
-	entry.Hardware = checkpointcatalog.Hardware{Vendor: target.Vendor, Architectures: append([]string{}, target.Architectures...), ProductSupport: checkpointcatalog.SupportUnknown}
+	target.Architectures = checkpointcatalog.ResolveArchitectures(target.Vendor, target.Architectures)
+	entry.Hardware = checkpointcatalog.Hardware{Vendor: target.Vendor, Architectures: target.Architectures, ProductSupport: checkpointcatalog.SupportUnknown}
 	switch {
-	case target.Vendor != "nvidia":
+	case !checkpointcatalog.RunnableVendor(target.Vendor):
 		entry.Hardware.ProductSupport = checkpointcatalog.SupportUnsupported
 	case p.policy.Runnable(target):
 		entry.Hardware.ProductSupport = checkpointcatalog.SupportRunnable
@@ -492,8 +495,8 @@ func eligibility(entry checkpointcatalog.Entry) checkpointcatalog.Eligibility {
 	}
 	if len(entry.Runtimes) == 0 {
 		blockers = append(blockers, "no reviewed runtime")
-	} else if !slices.ContainsFunc(entry.Runtimes, func(runtime string) bool { return runtimeOpen(entry.EngineRequirements, runtime) }) {
-		blockers = append(blockers, "every reviewed runtime needs an unreleased or blocked engine change")
+	} else if blocker := runtimesBlocker(entry); blocker != "" {
+		blockers = append(blockers, blocker)
 	}
 	if len(blockers) == 0 {
 		return checkpointcatalog.Eligibility{State: checkpointcatalog.EligibilityCandidate}
@@ -501,13 +504,83 @@ func eligibility(entry checkpointcatalog.Entry) checkpointcatalog.Eligibility {
 	return checkpointcatalog.Eligibility{State: checkpointcatalog.EligibilityCatalogOnly, Blockers: blockers}
 }
 
-func runtimeOpen(requirements []checkpointcatalog.EngineRequirement, runtime string) bool {
-	for _, requirement := range requirements {
-		if strings.EqualFold(requirement.Engine, runtime) && requirement.State != checkpointcatalog.EngineMinimumVersion {
-			return false
+const engineChangeBlocker = "every reviewed runtime needs an unreleased or blocked engine change"
+
+// runtimesBlocker says why no reviewed runtime can serve the build, or ""
+// when one can. A runtime is closed by an unreleased or blocked engine change,
+// or, on hardware the product runs, when every pinned image of that runtime
+// for the build's platforms is older than the model card requires.
+func runtimesBlocker(entry checkpointcatalog.Entry) string {
+	pinned := pinnedEngines(entry.Hardware)
+	var reasons []string
+	changesOnly := true
+	for _, runtime := range entry.Runtimes {
+		changed, minimum := runtimeGate(entry.EngineRequirements, runtime, pinned[runtime])
+		switch {
+		case changed:
+			reasons = append(reasons, runtime+" needs an unreleased or blocked engine change")
+		case minimum != "":
+			changesOnly = false
+			reasons = append(reasons, fmt.Sprintf("%s needs %s or newer, pinned %s", runtime, minimum, strings.Join(pinned[runtime], " and ")))
+		default:
+			return ""
 		}
 	}
-	return true
+	if changesOnly {
+		return engineChangeBlocker
+	}
+	return "no reviewed runtime fits the pinned images: " + strings.Join(reasons, "; ")
+}
+
+// runtimeGate reports whether a model card's requirements close one runtime:
+// changed for an unreleased or blocked engine change, or the highest minimum
+// version the card states when no pinned version meets it. A runtime without
+// a pinned image is judged only by engine changes.
+func runtimeGate(requirements []checkpointcatalog.EngineRequirement, runtime string, pinned []string) (bool, string) {
+	minimum := ""
+	for _, requirement := range requirements {
+		if !strings.EqualFold(requirement.Engine, runtime) {
+			continue
+		}
+		if requirement.State != checkpointcatalog.EngineMinimumVersion {
+			return true, ""
+		}
+		if minimum == "" || checkpointcatalog.CompareVersions(requirement.MinimumVersion, minimum) > 0 {
+			minimum = requirement.MinimumVersion
+		}
+	}
+	if len(pinned) == 0 || slices.ContainsFunc(pinned, func(version string) bool {
+		return checkpointcatalog.EngineSatisfied(requirements, runtime, version)
+	}) {
+		return false, ""
+	}
+	return false, minimum
+}
+
+// pinnedEngines returns, for each built-in runtime, the engine versions of its
+// pinned images on the platforms that serve this hardware: the reviewed
+// accelerators' platforms for their compiler targets, or the default CUDA
+// platform for the CUDA vendor. Hardware the product cannot run has none.
+func pinnedEngines(hardware checkpointcatalog.Hardware) map[string][]string {
+	if hardware.ProductSupport != checkpointcatalog.SupportRunnable {
+		return nil
+	}
+	var platforms []string
+	if hardware.Vendor == checkpointcatalog.CUDAVendor {
+		platforms = []string{provideridentity.PlatformCUDA}
+	}
+	for _, accelerator := range provideridentity.Accelerators() {
+		if accelerator.Vendor == hardware.Vendor && slices.Contains(hardware.Architectures, accelerator.Target) {
+			platforms = append(platforms, accelerator.Platform)
+		}
+	}
+	out := map[string][]string{}
+	for _, image := range support.RuntimeImages() {
+		if slices.Contains(platforms, image.Platform) && !slices.Contains(out[image.Runtime], image.EngineVersion) {
+			out[image.Runtime] = append(out[image.Runtime], image.EngineVersion)
+		}
+	}
+	return out
 }
 
 // previousRevision returns the newest committed revision of a repository when
