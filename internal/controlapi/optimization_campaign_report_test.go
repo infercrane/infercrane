@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,25 +41,25 @@ func (f *fakeReportStore) OptimizationCampaign(_ context.Context, tenant, id str
 	return f.campaign, nil
 }
 
-func (f *fakeReportStore) BenchmarksForDeployment(_ context.Context, tenant, name string, _ int) ([]domain.BenchmarkResult, error) {
+func (f *fakeReportStore) BenchmarksByIDs(_ context.Context, tenant string, ids []string) (map[string]domain.BenchmarkResult, error) {
 	f.saw(tenant)
-	rows := []domain.BenchmarkResult{}
+	rows := map[string]domain.BenchmarkResult{}
 	for _, row := range f.bench {
-		if row.TenantID == tenant && row.DeploymentName == name {
-			rows = append(rows, row)
+		if row.TenantID == tenant && slices.Contains(ids, row.ID) {
+			rows[row.ID] = row
 		}
 	}
 	return rows, nil
 }
 
-func (f *fakeReportStore) QualityEvidenceForDeployment(_ context.Context, tenant, _ string, _ int) ([]domain.QualityEvidence, error) {
+func (f *fakeReportStore) QualityEvidenceByIDs(_ context.Context, tenant string, _ []string) (map[string]domain.QualityEvidence, error) {
 	f.saw(tenant)
-	return nil, nil
+	return map[string]domain.QualityEvidence{}, nil
 }
 
-func (f *fakeReportStore) ReleaseGuardEvaluations(_ context.Context, tenant, _ string, _ int) ([]domain.ReleaseGuardEvaluation, error) {
+func (f *fakeReportStore) ReleaseGuardEvaluationsByIDs(_ context.Context, tenant string, _ []string) (map[string]domain.ReleaseGuardEvaluation, error) {
 	f.saw(tenant)
-	return nil, nil
+	return map[string]domain.ReleaseGuardEvaluation{}, nil
 }
 
 func (f *fakeReportStore) ReplayTraceByDigest(_ context.Context, tenant, _ string) (domain.ReplayTrace, error) {

@@ -252,26 +252,19 @@ func (s *Store) revisionModel(ctx context.Context, revisionID string) (string, e
 }
 
 // QualityEvidenceByIDs returns the tenant's evidence rows with the given IDs,
-// keyed by ID. Unknown IDs are absent from the map.
+// keyed by ID, whether or not their deployment still exists. Unknown IDs are
+// absent from the map.
 func (s *Store) QualityEvidenceByIDs(ctx context.Context, tenant string, ids []string) (map[string]domain.QualityEvidence, error) {
 	if tenant == "" {
 		tenant = "global"
 	}
-	out := make(map[string]domain.QualityEvidence, len(ids))
-	seen := make(map[string]struct{}, len(ids))
-	unique := make([]string, 0, len(ids))
-	for _, id := range ids {
-		if _, duplicate := seen[id]; id == "" || duplicate {
-			continue
-		}
-		seen[id] = struct{}{}
-		unique = append(unique, id)
+	unique, err := evidenceIDs(ids, "quality evidence")
+	if err != nil {
+		return nil, err
 	}
+	out := make(map[string]domain.QualityEvidence, len(unique))
 	if len(unique) == 0 {
 		return out, nil
-	}
-	if len(unique) > 1000 {
-		return nil, errors.New("at most 1000 quality evidence IDs can be read at once")
 	}
 	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
 	if err != nil {

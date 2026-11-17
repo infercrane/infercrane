@@ -80,19 +80,17 @@ func (s *Store) BenchmarksForModel(ctx context.Context, tenant, modelIdentity st
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,revision_id,COALESCE(model_artifact_id,''),model_identity,runtime,runtime_version,runtime_config_json::text,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json::text,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json::text,created_at FROM benchmark_results WHERE tenant_id=? AND model_identity=? ORDER BY created_at DESC LIMIT ?`, tenant, modelIdentity, limit)
+	rows, err := s.QueryContext(ctx, `SELECT `+benchmarkResultColumns+` FROM benchmark_results WHERE tenant_id=? AND model_identity=? ORDER BY created_at DESC LIMIT ?`, tenant, modelIdentity, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []domain.BenchmarkResult
 	for rows.Next() {
-		var row domain.BenchmarkResult
-		var created string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.ModelArtifactID, &row.ModelIdentity, &row.Runtime, &row.RuntimeVersion, &row.RuntimeConfigJSON, &row.Provider, &row.Region, &row.GPU, &row.GPUCount, &row.ComputeMode, &row.Tool, &row.ToolVersion, &row.WorkloadJSON, &row.ReproductionCommand, &row.RequestCount, &row.Succeeded, &row.Failed, &row.DurationSeconds, &row.RequestThroughput, &row.OutputTokenThroughput, &row.TTFTP50MS, &row.TTFTP95MS, &row.TPOTP50MS, &row.TPOTP95MS, &row.LatencyP50MS, &row.LatencyP95MS, &row.Goodput, &row.GPUUtilization, &row.CostMetadataJSON, &created); err != nil {
-			return nil, err
+		row, scanErr := scanBenchmarkResult(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		row.CreatedAt = parseTime(created)
 		out = append(out, row)
 	}
 	return out, rows.Err()

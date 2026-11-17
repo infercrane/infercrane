@@ -334,9 +334,10 @@ signals when the runtime reported any, and an appendix. The appendix has the win
 version, args, hardware, price) and the evidence digests: campaign input, proposal, benchmarks, signed
 quality evidence, ranking, Release Guard evaluation, replayed traffic, and the report itself. Automation
 clients read the same report from `GET /api/v1/optimization/campaigns/{id}/report`, which requires read
-access and only returns campaigns of the caller's organization. The report reads evidence rows
-referenced by the campaign from the newest 100 per candidate deployment; an older row leaves its
-field `unknown`.
+access and only returns campaigns of the caller's organization. The report reads the benchmark,
+quality, and Release Guard records each candidate recorded, by their IDs, so a finished campaign keeps
+its measured results after cleanup deletes the candidate deployments, and after their names are
+deployed again. A referenced record that does not exist leaves its field `unknown`.
 
 That default creates a `new_endpoint` campaign. To optimize a candidate revision for an endpoint
 that already serves production, bind the campaign to its stable deployment identity:

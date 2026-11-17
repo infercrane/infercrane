@@ -260,16 +260,16 @@ func (m *memoryStore) OptimizationCampaign(_ context.Context, tenant, id string)
 	return domain.OptimizationCampaign{}, domain.ErrNotFound
 }
 
-func (m *memoryStore) BenchmarksForDeployment(context.Context, string, string, int) ([]domain.BenchmarkResult, error) {
-	return nil, nil
+func (m *memoryStore) BenchmarksByIDs(context.Context, string, []string) (map[string]domain.BenchmarkResult, error) {
+	return map[string]domain.BenchmarkResult{}, nil
 }
 
-func (m *memoryStore) QualityEvidenceForDeployment(context.Context, string, string, int) ([]domain.QualityEvidence, error) {
-	return nil, nil
+func (m *memoryStore) QualityEvidenceByIDs(context.Context, string, []string) (map[string]domain.QualityEvidence, error) {
+	return map[string]domain.QualityEvidence{}, nil
 }
 
-func (m *memoryStore) ReleaseGuardEvaluations(context.Context, string, string, int) ([]domain.ReleaseGuardEvaluation, error) {
-	return nil, nil
+func (m *memoryStore) ReleaseGuardEvaluationsByIDs(context.Context, string, []string) (map[string]domain.ReleaseGuardEvaluation, error) {
+	return map[string]domain.ReleaseGuardEvaluation{}, nil
 }
 
 func (m *memoryStore) ReplayTraceByDigest(context.Context, string, string) (domain.ReplayTrace, error) {

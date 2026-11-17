@@ -65,15 +65,25 @@ func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string
 	defer rows.Close()
 	var results []domain.BenchmarkResult
 	for rows.Next() {
-		var row domain.BenchmarkResult
-		var created string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.ModelArtifactID, &row.ModelIdentity, &row.Runtime, &row.RuntimeVersion, &row.RuntimeConfigJSON, &row.Provider, &row.Region, &row.GPU, &row.GPUCount, &row.ComputeMode, &row.Tool, &row.ToolVersion, &row.WorkloadJSON, &row.ReproductionCommand, &row.RequestCount, &row.Succeeded, &row.Failed, &row.DurationSeconds, &row.RequestThroughput, &row.OutputTokenThroughput, &row.TTFTP50MS, &row.TTFTP95MS, &row.TPOTP50MS, &row.TPOTP95MS, &row.LatencyP50MS, &row.LatencyP95MS, &row.Goodput, &row.GPUUtilization, &row.CostMetadataJSON, &created); err != nil {
-			return nil, err
+		row, scanErr := scanBenchmarkResult(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		row.CreatedAt = parseTime(created)
 		results = append(results, row)
 	}
 	return results, rows.Err()
+}
+
+// benchmarkResultColumns is the column list scanBenchmarkResult reads, for
+// queries that select from benchmark_results alone.
+const benchmarkResultColumns = `id,tenant_id,deployment_id,deployment_name,revision_id,COALESCE(model_artifact_id,''),model_identity,runtime,runtime_version,runtime_config_json::text,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json::text,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json::text,created_at`
+
+func scanBenchmarkResult(row rowScanner) (domain.BenchmarkResult, error) {
+	var out domain.BenchmarkResult
+	var created string
+	err := row.Scan(&out.ID, &out.TenantID, &out.DeploymentID, &out.DeploymentName, &out.RevisionID, &out.ModelArtifactID, &out.ModelIdentity, &out.Runtime, &out.RuntimeVersion, &out.RuntimeConfigJSON, &out.Provider, &out.Region, &out.GPU, &out.GPUCount, &out.ComputeMode, &out.Tool, &out.ToolVersion, &out.WorkloadJSON, &out.ReproductionCommand, &out.RequestCount, &out.Succeeded, &out.Failed, &out.DurationSeconds, &out.RequestThroughput, &out.OutputTokenThroughput, &out.TTFTP50MS, &out.TTFTP95MS, &out.TPOTP50MS, &out.TPOTP95MS, &out.LatencyP50MS, &out.LatencyP95MS, &out.Goodput, &out.GPUUtilization, &out.CostMetadataJSON, &created)
+	out.CreatedAt = parseTime(created)
+	return out, err
 }
 
 func (s *Store) Targets(ctx context.Context) ([]domain.Target, error) {
