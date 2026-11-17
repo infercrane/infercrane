@@ -434,7 +434,7 @@ complete. The current implementation boundary is:
 | PyTorch profiler, rocprof, XProf and Neuron Explorer capture | Executable worker contract | The shipped NVIDIA adapter captures PyTorch profiler traces; the others are declared schemas only. Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
 | Generated kernels with recent-research intake | Implemented; not yet run on a GPU or against a live model | `cmd/infercrane-kernel-adapter`, `internal/kernelgen`, and `internal/kernelliterature` write drafts for reviewed operator packs and keep them only through `kernelresearch`; the first pack is residual-RMSNorm in Triton |
 | Iterative authored-kernel research and KernelBench-style evaluation | Implemented model-neutral state machine and orchestration gates | Profile-bound AutoKernel-style keep/reject loop, five correctness stages, plateau/roofline/time/iteration/cost limits, isolated build, exact-target and serving replay; generator and hardware-worker implementations still need deployment qualification |
-| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented | AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron candidates exist. TPU rows name the vLLM TorchTPU and vLLM JAX plugins and the Trainium row names the vLLM Neuron plugin, which replaces NxD Inference; no real-hardware product claim until the corresponding worker passes |
+| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented; AMD Instinct serving implemented | Pinned ROCm vLLM 0.22.1 and SGLang 0.5.12 images deploy on MI300X, MI325X, MI350X and MI355X through RunPod Pods and Kubernetes, and the diagnosis planner applies the same rules there ([AMD Instinct GPUs](/integrations/amd-instinct)); no AMD run is recorded yet. AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron kernel candidates exist. TPU rows name the vLLM TorchTPU and vLLM JAX plugins and the Trainium row names the vLLM Neuron plugin, which replaces NxD Inference; no real-hardware product claim until the corresponding worker passes |
 | Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
 
 For the MVP, the defensible product is the locally qualified control plane plus
@@ -592,7 +592,7 @@ A proposal that names `diagnosis_endpoint` closes the loop: the control plane
 reads that assessment and a recent GPU profile summary (kernel shares, plus the
 fired findings of a v2 capture's trace analysis with their measured values and
 thresholds), binds them into the proposal input digest, and the planner's typed
-rule set (`diagnosis-technique-rules-v2` in `internal/optimizer`) keeps only the
+rule set (`diagnosis-technique-rules-v3` in `internal/optimizer`) keeps only the
 starting point and the one-change setups its rules choose, ordered by expected
 benefit with the reason recorded on each. Flags equal to the engine's resolved
 default are dropped, and when no rule applies only the starting point is

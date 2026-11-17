@@ -19,28 +19,42 @@ import (
 
 const maxCollectorPayload = 8 << 20
 
+const telemetryUsage = "usage: infercrane telemetry collect dcgm|amd DEPLOYMENT [--url URL | --file PATH] [--selector key=value] [--interval 15s]"
+
+// telemetryCommand imports bounded snapshots from a GPU metrics exporter:
+// NVIDIA's dcgm-exporter (dcgm) or the AMD Device Metrics Exporter (amd).
 func telemetryCommand(ctx context.Context, cfg config.Config, args []string) error {
-	if len(args) < 3 || args[0] != "collect" || args[1] != "dcgm" {
-		return errors.New("usage: infercrane telemetry collect dcgm DEPLOYMENT [--url URL | --file PATH] [--selector key=value] [--interval 15s]")
+	if len(args) < 3 || args[0] != "collect" || (args[1] != "dcgm" && args[1] != "amd") {
+		return errors.New(telemetryUsage)
 	}
-	deployment := args[2]
-	fs := newFlagSet("telemetry collect dcgm")
-	collectorURL := fs.String("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
-	file := fs.String("file", "", "saved DCGM Prometheus snapshot")
+	collector, deployment := args[1], args[2]
+	fs := newFlagSet("telemetry collect " + collector)
+	defaultURL, defaultSource := "http://127.0.0.1:9400/metrics", "dcgm_exporter"
+	if collector == "amd" {
+		defaultURL, defaultSource = "http://127.0.0.1:5000/metrics", "amd_device_metrics_exporter"
+	}
+	collectorURL := fs.String("url", defaultURL, "exporter Prometheus metrics URL")
+	file := fs.String("file", "", "saved exporter Prometheus snapshot")
 	selectorText := fs.String("selector", "", "comma-separated exact label selectors")
 	replicaID := fs.String("replica", "", "InferCrane replica identity")
-	source := fs.String("source", "dcgm_exporter", "evidence source")
-	utilizationUnit := fs.String("utilization-unit", "percent", "percent or ratio")
+	source := fs.String("source", defaultSource, "evidence source")
 	ttl := fs.Duration("ttl", 2*time.Minute, "evidence freshness TTL")
 	interval := fs.Duration("interval", 0, "keep collecting at this interval (5s to 10m) until stopped; the TTL defaults to three intervals")
-	nvlinkPeak := fs.Float64("nvlink-peak-gbps", 0, "declared per-GPU, per-direction NVLink peak in GB/s")
-	pciePeak := fs.Float64("pcie-peak-gbps", 0, "declared per-GPU, per-direction PCIe peak in GB/s")
 	output := fs.String("output", "human", "human or json")
+	var utilizationUnit, metricPrefix *string
+	var nvlinkPeak, pciePeak *float64
+	if collector == "dcgm" {
+		utilizationUnit = fs.String("utilization-unit", "percent", "percent or ratio")
+		nvlinkPeak = fs.Float64("nvlink-peak-gbps", 0, "declared per-GPU, per-direction NVLink peak in GB/s")
+		pciePeak = fs.Float64("pcie-peak-gbps", 0, "declared per-GPU, per-direction PCIe peak in GB/s")
+	} else {
+		metricPrefix = fs.String("metric-prefix", "", "the exporter's MetricsFieldPrefix, if it sets one")
+	}
 	if err := fs.Parse(args[3:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 || deployment == "" {
-		return errors.New("usage: infercrane telemetry collect dcgm DEPLOYMENT [--url URL | --file PATH]")
+		return errors.New(telemetryUsage)
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
@@ -49,7 +63,7 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 	if err != nil {
 		return err
 	}
-	if *nvlinkPeak < 0 || *pciePeak < 0 {
+	if collector == "dcgm" && (*nvlinkPeak < 0 || *pciePeak < 0) {
 		return errors.New("--nvlink-peak-gbps and --pcie-peak-gbps must not be negative")
 	}
 	if *interval != 0 {
@@ -65,8 +79,14 @@ func telemetryCommand(ctx context.Context, cfg config.Config, args []string) err
 			*ttl = 3 * *interval
 		}
 	}
+	parse := func(payload string, observedAt time.Time) ([]domain.OperationalMeasurement, error) {
+		if collector == "amd" {
+			return metrics.ParseAMDDeviceMetrics(payload, metrics.AMDDeviceMetricsOptions{Selector: selector, ReplicaID: *replicaID, Source: *source, ObservedAt: observedAt, TTL: *ttl, MetricPrefix: *metricPrefix})
+		}
+		return metrics.ParseDCGM(payload, metrics.DCGMOptions{Selector: selector, ReplicaID: *replicaID, Source: *source, UtilizationUnit: *utilizationUnit, ObservedAt: observedAt, TTL: *ttl, NVLinkPeakBytesPerSecond: *nvlinkPeak * 1e9, PCIePeakBytesPerSecond: *pciePeak * 1e9})
+	}
 	collect := func() error {
-		return collectDCGMOnce(ctx, cfg, deployment, *collectorURL, *file, *source, *replicaID, *utilizationUnit, *output, selector, *ttl, *nvlinkPeak, *pciePeak)
+		return collectHardwareOnce(ctx, cfg, deployment, *collectorURL, *file, *source, *replicaID, *output, *ttl, parse)
 	}
 	if *interval == 0 {
 		return collect()
@@ -95,13 +115,15 @@ var telemetrySleep = func(ctx context.Context, wait time.Duration) error {
 	}
 }
 
-func collectDCGMOnce(ctx context.Context, cfg config.Config, deployment, collectorURL, file, source, replicaID, utilizationUnit, output string, selector map[string]string, ttl time.Duration, nvlinkPeak, pciePeak float64) error {
+// collectHardwareOnce reads one exporter snapshot, parses it with the
+// collector's bounded parser, and records it against the deployment.
+func collectHardwareOnce(ctx context.Context, cfg config.Config, deployment, collectorURL, file, source, replicaID, output string, ttl time.Duration, parse func(string, time.Time) ([]domain.OperationalMeasurement, error)) error {
 	payload, err := readCollectorPayload(ctx, collectorURL, file)
 	if err != nil {
 		return err
 	}
 	observedAt := time.Now().UTC()
-	rows, err := metrics.ParseDCGM(string(payload), metrics.DCGMOptions{Selector: selector, ReplicaID: replicaID, Source: source, UtilizationUnit: utilizationUnit, ObservedAt: observedAt, TTL: ttl, NVLinkPeakBytesPerSecond: nvlinkPeak * 1e9, PCIePeakBytesPerSecond: pciePeak * 1e9})
+	rows, err := parse(string(payload), observedAt)
 	if err != nil {
 		return err
 	}
@@ -169,11 +191,11 @@ func readCollectorPayload(ctx context.Context, rawURL, file string) ([]byte, err
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("read DCGM exporter: %w", err)
+		return nil, fmt.Errorf("read GPU metrics exporter: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("DCGM exporter returned HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("GPU metrics exporter returned HTTP %d", response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxCollectorPayload+1))
 	if err != nil {

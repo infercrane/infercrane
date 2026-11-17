@@ -166,3 +166,33 @@ func TestAnswerQualityLabelIsShortAndTheSuiteStaysInEvidence(t *testing.T) {
 		})
 	}
 }
+
+// The renderers use the dashboard's words. The current setup is the baseline
+// the others were measured against, so it never reads "rejected", and a
+// winner waits to be rolled out, not activated.
+func TestRenderersSayRunBaselineAndRollOut(t *testing.T) {
+	f := winnerFixture()
+	f.arms[0].state = optimizationcampaign.CandidateRejected
+	report := Assemble(f.evidence())
+	page, err := HTML(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for format, output := range map[string]string{"text": Text(report), "html": html.UnescapeString(string(page))} {
+		for _, want := range []string{"· run " + report.CampaignID, "run input", "baseline · another setup measured better", "winner, ready to roll out"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("%s lacks %q:\n%s", format, want, output)
+			}
+		}
+		for _, wrong := range []string{"campaign input", "campaign " + report.CampaignID, "rejected · another setup measured better", "activate"} {
+			if strings.Contains(output, wrong) {
+				t.Fatalf("%s says %q:\n%s", format, wrong, output)
+			}
+		}
+	}
+	// A setup that is not the current one keeps its verdict.
+	f.arms[2].state = optimizationcampaign.CandidateRejected
+	if text := Text(Assemble(f.evidence())); !strings.Contains(text, "· rejected · ") {
+		t.Fatalf("a rejected setup lost its verdict:\n%s", text)
+	}
+}

@@ -267,7 +267,13 @@ func measurementAggregation(name string) string {
 }
 
 func (s *Store) monitoringOperationalMeasurements(ctx context.Context, tenant, endpointID string, start, end time.Time, out *domain.EndpointMonitoringSnapshot) error {
-	rows, err := s.QueryContext(ctx, `SELECT DISTINCT ON (m.deployment_id,m.replica_id,m.name) m.name,m.value,m.unit,m.evidence_class,m.source,m.sample_count,m.observed_at,m.valid_until FROM operational_measurements m JOIN deployments d ON d.id=m.deployment_id AND d.tenant_id=m.tenant_id JOIN backend_bindings b ON b.deployment_id=m.deployment_id AND b.tenant_id=m.tenant_id WHERE m.tenant_id=? AND b.endpoint_id=? AND m.revision_id=d.active_revision_id AND m.observed_at<=? AND m.valid_until>=? ORDER BY m.deployment_id,m.replica_id,m.name,m.observed_at DESC,m.created_at DESC`, tenant, endpointID, end, start)
+	// Deployment bindings read their active revision's measurements; bindings
+	// to a target no deployment owns (an adopted server, observed directly or
+	// through an agent) read that target's measurements. Both paths keep the
+	// latest reading per reporter and measurement.
+	rows, err := s.QueryContext(ctx, `(SELECT DISTINCT ON (m.deployment_id,m.replica_id,m.name) m.name,m.value,m.unit,m.evidence_class,m.source,m.sample_count,m.observed_at,m.valid_until FROM operational_measurements m JOIN deployments d ON d.id=m.deployment_id AND d.tenant_id=m.tenant_id JOIN backend_bindings b ON b.deployment_id=m.deployment_id AND b.tenant_id=m.tenant_id WHERE m.tenant_id=? AND b.endpoint_id=? AND m.revision_id=d.active_revision_id AND m.observed_at<=? AND m.valid_until>=? ORDER BY m.deployment_id,m.replica_id,m.name,m.observed_at DESC,m.created_at DESC)
+UNION ALL
+(SELECT DISTINCT ON (m.target_id,m.replica_id,m.name) m.name,m.value,m.unit,m.evidence_class,m.source,m.sample_count,m.observed_at,m.valid_until FROM target_measurements m JOIN backend_bindings b ON b.target_id=m.target_id AND b.tenant_id=m.tenant_id WHERE m.tenant_id=? AND b.endpoint_id=? AND b.deployment_id IS NULL AND m.observed_at<=? AND m.valid_until>=? ORDER BY m.target_id,m.replica_id,m.name,m.observed_at DESC,m.created_at DESC)`, tenant, endpointID, end, start, tenant, endpointID, end, start)
 	if err != nil {
 		return err
 	}

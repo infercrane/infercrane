@@ -1,0 +1,173 @@
+---
+title: AMD Instinct GPUs
+description: Deploy and optimize open models on AMD Instinct MI300X, MI325X, MI350X, and MI355X with pinned ROCm builds of vLLM and SGLang.
+---
+
+# AMD Instinct GPUs
+
+InferCrane can deploy and optimize open models on AMD Instinct GPUs with the same engine versions it
+runs on NVIDIA: vLLM 0.22.1 and SGLang 0.5.12, built for ROCm and pinned by digest. The deployment
+spec, rollout, routing, AIPerf measurement, engine metrics, and the optimizer's rules are the same on
+both vendors. What differs, the runtime image and where the GPU can be rented, is data, not code.
+
+<Warning>
+No model has been served or measured on an AMD GPU through InferCrane yet. Everything on this page
+is checked by hermetic tests against fake providers and recorded source code. Speed, cost, and
+answer quality on AMD stay unknown until a recorded run exists.
+</Warning>
+
+## What is supported
+
+| GPU | Architecture | Target | Memory | Platform | Where you can run it |
+|---|---|---|---|---|---|
+| MI300X | CDNA 3 | `gfx942` | 192 GB | `rocm-gfx942` | RunPod Pods, your Kubernetes cluster |
+| MI325X | CDNA 3 | `gfx942` | 256 GB | `rocm-gfx942` | Your Kubernetes cluster |
+| MI350X | CDNA 4 | `gfx950` | 288 GB | `rocm-gfx950` | RunPod Pods, your Kubernetes cluster |
+| MI355X | CDNA 4 | `gfx950` | 288 GB | `rocm-gfx950` | Your Kubernetes cluster |
+
+Architecture, target, and memory come from the
+[ROCm GPU specifications](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
+InferCrane recognizes each GPU under its short name (`MI300X`), its product name
+(`AMD Instinct MI300X`), RunPod's GPU type (`AMD Instinct MI300X OAM`), and the AMD node labeller's
+label value (`AMD_Instinct_MI300X_OAM`). Any other name, including other AMD GPUs such as MI250X or
+MI300A, is not recognized and keeps the default CUDA images.
+
+`GET /api/v1/catalog/accelerators` returns this list with sources, the pinned images, and where each
+platform may run.
+
+### Pinned runtime images
+
+| Runtime | GPUs | Image | Stack |
+|---|---|---|---|
+| vLLM 0.22.1 | all four | `vllm/vllm-openai-rocm:v0.22.1@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031` | ROCm 7.2.2, AITER v0.1.13, built for `gfx942` and `gfx950` |
+| SGLang 0.5.12 | MI300X, MI325X | `lmsysorg/sglang:v0.5.12-rocm720-mi30x@sha256:1f5c080be74269393bdc07d2cb30127dd2931c45b0b53e448235fb14d854da63` | ROCm 7.2, `gfx942` |
+| SGLang 0.5.12 | MI350X, MI355X | `lmsysorg/sglang:v0.5.12-rocm720-mi35x@sha256:3be1556105cdfdede103dc053f002d4d0307bdb229d0e15bfef130d5c53af208` | ROCm 7.2, `gfx950` |
+
+Each digest was read from the registry manifest of the named tag on 2026-11-17. The images are the
+engines' own release builds; InferCrane does not build or modify them. The command, port, `/health`,
+`/v1/models`, and `/metrics` paths are the same as on NVIDIA.
+
+### Where AMD GPUs can run
+
+| Provider | AMD GPUs | Why |
+|---|---|---|
+| RunPod Pods (`runpod` elastic) | Yes: MI300X, MI350X | RunPod rents both as secure-cloud pods. It lists no MI325X or MI355X. |
+| Kubernetes (`kubernetes` elastic) | Yes: all four | Your cluster's AMD GPU device plugin exposes them as `amd.com/gpu`. |
+| RunPod Serverless | No | The serverless worker image is a CUDA build. |
+| AWS EC2, GCP Compute | No | Neither offers AMD Instinct instances. |
+| Dynamo on Kubernetes | No | Its runtime images are CUDA builds. |
+| Any SkyPilot adapter, including RunPod through SkyPilot | No | SkyPilot reaches its node over SSH, and only InferCrane's CUDA images carry it. On RunPod, AMD GPUs use the `runpod-pods` adapter. |
+
+A spec that asks for an AMD GPU anywhere else is refused before anything is provisioned, with the
+places where its platform is qualified. vLLM and custom OCI images run on RunPod and Kubernetes;
+SGLang runs on Kubernetes, as on NVIDIA. A custom OCI image must itself be a ROCm build.
+
+## Deploy on RunPod
+
+```yaml title="examples/runpod-mi300x.yaml"
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen3-8b-mi300x
+model:
+  id: Qwen/Qwen3-8B
+  revision: b968826d9c46dd6066d109eabc6255188de91218
+runtime:
+  engine: vllm
+  version: 0.22.1
+compute: {mode: elastic}
+provider: {cloud: runpod, adapter: runpod-pods}
+resources: {gpu: MI300X}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: round-robin}
+```
+
+InferCrane asks RunPod for GPU type `AMD Instinct MI300X OAM` and starts the vLLM ROCm image. Prices
+come from RunPod's API under that exact GPU type, the same way as NVIDIA prices. When RunPod has no
+current secure-cloud offer, the price stays unknown; it is never filled in from a list price. On
+2026-11-17 RunPod listed the MI300X but returned no current offer.
+
+## Deploy on Kubernetes
+
+Install AMD's [GPU device plugin and node labeller](https://github.com/ROCm/k8s-device-plugin)
+(Apache-2.0), or the AMD GPU Operator that ships both. Then point InferCrane at them:
+
+```bash
+export INFERCRANE_KUBERNETES_GPU_RESOURCE='amd.com/gpu'
+export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='amd.com/gpu.product-name'
+```
+
+Use the node's `amd.com/gpu.product-name` label value as the GPU in the spec, for example
+`resources: {gpu: AMD_Instinct_MI300X_OAM}`. The labeller writes the product name with spaces
+replaced by underscores; check yours with `kubectl get nodes -L amd.com/gpu.product-name`.
+
+One control plane schedules one device resource. A GPU whose device plugin does not match the
+configured resource, such as an MI300X on a cluster configured for `nvidia.com/gpu`, is refused
+before anything is applied. Other resource names, such as NVIDIA MIG slices, are not checked.
+
+## How the optimizer plans on AMD
+
+The optimizer's rules read the endpoint's diagnosis, not the vendor, so the same bottleneck chooses
+the same changes on an MI300X as on an H100. Three things depend on the GPU:
+
+- **Engine defaults.** The ROCm images run the same engine versions as the CUDA ones, so the
+  recorded defaults hold. vLLM 0.22.1 sizes its batch defaults from device memory on every platform
+  ([`EngineArgs.get_batch_defaults`](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/engine/arg_utils.py));
+  every reviewed AMD GPU has at least 70 GB, so it starts with 1,024 sequences and 8,192 batched
+  tokens and a setup that restates those values is dropped as a no-op. vLLM's ROCm platform does not
+  change scheduler or cache defaults, and SGLang 0.5.12's recorded defaults (KV cache dtype,
+  quantization, schedule policy, speculation) are the same on ROCm.
+- **FP8.** CDNA 3 and CDNA 4 run FP8 matrix math in hardware (AMD's product pages list FP8
+  throughput for all four). vLLM 0.22.1 lists FP8 W8A8 as supported on AMD GPUs and an FP8 (e4m3)
+  KV cache on ROCm
+  ([quantization](https://github.com/vllm-project/vllm/blob/v0.22.1/docs/features/quantization/README.md#supported-hardware),
+  [cache config](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/config/cache.py)), and
+  SGLang 0.5.12 runs FP8 on AMD through AITER or Triton
+  ([AMD GPU guide](https://github.com/sgl-project/sglang/blob/v0.5.12/docs/platforms/amd_gpu.md#quantization-on-amd-gpus)).
+  So FP8 weights and an FP8 KV cache can be chosen on all four GPUs.
+- **AITER kernels.** SGLang's ROCm images turn AMD's AITER kernels on by default
+  (`SGLANG_USE_AITER=1` in the image). vLLM 0.22.1 needs the environment variable
+  `VLLM_ROCM_USE_AITER=1`, which is off in the image. A deployment spec carries engine arguments,
+  not environment variables, so the optimizer does not plan AITER or a ROCm attention backend for
+  vLLM yet.
+
+The custom kernel lab does not build HIP kernels yet; it still targets NVIDIA only.
+
+## Measure on AMD
+
+- **AIPerf** load and answer-quality checks call the OpenAI-compatible endpoint, so they run
+  unchanged.
+- **Engine metrics** are read from the same `/metrics` path with the same names on vLLM and SGLang.
+- **GPU telemetry** comes from the
+  [AMD Device Metrics Exporter](https://github.com/ROCm/device-metrics-exporter) (Apache-2.0):
+
+  ```bash
+  infercrane telemetry collect amd qwen3-8b-mi300x \
+    --url http://127.0.0.1:5000/metrics \
+    --selector pod=qwen3-8b-mi300x-0
+  ```
+
+  | Exporter field (v1.5.3) | InferCrane measurement |
+  |---|---|
+  | `gpu_gfx_activity` (percent) | `gpu_utilization`, maximum across GPUs |
+  | `gpu_package_power`, or `gpu_power_usage` (watts) | `gpu_power`, sum |
+  | `gpu_junction_temperature` (Celsius, hotspot sensor) | `gpu_temperature`, maximum |
+  | distinct `serial_number` labels | `gpu_devices` |
+
+  Use `--metric-prefix` if the exporter sets a `MetricsFieldPrefix`. Memory used, memory-controller
+  activity, and the `GPU_PROF_*` profiler counters are not read: their units or their equivalence to
+  NVIDIA's SM, tensor, and DRAM activity are not confirmed. So the GPU bottleneck rules (memory
+  bandwidth, compute, host, interconnect) do not fire on AMD, and GPU utilization is shown but never
+  diagnosed from, as on NVIDIA.
+- **GPU profiles.** A recording accepts any capture tool. On AMD, capture with
+  [rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/) and list `sass` and
+  `stall` as unavailable layers; those are NVIDIA PC-sampling layers.
+
+## Not yet measured
+
+- No AMD run exists. The smallest qualification run (one MI300X, Qwen3-8B, about an hour) is
+  planned and needs approval before any GPU is rented.
+- Other AMD GPUs (MI250X, MI300A, Radeon) are not recognized.
+- Publisher checkpoints built for AMD (Quark MXFP4, PTPC-FP8) cannot seed a setup yet; they are not
+  reviewed for the pinned images.
+- AITER and ROCm attention backends for vLLM are not planned (see above).
+- AMD memory, memory-controller, and profiler counters are not mapped.

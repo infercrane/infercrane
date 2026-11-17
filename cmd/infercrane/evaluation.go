@@ -276,7 +276,7 @@ func evaluationAPICommand(ctx context.Context, cfg config.Config, args []string)
 	if *output == "json" {
 		return printJSON(response)
 	}
-	fmt.Printf("Quality evidence attached\nDeployment  %s\nRevision    %s\nSuite       %s@%s\nScore       %.4f\nPassed      %t\nDigest      %s\n\nRelease Guard applies the persisted deterministic policy; the external evaluator does not promote revisions.\n", deployment, payload.RevisionID, payload.Suite, payload.SuiteVersion, payload.Score, payload.Passed, envelope.Digest)
+	fmt.Printf("Quality evidence attached\nDeployment  %s\nRevision    %s\nSuite       %s@%s\nScore       %.4f\nPassed      %t\nDigest      %s\n\nRelease Guard applies the persisted deterministic policy; the external evaluator does not roll out revisions.\n", deployment, payload.RevisionID, payload.Suite, payload.SuiteVersion, payload.Score, payload.Passed, envelope.Digest)
 	return nil
 }
 

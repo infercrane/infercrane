@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -45,6 +46,28 @@ func TestRunPodFeedUsesExactSecureCloudProviderPrice(t *testing.T) {
 	h100, err := catalog.Estimate(context.Background(), pricing.Request{Cloud: "runpod", Region: "global", GPU: "NVIDIA H100", GPUCount: 1, Replicas: 1})
 	if err != nil || h100.Hourly != 1.99 {
 		t.Fatalf("unexpected H100 offer: %#v err=%v", h100, err)
+	}
+}
+
+func TestRunPodFeedPricesAMDGPUsUnderTheirExactIDAndOnlyWhenOffered(t *testing.T) {
+	// The shape RunPod returned on 2026-11-17: the MI300X listed with no
+	// current secure-cloud offer, and an MI350X offer for this test.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"gpuTypes":[{"id":"AMD Instinct MI300X OAM","displayName":"MI300X","lowestPrice":{"uninterruptablePrice":null}},{"id":"AMD Instinct MI350 OAM","displayName":"MI350X","lowestPrice":{"uninterruptablePrice":5.49}},{"id":"NVIDIA L40S","displayName":"L40S","lowestPrice":{"uninterruptablePrice":0.74}}]}}`))
+	}))
+	defer server.Close()
+	catalog := pricing.NewDynamicCatalog(nil)
+	if err := (RunPodFeed{BaseURL: server.URL, Client: server.Client()}).Refresh(context.Background(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	mi350, err := catalog.Estimate(context.Background(), pricing.Request{Cloud: "runpod", Region: "global", GPU: provideridentity.GPUTypeID("runpod", "MI350X"), GPUCount: 1, Replicas: 1})
+	if err != nil || mi350.Hourly != 5.49 || mi350.Authority != pricing.PriceAuthorityProviderAPI {
+		t.Fatalf("MI350X offer=%#v err=%v", mi350, err)
+	}
+	// No current offer stays unknown: it is never filled from a list price.
+	if mi300x, err := catalog.Estimate(context.Background(), pricing.Request{Cloud: "runpod", Region: "global", GPU: provideridentity.GPUTypeID("runpod", "MI300X"), GPUCount: 1, Replicas: 1}); err == nil {
+		t.Fatalf("MI300X without an offer was priced: %#v", mi300x)
 	}
 }
 

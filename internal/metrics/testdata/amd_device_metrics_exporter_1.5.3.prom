@@ -1,0 +1,25 @@
+# Synthetic snapshot in the AMD Device Metrics Exporter v1.5.3 text format.
+# Metric and label names are read from the exporter's source
+# (pkg/amdgpu/gpuagent/gpuagent_gpu_metrics.go); values are made up and are
+# not a measurement.
+# HELP gpu_gfx_activity Graphics engine usage in Percentage (0-100)
+# TYPE gpu_gfx_activity gauge
+gpu_gfx_activity{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 64
+gpu_gfx_activity{card_model="AMD Instinct MI300X OAM",container="",gpu_id="1",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001125",job_id="",job_partition="",job_user=""} 81
+gpu_gfx_activity{card_model="AMD Instinct MI300X OAM",container="",gpu_id="2",gpu_partition_id="0",hostname="mi300x-node-1",namespace="other-team",pod="batch-7",serial_number="692251001126",job_id="",job_partition="",job_user=""} 99
+# HELP gpu_package_power Current socket power in Watts
+# TYPE gpu_package_power gauge
+gpu_package_power{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 512
+gpu_package_power{card_model="AMD Instinct MI300X OAM",container="",gpu_id="1",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001125",job_id="",job_partition="",job_user=""} 604
+# HELP gpu_power_usage GPU Power usage in Watts
+# TYPE gpu_power_usage gauge
+gpu_power_usage{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 511
+# HELP gpu_junction_temperature Current junction/hotspot temperature in Celsius
+# TYPE gpu_junction_temperature gauge
+gpu_junction_temperature{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 71
+gpu_junction_temperature{card_model="AMD Instinct MI300X OAM",container="",gpu_id="1",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001125",job_id="",job_partition="",job_user=""} 76
+# Not read: the unit and equivalence of these are not confirmed.
+gpu_used_vram{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 175000
+gpu_umc_activity{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 47
+gpu_prof_occupancy_percent{card_model="AMD Instinct MI300X OAM",container="",gpu_id="0",gpu_partition_id="0",hostname="mi300x-node-1",namespace="infercrane-system",pod="qwen-0",serial_number="692251001124",job_id="",job_partition="",job_user=""} 33
+gpu_nodes_total{hostname="mi300x-node-1"} 8

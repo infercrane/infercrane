@@ -236,7 +236,9 @@ Profiling traces are short and opt-in. For always-on, low-overhead counters, run
 `infercrane telemetry collect dcgm DEPLOYMENT --url … --interval 15s` beside
 [dcgm-exporter](/features/telemetry#nvidia-gpu-evidence): it posts SM active, SM occupancy, tensor
 active, DRAM active, PCIe, and NVLink readings every interval, each fresh for three intervals, and the
-readiness rules read them continuously.
+readiness rules read them continuously. On AMD Instinct GPUs, `infercrane telemetry collect amd` reads
+the AMD Device Metrics Exporter the same way, but only utilization, power, temperature, and device
+count; see [AMD Instinct GPUs](/integrations/amd-instinct#measure-on-amd).
 
 Continuous kernel-level profiling with eBPF and CUPTI
 ([Parca Agent with parcagpu](https://www.polarsignals.com/blog/posts/2025/10/22/gpu-profiling),

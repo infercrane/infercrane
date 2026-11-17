@@ -44,7 +44,7 @@ func TestWatchLabelAndStatusUsePlainWords(t *testing.T) {
 	if got := watchLabel(watchCandidate{ID: "0123456789abcdef", DeploymentSpec: json.RawMessage(`{}`)}); !strings.HasPrefix(got, "setup ") {
 		t.Fatalf("label without a spec = %q", got)
 	}
-	status := watchStatus(watchCandidate{State: "rejected", FailureCode: "measured_no_measurable_difference"}, watchMeasurement{}, false)
+	status := watchStatus(watchCandidate{State: "rejected", FailureCode: "measured_no_measurable_difference"}, watchMeasurement{}, false, false)
 	if status != "rejected · no real difference from your current setup" {
 		t.Fatalf("status = %q", status)
 	}
@@ -68,13 +68,13 @@ func TestRenderOptimizeWatchStatesTheDecision(t *testing.T) {
 	candidate := watchCandidate{ID: "candidate", Rank: 2, State: "rejected", FailureCode: "measured_no_measurable_difference", DeploymentSpec: watchSpec("custom-oci", "--parallel", "8")}
 	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-1", ModelIdentity: "Qwen/Qwen3-0.6B", State: "qualified", Candidates: []watchCandidate{candidate, control}}, measurements: map[string]watchMeasurement{}}
 	text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false)
-	for _, want := range []string{"kept your current setup", "kept · nothing to activate", "no real difference from your current setup", "Keep your current setup", "Nothing to activate: no new endpoint is published.", "infercrane optimize cancel campaign-1 removes the measurement servers now", "results appear as each setup finishes measuring"} {
+	for _, want := range []string{"kept your current setup", "kept · nothing to roll out", "no real difference from your current setup", "Keep your current setup", "Nothing to roll out: no new endpoint is created.", "infercrane optimize cancel campaign-1 removes the measurement servers now", "results appear as each setup finishes measuring"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("watch view lacks %q:\n%s", want, text)
 		}
 	}
-	// A kept control is not a winner and has nothing to activate.
-	for _, wrong := range []string{"winner, ready to activate", "optimize activate", "optimized endpoint"} {
+	// A kept control is not a winner and has nothing to roll out.
+	for _, wrong := range []string{"winner, ready to roll out", "optimize activate", "optimized endpoint"} {
 		if strings.Contains(text, wrong) {
 			t.Fatalf("watch view says %q for a kept control:\n%s", wrong, text)
 		}
@@ -85,8 +85,14 @@ func TestRenderOptimizeWatchStatesTheDecision(t *testing.T) {
 
 	control.State, candidate.State, candidate.FailureCode = "rejected", "qualified", ""
 	snapshot.campaign.Candidates = []watchCandidate{control, candidate}
-	if text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false); !strings.Contains(text, "Roll out “custom image, --parallel 8”") || !strings.Contains(text, "optimize activate campaign-1 --candidate candidate") {
-		t.Fatalf("a measured winner was not offered for activation:\n%s", text)
+	text = renderOptimizeWatch(snapshot, newUIStyles(true), 100, false)
+	if !strings.Contains(text, "Roll out “custom image, --parallel 8”") || !strings.Contains(text, "optimize activate campaign-1 --candidate candidate") || !strings.Contains(text, "winner, ready to roll out") {
+		t.Fatalf("a measured winner was not offered for rollout:\n%s", text)
+	}
+	// The current setup is the baseline the winner was measured against; the
+	// API's "rejected" state is never shown for it.
+	if !strings.Contains(text, "  baseline\n") || strings.Contains(text, "rejected") {
+		t.Fatalf("a replaced current setup was not called the baseline:\n%s", text)
 	}
 
 	// A control activated anyway is live, but never "measured better".
@@ -107,8 +113,8 @@ func TestRenderOptimizeWatchStatesTheDecision(t *testing.T) {
 }
 
 func TestOptimizeWatchRequiresCampaign(t *testing.T) {
-	if err := optimizeWatchCommand(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "optimize watch CAMPAIGN") {
-		t.Fatalf("missing campaign error = %v", err)
+	if err := optimizeWatchCommand(t.Context(), nil); err == nil || !strings.Contains(err.Error(), "optimize watch RUN") {
+		t.Fatalf("missing run error = %v", err)
 	}
 	if err := optimizeWatchCommand(t.Context(), []string{"--once"}); err == nil {
 		t.Fatal("a flag was accepted as the campaign ID")
@@ -137,7 +143,7 @@ func TestRenderOptimizeWatchShowsTheAnswerCheck(t *testing.T) {
 	if strings.Contains(text, "Runs after this setup is measured") {
 		t.Fatalf("a pending answer check was listed:\n%s", text)
 	}
-	if status := watchStatus(watchCandidate{State: "validating", Quality: &watchQuality{State: "checking"}}, watchMeasurement{}, false); status != "checking answers against your current setup" {
+	if status := watchStatus(watchCandidate{State: "validating", Quality: &watchQuality{State: "checking"}}, watchMeasurement{}, false, false); status != "checking answers against your current setup" {
 		t.Fatalf("checking status = %q", status)
 	}
 }
@@ -179,7 +185,7 @@ func TestRenderOptimizeWatchDecisionFollowsEvolutionIntent(t *testing.T) {
 	candidate := watchCandidate{ID: "candidate", Rank: 2, State: "rejected", FailureCode: "measured_candidate_regressed", DeploymentSpec: watchSpec("vllm", "--kv-cache-dtype", "fp8")}
 	snapshot := watchSnapshot{campaign: watchCampaign{ID: "campaign-2", ModelIdentity: "Qwen/Qwen3-0.6B", Intent: "evolve_endpoint", TargetDeployment: "qwen-chat", State: "guard_passed", Candidates: []watchCandidate{control, candidate}}, measurements: map[string]watchMeasurement{}}
 	text := renderOptimizeWatch(snapshot, newUIStyles(true), 100, false)
-	for _, want := range []string{"kept · nothing to activate", "worse than your current setup", "Nothing to activate: qwen-chat keeps serving its current revision.", "infercrane optimize cancel campaign-2"} {
+	for _, want := range []string{"kept · nothing to roll out", "worse than your current setup", "Nothing to roll out: qwen-chat keeps serving its current revision.", "infercrane optimize cancel campaign-2"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("watch view lacks %q:\n%s", want, text)
 		}
@@ -277,11 +283,11 @@ func TestWatchStatusNamesTheMeasuringTurnAndPrefersTheAPIName(t *testing.T) {
 		t.Fatalf("label = %q", got)
 	}
 	measuring := watchCandidate{State: "measuring", Measurement: &watchLive{TurnsPlanned: 7, TurnsDone: 3, Current: &watchRun{Kind: "turn", Arm: "candidate"}}}
-	if status := watchStatus(measuring, watchMeasurement{}, false); status != "measuring · turn 4 of 7" {
+	if status := watchStatus(measuring, watchMeasurement{}, false, false); status != "measuring · turn 4 of 7" {
 		t.Fatalf("measuring status = %q", status)
 	}
 	measuring.Measurement = &watchLive{TurnsPlanned: 7, Current: &watchRun{Kind: "warmup", Arm: "control"}}
-	if status := watchStatus(measuring, watchMeasurement{}, false); status != "measuring · warming up" {
+	if status := watchStatus(measuring, watchMeasurement{}, false, false); status != "measuring · warming up" {
 		t.Fatalf("warmup status = %q", status)
 	}
 }

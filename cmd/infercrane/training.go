@@ -184,7 +184,7 @@ func trainingAttach(ctx context.Context, cfg config.Config, args []string) error
 	if *output == "json" {
 		return printJSON(response)
 	}
-	fmt.Printf("Training artifact attached\nDeployment  %s\nRevision    %s\nArtifact    %s@%s\nEvidence    %s\n\nThe external training system remains the execution owner. Qualify this revision with benchmark, Replay, quality evidence, and Release Guard before promotion.\n", payload.Deployment, payload.RevisionID, payload.Repository, payload.ImmutableRevision, envelope.Digest)
+	fmt.Printf("Training artifact attached\nDeployment  %s\nRevision    %s\nArtifact    %s@%s\nEvidence    %s\n\nThe external training system remains the execution owner. Qualify this revision with benchmark, Replay, quality evidence, and Release Guard before rollout.\n", payload.Deployment, payload.RevisionID, payload.Repository, payload.ImmutableRevision, envelope.Digest)
 	return nil
 }
 

@@ -1,0 +1,17 @@
+# One AMD Instinct MI300X on RunPod Pods, serving an 8B model with the pinned
+# vLLM 0.22.1 ROCm image. This is the smallest AMD qualification intent; it has
+# not been run yet. See docs/integrations/amd-instinct.mdx.
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen3-8b-mi300x
+model:
+  id: Qwen/Qwen3-8B
+  revision: b968826d9c46dd6066d109eabc6255188de91218
+runtime:
+  engine: vllm
+  version: 0.22.1
+compute: {mode: elastic}
+provider: {cloud: runpod, adapter: runpod-pods}
+resources: {gpu: MI300X}
+scaling: {min_replicas: 1, max_replicas: 1}
+routing: {strategy: round-robin}

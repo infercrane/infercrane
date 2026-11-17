@@ -18,7 +18,7 @@ var stateWords = map[string]string{
 	"proposed": "queued", "provisioning": "starting a server", "ready": "server ready",
 	"measuring": "measuring against your current setup", "validating": "checking answer quality",
 	"ranked": "measured and ranked", "guarding": "running the safety check", "guard_passed": "passed the safety check",
-	"qualified": "winner, ready to activate", "rejected": "rejected", "inconclusive": "no clear result",
+	"qualified": "winner, ready to roll out", "rejected": "rejected", "inconclusive": "no clear result",
 	"promoted": "live", "observed": "live", "failed": "failed", "cancelled": "cancelled", "cleaned": "server removed",
 }
 
@@ -32,7 +32,7 @@ var reasonWords = map[string]string{
 	"quality_gate_rejected":                  "failed the answer-quality check",
 	"release_guard_rejected":                 "failed the safety check",
 	"release_guard_inconclusive":             "safety check had too little evidence",
-	"approval_expired_before_activation":     "approval expired before activation",
+	"approval_expired_before_activation":     "approval expired before rollout",
 }
 
 var decisionWords = map[string]string{
@@ -72,7 +72,7 @@ type ViewRow struct {
 }
 
 // lead fills the card values. A card leads with the chosen setup; when the
-// campaign chose none it leads with the current setup, so measured values
+// run chose none it leads with the current setup, so measured values
 // stay visible instead of a large "unknown".
 func (row *ViewRow) lead(chosen bool) {
 	if chosen {
@@ -140,7 +140,7 @@ func NewView(r Report) View {
 		if entry.Subject != "" {
 			value += "  " + entry.Subject
 		}
-		v.Evidence = append(v.Evidence, ViewField{strings.ReplaceAll(entry.Kind, "_", " "), value})
+		v.Evidence = append(v.Evidence, ViewField{evidenceName(entry.Kind), value})
 	}
 	if eval := r.Quality.Eval; eval != "" && !evidenceNames(v.Evidence, eval) {
 		v.Evidence = append(v.Evidence, ViewField{"quality eval", eval})
@@ -150,6 +150,15 @@ func NewView(r Report) View {
 		v.Unknown = append(v.Unknown, ViewField{field, unknownReason(r, field)})
 	}
 	return v
+}
+
+// evidenceName labels one evidence entry. The report calls the run's input
+// "campaign_input", the control API's name for it.
+func evidenceName(kind string) string {
+	if kind == "campaign_input" {
+		return "run input"
+	}
+	return strings.ReplaceAll(kind, "_", " ")
 }
 
 // evidenceNames reports whether an evidence entry already names value.
@@ -170,7 +179,7 @@ func subtitle(r Report) string {
 	if r.Objective != "" {
 		parts = append(parts, "goal: "+r.Objective)
 	}
-	parts = append(parts, "campaign "+r.CampaignID)
+	parts = append(parts, "run "+r.CampaignID)
 	return strings.Join(parts, " · ")
 }
 
@@ -311,7 +320,7 @@ func measurementLines(r Report) []string {
 	case BasisReleaseGuard:
 		lines = append(lines, "Answer quality: Release Guard compared signed evals of both setups under your quality policy.")
 	case BasisCampaignGate:
-		lines = append(lines, "Answer quality: the winner's signed eval had to pass. No Release Guard watch band applies to this campaign.")
+		lines = append(lines, "Answer quality: the winner's signed eval had to pass. No Release Guard watch band applies to this run.")
 	}
 	if r.SimulatedAccelerator {
 		lines = append(lines, "Hardware: a simulated accelerator on a CPU. These numbers show the process works; they are not GPU results.")
@@ -452,12 +461,19 @@ func candidateStatus(candidate CandidateResult) string {
 		}
 		return statusWords(candidate.State, "") + " · " + optimizationcampaign.DescribeRegressions(regressions)
 	}
+	if candidate.Role == "baseline" && candidate.State == optimizationcampaign.CandidateRejected {
+		return statusWords(baselineWord, candidate.FailureCode)
+	}
 	return statusWords(candidate.State, candidate.FailureCode)
 }
 
-// keptWords describe a baseline the campaign kept. It is not a winner, and
-// activating it changes nothing.
-const keptWords = "kept · nothing to activate"
+// keptWords describe a baseline the run kept. It is not a winner, and
+// rolling it out changes nothing.
+const keptWords = "kept · nothing to roll out"
+
+// baselineWord is the current setup's status once another setup was chosen.
+// It is what the others were measured against, so it never reads "rejected".
+const baselineWord = "baseline"
 
 func statusWords(state, failure string) string {
 	text := stateWords[state]

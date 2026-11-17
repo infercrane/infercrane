@@ -1,0 +1,133 @@
+---
+title: Run on this machine
+description: Connect the model server on your laptop, workstation, or on-prem box to InferCrane in two commands, with outbound HTTPS only and prompts kept on the machine.
+---
+
+# Run on this machine
+
+Connect a model server that already runs on your own hardware: vLLM, SGLang, llama.cpp, Ollama, or
+LM Studio, on a laptop, a workstation, an on-prem box, or a cloud VM. The InferCrane agent finds the
+server, reports its health, engine, model, and hardware, and relays its engine metrics so the
+endpoint page and the bottleneck diagnosis work. It only dials out over HTTPS, so nothing has to be
+reachable from the internet.
+
+```bash
+infercrane login
+infercrane agent run
+```
+
+<Info>
+Prompts and completions never leave the machine. The agent sends hardware and server details,
+health, and engine metrics filtered to the families InferCrane reads. Request timings and token
+counts are sent only if you route traffic through its local gateway. See
+[what leaves the machine](/architecture/agent#what-leaves-the-machine).
+</Info>
+
+<Steps>
+  <Step title="Start your model server">
+    Any of these, on its usual port, works as it is:
+
+    ```bash
+    vllm serve Qwen/Qwen3-8B                      # port 8000
+    ollama serve                                  # port 11434
+    llama-server -m model.gguf --metrics          # port 8080
+    ```
+
+    vLLM serves engine metrics by default. Start SGLang with `--enable-metrics` and llama.cpp with
+    `--metrics` to get them. Ollama and LM Studio do not expose engine metrics, so their queue and
+    cache internals stay unknown.
+  </Step>
+  <Step title="Check what the agent would connect">
+    `detect` looks on ports 8000, 30000, 8080, 11434, and 1234 and sends nothing:
+
+    ```bash
+    infercrane agent detect
+    ```
+
+    Name a server on another port or host with `--server http://127.0.0.1:9000`.
+  </Step>
+  <Step title="Run the agent">
+    ```bash
+    infercrane agent run
+    ```
+
+    The first run creates an agent key with your sign-in and saves it in the OS keychain. Each
+    healthy server becomes an observe-only endpoint named after its model, for example `qwen3-8b`.
+    Keep the agent running (in a terminal, `tmux`, or a service manager); it syncs every 15 seconds.
+  </Step>
+  <Step title="Open the endpoint">
+    ```bash
+    infercrane observe qwen3-8b
+    ```
+
+    Running and waiting requests and KV-cache use appear with the first sync. Queue time and time to
+    first token come from the difference between two scrapes, so they appear about 30 seconds later,
+    once requests have been served.
+  </Step>
+</Steps>
+
+## A server that needs an API key
+
+Keep the key in an environment variable, name the variable, and name the server. The agent sends
+the key only to the servers you name with `--server`, never to InferCrane:
+
+```bash
+export VLLM_API_KEY=...
+infercrane agent run --server http://127.0.0.1:8000 --token-env VLLM_API_KEY --as qwen-local
+```
+
+## See request timings
+
+The agent cannot see traffic that goes straight to the server, and it says so. To record request
+timings and token counts, start its local gateway and point your application at it:
+
+```bash
+infercrane agent run --gateway 127.0.0.1:4000
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:4000/v1", api_key="your-server-key-or-anything")
+```
+
+The gateway forwards every request unchanged. If you stop the agent, point your application back at
+the server.
+
+## A machine where nobody signs in
+
+Create an agent key once from a signed-in machine (or the API), then pass it to the agent:
+
+```bash
+infercrane agent create rack-12
+```
+
+```bash
+INFERCRANE_URL=https://control.example.com INFERCRANE_AGENT_KEY=<key> infercrane agent run
+```
+
+The agent honours `HTTPS_PROXY`. It needs outbound HTTPS to the control plane and nothing inbound.
+
+## Stop or revoke
+
+`Ctrl-C` stops the agent. To cut it off from InferCrane for good:
+
+```bash
+infercrane agent list
+infercrane agent revoke laptop
+```
+
+A revoked agent stops at its next sync, within one poll. Its endpoints stay, marked unhealthy.
+
+## What it does not do yet
+
+- It does not start, restart, or tune your server. Running candidate setups on your own GPUs is
+  the next step; see [candidate runs](/architecture/agent#candidate-runs-next-slice).
+- Apple Silicon and AMD GPUs are reported as detected; their GPU telemetry is not collected.
+- Requests through the InferCrane gateway cannot reach a server that only the agent sees. Use the
+  agent's local gateway instead.
+
+## Next
+
+- [How the agent works](/architecture/agent)
+- [Observe an endpoint](/features/observe)

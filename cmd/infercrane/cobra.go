@@ -23,6 +23,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
 	{use: "workload ACTION [PATH] [flags]", short: "Initialize, validate, build, develop, and deploy inference projects", group: "start"},
 	{use: "evaluation ACTION [arguments]", short: "Sign, verify, attach, and inspect semantic quality evidence", group: "understand"},
+	{use: "agent run|detect|create|list|revoke [flags]", short: "Connect model servers on this machine through an outbound-only agent", group: "start"},
 	{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
 	{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
 	{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
@@ -31,7 +32,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
 	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
-	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
+	{use: "telemetry collect dcgm|amd DEPLOYMENT [flags]", short: "Collect bounded GPU evidence from DCGM or AMD's exporter through the control plane", group: "understand"},
 	{use: "profile ENDPOINT [flags]", short: "Capture and analyze a GPU profile: where GPU time goes and why", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
@@ -64,7 +65,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
 	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Explore reviewed models, or check any open Hugging Face model", group: "start"},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose and govern evidence-gated serving optimization campaigns", group: "understand"},
+	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose, measure, and roll out evidence-gated serving optimization runs", group: "understand"},
 	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
 	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
@@ -87,6 +88,19 @@ var publicCommandSpecs = []commandSpec{
 }
 
 var commandExamples = map[string]string{
+	"agent": `  # Connect every model server on this machine (vLLM, SGLang, llama.cpp,
+  # Ollama, LM Studio). Only outbound HTTPS; prompts never leave the machine.
+  infercrane login
+  infercrane agent run
+
+  # A server started with an API key, observed under a chosen name
+  VLLM_API_KEY=... infercrane agent run --server http://127.0.0.1:8000 --token-env VLLM_API_KEY --as qwen-local
+
+  # Also record request timings: point your app at the local gateway
+  infercrane agent run --gateway 127.0.0.1:4000
+
+  # See what would be connected, without sending anything
+  infercrane agent detect`,
 	"profile": `  # On the GPU host: record 10 s through the engine's own profiler, analyze, and record
   infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --duration 10s
 
@@ -144,12 +158,18 @@ var commandExamples = map[string]string{
   infercrane open
   infercrane open endpoint support-bot
   infercrane open run 4f1c2d9e`,
-	"rollout": `  # Create a candidate from a complete DeploymentSpec
+	"rollout": `  # Create a candidate revision from a complete DeploymentSpec
   infercrane rollout create production --file candidate.yaml --idempotency-key production-r2
 
   # Follow its durable provisioning operation
-  infercrane rollout provision production REVISION_ID --wait`,
-	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed candidates
+  infercrane rollout provision production REVISION_ID --wait
+
+  # Roll out the candidate revision once Release Guard accepts it
+  infercrane rollout promote production REVISION_ID --wait
+
+  # Roll back to an earlier revision
+  infercrane rollout rollback production REVISION_ID --reason "p95 latency regressed" --wait`,
+	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed setups
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
   # Find the best setup for any model pinned to a commit; reads its public config.json
@@ -158,14 +178,35 @@ var commandExamples = map[string]string{
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
 
-  # Show what a finished campaign changed in cost, speed, and quality, and save a shareable page
-  infercrane optimize report CAMPAIGN_ID --html result.html
+  # Show what a finished run changed in cost, speed, and quality, and save a shareable page
+  infercrane optimize report RUN_ID --html result.html
+
+  # Roll out the winning setup of a run
+  infercrane optimize activate RUN_ID --candidate SETUP_ID
 
   # Inspect a remote-derived, content-free public workload profile
   infercrane optimize workload-profile --file chutes-profile.json
 
   # Advanced: bind the proposal to an observed content-free workload shape
   infercrane optimize propose Qwen/Qwen3-8B --provider kubernetes-dynamo --gpu NVIDIA-L40S --workload-fingerprint sha256:WORKLOAD_DIGEST --source aiconfigurator`,
+}
+
+// commandLong explains a command whose action names are the control API's
+// verbs, in the words the dashboard uses.
+var commandLong = map[string]string{
+	"optimize": `An optimization run measures setups side by side on the same traffic and checks
+answer quality. Nothing changes in production until you roll out a winner.
+
+  propose   preview the setups a run would measure, without creating a run
+  create    save a run and its setups; it waits for your spend approval
+  list      list runs
+  inspect   show one run and every setup in it
+  approve   approve a spend cap and an expiry so the run can start
+  watch     follow a run live
+  results   show the measured comparison and the decision
+  report    show what a finished run changed in cost, speed, and answer quality
+  activate  roll out the winning setup, named with --candidate SETUP_ID
+  cancel    stop a run and remove its measurement servers`,
 }
 
 func isPublicCommand(name string) bool {
@@ -236,6 +277,7 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 			return runLegacy(ctx, append([]string{name}, args...))
 		},
 	}
+	command.Long = commandLong[name]
 	command.Example = commandExamples[name]
 	addHelpFlags(command, name)
 	return command
@@ -268,12 +310,13 @@ func addHelpFlags(command *cobra.Command, name string) {
 	case "open":
 		boolFlag("no-browser", "print the URL instead of opening a browser")
 	case "telemetry":
-		stringFlag("url", "http://127.0.0.1:9400/metrics", "DCGM Prometheus metrics URL")
-		stringFlag("file", "", "read a saved DCGM Prometheus snapshot instead of a URL")
+		stringFlag("url", "", "exporter Prometheus metrics URL (dcgm: http://127.0.0.1:9400/metrics, amd: http://127.0.0.1:5000/metrics)")
+		stringFlag("file", "", "read a saved exporter Prometheus snapshot instead of a URL")
 		stringFlag("selector", "", "comma-separated exact Prometheus label selectors")
 		stringFlag("replica", "", "InferCrane replica identity represented by this snapshot")
-		stringFlag("source", "dcgm_exporter", "bounded evidence source identity")
-		stringFlag("utilization-unit", "percent", "legacy DCGM_FI_DEV_GPU_UTIL input unit: percent or ratio")
+		stringFlag("source", "", "bounded evidence source identity (dcgm_exporter or amd_device_metrics_exporter)")
+		stringFlag("utilization-unit", "percent", "dcgm only: legacy DCGM_FI_DEV_GPU_UTIL input unit, percent or ratio")
+		stringFlag("metric-prefix", "", "amd only: the exporter's MetricsFieldPrefix, if it sets one")
 		stringFlag("nvlink-peak-gbps", "0", "declared per-GPU, per-direction NVLink peak in GB/s; enables NVLink saturation")
 		stringFlag("pcie-peak-gbps", "0", "declared per-GPU, per-direction PCIe peak in GB/s; enables PCIe saturation")
 		stringFlag("ttl", "2m", "maximum time this snapshot may be presented as fresh")
@@ -367,6 +410,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("model", "", "physical upstream model; discovered when omitted")
 		stringFlag("type", "auto", "auto, vllm, litellm, or openai-compatible")
 		boolFlag("manage-traffic", "route requests through InferCrane after qualification")
+		stringFlag("token-env", "", "environment variable holding the server's API key; sent once and stored encrypted")
 	case "observe":
 		boolFlag("watch", "refresh until interrupted")
 		boolFlag("diagnose", "persist a fresh deterministic Doctor evaluation")
@@ -464,7 +508,23 @@ func addHelpFlags(command *cobra.Command, name string) {
 			boolFlag("wait", "follow durable progress to completion")
 			stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 			stringFlag("idempotency-key", "", "stable safe-retry key")
+			stringFlag("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
+			boolFlag("infercrane-cloud", "deploy on InferCrane Cloud, paid from prepaid credits")
+			stringFlag("stop-after", "1h", "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
 		}
+	case "agent":
+		stringFlag("output", "human", "output format: human or json (json needs --once)")
+		stringFlag("server", "", "a model server URL (repeatable); default: look on ports 8000, 30000, 8080, 11434, 1234")
+		stringFlag("token-env", "", "environment variable holding the local server's API key; it never leaves this machine")
+		stringFlag("auth-header-env", "", "environment variable holding the local server's full Authorization header")
+		stringFlag("model", "", "model to observe when a server lists several")
+		stringFlag("as", "", "endpoint name when one server is observed")
+		stringFlag("name", "", "agent name when a new agent key is created (default: this host's name)")
+		stringFlag("gateway", "", "listen address of the local recording gateway, for example 127.0.0.1:4000")
+		stringFlag("gateway-server", "", "server URL the gateway forwards to when several are observed")
+		stringFlag("key-env", "INFERCRANE_AGENT_KEY", "environment variable holding the agent key")
+		boolFlag("no-detect", "only observe servers named with --server")
+		boolFlag("once", "detect, register, sync once, and exit")
 	case "request":
 		stringFlag("message", "Say hello in one sentence.", "user message")
 		stringFlag("protocol", "chat", "chat, responses, embeddings, completions, or batch")
@@ -547,15 +607,15 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("min-goodput", "", "minimum measured requests per second satisfying the SLO")
 		stringFlag("min-output-tokens-second", "", "required measured output throughput")
 		stringFlag("max-hourly-cost", "", "required sourced hourly cost")
-		stringFlag("write-dir", "", "write candidate DeploymentSpecs")
-		stringFlag("idempotency-key", "", "stable safe-retry key for campaign creation")
+		stringFlag("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
+		stringFlag("idempotency-key", "", "stable safe-retry key for run creation")
 		stringFlag("target-deployment", "", "existing deployment to evolve")
-		stringFlag("max-cost-usd", "", "hard maximum campaign spend for approval")
+		stringFlag("max-cost-usd", "", "hard maximum run spend for approval")
 		stringFlag("expires-in", "1h", "paid-resource approval validity")
-		stringFlag("candidate", "", "exact qualified candidate to activate")
+		stringFlag("candidate", "", "ID of the qualified setup that optimize activate rolls out")
 		boolFlag("yes", "approve without the confirmation prompt")
-		intFlag("max-candidates", 10, "maximum candidates")
-		intFlag("limit", 20, "maximum campaigns to list")
+		intFlag("max-candidates", 10, "maximum setups")
+		intFlag("limit", 20, "maximum runs to list")
 		boolFlag("include-simulated", "include simulated compatibility")
 		boolFlag("allow-model-metadata-network", "allow reading public model metadata from Hugging Face for estimates and --search recipes")
 		stringFlag("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
@@ -626,12 +686,12 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("require-compatibility", "require comparable model/runtime evidence")
 		boolFlag("require-synthetic", "require bounded AIPerf validation")
 		boolFlag("require-quality", "require signed comparable semantic quality evidence")
-		boolFlag("auto-rollback", "automatically roll back a rejected promoted revision")
+		boolFlag("auto-rollback", "automatically roll back a rolled-out revision that Release Guard rejects")
 		intFlag("minimum-requests", 0, "minimum measured requests per revision")
 		stringFlag("max-cost-regression", "", "maximum sourced cost regression percent")
 		stringFlag("minimum-quality-score", "", "minimum candidate semantic quality score")
 		stringFlag("max-quality-regression", "", "maximum semantic quality regression percent")
-		intFlag("auto-rollback-window", 0, "post-promotion observation window seconds")
+		intFlag("auto-rollback-window", 0, "observation window after a rollout, in seconds")
 		intFlag("validation-max-requests", 0, "hard validation request bound")
 		intFlag("validation-max-concurrency", 0, "hard validation concurrency bound")
 	}

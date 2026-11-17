@@ -55,6 +55,59 @@
       "why": "The engine evicted 8 running requests per 100 completed because the KV cache was full, so the KV cache is what binds. An FP8 KV cache stores about twice the tokens in the same memory on an H100, so it comes first. Capping concurrent requests below the 48 observed (to 32) stops the evictions at the cost of some queueing. Adding batch slots would make the evictions worse."
     },
     {
+      "id": "mi300x-kv-preemption-fp8-kv-first",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "MI300X",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "kv-cache-pressure",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "kv_cache.preemption",
+              "signal": "runtime_preemptions_per_completed_request",
+              "observed": 0.08,
+              "comparison": ">=",
+              "threshold": 0.01,
+              "unit": "ratio"
+            }
+          ],
+          "signals": {
+            "runtime_requests_running_per_replica": 48,
+            "runtime_preemptions_per_completed_request": 0.08,
+            "p95_latency": 4200,
+            "runtime_kv_cache_timeseries": 99
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "kv-sequence-cap"
+      ],
+      "must_not_propose": [
+        "batch-budget"
+      ],
+      "categories": [
+        "kv_pressure"
+      ],
+      "why": "The same evictions as on the H100 task, on an AMD Instinct MI300X. CDNA 3 runs FP8 in hardware and the pinned vLLM 0.22.1 ROCm image supports an FP8 (e4m3) KV cache, so the FP8 KV cache still comes first and the sequence cap second. The plan is identical because the rules read the diagnosis, not the vendor."
+    },
+    {
       "id": "l40s-kv-saturation-reviewed-profile",
       "request": {
         "model_identity": "mistral-7b-instruct",
@@ -156,6 +209,64 @@
         "queueing"
       ],
       "why": "Requests waited 640 ms at p95 inside the engine while the KV cache was only 41% used, so memory is not what holds them back; the scheduler admits too few per step. On an 80 GB H100, vLLM 0.22.1 already defaults to 1,024 sequences and 8,192 batched tokens, so the larger-batch setup raises both above those defaults (2,048 and 16,384) instead of restating them. Nothing points at precision or speculation."
+    },
+    {
+      "id": "mi300x-runpod-sku-queue-larger-batches",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "AMD Instinct MI300X OAM",
+        "objective": "interactive",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "queueing-and-admission",
+          "confidence": "stage-and-engine-level",
+          "findings": [
+            {
+              "rule": "queue.engine_wait",
+              "signal": "runtime_queue_time_p95",
+              "observed": 640,
+              "comparison": ">=",
+              "threshold": 360,
+              "unit": "ms"
+            }
+          ],
+          "signals": {
+            "runtime_queue_time_p95": 640,
+            "runtime_requests_waiting": 14,
+            "runtime_kv_cache_timeseries": 41,
+            "p95_latency": 1800
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ]
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "batch-budget"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache",
+        "fp8-weights",
+        "speculative-mtp"
+      ],
+      "categories": [
+        "queueing"
+      ],
+      "why": "RunPod's exact SKU name for the MI300X resolves to the reviewed 192 GB accelerator. vLLM 0.22.1 applies its 70 GB rule on ROCm too, so the defaults are already 1,024 sequences and 8,192 batched tokens, and the larger-batch setup raises them to 2,048 and 16,384. The small-memory values (512 and 8,192) would restate or lower the defaults and must not appear.",
+      "must_not_use_args": [
+        "--max-num-seqs 512",
+        "--max-num-batched-tokens 8192"
+      ]
     },
     {
       "id": "l40s-sglang-queue-unknown-defaults",

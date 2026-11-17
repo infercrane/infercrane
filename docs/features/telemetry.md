@@ -108,6 +108,13 @@ URLs are provider APIs. A tenant compute replica without a derivable worker cred
 skipped rather than scraped unauthenticated. A payload from an unsupported runtime is ignored and
 produces no evidence.
 
+A server observed through the [InferCrane agent](/architecture/agent) is scraped by the agent on
+its own machine every 30 seconds. The agent keeps only these families, then relays the current
+scrape with the oldest scrape of the same engine process from the last five minutes. The control
+plane derives the same measurements from that pair as from its own scrapes and keys them by the
+server's target, so the endpoint's monitoring and readiness read them the same way. A server
+connected directly with `infercrane connect` is not scraped in this release.
+
 | Measurement | Unit | vLLM | SGLang | llama.cpp server | Across replicas |
 |---|---|---|---|---|---|
 | `runtime_requests_running` | count | `num_requests_running` | `num_running_reqs` | `requests_processing` | sum |
@@ -309,11 +316,33 @@ which at least one kernel was running. A GPU that runs one small kernel at a tim
 InferCrane shows it but never diagnoses from it. SM active, tensor active, and DRAM active are the
 fields that show where the work is limited.
 
-AMD Instinct GPUs are unknown. The ROCm device-metrics-exporter documents related metrics such as
-`GPU_UMC_ACTIVITY`, `GPU_PROF_TENSOR_ACTIVE_PERCENT`, `GPU_PROF_OCCUPANCY_PERCENT`,
-`GPU_XGMI_LINK_TX`, and `PCIE_BANDWIDTH`, and most `GPU_PROF_*` fields require profiler mode. Their
-exported names, units, and equivalence to the DCGM fields have not been confirmed against a live
-exporter, so InferCrane does not map them and the GPU rules do not apply to AMD hardware.
+### AMD Instinct GPUs
+
+On AMD Instinct GPUs, import a snapshot from the
+[AMD Device Metrics Exporter](https://github.com/ROCm/device-metrics-exporter) instead:
+
+```bash
+infercrane telemetry collect amd qwen3-8b-mi300x \
+  --url http://127.0.0.1:5000/metrics \
+  --selector pod=qwen3-8b-mi300x-0
+```
+
+InferCrane reads only the fields whose name, unit, and meaning were confirmed in the exporter's
+v1.5.3 source:
+
+| Exporter field | InferCrane measurement | Across selected GPUs |
+|---|---|---|
+| `gpu_gfx_activity` (graphics engine, 0–100) | `gpu_utilization` in percent | maximum |
+| `gpu_package_power`, or `gpu_power_usage` (watts) | `gpu_power` in watts | sum; the first spelling seen counts |
+| `gpu_junction_temperature` (hotspot sensor) | `gpu_temperature` in Celsius | maximum |
+| distinct `serial_number` (or `gpu_id` and `hostname`) labels | `gpu_devices` count | exact count |
+
+Pass `--metric-prefix` when the exporter's `MetricsFieldPrefix` is set. Other fields stay unknown:
+`gpu_used_vram` is documented in MB without saying whether that is MiB, `gpu_umc_activity`
+(memory controller) is not shown to equal DCGM's DRAM active, and the `GPU_PROF_*` counters need
+profiler mode and are not shown to equal SM, tensor, or DRAM active. So the GPU rules above do not
+apply to AMD hardware, and the exporter's values have not been checked against a live AMD GPU. See
+[AMD Instinct GPUs](/integrations/amd-instinct).
 
 The snapshot is attached to the active revision at ingestion time. It cannot silently move to a
 later rollout. Once its TTL expires, the monitoring API returns a stale envelope with no value.

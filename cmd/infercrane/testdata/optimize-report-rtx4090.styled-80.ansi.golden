@@ -1,5 +1,5 @@
 [1mOptimization result[m
-[38;2;161;161;170mQwen/Qwen3-0.6B · goal: interactive · campaign 83ccd598540e2dd1f9c897040c1ea503[m
+[38;2;161;161;170mQwen/Qwen3-0.6B · goal: interactive · run 83ccd598540e2dd1f9c897040c1ea503[m
 
 [38;2;63;63;70m╭──────────────────────────────────────────────────────────────────────────────╮[m
 [38;2;240;180;76m│[m [38;2;240;180;76m● NO WINNER[m                                                                  [38;2;63;63;70m│[m
@@ -78,7 +78,7 @@
              f7aa12bd415ffc55637dd3de38e7255f-rev-1
 
 [1mEvidence[m [38;2;63;63;70m───────────────────────────────────────────────────────────────────────[m
-  [38;2;161;161;170mcampaign input[m
+  [38;2;161;161;170mrun input[m
     sha256:e3eadf5ddf0ffe8a7a28da882a1a6f6d2d90efab0d0abf9a458a6d6e2b90d011
     (83ccd598540e2dd1f9c897040c1ea503) Qwen/Qwen3-0.6B
   [38;2;161;161;170mproposal[m

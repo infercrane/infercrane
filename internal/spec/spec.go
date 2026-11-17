@@ -71,7 +71,7 @@ func Load(path string) (Deployment, error) {
 	if out.Runtime.Engine == "" {
 		out.Runtime.Engine = "vllm"
 	}
-	out.Runtime.Workload = support.NormalizeWorkload(out.Runtime.Engine, out.Runtime.Workload)
+	out.Runtime.Workload = support.NormalizeWorkload(out.Runtime.Engine, out.Resources.GPU, out.Runtime.Workload)
 	if out.Compute.Mode == "" {
 		out.Compute.Mode = "elastic"
 	}
@@ -103,6 +103,9 @@ func Load(path string) (Deployment, error) {
 		out.Endpoint = out.Name
 	}
 	if err := support.V1().ValidateProvider(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode, out.Provider.Adapter); err != nil {
+		return out, fmt.Errorf("support policy: %w", err)
+	}
+	if err := support.V1().ValidateAccelerator(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode, out.Provider.Adapter, out.Resources.GPU); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {

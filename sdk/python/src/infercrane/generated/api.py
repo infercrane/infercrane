@@ -187,6 +187,10 @@ class ControlAPI:
         request_path = "/catalog/gpu-prices"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def list_accelerators(self) -> dict[str, Any]:
+        request_path = "/catalog/accelerators"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def list_public_g_p_u_prices(self) -> ObjectList:
         request_path = "/public/catalog/gpu-prices"
         return cast(ObjectList, self._transport.request("GET", request_path))
@@ -222,6 +226,30 @@ class ControlAPI:
     def create_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/endpoints"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def create_agent(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/agents"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def list_agents(self) -> dict[str, Any]:
+        request_path = "/agents"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_agent(self, id: str) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def revoke_agent(self, id: str, idempotency_key: str) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path, idempotency_key=idempotency_key))
+
+    def sync_agent(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/agent/sync"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def register_agent_server(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        request_path = "/agent/servers"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
 
     def adopt_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/adoptions/endpoints"

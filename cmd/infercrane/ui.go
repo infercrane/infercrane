@@ -389,7 +389,7 @@ func (m uiModel) availableActions() []uiAction {
 	if candidate != "" {
 		actions = append(actions, uiAction{name: "evaluate", label: "Evaluate Release Guard", detail: "May send measured inference traffic and incur provider cost", method: http.MethodPost, path: "/api/v1/deployments/" + escaped + "/rollouts/guard/evaluate", body: struct{}{}})
 		if currentGuardAccepts(m.view) {
-			actions = append(actions, uiAction{name: "promote", label: "Promote accepted candidate", detail: "Routes the accepted immutable revision and safely drains old capacity", method: http.MethodPost, path: "/api/v1/deployments/" + escaped + "/rollouts/" + url.PathEscape(candidate) + "/promote", body: struct{}{}})
+			actions = append(actions, uiAction{name: "promote", label: "Roll out accepted candidate", detail: "Routes the accepted immutable revision and safely drains old capacity", method: http.MethodPost, path: "/api/v1/deployments/" + escaped + "/rollouts/" + url.PathEscape(candidate) + "/promote", body: struct{}{}})
 		}
 	}
 	return actions
@@ -556,7 +556,7 @@ func (m uiModel) renderContext(s uiStyles, width int) string {
 	case 1:
 		lines = append(lines, s.subtle.Render("Durable execution and recovery."), "", uiRow(s, "Active", boolLabel(m.view.ActiveOperation != nil)))
 	case 2:
-		lines = append(lines, s.subtle.Render("Revision safety and promotion evidence."), "", uiRow(s, "Candidate", shortID(m.view.Deployment.CandidateRevisionID)), uiRow(s, "Guard", latestGuardDecision(m.view)))
+		lines = append(lines, s.subtle.Render("Revision safety and rollout evidence."), "", uiRow(s, "Candidate", shortID(m.view.Deployment.CandidateRevisionID)), uiRow(s, "Guard", latestGuardDecision(m.view)))
 	case 3:
 		lines = append(lines, s.subtle.Render("Measured behavior; no prompt content stored."), "", uiRow(s, "Benchmarks", fmt.Sprint(len(m.benchmarks))), uiRow(s, "Cold starts", fmt.Sprint(m.view.ColdStartStats.ColdStarts)))
 	case 4:

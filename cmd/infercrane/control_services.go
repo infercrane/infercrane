@@ -10,7 +10,9 @@ import (
 	"github.com/infercrane/infercrane/internal/controlapi"
 	"github.com/infercrane/infercrane/internal/notification"
 	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/reconcile"
 	"github.com/infercrane/infercrane/internal/secretcipher"
+	"github.com/infercrane/infercrane/internal/upstreamcredential"
 )
 
 // newComputeConnectionService returns nil when tenant compute credential
@@ -58,5 +60,33 @@ func bindOptionalControlServices(api *controlapi.API, async *asyncinference.Serv
 	}
 	if notifications != nil {
 		api.Notifications = notifications
+	}
+}
+
+// newUpstreamCredentialSealer returns the server-credential sealer. Without a
+// tenant credential key it cannot seal, so `infercrane connect --token-env`
+// is refused and the agent (which keeps the key on the server's machine) is
+// the path; it still resolves, so a credential stored under an earlier key
+// fails closed instead of being skipped.
+func newUpstreamCredentialSealer(cfg config.Config, store upstreamcredential.Store) (*upstreamcredential.Sealer, error) {
+	sealer := &upstreamcredential.Sealer{Store: store}
+	if cfg.CredentialEncryptionKey == "" {
+		return sealer, nil
+	}
+	cipher, err := secretcipher.New(cfg.CredentialEncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("configure server credential encryption: %w", err)
+	}
+	sealer.Cipher = &cipher
+	return sealer, nil
+}
+
+// bindUpstreamCredentials gives the reconciler the resolver always, and the
+// API the sealer only when it can seal, so the API's "not configured" branch
+// runs (a typed nil in an interface field would not be nil).
+func bindUpstreamCredentials(api *controlapi.API, reconciler *reconcile.Reconciler, sealer *upstreamcredential.Sealer) {
+	reconciler.UpstreamCredentials = sealer
+	if sealer.Cipher != nil {
+		api.UpstreamCredentials = sealer
 	}
 }
