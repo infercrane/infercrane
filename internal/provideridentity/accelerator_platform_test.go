@@ -28,6 +28,11 @@ func TestReviewedAMDAcceleratorsResolveEverySpellingToOneIdentity(t *testing.T) 
 		if AcceleratorPlatform(test.input) != test.platform || ExpectedDeviceResource(test.input) != DeviceResourceAMD {
 			t.Fatalf("platform or device resource of %q is wrong", test.input)
 		}
+		// The shared memory lookup that planning and the model check read
+		// resolves every spelling through the reviewed table.
+		if memory, known := AcceleratorMemoryGiB(test.input); !known || memory != test.memory {
+			t.Fatalf("AcceleratorMemoryGiB(%q)=%d, %v", test.input, memory, known)
+		}
 		if len(accelerator.Sources) < 2 {
 			t.Fatalf("%s has no cited sources", accelerator.Name)
 		}

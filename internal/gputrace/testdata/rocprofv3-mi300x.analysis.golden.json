@@ -1,0 +1,611 @@
+{
+  "algorithm_version": "gpu-trace-analysis-v1",
+  "trace": {
+    "format": "rocprofv3",
+    "engine": null,
+    "engine_version": null,
+    "devices": 1,
+    "streams": 2,
+    "kernels": 420,
+    "cpu_ops_recorded": false,
+    "shapes_recorded": false,
+    "launches_recorded": true,
+    "window_ms": 39.996,
+    "truncated": false
+  },
+  "verdict": {
+    "bottleneck": "host-launch",
+    "sentence": "The GPU sat idle 21% of the capture, mostly waiting for the host to launch work.",
+    "evidence": "idle 21% of 40 ms · 91% of idle waiting on launches · launch delay p50 744 µs"
+  },
+  "utilization": {
+    "busy_share": 0.7886,
+    "compute_share": 0.7861,
+    "non_compute_share": 0.0025,
+    "idle_share": 0.2114,
+    "bucket_ms": 0.2,
+    "busy_series": [
+      0.965,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.995,
+      0.955,
+      1,
+      0.07,
+      0,
+      0.865,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.17,
+      0,
+      0.765,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.27,
+      0,
+      0.675,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.37,
+      0,
+      0.575,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.47,
+      0,
+      0.475,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.57,
+      0,
+      0.385,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.67,
+      0,
+      0.285,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.77,
+      0,
+      0.185,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.87,
+      0,
+      0.085,
+      0.98,
+      0.97,
+      0.98,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.97,
+      0,
+      0.01,
+      0.955,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.995,
+      0.955,
+      1,
+      0.07,
+      0,
+      0.865,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.17,
+      0,
+      0.765,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.95,
+      1,
+      0.27,
+      0,
+      0.675,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.37,
+      0,
+      0.575,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.47,
+      0,
+      0.475,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.96,
+      0.99,
+      0.57,
+      0,
+      0.385,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.67,
+      0,
+      0.285,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.77,
+      0,
+      0.185,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.98,
+      0.87,
+      0,
+      0.085,
+      0.98,
+      0.97,
+      0.98,
+      0.98,
+      0.97,
+      0.98,
+      0.97,
+      0.9898
+    ]
+  },
+  "idle": {
+    "idle_ms": 8.456,
+    "host_wait_share": 0.91,
+    "launch_gap_share": 0.09,
+    "other_share": 0,
+    "reason": "",
+    "bubbles": {
+      "count": 419,
+      "p50_us": 2,
+      "p95_us": 3,
+      "max_us": 402,
+      "top": [
+        {
+          "start_ms": 1.616,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 3.636,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 7.676,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 9.696,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 11.716,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 13.736,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 15.756,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 17.776,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 19.796,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 33.936,
+          "duration_us": 402,
+          "device": 0,
+          "cause": "host_wait"
+        }
+      ]
+    }
+  },
+  "launch": {
+    "launches": 400,
+    "graph_launches": 0,
+    "per_second": 10001,
+    "host_launch_share": 0.06,
+    "launch_delay_p50_us": 744,
+    "launch_delay_p95_us": 1246,
+    "short_kernel_share": 0,
+    "reason": ""
+  },
+  "categories": [
+    {
+      "category": "gemm",
+      "kernel_ms": 25.6,
+      "share": 0.8117,
+      "count": 160
+    },
+    {
+      "category": "attention",
+      "kernel_ms": 4.16,
+      "share": 0.1319,
+      "count": 80
+    },
+    {
+      "category": "activation",
+      "kernel_ms": 0.96,
+      "share": 0.0304,
+      "count": 80
+    },
+    {
+      "category": "norm",
+      "kernel_ms": 0.72,
+      "share": 0.0228,
+      "count": 80
+    },
+    {
+      "category": "memory",
+      "kernel_ms": 0.1,
+      "share": 0.0032,
+      "count": 20
+    }
+  ],
+  "top_kernels": [
+    {
+      "name": "Cijk_Alik_Bljk_BBS_BH_MT64x64x64_MI16x16x16x1_SN_1LDSB0_APM1_ABV0_ACED0_AF0EM1_AF1EM1_AMAS3_ASE_ASGT_ASLT_ASAE01_ASCE01_ASEM1_AAC0_BL1_BS1",
+      "category": "gemm",
+      "phase": null,
+      "count": 160,
+      "total_ms": 25.6,
+      "mean_us": 160,
+      "max_us": 250,
+      "share": 0.8117
+    },
+    {
+      "name": "_Z38paged_attention_ll4mi_QKV_mfma16_kernelI14__hip_bfloat16S0_Li4ELi128ELi16ELi1ELi16EEvPKT_PKT0_S7_ifPKiS9_S9_iPKfiiiPfSB_PS2_SC_fff",
+      "category": "attention",
+      "phase": null,
+      "count": 80,
+      "total_ms": 4.16,
+      "mean_us": 52,
+      "max_us": 52,
+      "share": 0.1319
+    },
+    {
+      "name": "_ZN4vllm18act_and_mul_kernelIN3c108BFloat16EXadL_ZNS_11silu_kernelIS2_EET_RKS4_EELb1EEEvPS4_PS5_i",
+      "category": "activation",
+      "phase": null,
+      "count": 80,
+      "total_ms": 0.96,
+      "mean_us": 12,
+      "max_us": 12,
+      "share": 0.0304
+    },
+    {
+      "name": "_ZN4vllm15rms_norm_kernelIN3c108BFloat16ELi8ELi1EEEvPT_PKS3_lS6_fii",
+      "category": "norm",
+      "phase": null,
+      "count": 80,
+      "total_ms": 0.72,
+      "mean_us": 9,
+      "max_us": 9,
+      "share": 0.0228
+    },
+    {
+      "name": "memcpy MEMORY_COPY_HOST_TO_DEVICE",
+      "category": "memory",
+      "phase": null,
+      "count": 20,
+      "total_ms": 0.1,
+      "mean_us": 5,
+      "max_us": 5,
+      "share": 0.0032
+    }
+  ],
+  "overlap": {
+    "communication_ms": 0,
+    "overlapped_share": null,
+    "reason": "No collective communication kernels ran, so there is nothing to overlap."
+  },
+  "phases": {
+    "source": "unknown",
+    "prefill": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "decode": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "mixed": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "unknown": {
+      "gpu_ms": 31.54,
+      "share": 1,
+      "steps": 20
+    }
+  },
+  "steps": {
+    "source": "idle_gaps",
+    "marker": null,
+    "count": 20,
+    "p50_ms": 1.618,
+    "p95_ms": 1.618,
+    "items": [
+      {
+        "start_ms": 0,
+        "duration_ms": 1.616,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 2.018,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 4.038,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 6.058,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 8.078,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 10.098,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 12.118,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 14.138,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 16.158,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 18.178,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 20.198,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 22.218,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 24.238,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 26.258,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 28.278,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 30.298,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 32.318,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 34.338,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 36.358,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      },
+      {
+        "start_ms": 38.378,
+        "duration_ms": 1.618,
+        "gpu_busy_ms": 1.577,
+        "kernels": 21,
+        "phase": "unknown"
+      }
+    ],
+    "reason": ""
+  },
+  "roofline": {
+    "accelerator": "AMD Instinct MI300X",
+    "peak": {
+      "compute_tflops": 1307.4,
+      "precision": "BF16 dense matrix",
+      "memory_tbps": 5.3,
+      "source": "AMD Instinct MI300X data sheet"
+    },
+    "ridge_flop_per_byte": 246.7,
+    "position": "unknown",
+    "memory_bound_share": null,
+    "covered_share": 0,
+    "points": [],
+    "reason": "No 16-bit matrix multiply had recorded shapes. Enable record_shapes; kernels replayed from CUDA graphs never have them."
+  },
+  "hardware": null,
+  "findings": [
+    {
+      "rule": "gpu.idle_host_bound",
+      "observed": 0.1924,
+      "comparison": "\u003e=",
+      "threshold": 0.1,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 21% of the capture, mostly waiting for the host to launch work."
+    },
+    {
+      "rule": "gpu.idle",
+      "observed": 0.2114,
+      "comparison": "\u003e=",
+      "threshold": 0.2,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 21% of the capture."
+    }
+  ]
+}

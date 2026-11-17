@@ -1,7 +1,9 @@
 // Package intentplan turns a small, human-oriented deployment request into a
-// deterministic, side-effect-free starting configuration. It uses only reviewed
-// recipes and registered compatibility evidence. It never interprets a price as
-// capacity, or a configuration as a performance claim.
+// deterministic, side-effect-free starting configuration. It uses reviewed
+// recipes, or, for an open Hugging Face model nobody reviewed, the automatic
+// check the caller read beforehand, plus registered compatibility evidence. It
+// never reads the network, interprets a price as capacity, or treats a
+// configuration as a performance claim.
 package intentplan
 
 import (
@@ -15,6 +17,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -34,6 +37,33 @@ type Request struct {
 	GPU         string `json:"gpu,omitempty"`
 	Objective   string `json:"objective,omitempty"`
 	ComputeMode string `json:"compute_mode,omitempty"`
+	// ModelRevision pins an unreviewed Hugging Face model to a branch, tag,
+	// or commit. Reviewed models always use their reviewed commit.
+	ModelRevision string `json:"model_revision,omitempty"`
+	// ModelSecretReferenceID names the tenant's saved Hugging Face token for
+	// gated or private models. The token itself never enters the plan.
+	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty"`
+	// ContextTokens and Concurrency size the GPU for an unreviewed model.
+	ContextTokens int `json:"context_tokens,omitempty"`
+	Concurrency   int `json:"concurrency,omitempty"`
+}
+
+// Review states for the planned model.
+const (
+	ReviewReviewed             = "reviewed"
+	ReviewCheckedAutomatically = "checked_automatically"
+	evidenceChecked            = "checked-automatically"
+)
+
+// UnreviewedModel is the automatic check of a Hugging Face model that is not
+// in the reviewed catalog. The control API reads it before planning, so the
+// planner never touches the network. Report is nil when the check could not
+// run; Code and Reason then say why.
+type UnreviewedModel struct {
+	Repository string
+	Report     *modelcheck.Report
+	Code       string
+	Reason     string
 }
 
 type Provider struct {
@@ -46,6 +76,7 @@ type Planner struct {
 	Providers     []Provider
 	Prices        map[pricing.Request]pricing.Estimate
 	Now           func() time.Time
+	Unreviewed    *UnreviewedModel
 }
 
 type Interpretation struct {
@@ -55,6 +86,7 @@ type Interpretation struct {
 }
 
 type Model struct {
+	Review          string   `json:"review"`
 	Name            string   `json:"name"`
 	DisplayName     string   `json:"display_name"`
 	Repository      string   `json:"repository"`
@@ -150,29 +182,30 @@ type Architecture struct {
 // deployment creation endpoint. It is validated through CloudRequest.Validate
 // before it is returned, but validating a draft never mutates the draft itself.
 type DeploymentDraft struct {
-	Name            string                    `json:"name"`
-	EndpointName    string                    `json:"endpoint_name,omitempty"`
-	Model           string                    `json:"model"`
-	Runtime         string                    `json:"runtime,omitempty"`
-	Cloud           string                    `json:"cloud"`
-	ProviderAdapter string                    `json:"provider_adapter,omitempty"`
-	ComputeMode     string                    `json:"compute_mode,omitempty"`
-	GPU             string                    `json:"gpu"`
-	GPUCount        int                       `json:"gpu_count,omitempty"`
-	Region          string                    `json:"region,omitempty"`
-	RuntimeVersion  string                    `json:"runtime_version,omitempty"`
-	ModelRevision   string                    `json:"model_revision,omitempty"`
-	RuntimeArgs     []string                  `json:"runtime_args,omitempty"`
-	Port            int                       `json:"port,omitempty"`
-	MinReplicas     int                       `json:"min_replicas,omitempty"`
-	MaxReplicas     int                       `json:"max_replicas,omitempty"`
-	Workload        *runtimecontract.Workload `json:"workload,omitempty"`
-	Serving         *servingcontract.Topology `json:"serving,omitempty"`
+	Name                   string                    `json:"name"`
+	EndpointName           string                    `json:"endpoint_name,omitempty"`
+	Model                  string                    `json:"model"`
+	ModelSecretReferenceID string                    `json:"model_secret_reference_id,omitempty"`
+	Runtime                string                    `json:"runtime,omitempty"`
+	Cloud                  string                    `json:"cloud"`
+	ProviderAdapter        string                    `json:"provider_adapter,omitempty"`
+	ComputeMode            string                    `json:"compute_mode,omitempty"`
+	GPU                    string                    `json:"gpu"`
+	GPUCount               int                       `json:"gpu_count,omitempty"`
+	Region                 string                    `json:"region,omitempty"`
+	RuntimeVersion         string                    `json:"runtime_version,omitempty"`
+	ModelRevision          string                    `json:"model_revision,omitempty"`
+	RuntimeArgs            []string                  `json:"runtime_args,omitempty"`
+	Port                   int                       `json:"port,omitempty"`
+	MinReplicas            int                       `json:"min_replicas,omitempty"`
+	MaxReplicas            int                       `json:"max_replicas,omitempty"`
+	Workload               *runtimecontract.Workload `json:"workload,omitempty"`
+	Serving                *servingcontract.Topology `json:"serving,omitempty"`
 }
 
 func (d DeploymentDraft) CloudRequest() workflows.CloudRequest {
 	request := workflows.CloudRequest{
-		Name: d.Name, EndpointName: d.EndpointName, Model: d.Model, Runtime: d.Runtime,
+		Name: d.Name, EndpointName: d.EndpointName, Model: d.Model, ModelSecretReferenceID: d.ModelSecretReferenceID, Runtime: d.Runtime,
 		Cloud: d.Cloud, ProviderAdapter: d.ProviderAdapter, ComputeMode: d.ComputeMode,
 		GPU: d.GPU, GPUCount: d.GPUCount, Region: d.Region, RuntimeVersion: d.RuntimeVersion,
 		ModelRevision: d.ModelRevision, RuntimeArgs: append([]string(nil), d.RuntimeArgs...),
@@ -205,18 +238,34 @@ type Envelope struct {
 }
 
 type Plan struct {
-	SchemaVersion   string           `json:"schema_version"`
-	Status          string           `json:"status"`
-	Mutation        string           `json:"mutation"`
-	Interpretation  Interpretation   `json:"interpretation"`
-	Model           *Model           `json:"model,omitempty"`
-	Configuration   *Configuration   `json:"configuration,omitempty"`
-	Choices         []Choice         `json:"choices"`
-	Missing         []MissingChoice  `json:"missing_choices"`
-	Architecture    Architecture     `json:"architecture"`
-	Evidence        Evidence         `json:"evidence"`
-	Warnings        []string         `json:"warnings"`
-	DeploymentDraft *DeploymentDraft `json:"-"`
+	SchemaVersion  string          `json:"schema_version"`
+	Status         string          `json:"status"`
+	Mutation       string          `json:"mutation"`
+	Interpretation Interpretation  `json:"interpretation"`
+	Model          *Model          `json:"model,omitempty"`
+	Configuration  *Configuration  `json:"configuration,omitempty"`
+	Choices        []Choice        `json:"choices"`
+	Missing        []MissingChoice `json:"missing_choices"`
+	Architecture   Architecture    `json:"architecture"`
+	Evidence       Evidence        `json:"evidence"`
+	Warnings       []string        `json:"warnings"`
+	// ModelCheck is the automatic check of an unreviewed model: what was
+	// read, from where, and what stayed unknown.
+	ModelCheck      *modelcheck.Report `json:"model_check,omitempty"`
+	DeploymentDraft *DeploymentDraft   `json:"-"`
+}
+
+// planTarget is one model and starting profile the shared planning steps
+// complete with a provider, price, architecture, and deployment draft.
+type planTarget struct {
+	entry       curatedrecipe.Entry
+	profile     curatedrecipe.ServingProfile
+	gpu         string
+	gpuCount    int
+	review      string
+	modelOption Option
+	gpuOptions  []Option
+	evidence    string
 }
 
 func (p Planner) Plan(request Request) (Plan, error) {
@@ -245,6 +294,9 @@ func (p Planner) Plan(request Request) (Plan, error) {
 	}
 	sort.Slice(recipes, func(i, j int) bool { return recipes[i].Name < recipes[j].Name })
 	entry, matched, suggestions := resolveModel(recipes, request.Model, request.Intent)
+	if !matched && p.Unreviewed != nil && request.Model != "" && strings.EqualFold(p.Unreviewed.Repository, UnreviewedRepository(request)) {
+		return p.planUnreviewed(result, request, recipes)
+	}
 	if !matched {
 		result.Missing = append(result.Missing, MissingChoice{
 			Field: "model", Prompt: "Which reviewed model do you want to deploy?",
@@ -255,7 +307,7 @@ func (p Planner) Plan(request Request) (Plan, error) {
 		result.Architecture = baseArchitecture(nil)
 		return result, nil
 	}
-	result.Model = &Model{Name: entry.Name, DisplayName: entry.DisplayName, Repository: entry.Model, Revision: entry.Revision, Runtime: entry.Runtime, Tasks: append([]string(nil), entry.Tasks...), Gated: entry.Gated, EvidenceClass: entry.EvidenceClass, EvidenceSummary: entry.EvidenceSummary}
+	result.Model = &Model{Review: ReviewReviewed, Name: entry.Name, DisplayName: entry.DisplayName, Repository: entry.Model, Revision: entry.Revision, Runtime: entry.Runtime, Tasks: append([]string(nil), entry.Tasks...), Gated: entry.Gated, EvidenceClass: entry.EvidenceClass, EvidenceSummary: entry.EvidenceSummary}
 
 	profile, profileOK := chooseProfile(entry.Profiles, result.Interpretation.Objective, result.Interpretation.ComputeMode, request.GPU)
 	if !profileOK {
@@ -270,7 +322,17 @@ func (p Planner) Plan(request Request) (Plan, error) {
 	if gpu == "" {
 		gpu = profile.GPUHint
 	}
-	gpuCount := max(1, profile.GPUCount)
+	if entry.Gated {
+		result.Warnings = append(result.Warnings, "Model access is gated; verify license acceptance and provider-side artifact credentials before deployment.")
+	}
+	return p.complete(result, request, planTarget{entry: entry, profile: profile, gpu: gpu, gpuCount: max(1, profile.GPUCount), review: ReviewReviewed, modelOption: Option{Value: entry.Name, Label: entry.DisplayName, State: "reviewed"}, gpuOptions: gpuOptions(profile), evidence: "reviewed model recipe"})
+}
+
+// complete chooses the provider, compatibility, and price for a selected
+// model and profile, then validates the deployment draft once nothing is
+// missing.
+func (p Planner) complete(result Plan, request Request, target planTarget) (Plan, error) {
+	entry, profile, gpu, gpuCount := target.entry, target.profile, target.gpu, target.gpuCount
 	provider, providerOptions, providerReady := p.chooseProvider(request.Provider, request.Intent, request.Region, gpu, gpuCount, profile)
 	if provider.ID == "" {
 		result.Missing = append(result.Missing, MissingChoice{Field: "provider", Prompt: "Where should InferCrane deploy this model?", Reason: "No exact comparable quote, reviewed profile hint, or single ready compatible connection selected a provider.", Options: providerOptions, Remediation: "Choose a compatible provider and configure its compute connection before deployment."})
@@ -289,29 +351,30 @@ func (p Planner) Plan(request Request) (Plan, error) {
 
 	configuration := Configuration{Model: entry.Model, ModelRevision: entry.Revision, Runtime: profile.Runtime, RuntimeVersion: profile.RuntimeVersion, RuntimeArgs: append([]string(nil), profile.RuntimeArgs...), Profile: profile.Name, ComputeMode: profile.ComputeMode, Provider: provider.ID, ProviderAdapter: adapter, Region: region, GPU: gpu, GPUCount: gpuCount, MinReplicas: profile.MinReplicas, MaxReplicas: profile.MaxReplicas, Routing: "round-robin"}
 	result.Configuration = &configuration
+	profiles := entry.Profiles
+	if target.review == ReviewCheckedAutomatically {
+		profiles = []curatedrecipe.ServingProfile{profile}
+	}
 	result.Choices = append(result.Choices,
-		Choice{Field: "model", Label: "Model", Value: entry.Model, Editable: true, Required: true, Options: []Option{{Value: entry.Name, Label: entry.DisplayName, State: "reviewed"}}},
-		Choice{Field: "profile", Label: "Configuration profile", Value: profile.Name, Editable: true, Required: true, Options: profileOptions(entry.Profiles)},
+		Choice{Field: "model", Label: "Model", Value: entry.Model, Editable: true, Required: true, Options: []Option{target.modelOption}},
+		Choice{Field: "profile", Label: "Configuration profile", Value: profile.Name, Editable: true, Required: true, Options: profileOptions(profiles)},
 		Choice{Field: "provider", Label: "Provider", Value: provider.ID, Editable: true, Required: true, Options: providerOptions},
 		Choice{Field: "region", Label: "Region", Value: region, Editable: true, Required: provider.ID == "aws" || provider.ID == "gcp"},
-		Choice{Field: "gpu", Label: "GPU", Value: gpu, Editable: true, Required: true, Options: gpuOptions(profile)},
+		Choice{Field: "gpu", Label: "GPU", Value: gpu, Editable: true, Required: true, Options: target.gpuOptions},
 		Choice{Field: "min_replicas", Label: "Minimum replicas", Value: configuration.MinReplicas, Editable: true, Required: true},
 		Choice{Field: "max_replicas", Label: "Maximum replicas", Value: configuration.MaxReplicas, Editable: true, Required: true},
 	)
 	if compatibilityState != "" {
-		result.Evidence.Configuration = "reviewed model recipe; runtime/provider compatibility=" + compatibilityState
+		result.Evidence.Configuration = target.evidence + "; runtime/provider compatibility=" + compatibilityState
 		if compatibilityEvidence != "" {
 			result.Evidence.Configuration += " (" + compatibilityEvidence + ")"
 		}
 	}
 	result.Evidence.Price = p.priceEvidence(configuration)
 	result.Architecture = architecture(configuration, result.Model, providerReady)
-	if entry.Gated {
-		result.Warnings = append(result.Warnings, "Model access is gated; verify license acceptance and provider-side artifact credentials before deployment.")
-	}
 	result.Warnings = append(result.Warnings, profile.Limitations...)
 	if len(result.Missing) == 0 {
-		draft, err := validatedDeploymentDraft(entry.Name, configuration, profile.Workload)
+		draft, err := validatedDeploymentDraft(entry.Name, configuration, profile.Workload, request.ModelSecretReferenceID)
 		if err != nil {
 			return Plan{}, fmt.Errorf("ready deployment draft is invalid: %w", err)
 		}
@@ -346,9 +409,9 @@ func NewEnvelope(plan Plan) Envelope {
 	return envelope
 }
 
-func validatedDeploymentDraft(name string, configuration Configuration, workload runtimecontract.Workload) (DeploymentDraft, error) {
+func validatedDeploymentDraft(name string, configuration Configuration, workload runtimecontract.Workload, modelSecretReferenceID string) (DeploymentDraft, error) {
 	request := workflows.CloudRequest{
-		Name: name, EndpointName: name, Model: configuration.Model,
+		Name: name, EndpointName: name, Model: configuration.Model, ModelSecretReferenceID: modelSecretReferenceID,
 		Runtime: configuration.Runtime, Cloud: configuration.Provider,
 		ProviderAdapter: configuration.ProviderAdapter, ComputeMode: configuration.ComputeMode,
 		GPU: configuration.GPU, GPUCount: configuration.GPUCount, Region: configuration.Region,
@@ -360,7 +423,7 @@ func validatedDeploymentDraft(name string, configuration Configuration, workload
 		return DeploymentDraft{}, err
 	}
 	draft := DeploymentDraft{
-		Name: request.Name, EndpointName: request.EndpointName, Model: request.Model,
+		Name: request.Name, EndpointName: request.EndpointName, Model: request.Model, ModelSecretReferenceID: request.ModelSecretReferenceID,
 		Runtime: request.Runtime, Cloud: request.Cloud, ProviderAdapter: request.ProviderAdapter,
 		ComputeMode: request.ComputeMode, GPU: request.GPU, GPUCount: request.GPUCount,
 		Region: request.Region, RuntimeVersion: request.RuntimeVersion,
@@ -387,6 +450,8 @@ func normalizeRequest(request Request) Request {
 	request.GPU = strings.TrimSpace(request.GPU)
 	request.Objective = strings.ToLower(strings.TrimSpace(request.Objective))
 	request.ComputeMode = strings.ToLower(strings.TrimSpace(request.ComputeMode))
+	request.ModelRevision = strings.TrimSpace(request.ModelRevision)
+	request.ModelSecretReferenceID = strings.TrimSpace(request.ModelSecretReferenceID)
 	return request
 }
 
@@ -402,6 +467,18 @@ func validateRequest(request Request) error {
 	}
 	if request.ComputeMode != "" && request.ComputeMode != "elastic" && request.ComputeMode != "serverless" {
 		return errors.Join(ErrInvalidRequest, errors.New("compute_mode must be elastic or serverless"))
+	}
+	if len(request.ModelRevision) > 128 || len(request.ModelSecretReferenceID) > 255 {
+		return errors.Join(ErrInvalidRequest, errors.New("model_revision or model_secret_reference_id exceeds its bounded size"))
+	}
+	if request.ModelRevision != "" && !modelcheck.ValidRevision(request.ModelRevision) {
+		return errors.Join(ErrInvalidRequest, errors.New("model_revision must be a branch, tag, or commit name"))
+	}
+	if request.ContextTokens != 0 && (request.ContextTokens < modelcheck.MinContextTokens || request.ContextTokens > modelcheck.MaxContextTokens) {
+		return errors.Join(ErrInvalidRequest, fmt.Errorf("context_tokens must be between %d and %d", modelcheck.MinContextTokens, modelcheck.MaxContextTokens))
+	}
+	if request.Concurrency < 0 || request.Concurrency > modelcheck.MaxConcurrency {
+		return errors.Join(ErrInvalidRequest, fmt.Errorf("concurrency must be between 1 and %d", modelcheck.MaxConcurrency))
 	}
 	return nil
 }
@@ -721,9 +798,16 @@ func baseArchitecture(model *Model) Architecture {
 	nodes := []Node{{ID: "application", Kind: "client", Label: "Your application", State: "planned"}, {ID: "endpoint", Kind: "gateway", Label: "Stable OpenAI-compatible endpoint", State: "planned"}}
 	edges := []Edge{{From: "application", To: "endpoint", Label: "inference request"}}
 	if model != nil {
-		nodes = append(nodes, Node{ID: "model", Kind: "artifact", Label: model.Repository + "@" + model.Revision, State: "reviewed"})
+		nodes = append(nodes, Node{ID: "model", Kind: "artifact", Label: model.Repository + "@" + model.Revision, State: reviewState(model)})
 	}
 	return Architecture{Nodes: nodes, Edges: edges}
+}
+
+func reviewState(model *Model) string {
+	if model != nil && model.Review == ReviewCheckedAutomatically {
+		return "checked"
+	}
+	return "reviewed"
 }
 
 func architecture(configuration Configuration, model *Model, providerReady bool) Architecture {
@@ -737,7 +821,7 @@ func architecture(configuration Configuration, model *Model, providerReady bool)
 		providerLabel = "Choose provider"
 	}
 	result.Nodes = append(result.Nodes,
-		Node{ID: "runtime", Kind: "runtime", Label: configuration.Runtime + " / " + configuration.Profile, State: "reviewed"},
+		Node{ID: "runtime", Kind: "runtime", Label: configuration.Runtime + " / " + configuration.Profile, State: reviewState(model)},
 		Node{ID: "compute", Kind: "compute", Label: providerLabel + " / " + configuration.GPU, State: providerState},
 	)
 	result.Edges = append(result.Edges,

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/gpuprofile"
+	"github.com/infercrane/infercrane/internal/gputrace"
+	"github.com/infercrane/infercrane/internal/testtools/tracefixture"
 )
 
 func gpuProfileRecording(started time.Time, kernel string) gpuprofile.Recording {
@@ -114,5 +117,123 @@ func TestGPUProfilesArePinnedToTheActiveRevisionImmutableAndBounded(t *testing.T
 	rolled, err := s.RecordGPUProfile(ctx, "global", name, gpuProfileRecording(started, "gemm"))
 	if err != nil || rolled.Revision != candidate.Number {
 		t.Fatalf("capture after rollout receipt=%+v candidate=%d err=%v", rolled, candidate.Number, err)
+	}
+}
+
+// The capture history keeps captures of revisions that no longer serve, so a
+// capture before a rollout compares with one after it; reading by ID is
+// scoped to the endpoint's deployments; expired captures are neither listed
+// nor read.
+func TestGPUProfileHistoryOutlivesARolloutAndExpires(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "history-" + time.Now().UTC().Format("150405.000000000")
+	other := name + "-other"
+	for _, deploymentName := range []string{name, other} {
+		target := deploymentName + "-target"
+		if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://" + deploymentName + ".invalid", Provider: "existing", Runtime: "vllm", UpstreamModel: "org/model"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ApplyDeployment(ctx, domain.Deployment{Name: deploymentName, Model: "org/model", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1}, []string{target}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if list, err := s.EndpointGPUProfiles(ctx, "global", name); err != nil || len(list) != 0 || list == nil {
+		t.Fatalf("an endpoint without captures lists none: %v %v", list, err)
+	}
+	if _, err := s.EndpointGPUProfiles(ctx, "global", name+"-missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown endpoint err=%v", err)
+	}
+	started := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	before, err := s.RecordGPUProfile(ctx, "global", name, gpuProfileRecording(started, "gemm_before"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := s.CreateCandidateRevision(ctx, "global", name, `{"model":"org/model","runtime":"vllm","routing_strategy":"round-robin","min_replicas":1,"max_replicas":1,"autoscaling_enabled":false}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.PromoteCandidateRevision(ctx, "global", name, candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.RecordGPUProfile(ctx, "global", name, gpuProfileRecording(started.Add(time.Hour), "gemm_after"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := s.RecordGPUProfile(ctx, "global", other, gpuProfileRecording(started, "gemm_other"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.EndpointGPUProfiles(ctx, "global", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || list[0].ID != after.ID || !list[0].Active || list[1].ID != before.ID || list[1].Active || list[1].Revision != 1 || list[0].Revision != candidate.Number {
+		t.Fatalf("history %+v", list)
+	}
+	if list[0].Tool != "cupti-pc-sampling" || list[0].GPUs == nil || *list[0].GPUs != 1 || list[0].Verdict != nil || list[0].BusyShare != nil || list[0].SchemaVersion != gpuprofile.SchemaVersion {
+		t.Fatalf("a v1 summary has its capture and no verdict: %+v", list[0])
+	}
+	old, active, err := s.EndpointGPUProfileByID(ctx, "global", name, before.ID)
+	if err != nil || active || old.Revision != 1 || old.Frames[1].Name != "gemm_before" || old.Capture.ID != before.ID || old.Endpoint != name {
+		t.Fatalf("read by ID profile=%+v active=%v err=%v", old.Capture, active, err)
+	}
+	if _, _, err = s.EndpointGPUProfileByID(ctx, "global", name, foreign.ID); !errors.Is(err, gpuprofile.ErrNotRecorded) {
+		t.Fatalf("another endpoint's capture is not readable here: %v", err)
+	}
+	if _, _, err = s.EndpointGPUProfileByID(ctx, "other", name, before.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-tenant read err=%v", err)
+	}
+	if _, err = s.db.ExecContext(ctx, `UPDATE gpu_profiles SET ended_at=NOW()-INTERVAL '31 days',started_at=NOW()-INTERVAL '31 days 1 minute' WHERE id=$1`, before.ID); err != nil {
+		t.Fatal(err)
+	}
+	if list, err = s.EndpointGPUProfiles(ctx, "global", name); err != nil || len(list) != 1 || list[0].ID != after.ID {
+		t.Fatalf("an expired capture is not listed: %+v %v", list, err)
+	}
+	if _, _, err = s.EndpointGPUProfileByID(ctx, "global", name, before.ID); !errors.Is(err, gpuprofile.ErrNotRecorded) {
+		t.Fatalf("an expired capture is not readable: %v", err)
+	}
+	if _, err = s.RecordGPUProfile(ctx, "global", name, gpuProfileRecording(started.Add(90*time.Minute), "gemm_later")); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gpu_profiles WHERE id=$1`, before.ID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("recording a capture removes expired ones: remaining=%d err=%v", remaining, err)
+	}
+}
+
+func TestAnalyzedGPUProfileKeepsItsAnalysisAndExcerpt(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "analyzed-" + time.Now().UTC().Format("150405.000000000")
+	target := name + "-target"
+	if _, err := s.AddTarget(ctx, domain.Target{Name: target, URL: "http://analyzed.invalid", Provider: "existing", Runtime: "vllm", UpstreamModel: "org/model"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyDeployment(ctx, domain.Deployment{Name: name, Model: "org/model", Runtime: "vllm", MinReplicas: 1, MaxReplicas: 1}, []string{target}); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := gputrace.ParseKineto(bytes.NewReader(tracefixture.VLLMSingleGPU(time.Now().UTC().Add(-time.Hour))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recording, err := gputrace.Profile(trace, gputrace.Options{Engine: "vllm"}, gputrace.CaptureFromTrace(trace, "torch-profiler", "vllm-0.22.1", time.Time{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := s.RecordGPUProfile(ctx, "global", name, recording)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := s.EndpointGPUProfile(ctx, "global", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.SchemaVersion != gpuprofile.SchemaVersionV2 || profile.Analysis == nil || profile.TimelineExcerpt == nil || profile.Analysis.Verdict != recording.Analysis.Verdict || len(profile.TimelineExcerpt.Events) != len(recording.TimelineExcerpt.Events) {
+		t.Fatalf("the stored analysis must read back unchanged: %+v", profile.Analysis)
+	}
+	list, err := s.EndpointGPUProfiles(ctx, "global", name)
+	if err != nil || len(list) != 1 || list[0].ID != receipt.ID || list[0].Verdict == nil || *list[0].Verdict != recording.Analysis.Verdict || list[0].BusyShare == nil || *list[0].BusyShare != recording.Analysis.Utilization.BusyShare {
+		t.Fatalf("summary %+v err=%v", list, err)
 	}
 }

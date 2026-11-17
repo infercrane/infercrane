@@ -298,6 +298,26 @@ authenticated control API. Use `--file SNAPSHOT` for
 offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
 TTL; arbitrary Prometheus metrics are not accepted.
 
+`--interval 15s` keeps collecting until stopped; each snapshot stays fresh for three intervals.
+
+### `profile`
+
+```bash
+infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --duration 10s
+infercrane profile coder --trace ./profiles --no-upload
+infercrane profile coder --list
+infercrane profile coder --compare gpc-BEFORE,gpc-AFTER --output json
+```
+
+Run on the GPU host (or in a sidecar that shares the trace volume): the command records a bounded
+trace through vLLM's or SGLang's own `/start_profile` and `/stop_profile`, analyzes it locally, prints
+the verdict and the numbers behind it, and records the capture against the deployment's active
+revision. It states that the replica slows while the profiler runs and asks before starting; `--yes`
+skips the question. `--dcgm-url` samples dcgm-exporter during the capture. `--trace` analyzes existing
+Kineto JSON, rocprofv3 CSV, or Nsight Systems CSV files; with `--no-upload` it needs no sign-in.
+`--open` opens the capture in the dashboard. `--output json` prints the stable
+`infercrane.profile-result/v1` document. See [GPU profiling](/features/gpu-profiling).
+
 ### `finops collect opencost`
 
 ```bash
@@ -846,19 +866,28 @@ infercrane explain cold-start qwen-prod
 
 ## Models and recipes
 
-Explore the built-in reviewed catalog without contacting a control plane:
+Explore the built-in reviewed catalog without contacting a control plane (`models check` is the one
+subcommand that asks the control plane):
 
 ```bash
 infercrane models
 infercrane models embeddings
 infercrane models inspect qwen3-8b
 infercrane models --output json
+infercrane models check microsoft/phi-4 --spec phi-4.yaml
 ```
 
 `models inspect` prints the immutable revision, license URL, protocol capabilities, serving
 profiles, accelerator topology, immutable runtime workload when present, and the exact qualification boundary. Create a project with `infercrane workload init
 --recipe NAME`. Catalog profiles are configuration-verified, not benchmark, price, capacity, or
 universal GPU-fit claims. See [Verified Models](/features/model-catalog).
+
+`models check OWNER/NAME` asks the control plane to check any open Hugging Face model outside the
+catalog: architecture support on the pinned vLLM and SGLang releases, size, the smallest priced GPU
+layout for the load (`--concurrency`, `--context-tokens`), license, and access. Gated models need
+`--secret ID`, a saved Hugging Face token reference. `--spec FILE` writes the proposed setup as a
+DeploymentSpec for `infercrane deploy FILE`. See
+[Check any model automatically](/features/model-catalog#check-any-model-automatically).
 
 ## Benchmark
 

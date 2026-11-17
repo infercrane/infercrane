@@ -526,16 +526,11 @@ func nativeFP8Accelerator(gpu string) bool {
 	if checkpointcatalog.AcceleratorArchitecture(gpu) != "" {
 		return true
 	}
-	switch normalizedAccelerator(gpu) {
+	switch provideridentity.NormalizedAccelerator(gpu) {
 	case "l4", "l40", "l40s", "rtx4090", "rtx4080", "rtx4070", "rtx4070ti", "rtx6000ada", "rtx5000ada", "rtx4500ada", "rtx4000ada":
 		return true
 	}
 	return false
-}
-
-func normalizedAccelerator(gpu string) string {
-	normalized := strings.NewReplacer("-", "", "_", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(gpu)))
-	return strings.TrimPrefix(normalized, "nvidia")
 }
 
 // quantizedModelName reports a repository name that already marks quantized

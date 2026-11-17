@@ -67,6 +67,22 @@ func TestStripeModeMustMatchSecretKey(t *testing.T) {
 	}
 }
 
+func TestHuggingFaceMetadataAccessIsExplicit(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	cfg, err := Load()
+	if err != nil || cfg.HuggingFaceMetadataEnabled {
+		t.Fatalf("Hugging Face metadata access must default to off: %v %v", cfg.HuggingFaceMetadataEnabled, err)
+	}
+	t.Setenv("INFERCRANE_HUGGING_FACE_METADATA_ENABLED", "true")
+	if cfg, err = Load(); err != nil || !cfg.HuggingFaceMetadataEnabled {
+		t.Fatalf("enabled=%v err=%v", cfg.HuggingFaceMetadataEnabled, err)
+	}
+	t.Setenv("INFERCRANE_HUGGING_FACE_METADATA_ENABLED", "sometimes")
+	if _, err = Load(); err == nil {
+		t.Fatal("an invalid boolean was accepted")
+	}
+}
+
 func TestLoadRejectsInvalidInteger(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_PORT", "not-a-number")

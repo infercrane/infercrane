@@ -1,0 +1,71 @@
+{
+ "_id": "64f5fd954d3b1dd311d30e28",
+ "id": "TheBloke/Llama-2-7B-GGUF",
+ "sha": "b4e04e128f421c93a5f1e34ac4d7ca9b0af47b80",
+ "pipeline_tag": "text-generation",
+ "cardData": {
+  "license": "llama2",
+  "pipeline_tag": "text-generation"
+ },
+ "gated": false,
+ "private": false,
+ "config": {
+  "model_type": "llama"
+ },
+ "tags": [
+  "transformers",
+  "gguf",
+  "llama",
+  "facebook",
+  "meta",
+  "pytorch",
+  "llama-2",
+  "text-generation",
+  "en",
+  "arxiv:2307.09288",
+  "base_model:meta-llama/Llama-2-7b-hf",
+  "base_model:quantized:meta-llama/Llama-2-7b-hf",
+  "license:llama2",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "llama-2-7b.Q2_K.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q3_K_L.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q3_K_M.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q3_K_S.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q4_0.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q4_K_M.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q4_K_S.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q5_0.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q5_K_M.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q5_K_S.gguf"
+  },
+  {
+   "rfilename": "llama-2-7b.Q6_K.gguf"
+  }
+ ]
+}

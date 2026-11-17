@@ -95,6 +95,10 @@ class ControlAPI:
         request_path = "/catalog/hugging-face/search"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def check_hugging_face_model(self) -> dict[str, Any]:
+        request_path = "/catalog/hugging-face/check"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         request_path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))
@@ -245,6 +249,18 @@ class ControlAPI:
 
     def get_endpoint_g_p_u_profile(self, name: str) -> dict[str, Any]:
         request_path = f"/endpoints/{quote(name, safe='')}/gpu-profile"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def list_endpoint_g_p_u_profiles(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def compare_endpoint_g_p_u_profiles(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles/compare"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_endpoint_g_p_u_profile_by_i_d(self, name: str, id: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:

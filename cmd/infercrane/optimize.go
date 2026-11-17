@@ -63,7 +63,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	action := args[0]
 	model := args[1]
 	fs := newFlagSet("optimize " + action)
-	modelRevision := fs.String("model-revision", "", "immutable 40 to 64 character model commit (required for uncataloged models)")
+	modelRevision := fs.String("model-revision", "", "immutable 40 to 64 character model commit; for a model outside the reviewed catalog, omit it to have the control plane check the model and pin its commit")
 	provider := fs.String("provider", "", "provider cloud or exact adapter")
 	region := fs.String("region", "", "exact provider region")
 	gpu := fs.String("gpu", "", "exact accelerator identity")
@@ -131,6 +131,11 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	}
 	catalog := optimizer.NewCatalogSource(curatedrecipe.All(), registry.Snapshot())
 	diagnosed := strings.TrimSpace(*diagnosisEndpoint) != ""
+	if !diagnosed {
+		if err = pinUncatalogedModel(ctx, &request); err != nil {
+			return err
+		}
+	}
 	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, *allowMetadataNetwork, diagnosed); err != nil {
 		return err
 	}

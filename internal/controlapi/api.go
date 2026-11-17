@@ -47,6 +47,7 @@ import (
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/modelapicatalog"
 	"github.com/infercrane/infercrane/internal/modelapiproduct"
+	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
@@ -339,6 +340,10 @@ type API struct {
 	// HuggingFaceSearch answers live searches of the public Hugging Face
 	// models API. Nil disables the search route with a typed 503.
 	HuggingFaceSearch *huggingfacesearch.Searcher
+	// ModelCheck reads Hugging Face model metadata for models outside the
+	// reviewed catalog. Nil means the operator left Hugging Face metadata
+	// access off; planning then says so instead of checking.
+	ModelCheck *modelcheck.Resolver
 	// Secrets resolves tenant-owned credential references only at the final
 	// network boundary. Resolved values must never enter API responses.
 	Secrets        secrets.Resolver
@@ -505,6 +510,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/models/{name}", a.auth(authz.Read, a.catalogModel))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/models", a.auth(authz.Read, a.huggingFaceCatalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/search", a.auth(authz.Read, a.huggingFaceSearch))
+	mux.HandleFunc("GET /api/v1/catalog/hugging-face/check", a.auth(authz.Read, a.checkHuggingFaceModel))
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
@@ -625,6 +631,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/monitoring", a.auth(authz.Read, a.endpointMonitoring))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/optimization-readiness", a.auth(authz.Read, a.endpointOptimizationReadiness))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profile", a.auth(authz.Read, a.endpointGPUProfile))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles", a.auth(authz.Read, a.endpointGPUProfiles))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/compare", a.auth(authz.Read, a.compareEndpointGPUProfiles))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/{id}", a.auth(authz.Read, a.endpointGPUProfileByID))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/plans", a.auth(authz.Deploy, a.createEndpointPlan))
@@ -869,7 +878,17 @@ func (a API) planIntent(w http.ResponseWriter, r *http.Request) {
 	if a.GPUPriceCatalog != nil {
 		prices = a.GPUPriceCatalog.Snapshot()
 	}
-	plan, err := (intentplan.Planner{Recipes: curatedrecipe.All(), Compatibility: a.Integrations.Compatibility, Providers: providers, Prices: prices}).Plan(request)
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	unreviewed, failure := a.unreviewedForPlan(r.Context(), actor.TenantID, request)
+	if failure != nil {
+		status := failure.Status
+		if status == http.StatusBadRequest {
+			status = http.StatusUnprocessableEntity
+		}
+		writeError(w, status, failure.Code, failure.Message)
+		return
+	}
+	plan, err := (intentplan.Planner{Recipes: curatedrecipe.All(), Compatibility: a.Integrations.Compatibility, Providers: providers, Prices: prices, Unreviewed: unreviewed}).Plan(request)
 	if errors.Is(err, intentplan.ErrInvalidRequest) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_intent", err.Error())
 		return
@@ -1018,6 +1037,9 @@ func customerQualificationNote(qualification string) string {
 type optimizationProposalBody struct {
 	optimizer.Request
 	DiagnosisEndpoint string `json:"diagnosis_endpoint,omitempty"`
+	// ModelSecretReferenceID names the tenant's saved Hugging Face token so
+	// a gated model outside the reviewed catalog can be checked.
+	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty"`
 }
 
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
@@ -1075,6 +1097,10 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.ProviderAdapter = connection.Adapter
+	}
+	if failure := a.checkUncatalogedProposal(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, &request, strings.TrimSpace(body.ModelSecretReferenceID)); failure != nil {
+		writeError(w, failure.Status, failure.Code, failure.Message)
+		return
 	}
 	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations).Propose(r.Context(), request)
 	if err != nil {

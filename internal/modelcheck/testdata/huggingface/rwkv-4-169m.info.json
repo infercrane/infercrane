@@ -1,0 +1,40 @@
+{
+ "_id": "6453b4dfdc897edfd15c0d59",
+ "id": "RWKV/rwkv-4-169m-pile",
+ "sha": "46bdc280eb97b6141d5d51a935e0c4870ecaefcc",
+ "pipeline_tag": "text-generation",
+ "cardData": {},
+ "gated": false,
+ "private": false,
+ "config": {
+  "architectures": [
+   "RwkvForCausalLM"
+  ],
+  "model_type": "rwkv"
+ },
+ "tags": [
+  "transformers",
+  "pytorch",
+  "rwkv",
+  "text-generation",
+  "dataset:EleutherAI/pile",
+  "endpoints_compatible",
+  "region:us"
+ ],
+ "library_name": "transformers",
+ "disabled": false,
+ "siblings": [
+  {
+   "rfilename": "config.json"
+  },
+  {
+   "rfilename": "generation_config.json"
+  },
+  {
+   "rfilename": "pytorch_model.bin"
+  },
+  {
+   "rfilename": "tokenizer_config.json"
+  }
+ ]
+}

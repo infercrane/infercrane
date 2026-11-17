@@ -1,0 +1,833 @@
+{
+  "algorithm_version": "gpu-trace-analysis-v1",
+  "trace": {
+    "format": "kineto",
+    "engine": "vllm",
+    "engine_version": "0.22.1",
+    "devices": 1,
+    "streams": 1,
+    "kernels": 1816,
+    "cpu_ops_recorded": true,
+    "shapes_recorded": true,
+    "launches_recorded": true,
+    "window_ms": 148.283,
+    "truncated": false
+  },
+  "verdict": {
+    "bottleneck": "host-launch",
+    "sentence": "The GPU sat idle 36% of the capture, mostly waiting for the host to launch work.",
+    "evidence": "idle 36% of 148 ms · 97% of idle waiting on launches · launch delay p50 3 µs"
+  },
+  "utilization": {
+    "busy_share": 0.639,
+    "compute_share": 0.638,
+    "non_compute_share": 0.0011,
+    "idle_share": 0.361,
+    "bucket_ms": 1,
+    "busy_series": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0.7,
+      0.397,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0.303,
+      0.016,
+      0.553,
+      0.982,
+      0.499,
+      0.229,
+      0.982,
+      0.823,
+      0,
+      0.89,
+      0.983,
+      0.161,
+      0.568,
+      0.983,
+      0.483,
+      0.245,
+      0.982,
+      0.807,
+      0,
+      0.906,
+      0.982,
+      0.146,
+      0.583,
+      0.982,
+      0.469,
+      0.261,
+      0.982,
+      0.791,
+      0,
+      0.922,
+      0.982,
+      0.13,
+      0.599,
+      0.982,
+      0.453,
+      0.277,
+      0.982,
+      0.775,
+      0,
+      0.938,
+      0.982,
+      0.114,
+      0.615,
+      0.982,
+      0.437,
+      0.293,
+      0.982,
+      0.759,
+      0,
+      0.954,
+      0.982,
+      0.098,
+      0.63,
+      0.982,
+      0.422,
+      0.309,
+      0.982,
+      0.743,
+      0,
+      0.97,
+      0.982,
+      0.082,
+      0.646,
+      0.982,
+      0.406,
+      0.325,
+      0.982,
+      0.727,
+      0.003,
+      0.983,
+      0.982,
+      0.066,
+      0.661,
+      0.983,
+      0.39,
+      0.341,
+      0.982,
+      0.711,
+      0.018,
+      0.983,
+      0.983,
+      0.05,
+      0.676,
+      0.982,
+      0.376,
+      0.357,
+      0.982,
+      0.695,
+      0.034,
+      0.982,
+      0.983,
+      0.035,
+      0.692,
+      0.982,
+      0.36,
+      0.373,
+      0.982,
+      0.679,
+      0.05,
+      0.982,
+      0.983,
+      0.019,
+      0.708,
+      0.982,
+      0.344,
+      0.387,
+      0.984,
+      0.663,
+      0.066,
+      0.982,
+      0.97,
+      0.016,
+      0.724,
+      0.982,
+      0.328,
+      0.403,
+      0.982,
+      0.649,
+      0.08,
+      0.983,
+      0.955,
+      0.016,
+      0.74,
+      0.982,
+      0.312,
+      0.419,
+      0.982,
+      0.633,
+      0.096,
+      0.982,
+      0.94,
+      0.016,
+      0.756,
+      0.982,
+      0.9894
+    ]
+  },
+  "idle": {
+    "idle_ms": 53.523,
+    "host_wait_share": 0.9731,
+    "launch_gap_share": 0.0269,
+    "other_share": 0,
+    "reason": "",
+    "bubbles": {
+      "count": 1761,
+      "p50_us": 1,
+      "p95_us": 15,
+      "max_us": 1163,
+      "top": [
+        {
+          "start_ms": 18.602,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 21.93,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 28.586,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 31.914,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 85.162,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 91.818,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 105.13,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 125.098,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 131.754,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 145.066,
+          "duration_us": 1163,
+          "device": 0,
+          "cause": "host_wait"
+        }
+      ]
+    }
+  },
+  "launch": {
+    "launches": 376,
+    "graph_launches": 40,
+    "per_second": 2535.7,
+    "host_launch_share": 0.0146,
+    "launch_delay_p50_us": 3,
+    "launch_delay_p95_us": 3607,
+    "short_kernel_share": 0.6383,
+    "reason": ""
+  },
+  "categories": [
+    {
+      "category": "gemm",
+      "kernel_ms": 79.2,
+      "share": 0.8358,
+      "count": 672
+    },
+    {
+      "category": "attention",
+      "kernel_ms": 8.16,
+      "share": 0.0861,
+      "count": 168
+    },
+    {
+      "category": "norm",
+      "kernel_ms": 2.68,
+      "share": 0.0283,
+      "count": 328
+    },
+    {
+      "category": "activation",
+      "kernel_ms": 1.92,
+      "share": 0.0203,
+      "count": 168
+    },
+    {
+      "category": "other",
+      "kernel_ms": 1.44,
+      "share": 0.0152,
+      "count": 400
+    },
+    {
+      "category": "sampling",
+      "kernel_ms": 1.2,
+      "share": 0.0127,
+      "count": 40
+    },
+    {
+      "category": "memory",
+      "kernel_ms": 0.16,
+      "share": 0.0017,
+      "count": 40
+    }
+  ],
+  "top_kernels": [
+    {
+      "name": "sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize64x64x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas",
+      "category": "gemm",
+      "phase": null,
+      "count": 640,
+      "total_ms": 67.2,
+      "mean_us": 105,
+      "max_us": 210,
+      "share": 0.7092
+    },
+    {
+      "name": "sm90_xmma_gemm_bf16bf16_bf16f32_f32_tn_n_tilesize128x256x64_warpgroupsize2x1x1_execute_segment_k_off_kernel__5x_cublas",
+      "category": "gemm",
+      "phase": null,
+      "count": 32,
+      "total_ms": 12,
+      "mean_us": 375,
+      "max_us": 800,
+      "share": 0.1266
+    },
+    {
+      "name": "void flashinfer::BatchDecodeWithPagedKVCacheKernel\u003c128u, 4u, 8u, 16u, 1u\u003e(flashinfer::BatchDecodeParams)",
+      "category": "attention",
+      "phase": "decode",
+      "count": 160,
+      "total_ms": 7.2,
+      "mean_us": 45,
+      "max_us": 45,
+      "share": 0.076
+    },
+    {
+      "name": "void vllm::rms_norm_kernel\u003cc10::BFloat16, 8, 1\u003e(c10::BFloat16*, c10::BFloat16 const*, long, c10::BFloat16 const*, float, int, int)",
+      "category": "norm",
+      "phase": null,
+      "count": 328,
+      "total_ms": 2.68,
+      "mean_us": 8.17,
+      "max_us": 15,
+      "share": 0.0283
+    },
+    {
+      "name": "void vllm::act_and_mul_kernel\u003cc10::BFloat16, \u0026vllm::silu_kernel\u003cc10::BFloat16\u003e, true\u003e(c10::BFloat16*, c10::BFloat16 const*, int)",
+      "category": "activation",
+      "phase": null,
+      "count": 168,
+      "total_ms": 1.92,
+      "mean_us": 11.43,
+      "max_us": 40,
+      "share": 0.0203
+    },
+    {
+      "name": "void flashinfer::sampling::TopKTopPSamplingFromProbKernel\u003c1024u, (cub::BlockScanAlgorithm)2, (cub::BlockReduceAlgorithm)0, 4u, false, float, int\u003e(float*, int*, int*, unsigned int, float const*, int const*, float const*, unsigned int, unsigned long, unsigned long)",
+      "category": "sampling",
+      "phase": null,
+      "count": 40,
+      "total_ms": 1.2,
+      "mean_us": 30,
+      "max_us": 30,
+      "share": 0.0127
+    },
+    {
+      "name": "void flashinfer::BatchPrefillWithPagedKVCacheKernel\u003c128u, 4u, 1u\u003e(flashinfer::BatchPrefillPagedParams)",
+      "category": "attention",
+      "phase": "prefill",
+      "count": 8,
+      "total_ms": 0.96,
+      "mean_us": 120,
+      "max_us": 120,
+      "share": 0.0101
+    },
+    {
+      "name": "void vllm::rotary_embedding_kernel\u003cc10::BFloat16, true\u003e(long const*, c10::BFloat16*, c10::BFloat16*, c10::BFloat16 const*, int, long, long, int, int, int, int)",
+      "category": "other",
+      "phase": null,
+      "count": 160,
+      "total_ms": 0.96,
+      "mean_us": 6,
+      "max_us": 6,
+      "share": 0.0101
+    },
+    {
+      "name": "void at::native::vectorized_elementwise_kernel\u003c4, at::native::FillFunctor\u003clong\u003e, std::array\u003cchar*, 1ul\u003e \u003e(int, at::native::FillFunctor\u003clong\u003e, std::array\u003cchar*, 1ul\u003e)",
+      "category": "other",
+      "phase": null,
+      "count": 240,
+      "total_ms": 0.48,
+      "mean_us": 2,
+      "max_us": 2,
+      "share": 0.0051
+    },
+    {
+      "name": "Memcpy HtoD (Pageable -\u003e Device)",
+      "category": "memory",
+      "phase": null,
+      "count": 40,
+      "total_ms": 0.16,
+      "mean_us": 4,
+      "max_us": 4,
+      "share": 0.0017
+    }
+  ],
+  "overlap": {
+    "communication_ms": 0,
+    "overlapped_share": null,
+    "reason": "No collective communication kernels ran, so there is nothing to overlap."
+  },
+  "phases": {
+    "source": "kernel_names",
+    "prefill": {
+      "gpu_ms": 13.4,
+      "share": 0.1414,
+      "steps": 2
+    },
+    "decode": {
+      "gpu_ms": 81.36,
+      "share": 0.8586,
+      "steps": 40
+    },
+    "mixed": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "unknown": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    }
+  },
+  "steps": {
+    "source": "annotations",
+    "marker": "ProfilerStep#0",
+    "count": 42,
+    "p50_ms": 3.288,
+    "p95_ms": 3.288,
+    "items": [
+      {
+        "start_ms": 0,
+        "duration_ms": 6.703,
+        "gpu_busy_ms": 6.7,
+        "kernels": 28,
+        "phase": "prefill"
+      },
+      {
+        "start_ms": 7.6,
+        "duration_ms": 6.703,
+        "gpu_busy_ms": 6.7,
+        "kernels": 28,
+        "phase": "prefill"
+      },
+      {
+        "start_ms": 15.203,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 18.531,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 21.859,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 25.187,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 28.515,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 31.843,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 35.171,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 38.499,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 41.827,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 45.155,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 48.483,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 51.811,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 55.139,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 58.467,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 61.795,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 65.123,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 68.451,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 71.779,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 75.107,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 78.435,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 81.763,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 85.091,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 88.419,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 91.747,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 95.075,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 98.403,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 101.731,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 105.059,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 108.387,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 111.715,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 115.043,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 118.371,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 121.699,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 125.027,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 128.355,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 131.683,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 135.011,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 138.339,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 141.667,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 144.995,
+        "duration_ms": 3.288,
+        "gpu_busy_ms": 2.034,
+        "kernels": 44,
+        "phase": "decode"
+      }
+    ],
+    "reason": ""
+  },
+  "roofline": {
+    "accelerator": "NVIDIA H100 80GB HBM3",
+    "peak": {
+      "compute_tflops": 989.5,
+      "precision": "BF16 dense tensor",
+      "memory_tbps": 3.35,
+      "source": "NVIDIA H100 datasheet, SXM (half the sparse figure)"
+    },
+    "ridge_flop_per_byte": 295.4,
+    "position": "unknown",
+    "memory_bound_share": 0,
+    "covered_share": 0.1515,
+    "points": [
+      {
+        "label": "mm 2048×4096×28672 bf16",
+        "category": "gemm",
+        "flops": 3848290697216,
+        "bytes": 2952790016,
+        "kernel_ms": 6.4,
+        "intensity": 1303.27,
+        "achieved_tflops": 601.295,
+        "bound": "compute"
+      },
+      {
+        "label": "mm 2048×14336×4096 bf16",
+        "category": "gemm",
+        "flops": 1924145348608,
+        "bytes": 1543503872,
+        "kernel_ms": 3.2,
+        "intensity": 1246.61,
+        "achieved_tflops": 601.295,
+        "bound": "compute"
+      },
+      {
+        "label": "mm 2048×4096×6144 bf16",
+        "category": "gemm",
+        "flops": 824633720832,
+        "bytes": 738197504,
+        "kernel_ms": 1.44,
+        "intensity": 1117.09,
+        "achieved_tflops": 572.662,
+        "bound": "compute"
+      },
+      {
+        "label": "mm 2048×4096×4096 bf16",
+        "category": "gemm",
+        "flops": 549755813888,
+        "bytes": 536870912,
+        "kernel_ms": 0.96,
+        "intensity": 1024,
+        "achieved_tflops": 572.662,
+        "bound": "compute"
+      }
+    ],
+    "reason": "Only 15% of matrix-multiply time had recorded shapes, too little to place the workload."
+  },
+  "hardware": null,
+  "findings": [
+    {
+      "rule": "gpu.idle_host_bound",
+      "observed": 0.3512,
+      "comparison": "\u003e=",
+      "threshold": 0.1,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 36% of the capture, mostly waiting for the host to launch work."
+    },
+    {
+      "rule": "gpu.launch_bound_kernels",
+      "observed": 0.6383,
+      "comparison": "\u003e=",
+      "threshold": 0.5,
+      "unit": "ratio",
+      "sentence": "64% of launches finish on the GPU faster than the host takes to launch them."
+    },
+    {
+      "rule": "gpu.idle",
+      "observed": 0.361,
+      "comparison": "\u003e=",
+      "threshold": 0.2,
+      "unit": "ratio",
+      "sentence": "The GPU sat idle 36% of the capture."
+    },
+    {
+      "rule": "gpu.decode_dominant",
+      "observed": 0.8586,
+      "comparison": "\u003e=",
+      "threshold": 0.7,
+      "unit": "ratio",
+      "sentence": "Decode steps take 86% of kernel time."
+    }
+  ]
+}

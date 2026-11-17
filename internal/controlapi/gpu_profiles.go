@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -85,4 +86,109 @@ func (a API) endpointGPUProfile(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, profile)
 	}
+}
+
+type gpuProfileHistoryStore interface {
+	EndpointGPUProfiles(context.Context, string, string) ([]gpuprofile.Summary, error)
+	EndpointGPUProfileByID(context.Context, string, string, string) (gpuprofile.Profile, bool, error)
+}
+
+// endpointGPUProfiles lists every retained capture behind an endpoint, newest
+// first, including captures of revisions that no longer serve.
+func (a API) endpointGPUProfiles(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(gpuProfileHistoryStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "GPU profile storage is not configured")
+		return
+	}
+	if len(r.URL.Query()) > 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "gpu-profiles accepts no query parameters")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	summaries, err := store.EndpointGPUProfiles(r.Context(), actor.TenantID, r.PathValue("name"))
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "GPU profiles could not be read")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"data": summaries})
+	}
+}
+
+// endpointGPUProfileByID reads one retained capture behind an endpoint.
+func (a API) endpointGPUProfileByID(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(gpuProfileHistoryStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "GPU profile storage is not configured")
+		return
+	}
+	if len(r.URL.Query()) > 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "gpu-profiles/{id} accepts no query parameters")
+		return
+	}
+	id := r.PathValue("id")
+	if !gpuProfileID.MatchString(id) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "a GPU profile ID is gpc- followed by 32 hexadecimal characters")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	profile, _, err := store.EndpointGPUProfileByID(r.Context(), actor.TenantID, r.PathValue("name"), id)
+	if !writeGPUProfileReadError(w, err) {
+		writeJSON(w, http.StatusOK, profile)
+	}
+}
+
+// compareEndpointGPUProfiles reads two analyzed captures behind an endpoint
+// side by side, for example before and after a rollout.
+func (a API) compareEndpointGPUProfiles(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(gpuProfileHistoryStore)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "GPU profile storage is not configured")
+		return
+	}
+	query := r.URL.Query()
+	base, head := query.Get("base"), query.Get("head")
+	if len(query) != 2 || len(query["base"]) != 1 || len(query["head"]) != 1 || !gpuProfileID.MatchString(base) || !gpuProfileID.MatchString(head) || base == head {
+		writeError(w, http.StatusBadRequest, "invalid_request", "compare needs two different capture IDs: ?base=gpc-…&head=gpc-…")
+		return
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	before, beforeActive, err := store.EndpointGPUProfileByID(r.Context(), actor.TenantID, r.PathValue("name"), base)
+	if writeGPUProfileReadError(w, err) {
+		return
+	}
+	after, afterActive, err := store.EndpointGPUProfileByID(r.Context(), actor.TenantID, r.PathValue("name"), head)
+	if writeGPUProfileReadError(w, err) {
+		return
+	}
+	comparison, err := gpuprofile.Compare(before, after, beforeActive, afterActive)
+	if errors.Is(err, gpuprofile.ErrNotComparable) {
+		writeError(w, http.StatusUnprocessableEntity, "gpu_profile_not_comparable", "both captures need an analysis; a call-stack-only capture has nothing to compare")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "GPU profiles could not be compared")
+		return
+	}
+	writeJSON(w, http.StatusOK, comparison)
+}
+
+var gpuProfileID = regexp.MustCompile(`^gpc-[0-9a-f]{32}$`)
+
+// writeGPUProfileReadError answers a failed capture read and reports whether
+// it did.
+func writeGPUProfileReadError(w http.ResponseWriter, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "endpoint was not found")
+	case errors.Is(err, gpuprofile.ErrNotRecorded):
+		writeError(w, http.StatusNotFound, "gpu_profile_not_found", "no such GPU profile is retained for this endpoint")
+	default:
+		writeError(w, http.StatusInternalServerError, "internal", "GPU profile could not be read")
+	}
+	return true
 }

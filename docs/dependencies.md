@@ -21,6 +21,27 @@
 | [Terraform Plugin Testing](https://github.com/hashicorp/terraform-plugin-testing) | Real protocol CRUD/import acceptance | MPL-2.0 | Development-only provider test dependency |
 | [Terraform CLI](https://github.com/hashicorp/terraform) | Protocol acceptance runner | BSL-1.1 for current releases | Downloaded, checksum-verified development tool; never linked, embedded, or redistributed |
 
+## GPU profiling tools
+
+[GPU profiling](/features/gpu-profiling) reads the output of profilers the operator already runs. None of
+them is linked into, embedded in, or redistributed with InferCrane; the Go analysis reads their files.
+Licences were checked against each project's repository on 2026-11-17.
+
+| Project | Purpose | License | Integration |
+|---|---|---|---|
+| [PyTorch profiler (Kineto)](https://github.com/pytorch/kineto) | Traces vLLM and SGLang write from `/start_profile` and `/stop_profile`, on NVIDIA (CUPTI) and AMD (ROCm) | BSD-3-Clause | Runs inside the operator's engine; InferCrane parses its Chrome-trace JSON |
+| [rocprofiler-sdk (rocprofv3)](https://github.com/ROCm/rocprofiler-sdk) | AMD kernel, HIP API, and memory-copy traces | MIT | Operator-run CLI; InferCrane parses its CSV output |
+| [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) | Optional NVIDIA timelines | NVIDIA proprietary licence | Optional and operator-installed only; InferCrane parses `nsys stats` CSV exports and, in Accelerator Lab, runs an `nsys` binary already present in a reviewed runtime image |
+| [NVIDIA DCGM Exporter](https://github.com/NVIDIA/dcgm-exporter) | Continuous GPU counters | Apache-2.0 (source); NVIDIA's container images are also under the NVIDIA Software License Agreement | Operator-run exporter; InferCrane reads its Prometheus text |
+| [Holistic Trace Analysis](https://github.com/facebookresearch/HolisticTraceAnalysis) | Definitions of temporal breakdown, idle time, kernel launch, and communication overlap | MIT | Definitions re-implemented in Go; no code copied, linked, or run |
+| [Perfetto UI](https://github.com/google/perfetto) | Full trace viewer | Apache-2.0 | The dashboard opens `ui.perfetto.dev` in a new tab on request and posts it the capture's excerpt; nothing is embedded or redistributed |
+| [speedscope](https://github.com/jlfwong/speedscope) | Flame-graph interaction reference | MIT | Design reference for the dashboard's flame graph; no code used |
+
+Evaluated and not integrated: [Parca Agent](https://github.com/parca-dev/parca-agent) with
+[parcagpu](https://github.com/parca-dev/parcagpu) (both Apache-2.0) for continuous eBPF and CUPTI
+profiling, because it needs a privileged node DaemonSet and an injected CUDA library; and Zymtrace, a
+proprietary continuous GPU profiler, which stays an integration option.
+
 InferCrane does not fork or embed vLLM, vLLM Router, SGLang, or SkyPilot. The ROCm runtime images
 bundle ROCm and AMD's AITER kernels (MIT) under their own licenses; InferCrane does not build or
 redistribute them. Release automation must pin

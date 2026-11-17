@@ -142,3 +142,50 @@ func TestTelemetryCollectAMDImportsTheExporterSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestTelemetryCollectDCGMKeepsCollectingAtAnInterval(t *testing.T) {
+	exporter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `DCGM_FI_PROF_SM_ACTIVE{gpu="0",UUID="GPU-1"} 0.5`)
+	}))
+	defer exporter.Close()
+	var posts []time.Duration
+	control := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ObservedAt time.Time `json:"observed_at"`
+			ValidUntil time.Time `json:"valid_until"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		posts = append(posts, body.ValidUntil.Sub(body.ObservedAt))
+		_, _ = io.WriteString(w, `{"data":[],"content_recorded":false}`)
+	}))
+	defer control.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	previous := telemetrySleep
+	defer func() { telemetrySleep = previous }()
+	waits := 0
+	telemetrySleep = func(ctx context.Context, wait time.Duration) error {
+		if wait != 15*time.Second {
+			t.Fatalf("waited %s", wait)
+		}
+		if waits++; waits == 3 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}
+	_, err := captureStdout(t, func() error {
+		return telemetryCommand(ctx, config.Config{ControlURL: control.URL, APIKey: "secret"}, []string{"collect", "dcgm", "coder", "--url", exporter.URL + "/metrics", "--interval", "15s", "--output", "json"})
+	})
+	if err != nil || len(posts) != 3 || posts[0] != 45*time.Second {
+		t.Fatalf("posts=%v err=%v", posts, err)
+	}
+	for name, args := range map[string][]string{
+		"too often": {"collect", "dcgm", "coder", "--interval", "1s"},
+		"file":      {"collect", "dcgm", "coder", "--interval", "15s", "--file", "dcgm.prom"},
+	} {
+		if err = telemetryCommand(context.Background(), config.Config{}, args); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+}
