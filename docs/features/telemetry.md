@@ -306,6 +306,11 @@ infercrane telemetry collect dcgm coder-production \
 Without a declared peak, saturation stays unknown. PCIe throughput includes protocol headers, so
 saturation is capped at 100%.
 
+To keep the counters fresh, add `--interval 15s` (5 seconds to 10 minutes): the command then reads
+the exporter and records a snapshot every interval until stopped, each fresh for three intervals unless
+`--ttl` says otherwise. A failed read is reported and retried at the next interval; the last snapshot
+goes stale on its own.
+
 GPU utilization is not a bottleneck signal. NVIDIA defines it as the share of the sample period in
 which at least one kernel was running. A GPU that runs one small kernel at a time reads 100%, so
 InferCrane shows it but never diagnoses from it. SM active, tensor active, and DRAM active are the
@@ -325,9 +330,11 @@ the configured high-volume request-evidence retention period (`INFERCRANE_REQUES
 
 ## GPU profiles
 
-A GPU profile shows where sampled GPU time goes, from Python and PyTorch down through the CUDA
-launch to each kernel, its SASS instructions, and the reason its warps were waiting. A collector
-records one capture against a deployment:
+A GPU profile shows where GPU time goes, from Python and PyTorch down through the CUDA launch to each
+kernel, its SASS instructions, and the reason its warps were waiting. `infercrane profile` captures one
+through the serving engine's own profiler, analyzes it, and records it: see
+[GPU profiling](/features/gpu-profiling). This section describes the call-stack recording format, which
+any collector can also post itself:
 
 ```bash
 curl -fsS "$INFERCRANE_API_URL/api/v1/deployments/coder-production/gpu-profiles" \
@@ -395,5 +402,6 @@ returned: they describe code that no longer serves. When nothing is recorded the
 Advanced on, rather than an empty graph. Recording and reading a profile never touch the inference
 path.
 
-InferCrane does not run the profiler for you yet. The capture comes from your own CUPTI PC sampling
-or Nsight run, converted to this format.
+A `infercrane.gpu-profile/v2` recording adds the trace analysis and a timeline excerpt; its fields,
+the capture history, and before-and-after comparison are on [GPU profiling](/features/gpu-profiling#api).
+A capture that ended more than 30 days ago is no longer returned.

@@ -32,12 +32,6 @@ var agentOutput io.Writer = os.Stdout
 // agentHardware is replaced in tests so they do not read the host.
 var agentHardware = agent.HardwareProbe{}
 
-// stringList collects a repeatable flag.
-type stringList []string
-
-func (s *stringList) String() string     { return strings.Join(*s, ",") }
-func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
-
 func agentCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New(agentUsage)

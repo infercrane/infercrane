@@ -293,6 +293,26 @@ normalized content-free evidence through the authenticated control API. Use `--f
 offline input. The snapshot is immutable, active-revision-bound, and becomes stale at its declared
 TTL; arbitrary Prometheus metrics are not accepted.
 
+`--interval 15s` keeps collecting until stopped; each snapshot stays fresh for three intervals.
+
+### `profile`
+
+```bash
+infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --duration 10s
+infercrane profile coder --trace ./profiles --no-upload
+infercrane profile coder --list
+infercrane profile coder --compare gpc-BEFORE,gpc-AFTER --output json
+```
+
+Run on the GPU host (or in a sidecar that shares the trace volume): the command records a bounded
+trace through vLLM's or SGLang's own `/start_profile` and `/stop_profile`, analyzes it locally, prints
+the verdict and the numbers behind it, and records the capture against the deployment's active
+revision. It states that the replica slows while the profiler runs and asks before starting; `--yes`
+skips the question. `--dcgm-url` samples dcgm-exporter during the capture. `--trace` analyzes existing
+Kineto JSON, rocprofv3 CSV, or Nsight Systems CSV files; with `--no-upload` it needs no sign-in.
+`--open` opens the capture in the dashboard. `--output json` prints the stable
+`infercrane.profile-result/v1` document. See [GPU profiling](/features/gpu-profiling).
+
 ### `finops collect opencost`
 
 ```bash

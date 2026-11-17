@@ -271,6 +271,18 @@ class ControlAPI:
         request_path = f"/endpoints/{quote(name, safe='')}/gpu-profile"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def list_endpoint_g_p_u_profiles(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def compare_endpoint_g_p_u_profiles(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles/compare"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_endpoint_g_p_u_profile_by_i_d(self, name: str, id: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:
         request_path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
         return cast(dict[str, Any], self._transport.request("GET", request_path))

@@ -33,6 +33,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
 	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
 	{use: "telemetry collect dcgm DEPLOYMENT [flags]", short: "Collect bounded hardware evidence through the control plane", group: "understand"},
+	{use: "profile ENDPOINT [flags]", short: "Capture and analyze a GPU profile: where GPU time goes and why", group: "understand"},
 	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
 	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
 	{use: "version [flags]", short: "Print the InferCrane version", group: "start"},
@@ -100,6 +101,19 @@ var commandExamples = map[string]string{
 
   # See what would be connected, without sending anything
   infercrane agent detect`,
+	"profile": `  # On the GPU host: record 10 s through the engine's own profiler, analyze, and record
+  infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --duration 10s
+
+  # Also sample dcgm-exporter during the capture, then open the timeline
+  infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --dcgm-url http://127.0.0.1:9400/metrics --open
+
+  # Analyze traces you already have (Kineto JSON, rocprofv3 CSV, or Nsight Systems CSV)
+  infercrane profile coder --trace ./profiles --no-upload
+
+  # The newest recorded verdict, the history, and before versus after
+  infercrane profile coder
+  infercrane profile coder --list
+  infercrane profile coder --compare gpc-BEFORE,gpc-AFTER --output json`,
 	"logs": `  # Follow the timeline in a terminal
   infercrane logs qwen-prod --follow
 
@@ -255,7 +269,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "route", "version", "login", "logout", "whoami":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "profile", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "route", "version", "login", "logout", "whoami":
 		stringFlag("output", "human", "output format: human or json")
 	case "logs":
 		stringFlag("output", "human", "output format: human, or json for JSON Lines (one event object per line)")
@@ -277,6 +291,29 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("nvlink-peak-gbps", "0", "declared per-GPU, per-direction NVLink peak in GB/s; enables NVLink saturation")
 		stringFlag("pcie-peak-gbps", "0", "declared per-GPU, per-direction PCIe peak in GB/s; enables PCIe saturation")
 		stringFlag("ttl", "2m", "maximum time this snapshot may be presented as fresh")
+		stringFlag("interval", "0", "keep collecting at this interval (5s to 10m) until stopped; the TTL defaults to three intervals")
+	case "profile":
+		stringFlag("deployment", "", "deployment the capture belongs to (default: ENDPOINT)")
+		stringFlag("engine-url", "", "serving engine base URL that has /start_profile and /stop_profile")
+		stringFlag("trace-dir", "", "directory, readable here, where the engine writes its traces")
+		stringFlag("engine-trace-dir", "", "the same directory as the engine sees it (default: --trace-dir)")
+		stringFlag("engine", "auto", "auto, vllm, or sglang")
+		stringFlag("engine-key-env", "", "environment variable that holds a bearer key for the engine")
+		stringFlag("duration", "10s", "how long to record, 2s to 30s")
+		stringFlag("flush-timeout", "5m", "how long to wait for the engine to write its trace")
+		stringFlag("dcgm-url", "", "dcgm-exporter metrics URL to sample every second during the capture")
+		stringFlag("dcgm-selector", "", "comma-separated exact label selectors for --dcgm-url")
+		boolFlag("yes", "capture without asking, accepting that the replica slows while it runs")
+		stringFlag("trace", "", "analyze an existing trace file or directory instead of capturing (repeatable)")
+		stringFlag("format", "", "trace format for --trace: kineto, rocprofv3, or nsys (default: detect)")
+		stringFlag("accelerator", "", "accelerator name when the trace does not say, for the roofline peak")
+		stringFlag("peak-tflops", "0", "peak dense 16-bit tensor TFLOPS, when no datasheet peak is listed")
+		stringFlag("peak-tbps", "0", "peak memory bandwidth in TB/s, with --peak-tflops")
+		boolFlag("no-upload", "analyze locally without recording the capture")
+		boolFlag("open", "open the capture's timeline in the dashboard")
+		boolFlag("list", "list the endpoint's retained captures")
+		stringFlag("compare", "", "compare two captures: BASE[,HEAD]; HEAD defaults to the newest")
+		stringFlag("capture", "", "read this capture instead of the newest")
 	case "workload":
 		stringFlag("model", "", "Hugging Face model identity")
 		stringFlag("recipe", "", "reviewed curated recipe name")
@@ -660,6 +697,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"version":     {"--output"},
 		"observe":     {"--watch", "--diagnose", "--events", "--window", "--output"},
 		"inbox":       {"--limit", "--output"},
+		"profile":     {"--deployment", "--engine-url", "--trace-dir", "--engine-trace-dir", "--engine", "--engine-key-env", "--duration", "--flush-timeout", "--dcgm-url", "--dcgm-selector", "--yes", "--trace", "--format", "--accelerator", "--peak-tflops", "--peak-tbps", "--no-upload", "--open", "--list", "--compare", "--capture", "--output"},
 		"rollout":     {"--file", "--model", "--model-revision", "--runtime", "--runtime-version", "--runtime-args", "--cloud", "--provider-adapter", "--gpu", "--region", "--routing", "--min", "--max", "--reason", "--requests", "--concurrency", "--acknowledge-validation-cost", "--enabled", "--require-compatibility", "--require-synthetic", "--require-quality", "--auto-rollback", "--minimum-requests", "--max-cost-regression", "--minimum-quality-score", "--max-quality-regression", "--auto-rollback-window", "--validation-max-requests", "--validation-max-concurrency", "--idempotency-key", "--wait", "--wait-timeout", "--output"},
 		"endpoint":    {"--model", "--environment", "--name", "--deployment", "--target", "--connection", "--ownership", "--policy", "--bindings", "--evaluate", "--window", "--disable", "--minimum-requests", "--max-ttft-regression", "--yes", "--output"},
 		"provider":    {"--adapter", "--url", "--model", "--secret-reference", "--from-env", "--output"},

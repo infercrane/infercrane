@@ -354,6 +354,11 @@ func completePositional(s completionSource, command string, typed []string, pref
 			return s.endpoints(prefix), none
 		}
 		return nil, none
+	case "profile":
+		if len(typed) == 0 {
+			return s.endpoints(prefix), none
+		}
+		return nil, none
 	case "request", "status", "observe", "logs", "events", "inspect", "explain", "benchmark", "passport", "recommend", "slo", "delete", "route", "rollout":
 		if len(typed) == 0 {
 			return s.deployments(prefix), none

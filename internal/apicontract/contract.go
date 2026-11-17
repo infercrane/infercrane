@@ -92,6 +92,9 @@ var Routes = []Route{
 	{"GET", "/endpoints/{name}", "getEndpoint", "Endpoints", "Inspect an endpoint and its serving plans", "", "Object", 200, false},
 	{"GET", "/endpoints/{name}/monitoring", "getEndpointMonitoring", "Monitoring", "Read bounded normalized inference and lifecycle evidence", "", "EndpointMonitoring", 200, false},
 	{"GET", "/endpoints/{name}/gpu-profile", "getEndpointGPUProfile", "Monitoring", "Read the newest content-free GPU profile capture of the active revision behind an endpoint", "", "GPUProfile", 200, false},
+	{"GET", "/endpoints/{name}/gpu-profiles", "listEndpointGPUProfiles", "Monitoring", "List every retained GPU profile capture behind an endpoint, including revisions that no longer serve", "", "GPUProfileSummaryList", 200, false},
+	{"GET", "/endpoints/{name}/gpu-profiles/compare", "compareEndpointGPUProfiles", "Monitoring", "Compare two analyzed GPU profile captures behind an endpoint, for example before and after a rollout", "", "GPUProfileComparison", 200, false},
+	{"GET", "/endpoints/{name}/gpu-profiles/{id}", "getEndpointGPUProfileByID", "Monitoring", "Read one retained GPU profile capture behind an endpoint", "", "GPUProfile", 200, false},
 	{"GET", "/endpoints/{name}/optimization-readiness", "getEndpointOptimizationReadiness", "Inference optimization", "Turn content-free monitoring into a conservative next profiling action", "", "Object", 200, false},
 	{"POST", "/endpoints/{name}/doctor", "diagnoseEndpoint", "Diagnostics", "Persist deterministic endpoint findings", "Object", "ObjectList", 200, false},
 	{"GET", "/endpoints/{name}/alerts", "listAlertPolicies", "Alerts", "List signed webhook alert policies", "", "ObjectList", 200, false},
@@ -284,6 +287,11 @@ func Document() (map[string]any, error) {
 		}
 		if route.Path == "/catalog/hugging-face/search" {
 			parameters = append(parameters, huggingFaceSearchQueryParameters()...)
+		}
+		if route.Path == "/endpoints/{name}/gpu-profiles/compare" {
+			parameters = append(parameters,
+				map[string]any{"name": "base", "in": "query", "required": true, "description": "The earlier capture, for example the starting point.", "schema": map[string]any{"type": "string", "pattern": "^gpc-[0-9a-f]{32}$"}},
+				map[string]any{"name": "head", "in": "query", "required": true, "description": "The later capture, for example after an optimization rolled out.", "schema": map[string]any{"type": "string", "pattern": "^gpc-[0-9a-f]{32}$"}})
 		}
 		if route.Path == "/catalog/hugging-face/check" {
 			parameters = append(parameters, modelCheckQueryParameters()...)
