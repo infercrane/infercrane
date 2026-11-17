@@ -62,7 +62,8 @@ type Service struct {
 	// set. RecommendedAgentVersion is only advice.
 	MinimumAgentVersion, RecommendedAgentVersion string
 	// RefreshEndpoints recompiles endpoint state after a registration so the
-	// new endpoint reads "observing" without waiting for the next pass.
+	// new endpoint reads "observing" without waiting for the next pass. It
+	// runs in the background, bounded to 30 seconds.
 	RefreshEndpoints func(context.Context) error
 	Now              func() time.Time
 }
@@ -164,7 +165,13 @@ func (s Service) Register(ctx context.Context, agent domain.Agent, request agent
 		return agentprotocol.RegisterServerResponse{}, err
 	}
 	if created && s.RefreshEndpoints != nil {
-		_ = s.RefreshEndpoints(ctx)
+		// Recompile endpoint state off the agent's request path; the
+		// reconciler's next pass does the same if this one is slow.
+		refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		go func() {
+			defer cancel()
+			_ = s.RefreshEndpoints(refreshCtx)
+		}()
 	}
 	return agentprotocol.RegisterServerResponse{Server: registered(server, agent.GatewayServerKey), Created: created}, nil
 }
