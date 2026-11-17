@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 var update = flag.Bool("update", false, "rewrite golden plan outputs from the recorded fixtures")
@@ -140,13 +141,24 @@ func TestPlanAppliesReviewHardwareLicenseAndEngineGates(t *testing.T) {
 	if redHat.Review.State != checkpointcatalog.ReviewPending || len(redHat.Review.Reasons) != 2 || len(redHat.PublisherPriors) != 1 || redHat.PublisherPriors[0].EvidenceState != checkpointcatalog.EvidenceUnmeasured {
 		t.Fatalf("new publisher and format did not require review, or priors were not kept unmeasured: %+v", redHat)
 	}
+	// The policy names AMD architectures by CDNA generation; the catalog
+	// records the compiler targets of the reviewed accelerators.
 	amd := entries["amd/GLM-5.3-Flash-Quark-MXFP4@"+strings.Repeat("d4", 20)]
-	if amd.Hardware.Vendor != "amd" || amd.Hardware.ProductSupport != checkpointcatalog.SupportUnsupported || amd.Eligibility.State == checkpointcatalog.EligibilityCandidate || amd.Quantization.Scheme != "mxfp4" {
-		t.Fatalf("AMD build was not marked as unsupported hardware: %+v", amd)
+	if amd.Hardware.Vendor != "amd" || amd.Hardware.ProductSupport != checkpointcatalog.SupportRunnable || !slices.Equal(amd.Hardware.Architectures, []string{"gfx950"}) || amd.Quantization.Scheme != "mxfp4" || !slices.Equal(amd.Eligibility.Blockers, []string{"tool quark cannot seed product candidates yet"}) {
+		t.Fatalf("CDNA 4 build is not runnable on gfx950, or is blocked by more than its tool: %+v", amd)
+	}
+	fits := entries["amd/Qwen3.8-27B-w8a8-llmcompressor@"+strings.Repeat("e5", 20)]
+	if !candidate("amd/Qwen3.8-27B-w8a8-llmcompressor@"+strings.Repeat("e5", 20)) || !slices.Equal(fits.Hardware.Architectures, []string{"gfx942", "gfx950"}) || !slices.Equal(fits.Runtimes, []string{"vllm"}) {
+		t.Fatalf("AMD build that fits the pinned ROCm images did not become a candidate on gfx942 and gfx950: %+v", fits)
+	}
+	newer := entries["amd/Qwen3.8-27B-w4a16-llmcompressor@"+strings.Repeat("f6", 20)]
+	want := "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned " + support.DefaultRuntimeVersion
+	if newer.Hardware.ProductSupport != checkpointcatalog.SupportRunnable || !slices.Equal(newer.Eligibility.Blockers, []string{want}) {
+		t.Fatalf("AMD build that needs a newer vLLM than the pinned ROCm image was not blocked for that reason: %+v", newer.Eligibility)
 	}
 	for _, entry := range result.Catalog.Entries {
-		if entry.Hardware.Vendor != "nvidia" && entry.Eligibility.State == checkpointcatalog.EligibilityCandidate {
-			t.Fatalf("non-NVIDIA entry became a candidate: %+v", entry)
+		if text := strings.Join(append(entry.Limitations, entry.Eligibility.Blockers...), " "); strings.Contains(text, "cannot run") {
+			t.Fatalf("entry for runnable hardware says the product cannot run it: %+v", entry)
 		}
 		if entry.Repository == "nvidia/Old-Model-NVFP4" {
 			t.Fatal("a repository created before the listing window entered the catalog")
@@ -155,7 +167,7 @@ func TestPlanAppliesReviewHardwareLicenseAndEngineGates(t *testing.T) {
 	if len(result.Diff.Removed) != 1 || result.Diff.Removed[0].Entry.Revision != removedGLMRevision || !strings.Contains(result.Diff.Removed[0].Reason, "404") {
 		t.Fatalf("missing upstream repository was not reported as removed: %+v", result.Diff.Removed)
 	}
-	if len(result.Diff.Revised) != 1 || result.Diff.Unchanged != 1 || len(result.Diff.Added) != 9 {
+	if len(result.Diff.Revised) != 1 || result.Diff.Unchanged != 1 || len(result.Diff.Added) != 11 {
 		t.Fatalf("unexpected diff shape: revised=%d unchanged=%d added=%d", len(result.Diff.Revised), result.Diff.Unchanged, len(result.Diff.Added))
 	}
 	if !slices.Contains(result.Diff.Skipped[skipNotLLMLibrary], "nvidia/Cosmos3-Nano-FP8") || !slices.Contains(result.Diff.Skipped[skipNoBase], "RedHatAI/GLM-5.3-Flash") {
@@ -197,13 +209,82 @@ func TestApprovingPublisherAndFormatPromotesEntryOnSameSnapshot(t *testing.T) {
 	result := fixturePlan(t, policy, digest, fixturePrevious(t))
 	for _, entry := range result.Catalog.Entries {
 		if entry.Repository == "RedHatAI/Qwen3.8-27B-NVFP4" {
-			if entry.Eligibility.State != checkpointcatalog.EligibilityCandidate || entry.EngineRequirements[0].MinimumVersion != "0.28.1" {
-				t.Fatalf("approved publisher format did not become a candidate: %+v", entry)
+			// Approval clears the review and hardware gates. The card needs a
+			// newer vLLM than the pinned image, so that gate alone remains.
+			want := "no reviewed runtime fits the pinned images: vllm needs 0.28.1 or newer, pinned " + support.DefaultRuntimeVersion
+			if entry.Review.State != checkpointcatalog.ReviewApproved || entry.Hardware.ProductSupport != checkpointcatalog.SupportRunnable || !slices.Equal(entry.Eligibility.Blockers, []string{want}) {
+				t.Fatalf("approval left a gate other than the engine version: %+v", entry)
+			}
+			entry.EngineRequirements[0].MinimumVersion = support.DefaultRuntimeVersion
+			if got := eligibility(entry); got.State != checkpointcatalog.EligibilityCandidate {
+				t.Fatalf("approved publisher format that fits the pinned image did not become a candidate: %+v", got)
 			}
 			return
 		}
 	}
 	t.Fatal("Red Hat entry missing from plan")
+}
+
+func TestPinnedImagesGateEachRuntimeOnRunnableHardware(t *testing.T) {
+	sglang, vllm := support.SGLangRuntimeVersion, support.DefaultRuntimeVersion
+	minimum := func(engine, version string) checkpointcatalog.EngineRequirement {
+		return checkpointcatalog.EngineRequirement{Engine: engine, State: checkpointcatalog.EngineMinimumVersion, MinimumVersion: version}
+	}
+	unreleased := checkpointcatalog.EngineRequirement{Engine: "sglang", State: checkpointcatalog.EngineUnreleasedChange, PullRequest: "sgl-project/sglang#1"}
+	for _, test := range []struct {
+		name         string
+		hardware     checkpointcatalog.Hardware
+		requirements []checkpointcatalog.EngineRequirement
+		want         string
+	}{
+		{"both runtimes fit", amdHardware("gfx942"), []checkpointcatalog.EngineRequirement{minimum("vllm", vllm), minimum("sglang", sglang)}, ""},
+		{"one runtime fits", amdHardware("gfx950"), []checkpointcatalog.EngineRequirement{minimum("vllm", "99.0.0")}, ""},
+		{"neither fits", amdHardware("gfx942", "gfx950"), []checkpointcatalog.EngineRequirement{minimum("vllm", "98.0.0"), minimum("vllm", "99.0.0"), minimum("sglang", "99.1")},
+			"no reviewed runtime fits the pinned images: sglang needs 99.1 or newer, pinned " + sglang + "; vllm needs 99.0.0 or newer, pinned " + vllm},
+		{"change and version", amdHardware("gfx942"), []checkpointcatalog.EngineRequirement{unreleased, minimum("vllm", "99.0.0")},
+			"no reviewed runtime fits the pinned images: sglang needs an unreleased or blocked engine change; vllm needs 99.0.0 or newer, pinned " + vllm},
+		{"changes only", amdHardware("gfx942"), []checkpointcatalog.EngineRequirement{unreleased, {Engine: "vllm", State: checkpointcatalog.EngineBlockedByReview, Note: "card"}}, engineChangeBlocker},
+		{"CUDA images", checkpointcatalog.Hardware{Vendor: "nvidia", Architectures: []string{"hopper"}, ProductSupport: checkpointcatalog.SupportRunnable}, []checkpointcatalog.EngineRequirement{minimum("vllm", "99.0.0"), minimum("sglang", "99.0.0")},
+			"no reviewed runtime fits the pinned images: sglang needs 99.0.0 or newer, pinned " + sglang + "; vllm needs 99.0.0 or newer, pinned " + vllm},
+		{"hardware not runnable", checkpointcatalog.Hardware{Vendor: "intel", Architectures: []string{"gpu"}, ProductSupport: checkpointcatalog.SupportUnsupported}, []checkpointcatalog.EngineRequirement{minimum("vllm", "99.0.0"), minimum("sglang", "99.0.0")}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			entry := checkpointcatalog.Entry{Hardware: test.hardware, Runtimes: []string{"sglang", "vllm"}, EngineRequirements: test.requirements}
+			if got := runtimesBlocker(entry); got != test.want {
+				t.Fatalf("blocker = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func amdHardware(targets ...string) checkpointcatalog.Hardware {
+	return checkpointcatalog.Hardware{Vendor: "amd", Architectures: targets, ProductSupport: checkpointcatalog.SupportRunnable}
+}
+
+func TestHardwareWithoutReviewedAcceleratorsStaysUnsupported(t *testing.T) {
+	policy, digest := fixturePolicy(t)
+	for index := range policy.Publishers {
+		for format := range policy.Publishers[index].Formats {
+			if hardware := &policy.Publishers[index].Formats[format].Hardware; hardware.Vendor == "amd" {
+				hardware.Vendor = "intel"
+			}
+		}
+	}
+	result := fixturePlan(t, policy, digest, fixturePrevious(t))
+	seen := 0
+	for _, entry := range result.Catalog.Entries {
+		if entry.Hardware.Vendor != "intel" {
+			continue
+		}
+		seen++
+		if entry.Hardware.ProductSupport != checkpointcatalog.SupportUnsupported || entry.Eligibility.State == checkpointcatalog.EligibilityCandidate ||
+			!slices.Contains(entry.Eligibility.Blockers, "targets intel hardware the product cannot run yet") || !slices.Contains(entry.Limitations, "Targets intel hardware, which InferCrane cannot run yet.") {
+			t.Fatalf("hardware without reviewed accelerators was not kept unsupported: %+v", entry)
+		}
+	}
+	if seen != 3 {
+		t.Fatalf("expected the three fixture builds on Intel hardware, got %d", seen)
+	}
 }
 
 func TestPlanSelectsOlderBuildsByDownloadsOrReviewedCollection(t *testing.T) {

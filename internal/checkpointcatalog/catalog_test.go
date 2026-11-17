@@ -37,8 +37,8 @@ func TestEmbeddedCatalogIsReviewedPinnedAndHardwareBound(t *testing.T) {
 	vendors := map[string]bool{}
 	for _, entry := range catalog.Entries {
 		vendors[entry.Hardware.Vendor] = true
-		if entry.Hardware.Vendor != "nvidia" && (entry.Hardware.ProductSupport != SupportUnsupported || entry.Eligibility.State == EligibilityCandidate) {
-			t.Fatalf("non-NVIDIA entry is runnable: %+v", entry)
+		if !RunnableVendor(entry.Hardware.Vendor) && (entry.Hardware.ProductSupport != SupportUnsupported || entry.Eligibility.State == EligibilityCandidate) {
+			t.Fatalf("an entry for hardware without reviewed accelerators is runnable: %+v", entry)
 		}
 		if entry.Eligibility.State == EligibilityCandidate && entry.Artifact.ModelCardDigest == "" {
 			t.Fatalf("candidate lacks a pinned model card: %s", entry.ID)
@@ -89,7 +89,7 @@ func TestEmbeddedCatalogIsReviewedPinnedAndHardwareBound(t *testing.T) {
 		t.Fatalf("DeepSeek exact match = %+v", got)
 	}
 	if got := catalog.Match("zai-org/GLM-5.3-Flash", strings.Repeat("a", 40), "sglang", sglangPinnedVersion, "MI355X"); len(got) != 0 {
-		t.Fatalf("an AMD accelerator matched a checkpoint: %+v", got)
+		t.Fatalf("an AMD accelerator matched an NVIDIA checkpoint: %+v", got)
 	}
 	sum := sha256.Sum256(policyRaw)
 	if digest != "sha256:"+hex.EncodeToString(sum[:]) {
@@ -120,7 +120,11 @@ func TestValidateRejectsEntriesThatCrossTheProductBoundary(t *testing.T) {
 		t.Fatalf("valid entry rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*Entry){
-		"AMD runnable":       func(e *Entry) { e.Hardware.Vendor = "amd" },
+		"AMD family name":    func(e *Entry) { e.Hardware.Vendor, e.Hardware.Architectures = "amd", []string{"cdna3"} },
+		"AMD target missing": func(e *Entry) { e.Hardware.Vendor, e.Hardware.Architectures = "amd", []string{"gfx90a"} },
+		"Intel runnable":     func(e *Entry) { e.Hardware.Vendor, e.Hardware.Architectures = "intel", []string{"gpu"} },
+		"no architectures":   func(e *Entry) { e.Hardware.Architectures = nil },
+		"unknown family":     func(e *Entry) { e.Hardware.Architectures = []string{"ampere"} },
 		"unresolved license": func(e *Entry) { e.License = License{Tag: "other", State: LicenseUnresolved} },
 		"pending review":     func(e *Entry) { e.Review = Review{State: ReviewPending, Reasons: []string{"new publisher"}} },
 		"speculator candidate": func(e *Entry) {
@@ -166,6 +170,81 @@ func TestMatchHonorsEngineRequirements(t *testing.T) {
 	}{{"0.5.10.post1", "0.5.10", 1}, {"0.29.0", "0.29", 0}, {"v0.31.0", "0.30.9", 1}, {"0.9", "0.10", -1}} {
 		if got := CompareVersions(test.a, test.b); got != test.want {
 			t.Errorf("CompareVersions(%s, %s) = %d", test.a, test.b, got)
+		}
+	}
+}
+
+func amdEntry(architectures ...string) Entry {
+	entry := validEntry()
+	entry.ID, entry.Publisher, entry.Repository, entry.SourceURL = "amd-model-aaaaaaaa", "amd", "amd/model", "https://huggingface.co/amd/model"
+	entry.Quantization = &Quantization{Tool: "llm-compressor", ToolVersion: "0.12.3", Method: "compressed-tensors", Scheme: "w8a8"}
+	entry.Hardware = Hardware{Vendor: "amd", Architectures: architectures, ProductSupport: SupportRunnable}
+	return entry
+}
+
+func TestMatchPairsAMDBuildsOnlyWithTheirCompilerTarget(t *testing.T) {
+	both, cdna4 := amdEntry("gfx942", "gfx950"), amdEntry("gfx950")
+	cdna4.ID, cdna4.Repository, cdna4.SourceURL = "amd-model-mxfp4-aaaaaaaa", "amd/model-mxfp4", "https://huggingface.co/amd/model-mxfp4"
+	for _, entry := range []Entry{both, cdna4} {
+		if err := ValidateEntry(entry); err != nil {
+			t.Fatalf("runnable AMD entry rejected: %v", err)
+		}
+	}
+	catalog := Catalog{Entries: []Entry{both, cdna4}}
+	revision := strings.Repeat("d", 40)
+	for gpu, want := range map[string][]string{
+		"MI300X":                  {"amd/model"},
+		"AMD Instinct MI300X OAM": {"amd/model"},
+		"MI325X":                  {"amd/model"},
+		"AMD Instinct MI350 OAM":  {"amd/model", "amd/model-mxfp4"},
+		"AMD_Instinct_MI355X_OAM": {"amd/model", "amd/model-mxfp4"},
+		"H100":                    nil,
+		"B200":                    nil,
+		"MI250X":                  nil,
+	} {
+		var got []string
+		for _, entry := range catalog.Match("acme/base", revision, "vllm", "0.22.1", gpu) {
+			got = append(got, entry.Repository)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("Match on %s = %v, want %v", gpu, got, want)
+		}
+	}
+	catalog.Entries[0].EngineRequirements = []EngineRequirement{{Engine: "vllm", State: EngineMinimumVersion, MinimumVersion: "0.28.0"}}
+	if got := catalog.Match("acme/base", revision, "vllm", "0.22.1", "MI300X"); len(got) != 0 {
+		t.Fatalf("an AMD build that needs a newer vLLM than the pinned image matched: %+v", got)
+	}
+}
+
+func TestAcceleratorArchitectureAndPolicyNamesResolveToCompilerTargets(t *testing.T) {
+	for gpu, want := range map[string]string{
+		"MI300X": "gfx942", "AMD Instinct MI325X": "gfx942", "MI355X": "gfx950", "AMD_Instinct_MI350X_OAM": "gfx950",
+		"H100": "hopper", "NVIDIA GB300": "blackwell", "A100": "", "MI250X": "",
+	} {
+		if got := AcceleratorArchitecture(gpu); got != want {
+			t.Errorf("AcceleratorArchitecture(%q) = %q, want %q", gpu, got, want)
+		}
+	}
+	for _, test := range []struct {
+		vendor string
+		names  []string
+		want   string
+	}{
+		{"amd", []string{"cdna3", "cdna4"}, "gfx942,gfx950"},
+		{"amd", []string{"CDNA 4"}, "gfx950"},
+		{"amd", []string{"gfx942", "cdna3"}, "gfx942"},
+		{"amd", []string{"cdna5"}, "cdna5"},
+		{"nvidia", []string{"hopper", "blackwell"}, "hopper,blackwell"},
+		{"intel", []string{"gpu"}, "gpu"},
+		{"intel", nil, ""},
+	} {
+		if got := strings.Join(ResolveArchitectures(test.vendor, test.names), ","); got != test.want {
+			t.Errorf("ResolveArchitectures(%s, %v) = %q, want %q", test.vendor, test.names, got, test.want)
+		}
+	}
+	for vendor, want := range map[string]string{"nvidia": "blackwell,hopper", "amd": "gfx942,gfx950", "intel": ""} {
+		if got := strings.Join(RunnableArchitectures(vendor), ","); got != want {
+			t.Errorf("RunnableArchitectures(%s) = %q, want %q", vendor, got, want)
 		}
 	}
 }
