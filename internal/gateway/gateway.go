@@ -136,6 +136,11 @@ func (g *Gateway) auth(next http.HandlerFunc) http.HandlerFunc {
 			openAIError(w, "Invalid API key", http.StatusUnauthorized, "authentication_error")
 			return
 		}
+		if principal.Kind == domain.AgentPrincipalKind {
+			// An agent key only reports what a customer's own machine sees.
+			openAIError(w, "InferCrane agent keys cannot invoke inference", http.StatusForbidden, "permission_error")
+			return
+		}
 		if !authz.AllowedScoped(authz.Role(principal.Role), principal.Scopes, authz.Read) {
 			openAIError(w, "API key is not allowed to invoke inference", http.StatusForbidden, "permission_error")
 			return

@@ -32,6 +32,7 @@ import (
 	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/admission"
+	"github.com/infercrane/infercrane/internal/agentrelay"
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
 	"github.com/infercrane/infercrane/internal/artifactcache"
@@ -323,6 +324,9 @@ func runLegacy(ctx context.Context, args []string) error {
 	}
 	if args[0] == "discover" {
 		return discoverCommand(ctx, args[1:])
+	}
+	if args[0] == "agent" {
+		return agentCommand(ctx, args[1:])
 	}
 	if !isPublicCommand(args[0]) {
 		return fmt.Errorf("unknown command %q", args[0])
@@ -1852,6 +1856,55 @@ func targetAPICommand(ctx context.Context, cfg config.Config, args []string) err
 	fmt.Printf("target %s registered\n", args[1])
 	return nil
 }
+
+// selfServeDeployment is one of the two targets a hosted workspace can
+// deploy to without operator setup: its own RunPod account through a
+// verified compute connection, or InferCrane Cloud on prepaid credits.
+type selfServeDeployment struct {
+	cloud, connectionID, billingMode string
+	runtimeSeconds                   int
+}
+
+func (s selfServeDeployment) active() bool { return s.cloud != "" }
+
+func selfServeTarget(ctx context.Context, cfg config.Config, connection string, cloud bool, stopAfter time.Duration, stopAfterExplicit bool) (selfServeDeployment, error) {
+	if connection != "" && cloud {
+		return selfServeDeployment{}, errors.New("choose either --compute-connection or --infercrane-cloud")
+	}
+	if stopAfterExplicit && !cloud {
+		return selfServeDeployment{}, errors.New("--stop-after applies only with --infercrane-cloud")
+	}
+	if cloud {
+		if stopAfter < 15*time.Minute || stopAfter > 24*time.Hour || stopAfter%time.Minute != 0 {
+			return selfServeDeployment{}, errors.New("--stop-after must be whole minutes between 15m and 24h")
+		}
+		return selfServeDeployment{cloud: "runpod", billingMode: "customer_wallet", runtimeSeconds: int(stopAfter / time.Second)}, nil
+	}
+	if connection == "" {
+		return selfServeDeployment{}, nil
+	}
+	var listed struct {
+		Data []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+			Status   string `json:"status"`
+		} `json:"data"`
+	}
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/compute/connections", "", nil, &listed); err != nil {
+		return selfServeDeployment{}, fmt.Errorf("list compute connections: %w", err)
+	}
+	for _, item := range listed.Data {
+		if item.ID == connection || item.Name == strings.ToLower(connection) {
+			if item.Status != "verified" {
+				return selfServeDeployment{}, fmt.Errorf("compute connection %s is %s, not verified", item.Name, item.Status)
+			}
+			return selfServeDeployment{cloud: item.Provider, connectionID: item.ID, billingMode: "provider_account"}, nil
+		}
+	}
+	return selfServeDeployment{}, fmt.Errorf("no compute connection named %s; add your RunPod key in the dashboard under Settings → Connections", connection)
+}
+
 func deployAPICommand(ctx context.Context, cfg config.Config, operationKind string, args []string) error {
 	model, err := commandSubject(args, 0, "usage: infercrane "+operationKind+" MODEL [--cloud CLOUD --gpu GPU | --targets TARGETS] [--output human|json]")
 	if err != nil {
@@ -1874,12 +1927,39 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
 	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
+	computeConnection := fs.String("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
+	infercraneCloud := fs.Bool("infercrane-cloud", false, "deploy on InferCrane Cloud, paid from prepaid credits")
+	stopAfter := fs.Duration("stop-after", time.Hour, "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *output != "human" && *output != "json" {
 		return errors.New("--output must be human or json")
+	}
+	stopAfterExplicit := false
+	fs.Visit(func(item *flag.Flag) {
+		if item.Name == "stop-after" {
+			stopAfterExplicit = true
+		}
+	})
+	selfServe, err := selfServeTarget(ctx, cfg, *computeConnection, *infercraneCloud, *stopAfter, stopAfterExplicit)
+	if err != nil {
+		return err
+	}
+	if selfServe.active() {
+		if *targets != "" || *backend != "" {
+			return errors.New("--compute-connection and --infercrane-cloud cannot be combined with --targets or --backend")
+		}
+		if *computeMode != "elastic" {
+			return errors.New("--compute-connection and --infercrane-cloud deploy elastic capacity only")
+		}
+		if *cloud == "" {
+			*cloud = selfServe.cloud
+		}
+		if *gpu == "" {
+			*gpu = support.DefaultGPU
+		}
 	}
 	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
 		return errors.New("--wait-timeout must be non-negative and requires --wait")
@@ -1983,7 +2063,8 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas}
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
+			ComputeConnectionID: selfServe.connectionID, BillingMode: selfServe.billingMode, ManagedRuntimeSeconds: selfServe.runtimeSeconds}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
@@ -4642,6 +4723,14 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		controlAPI.BillingCheckout = stripeBilling
 	}
 	bindOptionalControlServices(&controlAPI, asyncService, computeConnectionService, notificationService)
+	upstreamCredentials, err := newUpstreamCredentialSealer(cfg, s)
+	if err != nil {
+		return err
+	}
+	bindUpstreamCredentials(&controlAPI, rec, upstreamCredentials)
+	// The agent protocol is part of the open-source core: any control plane
+	// can accept agents. Agents only ever dial in; nothing here dials them.
+	controlAPI.Agents = agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints}
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {
@@ -5190,6 +5279,18 @@ func purgeRequests(ctx context.Context, s *store.Store, retention time.Duration,
 			if err != nil {
 				if ctx.Err() == nil {
 					logger.Error("purge operational measurements", "error", err)
+				}
+				break
+			}
+			if deleted < 10000 {
+				break
+			}
+		}
+		for {
+			deleted, err := s.PurgeTargetMeasurements(ctx, time.Now().Add(-retention), 10000)
+			if err != nil {
+				if ctx.Err() == nil {
+					logger.Error("purge target measurements", "error", err)
 				}
 				break
 			}

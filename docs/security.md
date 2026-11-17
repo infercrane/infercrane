@@ -35,6 +35,26 @@ revoke their CLI keys; revoke them in **Settings → CLI sessions**. The CLI kee
 keychain, written on standard input rather than the command line, and falls back to its `0600`
 config file.
 
+The [InferCrane agent](/architecture/agent) observes model servers on a customer's own machines
+without any inbound access: it only makes outbound HTTPS calls to `/api/v1/agent/sync` and
+`/api/v1/agent/servers`, and sends its key only over HTTPS (plain HTTP only to a control plane on
+the same machine). An agent key is a principal of kind `agent`, minted with the `deploy` action and
+shown once. It is refused on every other control-plane route and on the inference gateway, so a
+leaked agent key can report about its own servers and nothing else. The control plane never dials,
+probes, or routes to a server it learned through an agent. The agent filters engine metrics on the
+machine to the families InferCrane parses and never sends prompts, completions, headers, or the
+local server's API key; request hashes from its optional local gateway are keyed with a secret
+derived from the agent key, which the control plane cannot derive from the stored digest.
+Revoking an agent disables its principal and is checked on every agent request, so the agent stops
+at its next sync. Agent keys do not expire; rotate them by creating a new agent and revoking the
+old one.
+
+`infercrane connect --token-env VAR` sends a server's API key to the control plane once. It is
+stored only as AES-256-GCM ciphertext bound to the workspace and endpoint, sealed with
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only for discovery and health
+probes of that server. Without that key the control plane refuses the credential, and the agent,
+which keeps the key on the server's machine, is the path.
+
 Compute configured on the control-plane process (cloud workload identity, a kubeconfig context,
 SkyPilot manifests) is not tenant-scoped. Only the bootstrap operator may deploy or optimize on it
 without a tenant compute connection, unless `INFERCRANE_OPERATOR_COMPUTE_TENANTS` names the

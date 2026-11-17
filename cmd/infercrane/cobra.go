@@ -23,6 +23,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
 	{use: "workload ACTION [PATH] [flags]", short: "Initialize, validate, build, develop, and deploy inference projects", group: "start"},
 	{use: "evaluation ACTION [arguments]", short: "Sign, verify, attach, and inspect semantic quality evidence", group: "understand"},
+	{use: "agent run|detect|create|list|revoke [flags]", short: "Connect model servers on this machine through an outbound-only agent", group: "start"},
 	{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
 	{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
 	{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
@@ -86,6 +87,19 @@ var publicCommandSpecs = []commandSpec{
 }
 
 var commandExamples = map[string]string{
+	"agent": `  # Connect every model server on this machine (vLLM, SGLang, llama.cpp,
+  # Ollama, LM Studio). Only outbound HTTPS; prompts never leave the machine.
+  infercrane login
+  infercrane agent run
+
+  # A server started with an API key, observed under a chosen name
+  VLLM_API_KEY=... infercrane agent run --server http://127.0.0.1:8000 --token-env VLLM_API_KEY --as qwen-local
+
+  # Also record request timings: point your app at the local gateway
+  infercrane agent run --gateway 127.0.0.1:4000
+
+  # See what would be connected, without sending anything
+  infercrane agent detect`,
 	"logs": `  # Follow the timeline in a terminal
   infercrane logs qwen-prod --follow
 
@@ -324,6 +338,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("model", "", "physical upstream model; discovered when omitted")
 		stringFlag("type", "auto", "auto, vllm, litellm, or openai-compatible")
 		boolFlag("manage-traffic", "route requests through InferCrane after qualification")
+		stringFlag("token-env", "", "environment variable holding the server's API key; sent once and stored encrypted")
 	case "observe":
 		boolFlag("watch", "refresh until interrupted")
 		boolFlag("diagnose", "persist a fresh deterministic Doctor evaluation")
@@ -421,7 +436,23 @@ func addHelpFlags(command *cobra.Command, name string) {
 			boolFlag("wait", "follow durable progress to completion")
 			stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 			stringFlag("idempotency-key", "", "stable safe-retry key")
+			stringFlag("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
+			boolFlag("infercrane-cloud", "deploy on InferCrane Cloud, paid from prepaid credits")
+			stringFlag("stop-after", "1h", "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
 		}
+	case "agent":
+		stringFlag("output", "human", "output format: human or json (json needs --once)")
+		stringFlag("server", "", "a model server URL (repeatable); default: look on ports 8000, 30000, 8080, 11434, 1234")
+		stringFlag("token-env", "", "environment variable holding the local server's API key; it never leaves this machine")
+		stringFlag("auth-header-env", "", "environment variable holding the local server's full Authorization header")
+		stringFlag("model", "", "model to observe when a server lists several")
+		stringFlag("as", "", "endpoint name when one server is observed")
+		stringFlag("name", "", "agent name when a new agent key is created (default: this host's name)")
+		stringFlag("gateway", "", "listen address of the local recording gateway, for example 127.0.0.1:4000")
+		stringFlag("gateway-server", "", "server URL the gateway forwards to when several are observed")
+		stringFlag("key-env", "INFERCRANE_AGENT_KEY", "environment variable holding the agent key")
+		boolFlag("no-detect", "only observe servers named with --server")
+		boolFlag("once", "detect, register, sync once, and exit")
 	case "request":
 		stringFlag("message", "Say hello in one sentence.", "user message")
 		stringFlag("protocol", "chat", "chat, responses, embeddings, completions, or batch")

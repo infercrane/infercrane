@@ -20,6 +20,9 @@ plan, and an update to this document in the same pull request.
 - Reconciliation work is bounded and cancellation-aware.
 - Durable operation work has one unexpired lease owner and bounded attempts.
 - Lifecycle core does not branch on provider or runtime names; composition binds versioned adapters.
+- The control plane never dials, probes, or routes to a target reached through an InferCrane agent;
+  agents only dial out, and such a target's health comes from its agent's reports.
+- Agent-relayed engine metrics go through the same parser and window rules as a direct scrape.
 - Adapter registration, hermetic qualification, real qualification, and public support are distinct.
 - A supported integration capability cites executable evidence and cannot be inferred from protocol labels.
 - Custom runtime revisions contain an immutable OCI digest and bounded argv; the control plane never
@@ -38,6 +41,9 @@ plan, and an update to this document in the same pull request.
 
 - Production secrets have no built-in defaults and do not enter logs or provider metadata.
 - Credential secrets are never stored; only cryptographic hashes are persisted.
+- An agent key calls only the agent API, never other control-plane routes or the inference gateway.
+- Prompts, completions, and request content never leave an agent's machine; it sends hardware,
+  server details, filtered engine metrics, and content-free request shapes only.
 - External input sizes, concurrency, queues, timeouts and identifiers are bounded.
 - Liveness does not depend on downstream systems; readiness verifies required dependencies.
 - Development fakes are excluded from the production image target.

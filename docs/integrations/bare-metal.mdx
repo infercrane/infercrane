@@ -1,12 +1,22 @@
 ---
 title: Existing bare-metal GPUs
-description: Inspect local NVIDIA hardware and connect an existing runtime without transferring lifecycle ownership.
+description: Connect a runtime already serving your own GPUs, through the outbound-only agent or directly, without transferring lifecycle ownership.
 ---
 
 # Existing bare-metal GPUs
 
-InferCrane does not install a node agent or take over a bare-metal scheduler. It can perform a
-bounded, read-only inventory of the machine where the CLI runs:
+For a server the control plane cannot reach (behind NAT, on loopback, or in a private network),
+run the outbound-only [InferCrane agent](/architecture/agent) on the GPU host. It needs no inbound
+port and keeps prompts on the machine:
+
+```bash
+infercrane agent run
+```
+
+See [Run on this machine](/run-on-this-machine). InferCrane does not take over a bare-metal
+scheduler, and the agent does not start, stop, or change your server.
+
+The CLI can also perform a bounded, read-only inventory of the machine where it runs:
 
 ```bash
 infercrane discover local
@@ -26,23 +36,31 @@ send inventory to the control plane.
 <Warning>
   Hardware discovery is not compatibility or performance evidence. GPU presence does not prove
   model fit, runtime/CUDA compatibility, network reachability, health, cost, or a production SLO.
-  AMD/ROCm inventory and remote host discovery are not implemented by this contract.
+  `discover local` reads NVIDIA GPUs only. `infercrane agent detect` also reports Apple Silicon and
+  AMD GPUs as detected, with their telemetry unknown.
 </Warning>
 
 ## Connect the runtime already serving the host
 
 Start or retain vLLM, SGLang, LiteLLM, or another OpenAI-compatible runtime under your existing
-process manager. Then connect the service without transferring lifecycle ownership:
+process manager. When the control plane can reach the host, connect the service directly without
+transferring lifecycle ownership:
 
 ```bash
 infercrane connect http://gpu-host.internal:8000/v1 --as support-production
 ```
+
+If the server requires an API key, pass the name of an environment variable that holds it with
+`--token-env VLLM_API_KEY`. The control plane stores the key encrypted and uses it for discovery and
+health checks; that needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane. Otherwise use
+the agent, which keeps the key on the host.
 
 The connection begins `observe-only`. InferCrane may discover the served model and record health,
 but it does not SSH to the host, restart the process, change GPU allocation, scale replicas, or
 delete the external service. Explicitly move to `traffic-managed` only after reviewing the route and
 credential boundary.
 
-Use a lifecycle provider adapter only when you want InferCrane to create and delete capacity. A
-future bare-metal lifecycle adapter would require a qualified external scheduler or agent and a
-separate ownership-transfer design; read-only discovery does not imply that capability.
+Use a lifecycle provider adapter only when you want InferCrane to create and delete capacity.
+Running candidate setups on your own GPUs will go through the agent, only for an engine the agent
+launched itself; see [candidate runs](/architecture/agent#candidate-runs-next-slice). Read-only
+discovery does not imply that capability.

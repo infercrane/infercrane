@@ -90,7 +90,7 @@ func (s *Store) Targets(ctx context.Context) ([]domain.Target, error) {
 	return s.TargetsForTenant(ctx, "global")
 }
 func (s *Store) TargetsForTenant(ctx context.Context, tenant string) ([]domain.Target, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),created_at,updated_at FROM targets WHERE tenant_id=? ORDER BY name`, tenant)
+	rows, err := s.QueryContext(ctx, `SELECT id,name,url,provider,runtime,COALESCE(upstream_model_name,''),health,COALESCE(provider_resource_id,''),COALESCE(provider_details_json::text,''),COALESCE(agent_id,''),created_at,updated_at FROM targets WHERE tenant_id=? ORDER BY name`, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (s *Store) TargetsForTenant(ctx context.Context, tenant string) ([]domain.T
 	for rows.Next() {
 		var target domain.Target
 		var created, updated string
-		if err := rows.Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &created, &updated); err != nil {
+		if err := rows.Scan(&target.ID, &target.Name, &target.URL, &target.Provider, &target.Runtime, &target.UpstreamModel, &target.Health, &target.ProviderResourceID, &target.ProviderDetails, &target.AgentID, &created, &updated); err != nil {
 			return nil, err
 		}
 		target.CreatedAt, target.UpdatedAt = parseTime(created), parseTime(updated)
@@ -169,7 +169,7 @@ func (s *Store) CreateDeploymentForTenant(ctx context.Context, tenant string, de
 		seen[name] = struct{}{}
 		var id, runtime string
 		var targetModel sql.NullString
-		if err = tx.QueryRowContext(ctx, `SELECT id,runtime,upstream_model_name FROM targets WHERE name=? AND tenant_id=?`, name, tenant).Scan(&id, &runtime, &targetModel); errors.Is(err, sql.ErrNoRows) {
+		if err = tx.QueryRowContext(ctx, `SELECT id,runtime,upstream_model_name FROM targets WHERE name=? AND tenant_id=? AND agent_id IS NULL`, name, tenant).Scan(&id, &runtime, &targetModel); errors.Is(err, sql.ErrNoRows) {
 			return domain.Deployment{}, fmt.Errorf("%w: target %s", ErrNotFound, name)
 		} else if err != nil {
 			return domain.Deployment{}, err

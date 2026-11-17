@@ -36,6 +36,12 @@ Errors are stable JSON objects:
 | `GET /cli/sessions` | viewer | List the caller's active CLI keys with device and last use; admins see every member's. |
 | `DELETE /cli/sessions/{id}` | owner or admin | Revoke a CLI key. |
 | `DELETE /cli/sessions/current` | CLI key | Revoke the calling CLI key (`infercrane logout`); other credentials get `409 not_cli_session`. |
+| `POST /agents` | operator | Create an InferCrane agent key for one machine. The key is returned once and can call only the agent API. |
+| `GET /agents` | viewer | List agents with version, last sync, connection state, hardware, and reported servers. |
+| `GET /agents/{id}` | viewer | Inspect one agent (by ID or active name) and the servers observed through it, with whether their traffic is visible. |
+| `DELETE /agents/{id}` | operator | Revoke an agent. Its next sync gets `401 agent_revoked` and it stops; its servers are marked unhealthy. |
+| `POST /agent/sync` | agent key | Report hardware, servers, health, filtered engine metrics, and content-free request shapes; gzip allowed, 8 MiB at most. Any other key gets `401`. See [InferCrane agent](/architecture/agent). |
+| `POST /agent/servers` | agent key | Observe one local server as an observe-only endpoint. |
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `GET /compute/providers` | viewer | Return execution readiness per provider. `workspace_owned` is computed for the caller and is true only when it may deploy and optimize there without a compute connection. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |

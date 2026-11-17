@@ -108,6 +108,13 @@ URLs are provider APIs. A tenant compute replica without a derivable worker cred
 skipped rather than scraped unauthenticated. A payload from an unsupported runtime is ignored and
 produces no evidence.
 
+A server observed through the [InferCrane agent](/architecture/agent) is scraped by the agent on
+its own machine every 30 seconds. The agent keeps only these families, then relays the current
+scrape with the oldest scrape of the same engine process from the last five minutes. The control
+plane derives the same measurements from that pair as from its own scrapes and keys them by the
+server's target, so the endpoint's monitoring and readiness read them the same way. A server
+connected directly with `infercrane connect` is not scraped in this release.
+
 | Measurement | Unit | vLLM | SGLang | llama.cpp server | Across replicas |
 |---|---|---|---|---|---|
 | `runtime_requests_running` | count | `num_requests_running` | `num_running_reqs` | `requests_processing` | sum |

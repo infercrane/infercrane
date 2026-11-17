@@ -109,7 +109,7 @@ func validateTargetSet(ctx context.Context, tx *tx, tenant string, deployment do
 		seen[name] = struct{}{}
 		var id, runtime string
 		var targetModel sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT id,runtime,upstream_model_name FROM targets WHERE name=? AND tenant_id=?`, name, tenant).Scan(&id, &runtime, &targetModel)
+		err := tx.QueryRowContext(ctx, `SELECT id,runtime,upstream_model_name FROM targets WHERE name=? AND tenant_id=? AND agent_id IS NULL`, name, tenant).Scan(&id, &runtime, &targetModel)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: target %s", ErrNotFound, name)
 		}
