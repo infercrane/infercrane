@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	upstream, err := url.Parse(env("RUNPOD_PROXY_UPSTREAM", "https://rest.runpod.io"))
+	upstream, err := url.Parse(env("RUNPOD_PROXY_UPSTREAM", "https://api.runpod.io"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func main() {
 		request.Host = upstream.Host
 	}
 	proxy.ModifyResponse = func(response *http.Response) error {
-		if dropCreate && response.Request.Method == http.MethodPost && response.Request.URL.Path == "/v1/endpoints" && response.StatusCode >= 200 && response.StatusCode < 300 && dropped.CompareAndSwap(false, true) {
+		if dropCreate && response.Request.Method == http.MethodPost && response.Request.URL.Path == "/v2/serverless" && response.StatusCode >= 200 && response.StatusCode < 300 && dropped.CompareAndSwap(false, true) {
 			return errors.New("acceptance fault: provider create response intentionally lost")
 		}
 		return nil

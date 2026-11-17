@@ -280,25 +280,48 @@ capture_inventory() {
   record "$1-deployments" ic deployments --output json
 }
 
+runpod_api=${INFERCRANE_RUNPOD_DIRECT_API:-https://api.runpod.io/v2}
+
+# RunPod REST v2 lists are cursor-paginated and wrap items under a resource
+# key. A page without that key fails instead of reading as an empty inventory.
+runpod_v2_list() {
+  rp_path=$1
+  rp_key=$2
+  rp_api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
+  rp_cursor=''
+  rp_items='[]'
+  while :; do
+    if [ -n "$rp_cursor" ]; then
+      rp_page=$(curl -fsS -G -H "Authorization: Bearer $rp_api_key" --data-urlencode "cursor=$rp_cursor" "$runpod_api$rp_path")
+    else
+      rp_page=$(curl -fsS -H "Authorization: Bearer $rp_api_key" "$runpod_api$rp_path")
+    fi
+    rp_items=$(jq -n --argjson items "$rp_items" --argjson page "$rp_page" --arg key "$rp_key" \
+      '$items + ($page[$key] | if type == "array" then . else error("RunPod list omitted " + $key) end)')
+    [ "$(printf '%s' "$rp_page" | jq -r '.pagination.hasNextPage')" = true ] || break
+    rp_cursor=$(printf '%s' "$rp_page" | jq -er '.pagination.nextCursor')
+  done
+  printf '%s\n' "$rp_items"
+}
+
+runpod_v2_workers() {
+  curl -fsS -H "Authorization: Bearer $(tr -d '\r\n' <"$RUNPOD_KEY_FILE")" "$runpod_api/serverless/$1/workers"
+}
+
 capture_provider_inventory() {
   label=$1
-  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
-  pods=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/pods?includeMachine=true' | \
+  pods=$(runpod_v2_list /pods pods | \
 		jq '[.[] | select((.name // "") | startswith("infercrane-")) |
-			{id,name,desiredStatus,machineId,image:(.imageName // .image),gpuCount,
-			 gpu_type:(.gpuTypeId // .machine.gpuTypeId // .gpu.id),containerDiskInGb,
-			 dockerEntrypoint,dockerStartCmd,ports,env_keys:((.env // {}) | keys),
-			 lastStartedAt,lastStatusChange,uptimeSeconds,costPerHr,adjustedCostPerHr}]')
-  endpoints=$(curl -fsS -H "Authorization: Bearer $api_key" \
-    'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
-    jq '[.[] | select((.name // "") | startswith("infercrane-")) |
-      {id,name,workersMin,workersMax,
-       active_workers:([.workers[]? | select(.desiredStatus != "EXITED")] | length),
-       exited_workers:([.workers[]? | select(.desiredStatus == "EXITED")] | length),
-       last_worker:([.workers[]?] | sort_by(.createdAt // "") | last |
-         if . == null then null else
-           {id,desiredStatus,createdAt,lastStartedAt,lastStatusChange,machineId,imageName,gpuCount}
-         end)}]')
+			{id,name,status,dataCenterId,image,gpu,disk,entrypoint,cmd,ports,
+			 env_keys:((.env // {}) | keys),createdAt,startedAt,cost}]')
+  listed_endpoints=$(runpod_v2_list /serverless endpoints | \
+    jq '[.[] | select((.name // "") | startswith("infercrane-")) | {id,name,workers,gpu}]')
+  endpoints='[]'
+  for endpoint_id in $(printf '%s' "$listed_endpoints" | jq -r '.[].id'); do
+    worker_summary=$(runpod_v2_workers "$endpoint_id" | jq '.summary')
+    endpoints=$(jq -n --argjson all "$endpoints" --argjson listed "$listed_endpoints" --arg id "$endpoint_id" --argjson summary "$worker_summary" \
+      '$all + [$listed[] | select(.id == $id) | . + {active_workers:$summary.total,worker_summary:$summary}]')
+  done
   jq -n --argjson pods "$pods" --argjson endpoints "$endpoints" \
     '{pods:$pods,endpoints:$endpoints,verified_at:(now|todateiso8601)}' | \
     tee "$evidence/provider-direct-$label.json" >/dev/null
@@ -420,12 +443,10 @@ wait_serverless_zero() {
   limit=${2:-900}
   endpoint=$(ic status "$deployment" --output json | jq -r '.replicas[0].provider_resource_id')
   [ -n "$endpoint" ] && [ "$endpoint" != null ] || { echo "serverless endpoint ID is missing" >&2; return 1; }
-  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
   elapsed=0
   while [ "$elapsed" -lt "$limit" ]; do
-    endpoint_json=$(curl -fsS -H "Authorization: Bearer $api_key" \
-      'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | \
-      jq -c --arg id "$endpoint" '.[] | select(.id == $id) | {id,name,workersMin,workersMax,workers_observed:([.workers[]? | select(.desiredStatus != "EXITED")] | length)}')
+    endpoint_json=$(runpod_v2_workers "$endpoint" | \
+      jq -c --arg id "$endpoint" '{id:$id,workers_observed:(.summary.total // -1),worker_summary:.summary}')
     workers=$(printf '%s' "$endpoint_json" | jq -r '.workers_observed // -1')
     if [ "$workers" -eq 0 ]; then
       printf '%s\n' "$endpoint_json" >"$evidence/$deployment-scale-to-zero.json"
@@ -870,8 +891,7 @@ run_serverless_faults() {
   grep -F 'provider create response intentionally lost' "$evidence/runpod-fault-proxy.log" >/dev/null
   wait_ready "$SERVERLESS_NAME"
   endpoint=$(ic status "$SERVERLESS_NAME" --output json | jq -r '.replicas[0].provider_resource_id')
-  api_key=$(tr -d '\r\n' <"$RUNPOD_KEY_FILE")
-  endpoint_count=$(curl -fsS -H "Authorization: Bearer $api_key" 'https://rest.runpod.io/v1/endpoints?includeWorkers=true' | jq --arg id "$endpoint" '[.[] | select(.id == $id)] | length')
+  endpoint_count=$(runpod_v2_list /serverless endpoints | jq --arg id "$endpoint" '[.[] | select(.id == $id)] | length')
   [ "$endpoint_count" -eq 1 ] || { echo "lost response adoption did not produce exactly one endpoint" >&2; return 1; }
   printf '{"endpoint_id":"%s","operation_attempt":%s,"endpoint_count":%s}\n' "$endpoint" "$deploy_attempt" "$endpoint_count" >"$evidence/lost-create-response-adoption.json"
 

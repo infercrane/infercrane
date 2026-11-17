@@ -579,7 +579,7 @@ func load(requireAPIKey bool) (Config, error) {
 		BrezelOptimizationEnvironment:       env("INFERCRANE_BREZEL_OPTIMIZATION_ENVIRONMENT", ""),
 		RunPodAPIKey:                        env("RUNPOD_API_KEY", ""),
 		RunPodServerlessTemplateID:          env("INFERCRANE_RUNPOD_SERVERLESS_TEMPLATE_ID", ""),
-		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://rest.runpod.io/v1"),
+		RunPodRESTURL:                       env("INFERCRANE_RUNPOD_REST_URL", "https://api.runpod.io/v2"),
 		RunPodContainerDiskGiB:              runPodContainerDiskGiB,
 		RunPodArtifactCachePolicy:           env("INFERCRANE_RUNPOD_ARTIFACT_CACHE_POLICY", "prefer"),
 		RunPodNetworkVolumes:                runPodNetworkVolumes,

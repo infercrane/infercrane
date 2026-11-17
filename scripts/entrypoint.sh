@@ -25,9 +25,15 @@ if [ -z "$runpod_key" ] && [ -n "${RUNPOD_API_KEY_FILE:-}" ]; then
   runpod_key=$(tr -d '\r\n' <"$RUNPOD_API_KEY_FILE")
 fi
 if [ -n "$runpod_key" ]; then
+  # SkyPilot's RunPod backend requires ~/.runpod/config.toml. The runpod 2.x
+  # CLI removed `runpod config`, so write the file it used to write directly,
+  # as a TOML basic string with backslashes and quotes escaped.
   umask 077
-  rm -f "${HOME:?}/.runpod/config.toml"
-  runpod config "$runpod_key" >/dev/null
+  mkdir -p "${HOME:?}/.runpod"
+  rm -f "$HOME/.runpod/config.toml"
+  runpod_toml_key=$(printf '%s' "$runpod_key" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '[default]\napi_key = "%s"\n' "$runpod_toml_key" >"$HOME/.runpod/config.toml"
+  unset runpod_toml_key
   export RUNPOD_API_KEY="$runpod_key"
 fi
 unset runpod_key

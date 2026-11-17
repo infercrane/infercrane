@@ -4,7 +4,7 @@ set -eu
 command_name=${1:-plan}
 approval=${2:-}
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-api_base=${INFERCRANE_RUNPOD_REST_URL:-https://rest.runpod.io/v1}
+api_base=${INFERCRANE_RUNPOD_REST_URL:-https://api.runpod.io/v2}
 key_file=${RUNPOD_KEY_FILE:-${HOME}/.config/infercrane/runpod.key}
 model=${INFERCRANE_ARTIFACT_MODEL:-}
 revision=${INFERCRANE_ARTIFACT_REVISION:-}
@@ -50,7 +50,7 @@ case "$hf_secret" in *[!A-Za-z0-9_-]*) fail 'INFERCRANE_RUNPOD_HF_TOKEN_SECRET c
 case "$prefetch_compute" in gpu|cpu) ;; *) fail 'INFERCRANE_RUNPOD_PREFETCH_COMPUTE must be gpu or cpu' ;; esac
 case "$cpu_flavors" in *[!A-Za-z0-9,_-]*|'') fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_FLAVORS is invalid' ;; esac
 case "$cpu_vcpus" in *[!0-9]*|'') fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS must be a positive integer' ;; esac
-[ "$cpu_vcpus" -ge 1 ] && [ "$cpu_vcpus" -le 64 ] || fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS must be between 1 and 64'
+case "$cpu_vcpus" in 2|4|8|16|32|64) ;; *) fail 'INFERCRANE_RUNPOD_PREFETCH_CPU_VCPUS must be a power of two between 2 and 64' ;; esac
 
 identity=${model}@${revision}
 identity_digest=$(printf %s "$identity" | shasum -a 256 | awk '{print $1}')
@@ -176,10 +176,31 @@ api() {
   esac
 }
 
-volumes=$(api GET /networkvolumes)
+# RunPod REST v2 lists are cursor-paginated and wrap items under a resource
+# key. A page without that key fails instead of reading as an empty inventory.
+list_all() {
+  list_path=$1
+  list_key=$2
+  list_items='[]'
+  list_cursor=''
+  while :; do
+    if [ -n "$list_cursor" ]; then
+      list_page=$(api GET "$list_path?cursor=$(printf '%s' "$list_cursor" | jq -sRr @uri)")
+    else
+      list_page=$(api GET "$list_path")
+    fi
+    list_items=$(jq -n --argjson items "$list_items" --argjson page "$list_page" --arg key "$list_key" \
+      '$items + ($page[$key] | if type == "array" then . else error("missing") end)') || fail "RunPod list $list_path omitted $list_key"
+    [ "$(printf '%s' "$list_page" | jq -r '.pagination.hasNextPage')" = true ] || break
+    list_cursor=$(printf '%s' "$list_page" | jq -er '.pagination.nextCursor') || fail "RunPod list $list_path reported more pages without a cursor"
+  done
+  printf '%s\n' "$list_items"
+}
+
+volumes=$(list_all /network-volumes networkVolumes)
 volume_id=$(printf '%s' "$volumes" | jq -r --arg name "$volume_name" '[.[] | select(.name==$name)] | if length==1 then .[0].id else empty end')
-pods=$(api GET /pods)
-pod_id=$(printf '%s' "$pods" | jq -r --arg name "$pod_name" '[.[] | select(.name==$name and ((.desiredStatus // "")|ascii_upcase)!="TERMINATED")] | if length==1 then .[0].id else empty end')
+pods=$(list_all /pods pods)
+pod_id=$(printf '%s' "$pods" | jq -r --arg name "$pod_name" '[.[] | select(.name==$name and ((.status // "")|ascii_upcase)!="TERMINATED")] | if length==1 then .[0].id else empty end')
 
 if [ "$command_name" = status ]; then
   jq -n --arg identity "$identity" --arg volume_id "$volume_id" --arg pod_id "$pod_id" --arg volume_name "$volume_name" --arg pod_name "$pod_name" '{model_identity:$identity,volume:{id:$volume_id,name:$volume_name,present:($volume_id!="")},preparer:{id:$pod_id,name:$pod_name,present:($pod_id!="")}}'
@@ -194,7 +215,7 @@ fi
 
 if [ "$command_name" = delete-volume ]; then
   [ -z "$pod_id" ] || fail 'refusing to delete a network volume while its preparer Pod exists'
-  [ -z "$volume_id" ] || api DELETE "/networkvolumes/$volume_id" >/dev/null
+  [ -z "$volume_id" ] || api DELETE "/network-volumes/$volume_id" >/dev/null
   jq -n --arg volume_id "$volume_id" '{volume_deleted:($volume_id!=""),recoverable:false}'
   exit 0
 fi
@@ -202,8 +223,8 @@ fi
 printf '%s\n' "$plan_json" > "$report_dir/runpod-artifact-plan-${identity_digest}.json"
 
 if [ -z "$volume_id" ]; then
-  create_volume=$(jq -n --arg name "$volume_name" --arg dc "$data_center" --argjson size "$volume_size" '{name:$name,dataCenterId:$dc,size:$size}')
-  created=$(api POST /networkvolumes "$create_volume")
+  create_volume=$(jq -n --arg name "$volume_name" --arg dc "$data_center" --argjson size "$volume_size" '{name:$name,dataCenter:$dc,size:$size}')
+  created=$(api POST /network-volumes "$create_volume")
   volume_id=$(printf '%s' "$created" | jq -r '.id // empty')
   [ -n "$volume_id" ] || fail 'RunPod network volume create returned no ID'
 fi
@@ -222,22 +243,36 @@ if [ -z "$pod_id" ]; then
   fi
   env_json=$(jq -n --arg model "$model" --arg revision "$revision" --arg digest "$identity_digest" --argjson token "$token_env" '$token + {INFERCRANE_MODEL:$model,INFERCRANE_MODEL_REVISION:$revision,INFERCRANE_MODEL_IDENTITY_DIGEST:$digest,HF_HOME:"/workspace/huggingface",HUGGINGFACE_HUB_CACHE:"/workspace/huggingface/hub",HF_XET_HIGH_PERFORMANCE:"1"}')
   prepare='python -m pip install --no-cache-dir "huggingface_hub[hf_xet]=='"$hub_version"'"; mkdir -p /workspace/infercrane/model; python -c '\''import json,os,time; from huggingface_hub import snapshot_download; started=time.time(); path=snapshot_download(repo_id=os.environ["INFERCRANE_MODEL"],revision=os.environ["INFERCRANE_MODEL_REVISION"],local_dir="/workspace/infercrane/model"); manifest={"schema":"infercrane.artifact-cache/v1","model":os.environ["INFERCRANE_MODEL"],"revision":os.environ["INFERCRANE_MODEL_REVISION"],"model_identity_digest":os.environ["INFERCRANE_MODEL_IDENTITY_DIGEST"],"path":path,"download_seconds":round(time.time()-started,3),"completed_at":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())}; open("/workspace/infercrane/manifest.json","w").write(json.dumps(manifest,sort_keys=True))'\''; cd /workspace/infercrane; exec python -m http.server 8000'
-  # The network volume itself pins the Pod to its datacenter. Do not repeat the
-  # location through dataCenterIds: RunPod's live inventory can advertise a new
-  # datacenter before the REST OpenAPI enum accepts it.
+  # RunPod REST v2 CreatePodRequest. The network volume pins the Pod to its data
+  # center (v2 requires every network volume to be in the Pod's data center),
+  # so the location is not repeated through dataCenterIds.
   case "$prefetch_compute" in
     gpu)
-      pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg gpu "$gpu_type" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" '{name:$name,imageName:$image,gpuTypeIds:[$gpu],gpuTypePriority:"custom",gpuCount:1,cloudType:"SECURE",computeType:"GPU",interruptible:false,containerDiskInGb:20,networkVolumeId:$volume,volumeMountPath:"/workspace",dockerEntrypoint:["/bin/sh"],dockerStartCmd:["-ec",$command],ports:["8000/http"],env:$env}')
+      pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg gpu "$gpu_type" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" '{name:$name,image:$image,gpu:{id:$gpu,count:1},cloud:"SECURE",disk:20,mounts:{network:[{volumeId:$volume,path:"/workspace"}]},entrypoint:["/bin/sh"],cmd:["-ec",$command],ports:["8000/http"],env:$env}')
+      created=$(api POST /pods "$pod_body")
       ;;
     cpu)
-      cpu_flavors_json=$(printf '%s' "$cpu_flavors" | jq -R 'split(",")')
-      pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" --argjson flavors "$cpu_flavors_json" --argjson vcpus "$cpu_vcpus" '{name:$name,imageName:$image,cpuFlavorIds:$flavors,cpuFlavorPriority:"custom",vcpuCount:$vcpus,cloudType:"SECURE",computeType:"CPU",interruptible:false,containerDiskInGb:20,networkVolumeId:$volume,volumeMountPath:"/workspace",dockerEntrypoint:["/bin/sh"],dockerStartCmd:["-ec",$command],ports:["8000/http"],env:$env}')
+      # v2 places one CPU flavor per create. Try the configured flavors in
+      # order and move on only when RunPod could not place one (HTTP 400).
+      created=''
+      for flavor in $(printf '%s' "$cpu_flavors" | tr ',' ' '); do
+        pod_body=$(jq -n --arg name "$pod_name" --arg image "$preparer_image" --arg volume "$volume_id" --arg command "$prepare" --argjson env "$env_json" --arg flavor "$flavor" --argjson vcpus "$cpu_vcpus" '{name:$name,image:$image,cpu:{id:$flavor,vcpuCount:$vcpus},cloud:"SECURE",disk:20,mounts:{network:[{volumeId:$volume,path:"/workspace"}]},entrypoint:["/bin/sh"],cmd:["-ec",$command],ports:["8000/http"],env:$env}')
+        attempt_file=$(mktemp "${TMPDIR:-/tmp}/infercrane-runpod-response.XXXXXX")
+        attempt_status=$(curl -sS --max-time 30 -o "$attempt_file" -w '%{http_code}' -X POST -H "Authorization: Bearer $api_key" -H 'Content-Type: application/json' --data "$pod_body" "$api_base/pods") || attempt_status=000
+        if [ "$attempt_status" = 201 ]; then
+          created=$(cat "$attempt_file")
+          rm -f "$attempt_file"
+          break
+        fi
+        rm -f "$attempt_file"
+        [ "$attempt_status" = 400 ] || fail "RunPod API returned HTTP $attempt_status for POST /pods with CPU flavor $flavor"
+      done
+      [ -n "$created" ] || fail "RunPod could not place any configured CPU flavor: $cpu_flavors"
       ;;
   esac
-  created=$(api POST /pods "$pod_body")
   pod_id=$(printf '%s' "$created" | jq -r '.id // empty')
   [ -n "$pod_id" ] || fail 'RunPod preparer Pod create returned no ID'
-  observed_hourly=$(printf '%s' "$created" | jq -r '.adjustedCostPerHr // .costPerHr // empty')
+  observed_hourly=$(printf '%s' "$created" | jq -r '.cost // empty')
   [ -n "$observed_hourly" ] || fail 'RunPod preparer Pod returned unknown hourly price; cleanup requested'
   planned_hourly=$(printf '%s' "$plan_json" | jq -r '.price_evidence.preparer_hourly_usd')
   awk -v observed="$observed_hourly" -v planned="$planned_hourly" 'BEGIN { exit !(observed <= planned) }' || fail "RunPod preparer hourly price USD $observed_hourly exceeds authorized USD $planned_hourly; cleanup requested"
