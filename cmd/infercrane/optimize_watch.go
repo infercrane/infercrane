@@ -32,15 +32,20 @@ var watchStateWords = map[string]string{
 }
 
 var watchReasonWords = map[string]string{
-	"measured_no_measurable_difference":  "no real difference from your current setup",
-	"measured_candidate_regressed":       "worse than your current setup",
-	"measured_comparison_unavailable":    "not compared reliably with your current setup",
-	"measured_candidate_superseded":      "another setup measured better",
-	"quality_gate_rejected":              "answers changed too much",
-	"quality_reference_unavailable":      "no reference answers to compare with",
-	"release_guard_rejected":             "failed the safety check",
-	"release_guard_inconclusive":         "safety check had too little evidence",
-	"approval_expired_before_activation": "approval expired before rollout",
+	"measured_no_measurable_difference":               "no real difference from your current setup",
+	"measured_candidate_regressed":                    "worse than your current setup",
+	"measured_comparison_unavailable":                 "not compared reliably with your current setup",
+	"measured_candidate_superseded":                   "another setup measured better",
+	"quality_gate_rejected":                           "answers changed too much",
+	"quality_reference_unavailable":                   "no reference answers to compare with",
+	"release_guard_rejected":                          "failed the safety check",
+	"release_guard_inconclusive":                      "safety check had too little evidence",
+	"approval_expired_before_activation":              "approval expired before rollout",
+	"optimization_machine_lost_repeatedly":            "its server was lost too often; stopped inside your cost cap",
+	"optimization_replacement_not_covered":            "its server was lost and your cost cap does not cover a replacement",
+	"optimization_machine_replacement_failed":         "its server was lost and the replacement did not start",
+	"optimization_measurement_interrupted_repeatedly": "measuring stopped too often to finish",
+	"optimization_control_lost":                       "your current setup's server was lost, so nothing could be compared",
 }
 
 var watchStages = []string{"proposed", "provisioning", "ready", "measuring", "validating", "ranked", "qualified"}

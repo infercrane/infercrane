@@ -88,21 +88,33 @@ func TestMeasurementProgressRecordsEveryTurnAsItRuns(t *testing.T) {
 	}
 }
 
-func TestMeasurementProgressReplansWhenTheControlDropsOutAndNeverFailsTheMeasurement(t *testing.T) {
+func TestMeasurementProgressKeepsTheFailedTurnAndPlansTheResumedSegment(t *testing.T) {
 	fixture := newExecutorFixture(t, optimizer.Request{})
-	fixture.runner.failAt[controlEndpoint] = 1
+	fixture.runner.failAt[controlEndpoint] = 2
 	sink := &progressSinkFixture{err: errors.New("database unavailable")}
-	fixture.executor.Progress = sink
+	checkpoints := &checkpointSinkFixture{}
+	fixture.executor.Progress, fixture.executor.Checkpoints = sink, checkpoints
+	if _, err := fixture.executor.Run(t.Context(), fixture.campaign, fixture.candidate, fixture.profile); err == nil {
+		t.Fatal("a failed control turn must stop the measurement")
+	}
+	stopped := sink.records[len(sink.records)-1]
+	// Two warmups, then C X C(failed): three turns ended, the last with an error.
+	if stopped.TurnsPlanned != 7 || stopped.WarmupsPlanned != 2 || stopped.TurnsDone() != 3 || len(stopped.Runs) != 5 || stopped.Runs[4].Error == "" || stopped.Runs[4].Arm != ArmControl {
+		t.Fatalf("stopped record = %+v", stopped)
+	}
+
+	// The driver resolved the interruption; the next segment continues the
+	// same record.
+	fixture.candidate.MeasurementCheckpointJSON = resolvedCheckpoint(t, checkpoints.last, RecoveryMachineReplaced)
+	encoded, _ := json.Marshal(stopped)
+	fixture.candidate.MeasurementProgressJSON = string(encoded)
+	fixture.runner.failAt = map[string]int{}
 	fixture.run(t)
 	final := sink.records[len(sink.records)-1]
-	// Warmups for both arms, one failed control turn, then the candidate's
-	// three turns alone: four turns, all finished.
-	if final.TurnsPlanned != 4 || final.WarmupsPlanned != 2 || final.TurnsDone() != 4 || len(final.Runs) != 6 {
-		t.Fatalf("replanned record = %+v", final)
-	}
-	failed := final.Runs[2]
-	if failed.Arm != ArmControl || failed.Error == "" || failed.OutputTokenThroughput != nil {
-		t.Fatalf("failed control turn = %+v", failed)
+	// The failed control turn dropped the open pair, so all three pairs are
+	// measured again: two more warmups and C X C X C X C.
+	if final.TurnsPlanned != 3+7 || final.WarmupsPlanned != 4 || final.TurnsDone() != 10 || len(final.Runs) != 14 || !final.StartedAt.Equal(stopped.StartedAt) {
+		t.Fatalf("resumed record = %+v", final)
 	}
 }
 

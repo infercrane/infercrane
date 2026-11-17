@@ -187,7 +187,7 @@ func (s *Store) OptimizationCampaigns(ctx context.Context, tenant string, limit 
 }
 
 func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID string) ([]domain.OptimizationCandidateRun, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(lab_evaluation_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),state_entered_at::text,measurement_progress::text,cost_quote::text,created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,campaign_id,proposal_candidate_id,rank,state,evidence_state,deployment_spec_json::text,predicted_evidence_json::text,actual_evidence_json::text,COALESCE(deployment_name,''),COALESCE(revision_id,''),COALESCE(benchmark_id,''),COALESCE(quality_evidence_id,''),COALESCE(lab_evaluation_id,''),COALESCE(release_guard_evaluation_id,''),COALESCE(optimized_artifact_id,''),COALESCE(failure_code,''),state_entered_at::text,measurement_progress::text,cost_quote::text,measurement_checkpoint::text,machine_replacements::text,created_at,updated_at FROM optimization_candidate_runs WHERE tenant_id=? AND campaign_id=? ORDER BY rank`, tenant, campaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (s *Store) optimizationCandidates(ctx context.Context, tenant, campaignID s
 	for rows.Next() {
 		var row domain.OptimizationCandidateRun
 		var created, updated string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.LabEvaluationID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &row.StateEnteredAtJSON, &row.MeasurementProgressJSON, &row.CostQuoteJSON, &created, &updated); err != nil {
+		if err = rows.Scan(&row.ID, &row.TenantID, &row.CampaignID, &row.ProposalCandidateID, &row.Rank, &row.State, &row.EvidenceState, &row.DeploymentSpecJSON, &row.PredictedEvidenceJSON, &row.ActualEvidenceJSON, &row.DeploymentName, &row.RevisionID, &row.BenchmarkID, &row.QualityEvidenceID, &row.LabEvaluationID, &row.ReleaseGuardEvaluationID, &row.OptimizedArtifactID, &row.FailureCode, &row.StateEnteredAtJSON, &row.MeasurementProgressJSON, &row.CostQuoteJSON, &row.MeasurementCheckpointJSON, &row.MachineReplacementsJSON, &created, &updated); err != nil {
 			return nil, err
 		}
 		row.CreatedAt, row.UpdatedAt = parseTime(created), parseTime(updated)
@@ -488,6 +488,54 @@ func (s *Store) RecordOptimizationMeasurementProgress(ctx context.Context, tenan
 	}
 	count, _ := result.RowsAffected()
 	return count > 0, nil
+}
+
+// maxMeasurementCheckpointBytes bounds one candidate's resumable measurement.
+// It holds the AIPerf summaries of a bounded number of runs and
+// interruptions.
+const maxMeasurementCheckpointBytes = 256 << 10
+
+// RecordOptimizationMeasurementCheckpoint replaces a measuring candidate's
+// resumable measurement. Like the progress record it is written only while
+// the candidate is measuring and never moves updated_at, so evidence adoption
+// keeps comparing benchmark rows with the last state transition. It reports
+// whether the checkpoint was written.
+func (s *Store) RecordOptimizationMeasurementCheckpoint(ctx context.Context, tenant, campaignID, candidateID, checkpointJSON string) (bool, error) {
+	if len(checkpointJSON) > maxMeasurementCheckpointBytes || !json.Valid([]byte(checkpointJSON)) {
+		return false, errors.New("measurement checkpoint must be bounded valid JSON")
+	}
+	result, err := s.ExecContext(ctx, `UPDATE optimization_candidate_runs SET measurement_checkpoint=?::jsonb WHERE tenant_id=? AND campaign_id=? AND id=? AND state=?`, checkpointJSON, tenant, campaignID, candidateID, optimizationcampaign.CandidateMeasuring)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	return count > 0, nil
+}
+
+// RecordOptimizationMachineReplacement adds or updates the entry for one lost
+// replica on the candidate that owns the machine. The entry is keyed by
+// lost_replica_id, so a retried recovery updates its own entry and can never
+// count one lost machine twice. A new entry is refused once limit entries
+// other than given_up markers exist; an existing entry can always be
+// updated.
+func (s *Store) RecordOptimizationMachineReplacement(ctx context.Context, tenant, campaignID, candidateID, entryJSON string, limit int) (string, error) {
+	var entry struct {
+		LostReplicaID string `json:"lost_replica_id"`
+	}
+	if len(entryJSON) > 4096 || json.Unmarshal([]byte(entryJSON), &entry) != nil || entry.LostReplicaID == "" || limit < 1 {
+		return "", errors.New("machine replacement must be bounded JSON naming the lost replica")
+	}
+	var updated string
+	err := s.QueryRowContext(ctx, `UPDATE optimization_candidate_runs SET machine_replacements = CASE
+  WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(machine_replacements) existing WHERE existing->>'lost_replica_id' = ?)
+    THEN (SELECT COALESCE(jsonb_agg(CASE WHEN existing->>'lost_replica_id' = ? THEN existing || ?::jsonb ELSE existing END ORDER BY position), '[]'::jsonb) FROM jsonb_array_elements(machine_replacements) WITH ORDINALITY AS item(existing, position))
+  ELSE machine_replacements || jsonb_build_array(?::jsonb) END
+WHERE tenant_id=? AND campaign_id=? AND id=? AND (EXISTS (SELECT 1 FROM jsonb_array_elements(machine_replacements) existing WHERE existing->>'lost_replica_id' = ?) OR (SELECT count(*) FROM jsonb_array_elements(machine_replacements) existing WHERE existing->>'state' IS DISTINCT FROM 'given_up') < ?)
+RETURNING machine_replacements::text`, entry.LostReplicaID, entry.LostReplicaID, entryJSON, entryJSON, tenant, campaignID, candidateID, entry.LostReplicaID, limit).Scan(&updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrConflict
+	}
+	return updated, err
 }
 
 // RecordOptimizationCandidateCostQuote keeps the first sourced quote that

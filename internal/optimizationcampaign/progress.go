@@ -22,7 +22,8 @@ const (
 // MeasurementProgress is the live record of one candidate's interleaved
 // measurement: every AIPerf invocation so far, in order, with the numbers it
 // measured. A turn is one measured run of either arm; warmups are not turns.
-// TurnsPlanned shrinks when the control drops out mid-measurement.
+// After an interruption the record keeps the failed invocation, and the
+// resumed segment's warmups and turns are added to the plan.
 type MeasurementProgress struct {
 	Method         string           `json:"method"`
 	StartedAt      time.Time        `json:"started_at"`
@@ -55,9 +56,9 @@ type MeasurementProgressSink interface {
 	RecordOptimizationMeasurementProgress(context.Context, string, string, string, string) (bool, error)
 }
 
-// progressTracker records each invocation before and after it runs. Recording
-// is display evidence only: a failed write is logged and never fails or slows
-// the measurement beyond the write itself.
+// progressTracker records each invocation before and after it runs.
+// Recording is display evidence only: a failed write is logged and never
+// fails or slows the measurement beyond the write itself.
 type progressTracker struct {
 	sink                            MeasurementProgressSink
 	tenant, campaignID, candidateID string
@@ -66,45 +67,51 @@ type progressTracker struct {
 	controlTurns, candidateTurns    int
 }
 
+// newProgressTracker starts a record, or continues the stored one when the
+// measurement resumes after an interruption.
 func newProgressTracker(sink MeasurementProgressSink, candidate domain.OptimizationCandidateRun, now func() time.Time) *progressTracker {
-	return &progressTracker{sink: sink, tenant: candidate.TenantID, campaignID: candidate.CampaignID, candidateID: candidate.ID, now: now, record: MeasurementProgress{Method: MeasurementMethod, Runs: []MeasurementRun{}}}
-}
-
-// plan sets the expected invocations: with a live control, two warmups and
-// C X C X C X C; without one, one warmup and the candidate's runs.
-func (t *progressTracker) plan(withControl bool) {
-	if t == nil {
-		return
-	}
-	t.record.StartedAt = t.now()
-	if withControl {
-		t.record.TurnsPlanned, t.record.WarmupsPlanned = 2*measurementRunsPerArm+1, 2
-	} else {
-		t.record.TurnsPlanned, t.record.WarmupsPlanned = measurementRunsPerArm, 1
-	}
-	t.save()
-}
-
-// dropControl replans after the control failed: invocations already recorded
-// stay, and only the candidate's remaining warmup and turns are still expected.
-func (t *progressTracker) dropControl() {
-	if t == nil {
-		return
-	}
-	turns, warmups, candidateWarmedUp := 0, 0, false
-	for _, run := range t.record.Runs {
-		if run.Kind == RunKindTurn {
-			turns++
-		} else {
-			warmups++
-			candidateWarmedUp = candidateWarmedUp || run.Arm == ArmCandidate
+	tracker := &progressTracker{sink: sink, tenant: candidate.TenantID, campaignID: candidate.CampaignID, candidateID: candidate.ID, now: now, record: MeasurementProgress{Method: MeasurementMethod, Runs: []MeasurementRun{}}}
+	if existing, ok := DecodeMeasurementProgress(candidate.MeasurementProgressJSON); ok {
+		tracker.record = existing
+		for _, run := range existing.Runs {
+			if run.Kind != RunKindTurn || run.EndedAt == nil || run.Error != "" {
+				continue
+			}
+			if run.Arm == ArmControl {
+				tracker.controlTurns++
+			} else {
+				tracker.candidateTurns++
+			}
 		}
 	}
-	t.record.TurnsPlanned = turns + measurementRunsPerArm - t.candidateTurns
-	t.record.WarmupsPlanned = warmups
-	if !candidateWarmedUp {
-		t.record.WarmupsPlanned++
+	return tracker
+}
+
+// planSegment sets the invocations still expected. A fresh measurement with a
+// live control plans two warmups and C X C X C X C; without one, one warmup
+// and the candidate's runs. A resumed segment keeps every recorded invocation
+// and adds its own warmups and the turns its remaining pairs need.
+func (t *progressTracker) planSegment(withControl bool, remaining int, resumed bool) {
+	if t == nil {
+		return
 	}
+	warmups, turns := 1, remaining
+	if withControl {
+		warmups, turns = 2, 2*remaining+1
+	}
+	if !resumed || t.record.StartedAt.IsZero() {
+		t.record = MeasurementProgress{Method: MeasurementMethod, Runs: []MeasurementRun{}, StartedAt: t.now()}
+		t.controlTurns, t.candidateTurns = 0, 0
+	}
+	recordedTurns, recordedWarmups := 0, 0
+	for _, run := range t.record.Runs {
+		if run.Kind == RunKindTurn {
+			recordedTurns++
+		} else {
+			recordedWarmups++
+		}
+	}
+	t.record.TurnsPlanned, t.record.WarmupsPlanned = recordedTurns+turns, recordedWarmups+warmups
 	t.save()
 }
 

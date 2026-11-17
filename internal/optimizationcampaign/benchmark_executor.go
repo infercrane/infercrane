@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/support"
@@ -54,6 +56,10 @@ type BenchmarkExecutor struct {
 	// Progress records each invocation while the candidate measures; nil
 	// records nothing. It is display evidence and never affects the result.
 	Progress MeasurementProgressSink
+	// Checkpoints stores the resumable measurement after every complete pair
+	// and at an interruption; nil keeps nothing, so a stopped measurement
+	// starts over.
+	Checkpoints MeasurementCheckpointSink
 }
 
 func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, profile performanceprofile.Profile) (domain.BenchmarkResult, error) {
@@ -94,27 +100,36 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
-	base, err := invocationBase(e.Entropy)
+	control, controlEvidence, err := e.controlTarget(ctx, campaign, candidate)
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
-	runs := &invocations{runner: e.Runner, binary: e.AIPerfBinary, plan: plan, base: base}
+	if control != nil {
+		controlEvidence.ServerMetrics = control.serverMetrics
+	}
+	state, err := e.checkpoint(campaign, candidate, profile, target, controlEvidence, plan)
+	if err != nil {
+		return domain.BenchmarkResult{}, err
+	}
+	if state.Control.Role != ControlRoleBracketed {
+		// The control's role is fixed when the measurement starts. A control
+		// that comes up later is not added mid-measurement.
+		control = nil
+	}
+	runs := &invocations{runner: e.Runner, binary: e.AIPerfBinary, plan: plan}
 	if plan.trace != nil {
 		if runs.dir, err = os.MkdirTemp("", "infercrane-campaign-replay-"); err != nil {
 			return domain.BenchmarkResult{}, fmt.Errorf("create replay staging directory: %w", err)
 		}
 		defer os.RemoveAll(runs.dir)
 	}
-	control, controlEvidence, err := e.controlTarget(ctx, campaign, candidate)
-	if err != nil {
-		return domain.BenchmarkResult{}, err
-	}
 	started := e.now()
 	var tracker *progressTracker
 	if e.Progress != nil {
 		tracker = newProgressTracker(e.Progress, candidate, e.now)
 	}
-	measured, err := measureInterleaved(ctx, runs, target, control, controlEvidence, tracker)
+	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now}
+	measured, err := session.run(ctx)
 	ended := e.now()
 	if err != nil {
 		return domain.BenchmarkResult{}, err
@@ -160,6 +175,40 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	return e.Store.RecordBenchmark(ctx, row)
 }
 
+// checkpoint returns the measurement to continue: the stored one when it
+// belongs to these exact arms and load, otherwise a fresh one with a new
+// invocation base. A stored checkpoint whose interruption is still pending is
+// never measured from; the driver resolves it first.
+func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, profile performanceprofile.Profile, target armTarget, control ControlEvidence, plan loadPlan) (MeasurementCheckpoint, error) {
+	identity := measurementIdentity(target, control, plan, profile.Name+"@"+performanceprofile.Version, campaignRequest(campaign).WorkloadFingerprint)
+	if stored, ok := DecodeMeasurementCheckpoint(candidate.MeasurementCheckpointJSON); ok {
+		if stored.Pending() != nil {
+			return MeasurementCheckpoint{}, errCheckpointPending
+		}
+		resumable := stored.Identity == identity
+		if owner, found := CampaignControl(campaign); !resumable && found && stored.Control.Role == ControlRoleBracketed && control.Role == ControlRoleUnavailable && control.CandidateID == stored.Control.CandidateID && liveControlState(owner.State) {
+			// The recovered control is still coming up. Measuring without it
+			// would throw away every bracketed pair, so wait for it.
+			return MeasurementCheckpoint{}, operations.Retryable("optimization_control_not_serving", errors.New("the recovered control has no healthy endpoint yet"))
+		}
+		if !resumable && len(stored.Segments) > 0 {
+			// A recovered control keeps its candidate and revision, so the
+			// identity matches. A role change means the control is gone; the
+			// identity then differs and the stored control runs would
+			// misdescribe the comparison.
+			slog.Warn("optimization measurement checkpoint does not match the current arms or load; measuring from the start", "campaign_id", candidate.CampaignID, "candidate_id", candidate.ID)
+		}
+		if resumable {
+			return stored, nil
+		}
+	}
+	base, err := invocationBase(e.Entropy)
+	if err != nil {
+		return MeasurementCheckpoint{}, err
+	}
+	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control}, nil
+}
+
 // directTarget selects the lowest-ordinal healthy ready replica of one exact
 // revision and the server-side credential for its provider.
 func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
@@ -177,10 +226,10 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	if err != nil {
 		return armTarget{}, "", err
 	}
-	endpoint, provider, ordinal := "", "", int(^uint(0)>>1)
+	endpoint, provider, replicaID, ordinal := "", "", "", int(^uint(0)>>1)
 	for _, replica := range replicas {
 		if replica.RevisionID == candidate.RevisionID && replica.Endpoint != "" && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Ordinal < ordinal {
-			endpoint, provider, ordinal = replica.Endpoint, replica.Provider, replica.Ordinal
+			endpoint, provider, replicaID, ordinal = replica.Endpoint, replica.Provider, replica.ID, replica.Ordinal
 		}
 	}
 	if endpoint == "" || provider == "" {
@@ -195,7 +244,7 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	// runtime's draft carries no workload, so read the contract the replica
 	// was provisioned with, not the empty draft.
 	served := support.ServedWorkload(draft.Runtime.Engine, draft.Resources.GPU, draft.Runtime.Workload)
-	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
+	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, replicaID: replicaID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 
 // controlTarget resolves the campaign control's live endpoint. The control is

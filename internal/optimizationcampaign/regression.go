@@ -84,7 +84,7 @@ func MeasuredRegressions(evidence *MeasuredEvidence) []Regression {
 }
 
 // driftedControl reports a window invalidated only because the control's
-// throughput drifted past the limit. measureInterleaved records MaxDrift on
+// throughput drifted past the limit. The measurement records MaxDrift on
 // an invalid window only in that case, after every control run completed
 // cleanly.
 func driftedControl(control ControlEvidence) bool {
