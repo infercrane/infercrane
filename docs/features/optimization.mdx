@@ -638,9 +638,12 @@ one at a time, control first. A candidate that reaches the barrier waits there w
 is provisioned, so a deployment that converges between execution attempts is recorded on the next
 attempt. A winner stays in the ranking after it becomes `qualified` (or `guarding` for an
 evolution), so ranking the candidates after it reproduces the same evaluation. Inference Lab then
-compares only the exact same workload shape and the exact deployed model artifact
-(`repository@revision`), even when the campaign was created from a catalog name. Candidates that serve different artifacts cannot share
-one ranking and fail closed. Proposal order cannot choose the winner. Missing sourced cost, mismatched
+compares only the exact same workload shape, and each candidate's evidence must name the exact
+model artifact (`repository@revision`) that candidate deployed, even when the campaign was created
+from a catalog name. A quantized setup serves its own artifact and competes only when it was built
+from the control's model (see [When a quantized setup can win](#when-a-quantized-setup-can-win)).
+A proposal whose candidates serve unrelated models is refused when the campaign is created, with
+`invalid_optimization_proposal`. Proposal order cannot choose the winner. Missing sourced cost, mismatched
 workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost violations produce
 `rejected`. For evolution campaigns, the selected candidate still has to pass
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
@@ -681,6 +684,29 @@ covers the evidence format, eval sets, and the signing key.
 Agreement with the control is not task accuracy: it shows the candidate answers like your current
 setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
 your prompts, or attach your own evaluator's signed results.
+
+### When a quantized setup can win
+
+A quantized setup, such as a publisher's FP8 or NVFP4 checkpoint, serves different model files than
+your current setup. It can win a campaign when its answers hold and it is measurably better:
+
+- **It is built from the control's model.** The checkpoint records the model it was built from.
+  Ranking compares it with the control only when that is the control's repository and, for `exact`
+  lineage, the control's revision. When the publisher names only the base repository, the lineage is
+  `publisher_declared` and the source revision stays unknown. A checkpoint of another model or
+  another revision is refused when the campaign is created.
+- **The control serves the unmodified model.** The control's answers are the reference for every
+  answer check, so a quantized setup is never the control.
+- **Its answers pass the same check as every other setup.** A precision change changes the model's
+  numbers, so there is no exemption: the built-in check compares its answers with the control's, or
+  your signed evaluation decides. A quantized setup the check blocks ends `rejected` with
+  `quality_gate_rejected` and is never ranked, however fast it measured.
+- **It beats the control by more than the measurement noise** on the same workload, like any other
+  setup.
+
+The persisted ranking lists the quantized artifacts it admitted under `derived_model_identities` in
+its input, and names each quantized row's artifact (`model_identity`) and lineage
+(`artifact_lineage`: `exact` or `publisher_declared`). Unmodified rows keep their earlier shape.
 
 ### How a campaign measures candidates
 
@@ -926,7 +952,9 @@ Every entry is an **unmeasured candidate**, not an InferCrane performance claim.
 claim that it transformed the publisher artifact or that the artifact is faster on a target GPU.
 Exact runtime and accelerator compatibility, correctness, semantic quality, workload performance,
 and cost evidence remain mandatory before Release Guard can accept a candidate. A publisher
-checkpoint that fails any gate is retained as negative evidence rather than promoted.
+checkpoint that fails any gate is retained as negative evidence rather than promoted. One that is
+measured faster than the unmodified model, with answers that pass the check against it, can win the
+campaign; see [When a quantized setup can win](#when-a-quantized-setup-can-win).
 
 ### What each entry records
 
@@ -961,6 +989,10 @@ A catalog entry seeds a proposal candidate only when every condition holds:
   unmerged engine pull request keeps the build off that engine until a reviewer records the release
   that contains the change.
 - For `exact` lineage, the campaign pins the stated base revision.
+
+The unmodified setup each checkpoint is compared with serves the revision you pinned. A reviewed
+recipe's revision is used only when you pin none, so one proposal never mixes two revisions of a
+model.
 
 The catalog records the blockers for every other entry. `GET /api/v1/catalog/hugging-face/models`
 lists each base model's publisher builds under `publisher_builds`, including AMD and Intel builds
