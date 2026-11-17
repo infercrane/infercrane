@@ -770,7 +770,7 @@ func TestCleanedCampaignReportsAWinnerThatWasNeverRolledOut(t *testing.T) {
 			if report.Outcome.Kind != OutcomeWinnerSelected || report.Outcome.WinnerCandidateID != "winner" || report.Outcome.Activated {
 				t.Fatalf("outcome = %+v", report.Outcome)
 			}
-			want := "“vllm, --max-num-seqs 256” was the best setup found but was not rolled out: it measured better than your current setup on the same traffic; "
+			want := "“Up to 256 concurrent requests” was the best setup found but was not rolled out: it measured better than your current setup on the same traffic; "
 			if !strings.HasPrefix(report.Outcome.Headline, want) || strings.Contains(Text(report), "Roll out") {
 				t.Fatalf("headline = %q", report.Outcome.Headline)
 			}
