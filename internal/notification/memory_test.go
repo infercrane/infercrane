@@ -272,6 +272,10 @@ func (m *memoryStore) ReleaseGuardEvaluationsByIDs(context.Context, string, []st
 	return map[string]domain.ReleaseGuardEvaluation{}, nil
 }
 
+func (m *memoryStore) LabEvaluationsByIDs(context.Context, string, []string) (map[string]domain.LabEvaluation, error) {
+	return map[string]domain.LabEvaluation{}, nil
+}
+
 func (m *memoryStore) ReplayTraceByDigest(context.Context, string, string) (domain.ReplayTrace, error) {
 	return domain.ReplayTrace{}, domain.ErrNotFound
 }

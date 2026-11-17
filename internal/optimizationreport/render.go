@@ -62,6 +62,19 @@ type view struct {
 type viewRow struct {
 	Label, Baseline, Winner, Change, Decision, Noise, Reason string
 	Tone                                                     string
+	// Lead is an outcome card's large value and LeadNote the line under it.
+	Lead, LeadNote string
+}
+
+// lead fills the card values. A card leads with the chosen setup; when the
+// campaign chose none it leads with the current setup, so measured values
+// stay visible instead of a large "unknown".
+func (row *viewRow) lead(chosen bool) {
+	if chosen {
+		row.Lead, row.LeadNote = row.Winner, "current setup: "+row.Baseline
+		return
+	}
+	row.Lead, row.LeadNote = row.Baseline, "current setup"
 }
 
 type viewCandidate struct {
@@ -82,6 +95,10 @@ func newView(r Report) view {
 		v.Rows = append(v.Rows, metricRow(metric))
 	}
 	v.Rows = append(v.Rows, qualityRow(r.Quality), monthlyRow(r.Monthly))
+	chosen := r.Outcome.Kind == OutcomeWinnerSelected || r.Outcome.Kind == OutcomeBaselineKept
+	for index := range v.Rows {
+		v.Rows[index].lead(chosen)
+	}
 	v.Measurement = measurementLines(r)
 	for _, candidate := range r.Candidates {
 		v.Candidates = append(v.Candidates, candidateView(candidate))

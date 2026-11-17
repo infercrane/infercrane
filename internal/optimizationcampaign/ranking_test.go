@@ -97,6 +97,46 @@ func TestRankMeasuredCampaignIgnoresProposalOrder(t *testing.T) {
 	}
 }
 
+// TestRankingDecisionsReadBackThePersistedRanking keeps the reader the
+// optimization report uses after cleanup equal to what ranking persists, for
+// a challenger that won and for a control the gate kept.
+func TestRankingDecisionsReadBackThePersistedRanking(t *testing.T) {
+	won, wonBenchmarks := rankingFixture(t, "interactive", nil)
+	kept, keptBenchmarks := rankingFixture(t, "interactive", nil)
+	keptBenchmarks[1].WorkloadJSON = interleaved(t, map[string]MetricComparison{"ttft_p95_ms": {ControlMean: 220, CandidateMean: 214, Delta: -6.0 / 220, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}})
+	for name, test := range map[string]struct {
+		campaign   domain.OptimizationCampaign
+		benchmarks []domain.BenchmarkResult
+		selected   string
+	}{"challenger-won": {won, wonBenchmarks, "candidate-b"}, "control-kept": {kept, keptBenchmarks, "candidate-a"}} {
+		t.Run(name, func(t *testing.T) {
+			result, err := RankMeasuredCampaign(test.campaign, test.benchmarks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decisions, err := RankingDecisions(result.Evaluation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(decisions) != len(result.Decisions) || decisions[test.selected] != RankSelect {
+				t.Fatalf("persisted decisions=%v, ranked %v", decisions, result.Decisions)
+			}
+			for id, decision := range result.Decisions {
+				if decisions[id] != decision {
+					t.Fatalf("candidate %s persisted %q, ranked %q", id, decisions[id], decision)
+				}
+			}
+		})
+	}
+	if _, err := RankingDecisions(domain.LabEvaluation{ResultsJSON: "not json"}); err == nil {
+		t.Fatal("an unreadable ranking was decoded")
+	}
+	unannotated, err := RankingDecisions(domain.LabEvaluation{ResultsJSON: `[{"selected":true}]`})
+	if err != nil || len(unannotated) != 0 {
+		t.Fatalf("a Lab result without campaign decisions produced %v err=%v", unannotated, err)
+	}
+}
+
 func TestRankMeasuredCampaignBarrierWaitsForPeersButNotForAnEarlierWinner(t *testing.T) {
 	campaign, benchmarks := rankingFixture(t, "interactive", nil)
 	campaign.Candidates[0].State = CandidateProvisioning

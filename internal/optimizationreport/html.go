@@ -64,8 +64,8 @@ footer{color:var(--muted);font-size:12.5px;margin-top:32px}
 <section aria-label="Outcomes" class="cards">
 {{range .Rows}}<div class="card">
 <div class="label">{{.Label}}</div>
-<div class="value">{{.Winner}}</div>
-<div class="was">current setup: {{.Baseline}}</div>
+<div class="value">{{.Lead}}</div>
+<div class="was">{{.LeadNote}}</div>
 <span class="pill {{.Tone}}">{{.Change}}{{if .Decision}} · {{.Decision}}{{end}}</span>
 {{if .Noise}}<div class="note">{{.Noise}}</div>{{end}}
 {{if .Reason}}<div class="note">{{.Reason}}</div>{{end}}
