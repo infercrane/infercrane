@@ -60,6 +60,11 @@ type inboxCampaign struct {
 		QualityEvidenceID string    `json:"quality_evidence_id"`
 		FailureCode       string    `json:"failure_code"`
 		UpdatedAt         time.Time `json:"updated_at"`
+		// Quality is the control plane's own reading of the answer check.
+		// An older control plane omits it, and then no wait is claimed.
+		Quality struct {
+			State string `json:"state"`
+		} `json:"quality"`
 	} `json:"candidates"`
 }
 
@@ -206,10 +211,19 @@ func deploymentInboxItems(deployment deploymentSummary) []inboxItem {
 // with the same rules as the run notifications.
 func campaignInboxItems(campaign inboxCampaign, now time.Time) []inboxItem {
 	run := domain.OptimizationCampaign{ID: campaign.ID, ModelIdentity: campaign.ModelIdentity, Intent: campaign.Intent, State: campaign.State, FailureCode: campaign.FailureCode, CancelRequested: campaign.CancelRequested, ApprovalExpiresAt: campaign.ApprovalExpiresAt, ApprovedAt: campaign.ApprovedAt, CreatedAt: campaign.CreatedAt, UpdatedAt: campaign.UpdatedAt}
+	wait := notification.QualityWaitNone
 	for _, candidate := range campaign.Candidates {
 		run.Candidates = append(run.Candidates, domain.OptimizationCandidateRun{ID: candidate.ID, CampaignID: campaign.ID, State: candidate.State, DeploymentName: candidate.DeploymentName, QualityEvidenceID: candidate.QualityEvidenceID, FailureCode: candidate.FailureCode, UpdatedAt: candidate.UpdatedAt})
+		switch candidate.Quality.State {
+		case "waiting_for_evidence":
+			wait = notification.QualityWaitEvidence
+		case "waiting_for_eval_set":
+			if wait == notification.QualityWaitNone {
+				wait = notification.QualityWaitEvalSet
+			}
+		}
 	}
-	attention := notification.CampaignAttention(run, now)
+	attention := notification.CampaignAttention(run, now, wait)
 	items := make([]inboxItem, 0, len(attention))
 	for _, item := range attention {
 		items = append(items, inboxItem{Severity: item.Severity, Code: item.Code, ResourceKind: "optimization", ResourceName: campaign.ID, Summary: item.Summary, Evidence: "optimization_campaign.state", Next: item.Next, UpdatedAt: item.UpdatedAt})

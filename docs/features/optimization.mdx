@@ -254,7 +254,7 @@ curl -X POST "$INFERCRANE_URL/api/v1/notifications/subscriptions" \
 |---|---|
 | `approval_needed` | A run is created and waits for spend approval. |
 | `approval_expiring` | A run's approval ends within a quarter of its window, at most one hour. A result waiting for rollout is discarded at that time; work still running stops and is cleaned up. |
-| `quality_evidence_needed` | A setup has waited more than five minutes for signed answer-quality evidence. |
+| `quality_evidence_needed` | A setup has waited more than five minutes on you before its answers can be checked: for your signed evaluation when the run asked for [customer evidence](#how-a-campaign-checks-answers), or for the eval set the run names to be uploaded. The built-in answer check needs no one and never sends it. |
 | `decided` | The run reaches a decision. `outcome.kind` is `winner`, `no_clear_winner` (nothing beat your current setup by more than the measurement noise), or `nothing_passed` (no setup qualified). It comes from the [outcome report](#read-the-outcome-of-a-campaign) and is `unknown` when the report cannot be read. |
 | `failed` | The run failed. `failure.code` is the first candidate failure, or `unknown`. |
 | `rolled_out` | The winner is rolled out. |

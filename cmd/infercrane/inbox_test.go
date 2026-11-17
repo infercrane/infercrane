@@ -21,7 +21,8 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
       {"id":"run-approval","model_identity":"Qwen/Qwen3-8B","state":"awaiting_approval","created_at":%[1]q,"updated_at":%[1]q,"candidates":[]},
       {"id":"run-winner","model_identity":"Qwen/Qwen3-8B","state":"qualified","approved_at":%[2]q,"approval_expires_at":%[3]q,"updated_at":%[1]q,"candidates":[{"id":"cand-1","state":"qualified","updated_at":%[1]q}]},
       {"id":"run-failed","model_identity":"Qwen/Qwen3-8B","state":"cleaned","failure_code":"approval_expired","updated_at":%[1]q,"candidates":[{"id":"cand-2","state":"cleaned","failure_code":"approval_expired","updated_at":%[1]q}]},
-      {"id":"run-quality","model_identity":"Qwen/Qwen3-8B","state":"running","approved_at":%[4]q,"approval_expires_at":%[5]q,"updated_at":%[4]q,"candidates":[{"id":"cand-3","state":"validating","deployment_name":"qwen-opt-cand-3","updated_at":%[6]q}]},
+      {"id":"run-quality","model_identity":"Qwen/Qwen3-8B","state":"running","approved_at":%[4]q,"approval_expires_at":%[5]q,"updated_at":%[4]q,"candidates":[{"id":"cand-3","state":"validating","deployment_name":"qwen-opt-cand-3","updated_at":%[6]q,"quality":{"state":"waiting_for_evidence"}}]},
+      {"id":"run-checking","model_identity":"Qwen/Qwen3-8B","state":"running","approved_at":%[4]q,"approval_expires_at":%[5]q,"updated_at":%[4]q,"candidates":[{"id":"cand-5","state":"validating","updated_at":%[6]q,"quality":{"state":"checking"}}]},
       {"id":"run-cancelled","model_identity":"Qwen/Qwen3-8B","state":"awaiting_approval","cancel_requested":true,"updated_at":%[1]q,"candidates":[]},
       {"id":"run-done","model_identity":"Qwen/Qwen3-8B","state":"cleaned","updated_at":%[1]q,"candidates":[{"id":"cand-4","state":"cleaned","updated_at":%[1]q}]}
     ]}`, at(-time.Minute), at(-3*time.Hour), at(10*time.Minute), at(-time.Hour), at(5*time.Hour), at(-10*time.Minute))
@@ -64,7 +65,7 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
 	if strings.Contains(output, "never-expose-this-content") {
 		t.Fatal("inbox copied unrecognized request content from a fleet response")
 	}
-	if report.TotalAttention != 9 || report.Critical != 4 || report.Warnings != 5 || report.TotalEndpoints != 3 || report.TotalDeploys != 3 || report.TotalRuns != 6 || report.Truncated || report.Returned != 9 || report.Evidence != "persisted_control_plane_state" {
+	if report.TotalAttention != 9 || report.Critical != 4 || report.Warnings != 5 || report.TotalEndpoints != 3 || report.TotalDeploys != 3 || report.TotalRuns != 7 || report.Truncated || report.Returned != 9 || report.Evidence != "persisted_control_plane_state" {
 		t.Fatalf("report=%#v", report)
 	}
 	want := []string{
@@ -84,7 +85,7 @@ func TestInboxRanksPersistedFleetAttentionDeterministically(t *testing.T) {
 			t.Fatalf("item lacks actionable evidence: %#v", item)
 		}
 	}
-	if next := report.Items[6].Next; next != "infercrane evaluation attach qwen-opt-cand-3 --file evidence.json" {
+	if next := report.Items[6].Next; next != "infercrane optimize inspect run-quality" {
 		t.Fatalf("quality evidence next=%q", next)
 	}
 	if summary := report.Items[2].Summary; !strings.Contains(summary, "spend approval ended") {

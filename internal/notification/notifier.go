@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
 )
 
@@ -30,6 +31,7 @@ type NotifierStore interface {
 	OptimizationCampaignTransitionsSince(context.Context, string, time.Time) ([]domain.OptimizationCampaignTransition, error)
 	NotificationEventKeysSince(context.Context, string, time.Time) (map[string]bool, error)
 	ClaimNotificationDeliveries(context.Context, time.Duration, int) ([]domain.NotificationDelivery, error)
+	QualityEvalSet(context.Context, string, string) (domain.QualityEvalSet, error)
 }
 
 // Notifier queues campaign events for every enabled destination and sends
@@ -136,10 +138,12 @@ func (n Notifier) queueTenant(ctx context.Context, tenant string) (int, error) {
 		return 0, err
 	}
 	queued := 0
+	evalSetMissing := map[string]bool{}
 	for _, campaign := range campaigns {
 		var outcome *Outcome
 		reportRead := false
-		for _, notice := range CampaignNotices(campaign, byCampaign[campaign.ID], now) {
+		wait := QualityWait(campaign, n.evalSetMissing(ctx, tenant, campaign, evalSetMissing))
+		for _, notice := range CampaignNotices(campaign, byCampaign[campaign.ID], now, wait) {
 			if notice.OccurredAt.Before(since) {
 				continue
 			}
@@ -253,6 +257,33 @@ func (n Notifier) now() time.Time {
 		return n.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// evalSetMissing reports whether a run waits for the upload of the eval set it
+// names. It reads the store only for a run with a setup in validation, once
+// per digest and pass. A failed read is not a wait.
+func (n Notifier) evalSetMissing(ctx context.Context, tenant string, campaign domain.OptimizationCampaign, known map[string]bool) bool {
+	digest := optimizationcampaign.QualityEvalSetDigest(campaign)
+	if digest == "" || optimizationcampaign.QualityWaitsForCustomer(campaign) {
+		return false
+	}
+	validating := false
+	for _, candidate := range campaign.Candidates {
+		validating = validating || candidate.State == optimizationcampaign.CandidateValidating && candidate.QualityEvidenceID == ""
+	}
+	if !validating {
+		return false
+	}
+	if missing, ok := known[digest]; ok {
+		return missing
+	}
+	_, err := n.Store.QualityEvalSet(ctx, tenant, digest)
+	missing := errors.Is(err, domain.ErrNotFound)
+	if err != nil && !missing {
+		n.logger().Warn("eval set upload state unknown", "tenant", tenant, "campaign_id", campaign.ID, "error", err)
+	}
+	known[digest] = missing
+	return missing
 }
 
 func (n Notifier) logger() *slog.Logger {

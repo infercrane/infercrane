@@ -18,6 +18,7 @@ import (
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
+	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/secretcipher"
 )
 
@@ -193,6 +194,42 @@ func TestNotifierDeliversSignedApprovalAndDecisionEventsOnce(t *testing.T) {
 		if delivery.Status != "delivered" || delivery.Attempts != 1 {
 			t.Fatalf("delivery=%+v", delivery)
 		}
+	}
+}
+
+func TestQualityWaitIsAnnouncedOnlyWhenTheRunWaitsOnTheCustomer(t *testing.T) {
+	ctx := context.Background()
+	clk := &fakeClock{now: time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)}
+	store := newMemoryStore(clk.Now)
+	service := testService(t, store, newReceiver(t).poster(), clk.Now)
+	if _, _, err := service.Create(ctx, "tenant-a", "owner", CreateRequest{Destination: "webhook", URL: "https://hooks.example.test/infercrane", Events: []string{EventQualityEvidenceNeeded}}); err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(time.Hour)
+	uploaded := "sha256:" + strings.Repeat("a", 64)
+	store.evalSets = map[string]bool{uploaded: true}
+	run := func(id, proposal string) {
+		store.setCampaign(domain.OptimizationCampaign{ID: id, TenantID: "tenant-a", ModelIdentity: "Qwen/Qwen3-8B", State: optimizationcampaign.CampaignRunning, ProposalJSON: proposal, CreatedAt: clk.Now().Add(-30 * time.Minute), UpdatedAt: clk.Now(), Candidates: []domain.OptimizationCandidateRun{{ID: id + "-a", State: optimizationcampaign.CandidateValidating, UpdatedAt: clk.Now().Add(-20 * time.Minute)}}})
+	}
+	run("builtin", proposalJSON(t, optimizer.QualityCheckBuiltin, ""))
+	run("customer", proposalJSON(t, optimizer.QualityCheckCustomer, ""))
+	run("eval-set-missing", proposalJSON(t, optimizer.QualityCheckBuiltin, testEvalSet))
+	run("eval-set-uploaded", proposalJSON(t, optimizer.QualityCheckBuiltin, uploaded))
+
+	queued, err := Notifier{Service: service, Store: store, Reports: store, Now: clk.Now}.Queue(ctx)
+	if err != nil || queued != 2 {
+		t.Fatalf("queued=%d err=%v", queued, err)
+	}
+	summaries := map[string]string{}
+	for _, delivery := range store.delivered(EventQualityEvidenceNeeded) {
+		var body Body
+		if err = json.Unmarshal([]byte(delivery.Body), &body); err != nil {
+			t.Fatal(err)
+		}
+		summaries[delivery.CampaignID] = body.Summary
+	}
+	if !strings.Contains(summaries["customer"], "your signed evaluation of 1 setup") || !strings.Contains(summaries["eval-set-missing"], "eval set it names to be uploaded") || len(summaries) != 2 {
+		t.Fatalf("summaries=%v", summaries)
 	}
 }
 

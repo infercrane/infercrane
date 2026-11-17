@@ -42,14 +42,23 @@ const (
 	// Lookback bounds how old an event may be and still be sent. It equals the
 	// longest approval window, so no live run falls outside it.
 	Lookback = 24 * time.Hour
-	// QualityEvidenceGrace is how long a setup may wait in validation before
-	// the run counts as waiting on quality evidence. Validation is immediate
-	// when the evidence is already attached.
+	// QualityEvidenceGrace is how long a setup may wait on the customer in
+	// validation before the run says so. Evidence or an eval set provided
+	// ahead of time is picked up on the run's next pass, so that case stays
+	// quiet.
 	QualityEvidenceGrace = 5 * time.Minute
 	// MaxExpiryWarning caps how early the approval-expiring event fires.
 	MaxExpiryWarning = time.Hour
 	// RecentFailure is how long a failed run stays in the inbox.
 	RecentFailure = 24 * time.Hour
+)
+
+// What a validating setup waits for from the customer. The built-in answer
+// check needs no one, so a run that uses it never waits on the customer.
+const (
+	QualityWaitNone     = ""
+	QualityWaitEvidence = "evidence"
+	QualityWaitEvalSet  = "eval_set"
 )
 
 // Notice is one event a campaign has produced. ID is stable for the campaign
@@ -60,6 +69,23 @@ type Notice struct {
 	CampaignID   string
 	OccurredAt   time.Time
 	CandidateIDs []string
+	// QualityWait is set on EventQualityEvidenceNeeded.
+	QualityWait string
+}
+
+// QualityWait returns what the run's validating setups wait for from the
+// customer: their signed evaluation when the run asked for customer
+// evidence, or the eval set the run names when evalSetMissing says it is not
+// uploaded. Pass false when the upload state is unknown, so an unread store
+// never says a run needs someone.
+func QualityWait(campaign domain.OptimizationCampaign, evalSetMissing bool) string {
+	switch {
+	case optimizationcampaign.QualityWaitsForCustomer(campaign):
+		return QualityWaitEvidence
+	case evalSetMissing && optimizationcampaign.QualityEvalSetDigest(campaign) != "":
+		return QualityWaitEvalSet
+	}
+	return QualityWaitNone
 }
 
 // ExpiryWarning is how long before an approval ends the run warns about it:
@@ -76,10 +102,11 @@ func ExpiryWarning(approvedAt, expiresAt time.Time) time.Duration {
 }
 
 // CampaignNotices returns every event the campaign has produced by now.
-// Waiting states are read from the campaign itself; decisions, failures, and
-// rollouts are read from its recorded transitions, because cleanup rewrites
-// the campaign state seconds after a decision. A cancelled run produces none.
-func CampaignNotices(campaign domain.OptimizationCampaign, transitions []domain.OptimizationCampaignTransition, now time.Time) []Notice {
+// Waiting states are read from the campaign itself, with qualityWait from
+// QualityWait; decisions, failures, and rollouts are read from its recorded
+// transitions, because cleanup rewrites the campaign state seconds after a
+// decision. A cancelled run produces none.
+func CampaignNotices(campaign domain.OptimizationCampaign, transitions []domain.OptimizationCampaignTransition, now time.Time, qualityWait string) []Notice {
 	if campaign.CancelRequested || campaign.ID == "" {
 		return nil
 	}
@@ -93,8 +120,10 @@ func CampaignNotices(campaign domain.OptimizationCampaign, transitions []domain.
 	if warnAt, ok := expiryWarningAt(campaign, now); ok {
 		notices = append(notices, notice(EventApprovalExpiring, warnAt, waitingForRollout(campaign)))
 	}
-	if since, waiting := waitingOnQualityEvidence(campaign, now); len(waiting) > 0 {
-		notices = append(notices, notice(EventQualityEvidenceNeeded, since.Add(QualityEvidenceGrace), waiting))
+	if since, waiting := waitingOnQualityEvidence(campaign, qualityWait, now); len(waiting) > 0 {
+		waitNotice := notice(EventQualityEvidenceNeeded, since.Add(QualityEvidenceGrace), waiting)
+		waitNotice.QualityWait = qualityWait
+		notices = append(notices, waitNotice)
 	}
 	ordered := append([]domain.OptimizationCampaignTransition(nil), transitions...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].CreatedAt.Before(ordered[j].CreatedAt) })
@@ -162,10 +191,14 @@ func waitingForRollout(campaign domain.OptimizationCampaign) []string {
 	return ids
 }
 
-// waitingOnQualityEvidence returns the setups that have waited in validation
-// past the grace period, and since when the first of them has waited.
-func waitingOnQualityEvidence(campaign domain.OptimizationCampaign, now time.Time) (time.Time, []string) {
+// waitingOnQualityEvidence returns the setups that have waited on the
+// customer in validation past the grace period, and since when the first of
+// them has waited. Without a customer wait there are none.
+func waitingOnQualityEvidence(campaign domain.OptimizationCampaign, qualityWait string, now time.Time) (time.Time, []string) {
 	var since time.Time
+	if qualityWait == QualityWaitNone {
+		return since, nil
+	}
 	waiting := []string{}
 	for _, candidate := range campaign.Candidates {
 		if candidate.State != optimizationcampaign.CandidateValidating || candidate.QualityEvidenceID != "" || now.Sub(candidate.UpdatedAt) < QualityEvidenceGrace {

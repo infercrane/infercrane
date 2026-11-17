@@ -44,7 +44,7 @@ type Campaign struct {
 	TargetDeployment  string     `json:"target_deployment,omitempty"`
 	ApprovalExpiresAt *time.Time `json:"approval_expires_at,omitempty"`
 	// CandidateIDs names the setups the event is about: the ones waiting on
-	// quality evidence, or the ones waiting for rollout.
+	// the customer for answer quality, or the ones waiting for rollout.
 	CandidateIDs []string `json:"candidate_ids,omitempty"`
 }
 
@@ -118,7 +118,11 @@ func CampaignBody(workspace string, notice Notice, campaign domain.OptimizationC
 			body.Summary = fmt.Sprintf("The %s run's approval ends %s. Work still running then stops and is cleaned up.", model, ends)
 		}
 	case EventQualityEvidenceNeeded:
-		body.Summary = fmt.Sprintf("The %s run is waiting for signed answer-quality results for %s before it can decide.", model, plural(len(notice.CandidateIDs), "setup"))
+		if notice.QualityWait == QualityWaitEvalSet {
+			body.Summary = fmt.Sprintf("The %s run is waiting for the eval set it names to be uploaded before it can check answers.", model)
+		} else {
+			body.Summary = fmt.Sprintf("The %s run is waiting for your signed evaluation of %s before it can decide.", model, plural(len(notice.CandidateIDs), "setup"))
+		}
 	case EventDecided:
 		decided := Outcome{Kind: OutcomeUnknown}
 		if outcome != nil {

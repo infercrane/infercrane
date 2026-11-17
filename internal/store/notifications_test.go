@@ -205,7 +205,7 @@ func TestFailedCampaignKeepsItsFailureCodeAfterCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notices := notification.CampaignNotices(loaded, transitions, time.Now())
+	notices := notification.CampaignNotices(loaded, transitions, time.Now(), notification.QualityWaitNone)
 	if len(notices) != 1 || notices[0].Type != notification.EventFailed {
 		t.Fatalf("notices=%+v", notices)
 	}

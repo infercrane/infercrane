@@ -20,11 +20,21 @@ type memoryStore struct {
 	claims        map[string]time.Time
 	campaigns     []domain.OptimizationCampaign
 	transitions   []domain.OptimizationCampaignTransition
+	evalSets      map[string]bool
 	next          int
 }
 
 func newMemoryStore(now func() time.Time) *memoryStore {
 	return &memoryStore{now: now, subscriptions: map[string]domain.NotificationSubscription{}, claims: map[string]time.Time{}}
+}
+
+func (m *memoryStore) QualityEvalSet(_ context.Context, tenant, digest string) (domain.QualityEvalSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.evalSets[digest] {
+		return domain.QualityEvalSet{}, domain.ErrNotFound
+	}
+	return domain.QualityEvalSet{TenantID: tenant, Digest: digest}, nil
 }
 
 func (m *memoryStore) id(prefix string) string {

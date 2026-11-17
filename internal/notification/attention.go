@@ -21,9 +21,10 @@ type Attention struct {
 
 // CampaignAttention lists what the campaign needs now. A run waiting for
 // approval, a winner waiting for rollout, an approval about to end, setups
-// waiting on quality evidence, and a run that failed recently each need a
-// person. A finished run with nothing to roll out needs nothing.
-func CampaignAttention(campaign domain.OptimizationCampaign, now time.Time) []Attention {
+// waiting on the customer for answer quality (qualityWait, from QualityWait),
+// and a run that failed recently each need a person. A finished run with
+// nothing to roll out needs nothing.
+func CampaignAttention(campaign domain.OptimizationCampaign, now time.Time, qualityWait string) []Attention {
 	if campaign.CancelRequested || campaign.ID == "" {
 		return nil
 	}
@@ -46,14 +47,14 @@ func CampaignAttention(campaign domain.OptimizationCampaign, now time.Time) []At
 			items = append(items, Attention{Severity: "warning", Code: "optimization_approval_expiring", Summary: fmt.Sprintf("The %s run's approval ends at %s. Work still running then stops and is cleaned up.", model, clock(*campaign.ApprovalExpiresAt)), Next: "infercrane optimize watch " + campaign.ID, UpdatedAt: campaign.UpdatedAt})
 		}
 	}
-	if _, waiting := waitingOnQualityEvidence(campaign, now); len(waiting) > 0 {
-		deployment := "DEPLOYMENT"
-		for _, candidate := range campaign.Candidates {
-			if candidate.ID == waiting[0] && candidate.DeploymentName != "" {
-				deployment = candidate.DeploymentName
-			}
+	if _, waiting := waitingOnQualityEvidence(campaign, qualityWait, now); len(waiting) > 0 {
+		if qualityWait == QualityWaitEvalSet {
+			items = append(items, Attention{Severity: "warning", Code: "optimization_eval_set_needed", Summary: fmt.Sprintf("The %s run is waiting for the eval set it names to be uploaded before it can check answers.", model), Next: "infercrane evaluation set upload ./eval-set.json", UpdatedAt: campaign.UpdatedAt})
+		} else {
+			// Each setup is a different revision with its own ingest command;
+			// inspect prints them.
+			items = append(items, Attention{Severity: "warning", Code: "optimization_quality_evidence_needed", Summary: fmt.Sprintf("The %s run is waiting for your signed evaluation of %s.", model, plural(len(waiting), "setup")), Next: "infercrane optimize inspect " + campaign.ID, UpdatedAt: campaign.UpdatedAt})
 		}
-		items = append(items, Attention{Severity: "warning", Code: "optimization_quality_evidence_needed", Summary: fmt.Sprintf("The %s run is waiting for signed answer-quality results for %s.", model, plural(len(waiting), "setup")), Next: "infercrane evaluation attach " + deployment + " --file evidence.json", UpdatedAt: campaign.UpdatedAt})
 	}
 	failed := campaign.State == optimizationcampaign.CampaignFailed || campaign.FailureCode != "" && now.Sub(campaign.UpdatedAt) < RecentFailure
 	if failed && !AwaitingRollout(campaign.State) {
