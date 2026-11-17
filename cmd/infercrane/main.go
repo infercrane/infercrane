@@ -4326,6 +4326,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	manualPrices := manualOptimizationPrices(cfg.OptimizationPrices)
 	priceCatalog := pricing.NewDynamicCatalog(manualPrices)
+	// Spend approvals fetch a missing row on demand from the feed that owns it.
+	priceWarmers := map[string]pricing.Warmer{}
 	if cfg.GPUPriceSyncInterval > 0 {
 		// Dynamic marketplace prices must come from the provider itself. Static
 		// third-party catalogs are intentionally excluded from this live catalog.
@@ -4349,7 +4351,12 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		// Four exact Vast GPU shards are refreshed per rate-limit window. A full
 		// reviewed catalog rotation is nine windows, so validity covers two full
 		// rotations plus retry headroom without pretending an expired row is live.
-		vastFeed := priceingest.VastFeed{APIKey: os.Getenv("VAST_API_KEY"), ValidFor: 20 * priceSyncInterval}
+		vastFeed := priceingest.VastFeed{APIKey: os.Getenv("VAST_API_KEY"), ValidFor: 20 * priceSyncInterval, Interval: priceSyncInterval}
+		priceWarmers["vast"] = func(warmCtx context.Context, request pricing.Request) pricing.WarmResult {
+			warmCtx, cancel := context.WithTimeout(warmCtx, 20*time.Second)
+			defer cancel()
+			return vastFeed.Warm(warmCtx, priceCatalog, request)
+		}
 		vastCtx, vastCancel := context.WithTimeout(ctx, 75*time.Second)
 		vastErr := vastFeed.Refresh(vastCtx, priceCatalog)
 		vastCancel()
@@ -4429,7 +4436,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	_, aiperfErr := exec.LookPath(cfg.AIPerfBinary)
 	var optimizationCosts optimizationcampaign.CostAuthority
 	if aiperfErr == nil {
-		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: pricing.ReplicaScalingProvider{Delegate: priceCatalog}}
+		optimizationCosts = optimizationcampaign.PricingAuthority{Provider: pricing.WarmingProvider{Delegate: pricing.ReplicaScalingProvider{Delegate: priceCatalog}, Warmers: priceWarmers}}
 	} else {
 		logger.Warn("optimization execution disabled because AIPerf is unavailable", "binary", cfg.AIPerfBinary)
 	}

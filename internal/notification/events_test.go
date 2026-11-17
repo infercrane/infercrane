@@ -183,6 +183,8 @@ func TestCampaignAttentionMatchesNotificationRules(t *testing.T) {
 		{"signed evaluation needed", domain.OptimizationCampaign{ID: "r", State: optimizationcampaign.CampaignRunning, Candidates: validating}, QualityWaitEvidence, "warning:optimization_quality_evidence_needed"},
 		{"eval set needed", domain.OptimizationCampaign{ID: "r", State: optimizationcampaign.CampaignRunning, Candidates: validating}, QualityWaitEvalSet, "warning:optimization_eval_set_needed"},
 		{"built-in check running", domain.OptimizationCampaign{ID: "r", State: optimizationcampaign.CampaignRunning, Candidates: validating}, QualityWaitNone, ""},
+		{"current setup kept", keptCampaign(optimizationcampaign.CampaignQualified, at(now, 5*time.Hour)), "", "warning:optimization_measurement_servers_running"},
+		{"current setup kept by an evolution", keptCampaign(optimizationcampaign.CampaignGuardPassed, nil), "", "warning:optimization_measurement_servers_running"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := codes(CampaignAttention(tc.campaign, now, tc.wait)); got != tc.want {
@@ -195,5 +197,43 @@ func TestCampaignAttentionMatchesNotificationRules(t *testing.T) {
 func TestFailureReasonKeepsUnknownCodesVisible(t *testing.T) {
 	if FailureReason("") != "reason unknown" || FailureReason("approval_expired") != "the spend approval ended before the run finished" || FailureReason("provider_capacity_unavailable") != "provider capacity unavailable" {
 		t.Fatal("unexpected failure reasons")
+	}
+}
+
+// keptCampaign is a finished run whose control (the proposal's starting
+// point) is the setup waiting for activation.
+func keptCampaign(state string, expires *time.Time) domain.OptimizationCampaign {
+	waiting := optimizationcampaign.CandidateQualified
+	if state == optimizationcampaign.CampaignGuardPassed {
+		waiting = optimizationcampaign.CandidateGuardPassed
+	}
+	proposal, _ := json.Marshal(map[string]any{"starting_point": map[string]any{"candidate_id": "proposal-control"}})
+	return domain.OptimizationCampaign{ID: "r", State: state, ApprovalExpiresAt: expires, ProposalJSON: string(proposal), Candidates: []domain.OptimizationCandidateRun{
+		{ID: "control", ProposalCandidateID: "proposal-control", State: waiting},
+		{ID: "slower", ProposalCandidateID: "proposal-slower", State: optimizationcampaign.CandidateCleaned, FailureCode: optimizationcampaign.FailureRegressed},
+	}}
+}
+
+func TestKeptCurrentSetupPointsAtCleanupNotRollout(t *testing.T) {
+	now := time.Date(2026, 11, 17, 3, 0, 0, 0, time.UTC)
+	items := CampaignAttention(keptCampaign(optimizationcampaign.CampaignQualified, at(now, time.Hour)), now, "")
+	if len(items) != 1 || items[0].Next != "infercrane optimize cancel r" || !strings.Contains(items[0].Summary, "kept your current setup") || !strings.Contains(items[0].Summary, "2026-11-17 04:00 UTC") {
+		t.Fatalf("attention = %+v", items)
+	}
+	// A real winner still waits for a rollout decision.
+	winner := keptCampaign(optimizationcampaign.CampaignQualified, nil)
+	winner.Candidates[0].State, winner.Candidates[1].State = optimizationcampaign.CandidateCleaned, optimizationcampaign.CandidateQualified
+	if items := CampaignAttention(winner, now, ""); len(items) != 1 || items[0].Code != "optimization_decision_waiting" {
+		t.Fatalf("attention = %+v", items)
+	}
+}
+
+func TestApprovalExpiringNoticeForAKeptSetupNamesCleanup(t *testing.T) {
+	now := time.Date(2026, 11, 17, 3, 0, 0, 0, time.UTC)
+	campaign := keptCampaign(optimizationcampaign.CampaignQualified, at(now, 10*time.Minute))
+	campaign.ModelIdentity = "Qwen/Qwen3-0.6B"
+	body := CampaignBody("workspace", Notice{Type: EventApprovalExpiring, ID: "r:approval_expiring", CampaignID: "r", OccurredAt: now}, campaign, nil, Links{})
+	if body.Summary != "The Qwen/Qwen3-0.6B run kept your current setup. Its measurement servers are removed when the approval ends at 2026-11-17 03:10 UTC, or now with infercrane optimize cancel r." {
+		t.Fatalf("summary = %q", body.Summary)
 	}
 }

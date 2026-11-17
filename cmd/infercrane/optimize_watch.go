@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 )
 
 // optimize watch is a read-only, plain-language view of one campaign: where each
@@ -31,6 +32,9 @@ var watchStateWords = map[string]string{
 
 var watchReasonWords = map[string]string{
 	"measured_no_measurable_difference":  "no real difference from your current setup",
+	"measured_candidate_regressed":       "worse than your current setup",
+	"measured_comparison_unavailable":    "not compared reliably with your current setup",
+	"measured_candidate_superseded":      "another setup measured better",
 	"quality_gate_rejected":              "answers changed too much",
 	"quality_reference_unavailable":      "no reference answers to compare with",
 	"release_guard_rejected":             "failed the safety check",
@@ -53,6 +57,9 @@ type watchCandidate struct {
 	QualityEvidenceID   string          `json:"quality_evidence_id"`
 	DeploymentSpec      json.RawMessage `json:"deployment_spec"`
 	Quality             *watchQuality   `json:"quality"`
+	// Control is set by control APIs that mark the campaign control; without
+	// it the control is the proposal's first-ranked setup.
+	Control *bool `json:"control,omitempty"`
 }
 
 // watchQuality is the control API's view of a candidate's answer check.
@@ -71,12 +78,14 @@ var watchQualityWords = map[string]string{
 }
 
 type watchCampaign struct {
-	ID            string           `json:"id"`
-	ModelIdentity string           `json:"model_identity"`
-	Objective     string           `json:"objective"`
-	Intent        string           `json:"intent"`
-	State         string           `json:"state"`
-	Candidates    []watchCandidate `json:"candidates"`
+	ID                string           `json:"id"`
+	ModelIdentity     string           `json:"model_identity"`
+	Objective         string           `json:"objective"`
+	Intent            string           `json:"intent"`
+	TargetDeployment  string           `json:"target_deployment"`
+	State             string           `json:"state"`
+	ApprovalExpiresAt *time.Time       `json:"approval_expires_at"`
+	Candidates        []watchCandidate `json:"candidates"`
 }
 
 type watchComparison struct {
@@ -92,6 +101,9 @@ type watchMeasurement struct {
 	LatencyP95MS  *float64
 	CostPerMillon *float64
 	Comparison    map[string]watchComparison
+	// Regressions are the outcomes measured worse than the control in this
+	// setup's own window, including a window the control's drift invalidated.
+	Regressions []optimizationcampaign.Regression
 }
 
 type watchSnapshot struct {
@@ -240,6 +252,12 @@ func parseWatchBenchmark(raw json.RawMessage, benchmarkID string) (watchMeasurem
 	if json.Unmarshal(unwrapJSONString(row.Workload), &workload) == nil && workload.Measured != nil {
 		measurement.Comparison = workload.Measured.Comparison
 	}
+	var evidence struct {
+		Measured *optimizationcampaign.MeasuredEvidence `json:"measured"`
+	}
+	if json.Unmarshal(unwrapJSONString(row.Workload), &evidence) == nil {
+		measurement.Regressions = optimizationcampaign.MeasuredRegressions(evidence.Measured)
+	}
 	var cost struct {
 		Available bool     `json:"available"`
 		Hourly    *float64 `json:"hourly"`
@@ -281,13 +299,32 @@ func watchLabel(candidate watchCandidate) string {
 	return engine + ", " + strings.Join(spec.Runtime.Args, " ")
 }
 
-func watchStatus(candidate watchCandidate) string {
+// watchMeasuredLoss lists the ranking codes a measured regression explains
+// better: a setup that lost and measured worse says on which outcome.
+var watchMeasuredLoss = map[string]bool{
+	optimizationcampaign.FailureNoMeasurableDifference: true, optimizationcampaign.FailureRegressed: true,
+	optimizationcampaign.FailureComparisonUnavailable: true, "measured_candidate_superseded": true,
+}
+
+// watchKeptWords describe a control the campaign kept. Activating it would
+// change nothing, so it is never called a winner.
+const watchKeptWords = "kept · nothing to activate"
+
+// watchStatus describes one setup. kept is true for a control the campaign
+// kept; measurement may be empty.
+func watchStatus(candidate watchCandidate, measurement watchMeasurement, kept bool) string {
+	if kept && (candidate.State == "qualified" || candidate.State == "guard_passed") {
+		return watchKeptWords
+	}
 	text := watchStateWords[candidate.State]
 	if candidate.State == "validating" && candidate.Quality != nil && watchQualityWords[candidate.Quality.State] != "" {
 		text = watchQualityWords[candidate.Quality.State]
 	}
 	if text == "" {
 		text = strings.ReplaceAll(candidate.State, "_", " ")
+	}
+	if watchMeasuredLoss[candidate.FailureCode] && len(measurement.Regressions) > 0 {
+		return text + " · " + optimizationcampaign.DescribeRegressions(measurement.Regressions)
 	}
 	if candidate.FailureCode != "" {
 		reason := watchReasonWords[candidate.FailureCode]
@@ -318,6 +355,9 @@ func watchVerdict(measurement watchMeasurement) (string, string) {
 			return "same", fmt.Sprintf("no real difference in %s (%s)", name, noise)
 		}
 	}
+	if len(measurement.Regressions) > 0 {
+		return "worse", optimizationcampaign.DescribeRegressions(measurement.Regressions)
+	}
 	return "", ""
 }
 
@@ -341,9 +381,15 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 	campaign := snapshot.campaign
 	candidates := append([]watchCandidate(nil), campaign.Candidates...)
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Rank < candidates[j].Rank })
+	control, winner := watchControl(candidates), watchWinner(candidates)
+	kept := control != nil && winner != nil && winner.ID == control.ID
 	var b strings.Builder
 	title := "Optimization · " + campaign.ModelIdentity
-	b.WriteString(paint(s.title, title) + "  " + paint(s.subtle, watchStatus(watchCandidate{State: campaign.State})) + "\n")
+	headline := watchStatus(watchCandidate{State: campaign.State}, watchMeasurement{}, false)
+	if kept && watchTerminal[campaign.State] {
+		headline = "kept your current setup"
+	}
+	b.WriteString(paint(s.title, title) + "  " + paint(s.subtle, headline) + "\n")
 	b.WriteString(paint(s.subtle, "Each setup is measured against your current setup on the same traffic, then checked for answer quality.") + "\n\n")
 	b.WriteString(paint(s.title, "Progress") + "\n")
 	for _, candidate := range candidates {
@@ -369,7 +415,8 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 			}
 			track.WriteString(mark)
 		}
-		b.WriteString("  " + track.String() + "  " + truncateText(watchLabel(candidate), 40) + "  " + paint(s.subtle, watchStatus(candidate)) + "\n")
+		isKept := kept && candidate.ID == control.ID
+		b.WriteString("  " + track.String() + "  " + truncateText(watchLabel(candidate), 40) + "  " + paint(s.subtle, watchStatus(candidate, snapshot.measurements[candidate.ID], isKept)) + "\n")
 	}
 	b.WriteString("\n" + paint(s.title, "Measured") + "\n")
 	measuredAny := false
@@ -402,27 +449,83 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 	b.WriteString(renderWatchAnswers(candidates, s, paint))
 	if watchTerminal[campaign.State] {
 		b.WriteString("\n" + paint(s.title, "Decision") + "\n")
-		var winner *watchCandidate
-		for i := range candidates {
-			if candidates[i].State == "qualified" {
-				winner = &candidates[i]
-				break
-			}
-		}
 		switch {
 		case campaign.State == "cancelled":
 			b.WriteString("  Cancelled. Nothing changed in production.\n")
-		case winner != nil && len(candidates) > 0 && winner.ID != candidates[0].ID:
+		case winner != nil && (winner.State == "promoted" || winner.State == "observed"):
+			live := "“" + watchLabel(*winner) + "” is live"
+			if !kept {
+				live += ": it measured better on your traffic"
+			}
+			b.WriteString("  " + paint(s.healthyText, live+".") + "\n")
+		case winner != nil && !kept:
 			b.WriteString("  " + paint(s.healthyText, "Roll out “"+watchLabel(*winner)+"”: it measured better on your traffic.") + "\n")
 			b.WriteString("  " + paint(s.subtle, "infercrane optimize activate "+campaign.ID+" --candidate "+winner.ID) + "\n")
 		case winner != nil:
-			b.WriteString("  Keep your current setup: nothing beat it by more than the measurement noise.\n")
-			b.WriteString("  " + paint(s.subtle, "infercrane optimize activate "+campaign.ID+" --candidate "+winner.ID+" publishes it as the optimized endpoint") + "\n")
+			b.WriteString(renderWatchKept(campaign, s, paint))
 		default:
 			b.WriteString("  No setup qualified. Nothing changes in production.\n")
 		}
 	}
 	return b.String()
+}
+
+// renderWatchKept states a keep decision and its one next step. The kept
+// control's server stays up until the approval ends, so the step removes it;
+// activating the control would change nothing.
+func renderWatchKept(campaign watchCampaign, s uiStyles, paint func(lipgloss.Style, string) string) string {
+	var b strings.Builder
+	b.WriteString("  Keep your current setup: nothing beat it by more than the measurement noise.\n")
+	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
+		target := campaign.TargetDeployment
+		if target == "" {
+			target = "your endpoint"
+		}
+		b.WriteString("  Nothing to activate: " + target + " keeps serving its current revision.\n")
+	} else {
+		b.WriteString("  Nothing to activate: no new endpoint is published.\n")
+	}
+	cleanup := "infercrane optimize cancel " + campaign.ID + " removes the measurement servers now"
+	if campaign.ApprovalExpiresAt != nil {
+		cleanup += "; otherwise they are removed when the approval ends at " + campaign.ApprovalExpiresAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	b.WriteString("  " + paint(s.subtle, cleanup) + "\n")
+	return b.String()
+}
+
+// watchControl is the campaign control: the setup the API marks, else the
+// proposal's first-ranked setup, which is the proposal's starting point.
+// candidates must be sorted by rank.
+func watchControl(candidates []watchCandidate) *watchCandidate {
+	for index := range candidates {
+		if candidates[index].Control != nil && *candidates[index].Control {
+			return &candidates[index]
+		}
+	}
+	for index := range candidates {
+		if candidates[index].Control == nil {
+			return &candidates[index]
+		}
+	}
+	return nil
+}
+
+// watchWinner is the setup the campaign chose: live, or waiting for
+// activation after qualification (new endpoint) or the safety check
+// (evolution).
+func watchWinner(candidates []watchCandidate) *watchCandidate {
+	var waiting *watchCandidate
+	for index := range candidates {
+		switch candidates[index].State {
+		case "promoted", "observed":
+			return &candidates[index]
+		case "qualified", "guard_passed":
+			if waiting == nil {
+				waiting = &candidates[index]
+			}
+		}
+	}
+	return waiting
 }
 
 // renderWatchAnswers shows each setup's answer check as the control API

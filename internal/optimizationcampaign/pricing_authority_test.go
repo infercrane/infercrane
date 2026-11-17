@@ -2,13 +2,19 @@ package optimizationcampaign
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/priceingest"
 	"github.com/infercrane/infercrane/internal/pricing"
 )
 
@@ -203,5 +209,92 @@ func TestRefreshingPricingAuthorityRequiresSuccessfulRefresh(t *testing.T) {
 	authority.Refresh = func(context.Context) error { refreshed = true; return nil }
 	if _, err := authority.Quote(t.Context(), "tenant-1", optimizer.DeploymentDraft{}, time.Now().Add(time.Minute)); err != nil || !refreshed || delegate.calls != 1 {
 		t.Fatalf("successful refresh did not reach delegate: err=%v refreshed=%v calls=%d", err, refreshed, delegate.calls)
+	}
+}
+
+// fakeVast serves Vast's offer search. Once limited is set, every request is
+// refused with 429 and no reset time, as Vast does when its window is spent.
+type fakeVast struct {
+	requests atomic.Int32
+	queried  sync.Map
+	limited  atomic.Bool
+}
+
+func (f *fakeVast) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.requests.Add(1)
+	if f.limited.Load() {
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	var query struct {
+		GPU struct {
+			Eq string `json:"eq"`
+		} `json:"gpu_name"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&query)
+	f.queried.Store(query.GPU.Eq, true)
+	_, _ = w.Write([]byte(`{"offers":[{"id":57948831,"gpu_name":"` + query.GPU.Eq + `","num_gpus":1,"dph_total":0.328,"rentable":true,"rented":false,"verification":"verified"}]}`))
+}
+
+// The 2026-11-17 run: after a control-plane restart only the first sweep's
+// four GPUs were priced, and approving an RTX 4090 run failed with a bare
+// "pricing unavailable" until the rotation reached it about five minutes later.
+func TestApprovalAfterRestartWarmsTheRequestedVastGPUOrNamesTheMissingRow(t *testing.T) {
+	start := time.Date(2026, 11, 17, 2, 0, 0, 0, time.UTC)
+	var clock atomic.Int64
+	clock.Store(start.UnixNano())
+	now := func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	vast := &fakeVast{}
+	server := httptest.NewServer(vast)
+	defer server.Close()
+	catalog := pricing.NewDynamicCatalog(nil)
+	feed := &priceingest.VastFeed{BaseURL: server.URL, Client: server.Client(), ValidFor: 100 * time.Minute, Interval: 5 * time.Minute, Now: now}
+	if err := feed.Refresh(t.Context(), catalog); err != nil {
+		t.Fatal(err)
+	}
+	if _, swept := vast.queried.Load("RTX 4090"); swept || vast.requests.Load() != 4 {
+		t.Fatalf("the startup sweep should cover four GPUs before RTX 4090; requests=%d", vast.requests.Load())
+	}
+	authority := PricingAuthority{Now: now, Provider: pricing.WarmingProvider{
+		Delegate: pricing.ReplicaScalingProvider{Delegate: catalog},
+		Warmers: map[string]pricing.Warmer{"vast": func(ctx context.Context, request pricing.Request) pricing.WarmResult {
+			return feed.Warm(ctx, catalog, request)
+		}},
+		Now: now,
+	}}
+	draft := optimizer.DeploymentDraft{}
+	draft.Provider.Cloud, draft.Resources.GPU, draft.Resources.GPUCount = "vast", "RTX4090", 1
+	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = 1, 1
+	budget := Budget{MaxCostUSD: 5, ExpiresAt: start.Add(time.Hour)}
+
+	if err := AuthorizeCost(t.Context(), authority, "tenant", draft, budget, now()); err != nil {
+		t.Fatalf("approval did not warm the requested GPU: %v", err)
+	}
+	if vast.requests.Load() != 5 {
+		t.Fatalf("warming should spend exactly one request; requests=%d", vast.requests.Load())
+	}
+
+	// Another GPU in the same window is not fetched: the warm budget is spent.
+	// Approval names the exact row and when the rotation reaches it.
+	draft.Resources.GPU = "RTX5090"
+	clock.Store(start.Add(time.Minute).UnixNano())
+	err := AuthorizeCost(t.Context(), authority, "tenant", draft, budget, now())
+	var missing *pricing.MissingPriceError
+	if !errors.As(err, &missing) || !errors.Is(err, pricing.ErrUnavailable) || vast.requests.Load() != 5 {
+		t.Fatalf("err=%v requests=%d", err, vast.requests.Load())
+	}
+	for _, want := range []string{"no fresh vast price for 1 × RTX 5090 (region global, 1 replica)", "an on-demand Vast price fetch already ran at 02:00:00 UTC", "the Vast offer feed fetches it next at about 2026-11-17 02:20 UTC"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("approval error %q lacks %q", err, want)
+		}
+	}
+
+	// When Vast refuses the on-demand fetch, the row is still named.
+	vast.limited.Store(true)
+	draft.Resources.GPU = "L4"
+	clock.Store(start.Add(10 * time.Minute).UnixNano())
+	err = AuthorizeCost(t.Context(), authority, "tenant", draft, budget, now())
+	if !errors.As(err, &missing) || !strings.Contains(err.Error(), "no fresh vast price for 1 × L4 (region global, 1 replica); fetching it now failed (Vast L4 offers returned HTTP 429)") {
+		t.Fatalf("err=%v", err)
 	}
 }

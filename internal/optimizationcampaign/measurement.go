@@ -434,6 +434,22 @@ func CampaignControl(campaign domain.OptimizationCampaign) (domain.OptimizationC
 	return domain.OptimizationCandidateRun{}, false
 }
 
+// ControlKept reports a finished campaign whose chosen setup is its control:
+// nothing beat the current setup, so activating it would change nothing. The
+// control waits in qualified or guard_passed until the approval ends.
+func ControlKept(campaign domain.OptimizationCampaign) bool {
+	control, found := CampaignControl(campaign)
+	if !found || (control.State != CandidateQualified && control.State != CandidateGuardPassed) {
+		return false
+	}
+	for _, candidate := range campaign.Candidates {
+		if candidate.ID != control.ID && (candidate.State == CandidateQualified || candidate.State == CandidateGuardPassed || candidate.State == CandidatePromoted || candidate.State == CandidateObserved) {
+			return false
+		}
+	}
+	return true
+}
+
 // resolveBoundReplay returns the verified AIPerf rendering of the Replay trace
 // a customer-observed campaign is bound to, or nil when none is bound. Missing,
 // malformed, or tampered traces are permanent failures; a store error stays

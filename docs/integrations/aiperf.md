@@ -25,7 +25,8 @@ evidence; they are not flattened into a single unexplained number.
 AIPerf's server-metrics scrape and GPU telemetry are off for ordinary benchmarks. Optimization
 campaigns turn the server-metrics scrape on for a candidate whose runtime contract declares a
 `/metrics` path and keep a bounded summary of its cache, preemption, queue, and speculative-acceptance
-metrics. GPU telemetry stays off because benchmarks have no DCGM exporter; it is recorded as
+metrics. A built-in vLLM or SGLang candidate with no workload of its own is read with its runtime's
+default contract, the one it is provisioned with, so its metrics are scraped on every provider. GPU telemetry stays off because benchmarks have no DCGM exporter; it is recorded as
 `not_collected`.
 
 <Card title="Benchmarking" icon="gauge" href="/features/benchmarking">

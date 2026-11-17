@@ -75,7 +75,7 @@ func TestHTMLIsSelfContainedAndOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(page), "<h2>Bottleneck signals</h2>") || !strings.Contains(string(page), "Bottleneck signals: the serving engine reported no") {
+	if strings.Contains(string(page), "<h2>Bottleneck signals</h2>") || !strings.Contains(string(page), "Bottleneck signals: the serving engine&#39;s metrics were not scraped") {
 		t.Fatal("HTML shows an empty bottleneck section or hides why it is unknown")
 	}
 }

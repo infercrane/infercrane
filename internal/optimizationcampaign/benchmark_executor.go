@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 type BenchmarkStore interface {
@@ -183,8 +184,11 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 		return armTarget{}, "", fmt.Errorf("%w: benchmark credential is unavailable for provider %s", errNoDirectEndpoint, provider)
 	}
 	// The runtime contract declares a Prometheus path only when the server
-	// exposes one; without it, runtime metrics stay unknown.
-	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: draft.Runtime.Workload.MetricsPath != ""}, provider, nil
+	// exposes one; without it, runtime metrics stay unknown. A built-in
+	// runtime's draft carries no workload, so read the contract the replica
+	// was provisioned with, not the empty draft.
+	served := support.ServedWorkload(draft.Runtime.Engine, draft.Runtime.Workload)
+	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 
 // controlTarget resolves the campaign control's live endpoint. The control is

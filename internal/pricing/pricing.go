@@ -4,7 +4,9 @@ package pricing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -236,4 +238,118 @@ func clonePrices(source map[Request]Estimate) map[Request]Estimate {
 		cloned[request] = estimate
 	}
 	return cloned
+}
+
+// MissingPriceError names the exact price row a spend quote needed and could
+// not get fresh. When a feed owns the row it also says when that feed's own
+// schedule fetches it next, and what an on-demand fetch found. It wraps
+// ErrUnavailable, so callers keep treating it as retryable.
+type MissingPriceError struct {
+	Request Request
+	// Feed names the provider feed that refreshes the row; empty when none
+	// does.
+	Feed string
+	// NextRefreshAt is when the feed's schedule next fetches the row. It is
+	// zero when unknown.
+	NextRefreshAt time.Time
+	// Detail says what happened when the row was asked for on demand.
+	Detail string
+}
+
+func (e *MissingPriceError) Error() string {
+	request := e.Request
+	replicas := "1 replica"
+	if request.Replicas > 1 {
+		replicas = strconv.Itoa(request.Replicas) + " replicas"
+	}
+	count := request.GPUCount
+	if count < 1 {
+		count = 1
+	}
+	message := fmt.Sprintf("no fresh %s price for %d × %s (region %s, %s)", request.Cloud, count, request.GPU, emptyAs(request.Region, "any"), replicas)
+	if e.Detail != "" {
+		message += "; " + e.Detail
+	}
+	switch {
+	case e.Feed != "" && !e.NextRefreshAt.IsZero():
+		message += "; " + e.Feed + " fetches it next at about " + e.NextRefreshAt.UTC().Format("2006-01-02 15:04 UTC")
+	case e.Feed == "":
+		message += "; no provider feed refreshes this row"
+	}
+	return message
+}
+
+func (e *MissingPriceError) Unwrap() error { return ErrUnavailable }
+
+// WarmResult is what an on-demand fetch of one price row did.
+type WarmResult struct {
+	// Feed names the feed that owns the row; empty when none does.
+	Feed string
+	// Fetched is true when a fetch ran now and succeeded.
+	Fetched bool
+	// NextRefreshAt is when the feed's schedule next fetches the row.
+	NextRefreshAt time.Time
+	// Detail says why nothing was fetched, or what the fetch found.
+	Detail string
+}
+
+// Warmer fetches the feed rows one request needs, now.
+type Warmer func(context.Context, Request) WarmResult
+
+// WarmingProvider asks the feed that owns a missing or stale row to fetch it
+// now, then quotes again. A feed that rotates through shards on a schedule
+// (Vast) can otherwise leave a requested accelerator unpriced for several
+// sweeps after a restart. It never invents a price: a row the fetch did not
+// produce is still missing, and the error names it. It belongs at the spend
+// boundary only; discovery and ranking read the catalog directly.
+type WarmingProvider struct {
+	Delegate Provider
+	// Warmers are keyed by lowercase cloud.
+	Warmers map[string]Warmer
+	Now     func() time.Time
+}
+
+func (p WarmingProvider) Estimate(ctx context.Context, request Request) (Estimate, error) {
+	if p.Delegate == nil {
+		return Estimate{}, &MissingPriceError{Request: request}
+	}
+	estimate, err := p.Delegate.Estimate(ctx, request)
+	if err != nil && !errors.Is(err, ErrUnavailable) {
+		return Estimate{}, err
+	}
+	if err == nil && !estimate.Stale(p.now()) {
+		return estimate, nil
+	}
+	warm := p.Warmers[strings.ToLower(strings.TrimSpace(request.Cloud))]
+	if warm == nil {
+		if err == nil {
+			// A stale row with no feed to refresh it: the spend authority
+			// rejects it with its own freshness reason.
+			return estimate, nil
+		}
+		return Estimate{}, &MissingPriceError{Request: request}
+	}
+	result := warm(ctx, request)
+	if refreshed, retryErr := p.Delegate.Estimate(ctx, request); retryErr == nil && !refreshed.Stale(p.now()) {
+		return refreshed, nil
+	}
+	missing := &MissingPriceError{Request: request, Feed: result.Feed, NextRefreshAt: result.NextRefreshAt, Detail: result.Detail}
+	if err == nil && missing.Detail == "" {
+		missing.Detail = "the last price was observed at " + estimate.ObservedAt.UTC().Format("2006-01-02 15:04 UTC") + " and has expired"
+	}
+	return Estimate{}, missing
+}
+
+func (p WarmingProvider) now() time.Time {
+	if p.Now != nil {
+		return p.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func emptyAs(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }

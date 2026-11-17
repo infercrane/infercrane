@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
 )
 
@@ -112,9 +113,12 @@ func CampaignBody(workspace string, notice Notice, campaign domain.OptimizationC
 		if campaign.ApprovalExpiresAt != nil {
 			ends = "at " + clock(*campaign.ApprovalExpiresAt)
 		}
-		if AwaitingRollout(campaign.State) {
+		switch {
+		case AwaitingRollout(campaign.State) && optimizationcampaign.ControlKept(campaign):
+			body.Summary = fmt.Sprintf("The %s run kept your current setup. Its measurement servers are removed when the approval ends %s, or now with infercrane optimize cancel %s.", model, ends, campaign.ID)
+		case AwaitingRollout(campaign.State):
 			body.Summary = fmt.Sprintf("The %s run's approval ends %s. Its result is waiting for your decision; after that it is cleaned up.", model, ends)
-		} else {
+		default:
 			body.Summary = fmt.Sprintf("The %s run's approval ends %s. Work still running then stops and is cleaned up.", model, ends)
 		}
 	case EventQualityEvidenceNeeded:

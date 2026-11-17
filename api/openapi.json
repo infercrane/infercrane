@@ -5825,6 +5825,49 @@
                 "reason": {
                   "type": "string"
                 },
+                "regressions": {
+                  "description": "Headline outcomes (throughput, p95 time to first token, p95 latency) on which the setup measured worse than the baseline in its own window.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "basis": {
+                        "description": "Set on a regression: drifted_control_runs is read from runs whose control drifted and can show a setup is worse, never better.",
+                        "enum": [
+                          "interleaved_control",
+                          "drifted_control_runs"
+                        ],
+                        "type": "string"
+                      },
+                      "change_percent": {
+                        "type": "number"
+                      },
+                      "decision": {
+                        "enum": [
+                          "improved",
+                          "regressed",
+                          "no_measurable_difference",
+                          "unchanged",
+                          "unknown"
+                        ],
+                        "type": "string"
+                      },
+                      "metric": {
+                        "type": "string"
+                      },
+                      "noise_floor_percent": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "metric",
+                      "change_percent",
+                      "noise_floor_percent",
+                      "decision"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "requests_per_second": {
                   "type": [
                     "number",
@@ -5860,6 +5903,14 @@
                     {
                       "additionalProperties": false,
                       "properties": {
+                        "basis": {
+                          "description": "Set on a regression: drifted_control_runs is read from runs whose control drifted and can show a setup is worse, never better.",
+                          "enum": [
+                            "interleaved_control",
+                            "drifted_control_runs"
+                          ],
+                          "type": "string"
+                        },
                         "change_percent": {
                           "type": "number"
                         },

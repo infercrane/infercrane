@@ -216,16 +216,21 @@ type CandidateResult struct {
 	LatencyP95MS               *float64    `json:"latency_p95_ms"`
 	CostPerMillionOutputTokens *float64    `json:"cost_per_million_output_tokens"`
 	VersusBaseline             *Comparison `json:"versus_baseline"`
-	Reason                     string      `json:"reason,omitempty"`
+	// Regressions are the headline outcomes on which the setup measured worse
+	// than the baseline in its own window, so a rejection can name them.
+	Regressions []Comparison `json:"regressions,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
 }
 
-// Comparison is a candidate's objective-metric result against the baseline,
-// measured in interleaved runs.
+// Comparison is a candidate's result on one metric against the baseline,
+// measured in interleaved runs. Basis is set on a regression read from runs
+// whose control drifted (see optimizationcampaign.MeasuredRegressions).
 type Comparison struct {
 	Metric            string  `json:"metric"`
 	ChangePercent     float64 `json:"change_percent"`
 	NoiseFloorPercent float64 `json:"noise_floor_percent"`
 	Decision          string  `json:"decision"`
+	Basis             string  `json:"basis,omitempty"`
 }
 
 // Bottleneck holds the serving-engine signals reported while the baseline and
@@ -941,6 +946,11 @@ func candidateResults(campaign domain.OptimizationCampaign, objective string, ba
 		if finitePositive(row.OutputTokenThroughput) && current.hourly != nil {
 			result.CostPerMillionOutputTokens = ptr(*current.hourly / (*row.OutputTokenThroughput * 3600) * 1_000_000)
 		}
+		if result.Role != "baseline" && result.Role != "baseline_kept" && baseline != nil && current.measured != nil && current.measured.Control.CandidateID == baseline.run.ID {
+			for _, regression := range optimizationcampaign.MeasuredRegressions(current.measured) {
+				result.Regressions = append(result.Regressions, Comparison{Metric: regression.Metric, ChangePercent: regression.Delta * 100, NoiseFloorPercent: regression.NoiseFloor * 100, Decision: DecisionRegressed, Basis: regression.Basis})
+			}
+		}
 		switch {
 		case result.Role == "baseline" || result.Role == "baseline_kept":
 		case interleavedWith(current, baseline):
@@ -1015,11 +1025,33 @@ func bottleneck(kind string, baseline, winner *arm) Bottleneck {
 		result.Signals = append(result.Signals, signal)
 	}
 	if len(result.Signals) == 0 {
-		result.Reason = "the serving engine reported no cache, queue, or preemption metrics while measured"
+		result.Reason = noSignalsReason(winner, baseline)
 		return result
 	}
 	result.State = "measured"
 	return result
+}
+
+// noSignalsReason says why no engine signal exists. The engine is blamed only
+// when its metrics were scraped and held none of the signals read; a scrape
+// that was never requested, or that collected nothing, says so instead.
+func noSignalsReason(arms ...*arm) string {
+	requested := false
+	for _, current := range arms {
+		if current == nil || current.measured == nil {
+			continue
+		}
+		requested = requested || current.measured.ServerMetricsRequested || current.measured.Control.ServerMetrics
+		for _, run := range current.measured.Runs {
+			if run.ServerMetrics != nil && !run.ServerMetrics.Collected && run.ServerMetrics.Reason != "" {
+				return "the serving engine's metrics were not collected: " + run.ServerMetrics.Reason
+			}
+		}
+	}
+	if !requested {
+		return "the serving engine's metrics were not scraped while it was measured"
+	}
+	return "the serving engine reported no cache, queue, or preemption metrics while measured"
 }
 
 func armRuns(a *arm) []optimizationcampaign.RunSummary {
