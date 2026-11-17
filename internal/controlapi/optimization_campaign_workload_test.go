@@ -105,12 +105,12 @@ func TestCampaignReturnsItsBoundWorkload(t *testing.T) {
 // A workload the proposal did not record stays absent: never a default source.
 func TestCampaignWorkloadStaysAbsentWhenUnrecorded(t *testing.T) {
 	for _, stored := range []string{"", "{", `{"input":"not-an-object"}`, `{"schema_version":"infercrane.optimizer.proposal/v1"}`, `{"input":{"workload_profile":"interactive"}}`} {
-		if workload, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: stored})["workload"]; present {
+		if workload, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: stored}, campaignQualityInputs{})["workload"]; present {
 			t.Fatalf("proposal %q recorded no workload source, got %#v", stored, workload)
 		}
 	}
 	// Warnings stay readable when only the workload is missing.
-	if warnings, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: `{"input":{"workload_profile":"interactive"}}`})["warnings"]; !present {
+	if warnings, present := optimizationCampaignResponse(domain.OptimizationCampaign{ProposalJSON: `{"input":{"workload_profile":"interactive"}}`}, campaignQualityInputs{})["warnings"]; !present {
 		t.Fatalf("a readable proposal without a workload source must still return warnings, got %#v", warnings)
 	}
 }
