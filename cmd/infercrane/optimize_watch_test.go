@@ -199,3 +199,89 @@ func TestRenderOptimizeWatchDecisionFollowsEvolutionIntent(t *testing.T) {
 		t.Fatalf("an activated winner was offered for activation again:\n%s", text)
 	}
 }
+
+// A run mid-way: the control is ranked, so the aggregate state reads
+// "ranked", but the second setup is still measuring and the third waits. The
+// view must say the run is running, which setup and turn it is on, how long it
+// took so far, the API's estimate, the spend estimate, and the turns so far,
+// and it must not show a decision.
+func TestRenderOptimizeWatchFollowsALiveRunWithoutDeciding(t *testing.T) {
+	elapsed, left, spent, capUSD, total, marked := 2460.0, 3120.0, 0.38, 3.3, 17, true
+	control, tps := 246.0, 301.0
+	ended := time.Date(2026, 11, 17, 1, 40, 0, 0, time.UTC)
+	campaign := watchCampaign{ID: "campaign-1", ModelIdentity: "Qwen/Qwen3-0.6B", State: "ranked", ApprovedMaxCostUSD: &capUSD,
+		Progress: &watchProgress{Stage: "running", ElapsedSeconds: &elapsed, SetupsTotal: 3, TurnsDone: 6, TurnsTotal: &total},
+		Spend:    &watchSpend{State: "estimated", Label: "estimated from quoted rate", EstimatedUSD: &spent, CapUSD: &capUSD},
+		Candidates: []watchCandidate{
+			{ID: "third", Rank: 3, State: "proposed", Label: "FP8 KV cache, smaller prefill chunks"},
+			{ID: "second", Rank: 2, State: "measuring", Label: "Speculative decoding (n-gram)", Measurement: &watchLive{TurnsPlanned: 7, TurnsDone: 2, Current: &watchRun{Kind: "turn", Arm: "control", Turn: 3}, Runs: []watchRun{
+				{Kind: "warmup", Arm: "control", EndedAt: &ended}, {Kind: "turn", Arm: "control", Turn: 1, EndedAt: &ended, OutputTPS: &control},
+				{Kind: "turn", Arm: "candidate", Turn: 2, EndedAt: &ended, OutputTPS: &tps}, {Kind: "turn", Arm: "control", Turn: 3},
+			}}},
+			{ID: "control", Rank: 1, State: "ranked", Label: "Your current setup (vLLM defaults)", Control: &marked},
+		}}
+	campaign.Progress.ETA.State, campaign.Progress.ETA.RemainingSeconds = "estimated", &left
+	text := renderOptimizeWatch(watchSnapshot{campaign: campaign, measurements: map[string]watchMeasurement{}}, newUIStyles(true), 120, false)
+	for _, want := range []string{
+		"Qwen/Qwen3-0.6B  running",
+		"Setup 2 of 3 · turn 3 of 7 · 41m elapsed · about 52m left (estimate from this run's measured steps)",
+		"Spend so far about $0.38 of the $3.30 cap · estimated from quoted rate",
+		"Your current setup (vLLM defaults)      ",
+		"measured, waiting to compare",
+		"Speculative decoding (n-gram)",
+		"measuring · turn 3 of 7",
+		"C 246  X 301  C running",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("live view lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Decision") {
+		t.Fatalf("a decision was shown while a setup was still measuring:\n%s", text)
+	}
+	if strings.Index(text, "Your current setup") > strings.Index(text, "Speculative decoding") || strings.Index(text, "Speculative decoding") > strings.Index(text, "FP8 KV cache") {
+		t.Fatalf("setups are not in run order:\n%s", text)
+	}
+
+	campaign.Progress.ETA.State, campaign.Progress.ETA.RemainingSeconds, campaign.Progress.ETA.Reason = "unknown", nil, "waiting for the first answer check to finish"
+	campaign.Spend = &watchSpend{State: "unknown", Reason: "a setup ran without a recorded quoted rate"}
+	text = renderOptimizeWatch(watchSnapshot{campaign: campaign, measurements: map[string]watchMeasurement{}}, newUIStyles(true), 120, false)
+	for _, want := range []string{"time left unknown, waiting for the first answer check to finish", "Spend so far unknown · a setup ran without a recorded quoted rate · $3.30 cap"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("unknown values were not said so: lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "about $") || strings.Contains(text, "left (estimate") {
+		t.Fatalf("an unknown value was printed as a number:\n%s", text)
+	}
+
+	campaign.Progress = &watchProgress{Stage: "decided", ElapsedSeconds: &elapsed}
+	campaign.Candidates[1].State, campaign.Candidates[1].Measurement = "qualified", nil
+	campaign.Candidates[2].State = "rejected"
+	text = renderOptimizeWatch(watchSnapshot{campaign: campaign, measurements: map[string]watchMeasurement{}}, newUIStyles(true), 120, false)
+	if !strings.Contains(text, "Decided after 41m") || !strings.Contains(text, "Roll out “Speculative decoding (n-gram)”") {
+		t.Fatalf("decided run:\n%s", text)
+	}
+}
+
+func TestWatchDurationIsPlain(t *testing.T) {
+	for seconds, want := range map[float64]string{30: "under a minute", 60: "1m", 2460: "41m", 5520: "1h 32m"} {
+		if got := watchDuration(seconds); got != want {
+			t.Fatalf("watchDuration(%v) = %q, want %q", seconds, got, want)
+		}
+	}
+}
+
+func TestWatchStatusNamesTheMeasuringTurnAndPrefersTheAPIName(t *testing.T) {
+	if got := watchLabel(watchCandidate{Label: "Speculative decoding (n-gram)", Rank: 2}); got != "Speculative decoding (n-gram)" {
+		t.Fatalf("label = %q", got)
+	}
+	measuring := watchCandidate{State: "measuring", Measurement: &watchLive{TurnsPlanned: 7, TurnsDone: 3, Current: &watchRun{Kind: "turn", Arm: "candidate"}}}
+	if status := watchStatus(measuring, watchMeasurement{}, false); status != "measuring · turn 4 of 7" {
+		t.Fatalf("measuring status = %q", status)
+	}
+	measuring.Measurement = &watchLive{TurnsPlanned: 7, Current: &watchRun{Kind: "warmup", Arm: "control"}}
+	if status := watchStatus(measuring, watchMeasurement{}, false); status != "measuring · warming up" {
+		t.Fatalf("warmup status = %q", status)
+	}
+}

@@ -130,6 +130,9 @@ func renderCampaign(t theme, view optimizationCampaignView, described map[string
 		for _, candidate := range view.Candidates {
 			detail := candidate.ID
 			if setup := described[candidate.ID]; setup != "" {
+				if candidate.Control != nil && *candidate.Control {
+					setup = "current setup · " + setup
+				}
 				detail = setup + " · " + candidate.ID
 			}
 			if candidate.TargetEndpoint != "" {

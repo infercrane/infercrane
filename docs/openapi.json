@@ -5240,11 +5240,22 @@
           "objective": {
             "type": "string"
           },
+          "progress": {
+            "$ref": "#/components/schemas/OptimizationRunProgress"
+          },
           "proof_boundary": {
             "type": "string"
           },
           "source": {
             "type": "string"
+          },
+          "spend": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationRunSpend"
+              }
+            ],
+            "description": "Returned by GET /optimization/campaigns/{id} only."
           },
           "state": {
             "type": "string"
@@ -5312,7 +5323,8 @@
           "created_at",
           "updated_at",
           "candidates",
-          "proof_boundary"
+          "proof_boundary",
+          "progress"
         ],
         "type": "object"
       },
@@ -5358,6 +5370,10 @@
           "benchmark_id": {
             "type": "string"
           },
+          "control": {
+            "description": "True for the campaign control, the current setup every other candidate is measured against.",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -5379,6 +5395,20 @@
           },
           "lab_evaluation_id": {
             "type": "string"
+          },
+          "label": {
+            "description": "What the setup changes, in plain words: the description written into the proposal when it has one, else the recognized serving flags (for example \"Speculative decoding (n-gram)\"), else \"\u003cengine\u003e defaults\". It describes configuration, never performance.",
+            "type": "string"
+          },
+          "measurement": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationCandidateMeasurement"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "optimized_artifact_id": {
             "type": "string"
@@ -5411,6 +5441,14 @@
           "state": {
             "type": "string"
           },
+          "state_entered_at": {
+            "additionalProperties": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "description": "First time the candidate entered each state, keyed by state. States the candidate never reached, or that a control plane released before this field never timed, are absent.",
+            "type": "object"
+          },
           "target_endpoint": {
             "type": "string"
           },
@@ -5438,7 +5476,11 @@
           "optimized_artifact_id",
           "failure_code",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "label",
+          "control",
+          "state_entered_at",
+          "measurement"
         ],
         "type": "object"
       },
@@ -6517,6 +6559,183 @@
         ],
         "type": "object"
       },
+      "OptimizationCandidateMeasurement": {
+        "additionalProperties": false,
+        "description": "Each AIPerf invocation of the candidate's measurement so far. A turn is one measured run of either arm: with a live control, C X C X C X C after one warmup per arm. turns_planned shrinks when the control drops out.",
+        "properties": {
+          "current": {
+            "description": "The invocation running now, or null.",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "arm": {
+                    "enum": [
+                      "control",
+                      "candidate"
+                    ],
+                    "type": "string"
+                  },
+                  "duration_seconds": {
+                    "type": "number"
+                  },
+                  "ended_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "error": {
+                    "description": "Bounded reason when the invocation failed.",
+                    "type": "string"
+                  },
+                  "failed": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "enum": [
+                      "warmup",
+                      "turn"
+                    ],
+                    "type": "string"
+                  },
+                  "latency_p95_ms": {
+                    "type": "number"
+                  },
+                  "output_token_throughput": {
+                    "type": "number"
+                  },
+                  "requests": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "started_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "ttft_p95_ms": {
+                    "type": "number"
+                  },
+                  "turn": {
+                    "description": "1-based turn number; absent for warmups.",
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "arm",
+                  "started_at",
+                  "requests"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "method": {
+            "type": "string"
+          },
+          "runs": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "arm": {
+                  "enum": [
+                    "control",
+                    "candidate"
+                  ],
+                  "type": "string"
+                },
+                "duration_seconds": {
+                  "type": "number"
+                },
+                "ended_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "error": {
+                  "description": "Bounded reason when the invocation failed.",
+                  "type": "string"
+                },
+                "failed": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "kind": {
+                  "enum": [
+                    "warmup",
+                    "turn"
+                  ],
+                  "type": "string"
+                },
+                "latency_p95_ms": {
+                  "type": "number"
+                },
+                "output_token_throughput": {
+                  "type": "number"
+                },
+                "requests": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "started_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "ttft_p95_ms": {
+                  "type": "number"
+                },
+                "turn": {
+                  "description": "1-based turn number; absent for warmups.",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "arm",
+                "started_at",
+                "requests"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "turns_done": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "turns_planned": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "warmups_planned": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "method",
+          "started_at",
+          "updated_at",
+          "turns_planned",
+          "warmups_planned",
+          "turns_done",
+          "current",
+          "runs"
+        ],
+        "type": "object"
+      },
       "OptimizationCandidateQuality": {
         "additionalProperties": false,
         "description": "The candidate's answer-quality step, derived from persisted state. Answers and prompts are never returned.",
@@ -7004,6 +7223,171 @@
           "model_identity",
           "provider",
           "gpu"
+        ],
+        "type": "object"
+      },
+      "OptimizationRunProgress": {
+        "additionalProperties": false,
+        "description": "Where the run is, derived from candidate states rather than the aggregate campaign state, which reads ranked as soon as one candidate is ranked.",
+        "properties": {
+          "elapsed_seconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "ended_at": {
+            "description": "When the last candidate reached its decision; null while running or when a decision time was never recorded.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "eta": {
+            "additionalProperties": false,
+            "description": "An estimate, built only from step durations this run already observed. Unknown until every remaining kind of step was timed once; never covers waiting for a person.",
+            "properties": {
+              "basis": {
+                "const": "observed_durations",
+                "type": "string"
+              },
+              "completes_at": {
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "observed": {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "How many provisioning, warmup, turn, and answer-check durations the estimate uses.",
+                "type": "object"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "remaining_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "state": {
+                "enum": [
+                  "estimated",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "basis",
+              "remaining_seconds",
+              "completes_at",
+              "observed"
+            ],
+            "type": "object"
+          },
+          "setups_measured": {
+            "type": "integer"
+          },
+          "setups_total": {
+            "type": "integer"
+          },
+          "stage": {
+            "enum": [
+              "awaiting_approval",
+              "running",
+              "comparing",
+              "decided",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "started_at": {
+            "description": "Approval time.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "turns_done": {
+            "type": "integer"
+          },
+          "turns_total": {
+            "description": "Measured turns the run expects; null when a finished candidate's turns were never recorded.",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "stage",
+          "started_at",
+          "ended_at",
+          "elapsed_seconds",
+          "setups_total",
+          "setups_measured",
+          "turns_done",
+          "turns_total",
+          "eta"
+        ],
+        "type": "object"
+      },
+      "OptimizationRunSpend": {
+        "additionalProperties": false,
+        "description": "Spend so far, estimated from each candidate's sourced hourly quote, divided by its quoted maximum replica count, times how long its replicas existed. It is not an invoice. Unknown when a setup held servers without a recorded quote or its servers cannot be attributed yet.",
+        "properties": {
+          "basis": {
+            "const": "quoted_rate_x_replica_seconds",
+            "type": "string"
+          },
+          "cap_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "estimated_usd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "label": {
+            "const": "estimated from quoted rate",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "replica_seconds": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "estimated",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "basis",
+          "label",
+          "estimated_usd",
+          "replica_seconds",
+          "cap_usd"
         ],
         "type": "object"
       },

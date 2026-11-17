@@ -60,20 +60,7 @@ func TestStyledCampaignDetailKeepsAnswerCheckUnderItsSetup(t *testing.T) {
 	limit := 25.0
 	warnings := []string{"the untuned starting setup is measured alongside every candidate"}
 	view := optimizationCampaignView{ID: "83ccd598540e2dd1f9c897040c1ea503", ModelIdentity: "Qwen/Qwen3-0.6B", Objective: "interactive", Intent: "new_endpoint", Source: "catalog", State: "running", ApprovedMaxCostUSD: &limit, ApprovalExpiresAt: &expires, Warnings: &warnings}
-	view.Candidates = append(view.Candidates, struct {
-		ID                  string              `json:"id"`
-		ProposalCandidateID string              `json:"proposal_candidate_id"`
-		State               string              `json:"state"`
-		EvidenceState       string              `json:"evidence_state"`
-		TargetEndpoint      string              `json:"target_endpoint"`
-		DeploymentName      string              `json:"deployment_name"`
-		RevisionID          string              `json:"revision_id"`
-		BenchmarkID         string              `json:"benchmark_id"`
-		QualityEvidenceID   string              `json:"quality_evidence_id"`
-		FailureCode         string              `json:"failure_code"`
-		Rank                int                 `json:"rank"`
-		Quality             *watchQualityDetail `json:"quality,omitempty"`
-	}{ID: "cand-1", State: "measuring", EvidenceState: "measured", Rank: 1, Quality: &watchQualityDetail{watchQuality: watchQuality{State: "failed", Reason: "answers drifted from the control"}}})
+	view.Candidates = append(view.Candidates, optimizationCampaignSetupView{ID: "cand-1", State: "measuring", EvidenceState: "measured", Rank: 1, Quality: &watchQualityDetail{watchQuality: watchQuality{State: "failed", Reason: "answers drifted from the control"}}})
 	execution := &domain.Operation{ID: "op-1", Status: "running"}
 	text := ansi.Strip(renderCampaign(styledTheme(80, "dark"), view, map[string]string{"cand-1": "vllm, --kv-cache-dtype fp8 · 1 × L40S · runpod"}, execution, nil, nil, styledNow))
 	for _, want := range []string{"● RUNNING", "$25.00 · approval expires in 43m", "op-1 · RUNNING", "▲ the untuned starting setup", "● MEASURING", "vllm, --kv-cache-dtype fp8", "cand-1", "answers: answers drifted from the control"} {

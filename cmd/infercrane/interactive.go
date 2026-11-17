@@ -275,8 +275,11 @@ func confirmDeletion(ctx context.Context, cfg config.Config, t theme, name strin
 // approvalSetup is the part of a campaign candidate's DeploymentSpec that says
 // what a paid run starts.
 type approvalSetup struct {
-	ID             string `json:"id"`
-	State          string `json:"state"`
+	ID    string `json:"id"`
+	State string `json:"state"`
+	// Label is the control API's name for the setup; older control planes
+	// leave it empty and the engine and flags describe it instead.
+	Label          string `json:"label"`
 	DeploymentSpec struct {
 		Runtime struct {
 			Engine string   `json:"engine"`
@@ -297,14 +300,17 @@ type approvalSetup struct {
 // describe says what the setup runs, or "" when its spec was not returned.
 func (s approvalSetup) describe() string {
 	spec := s.DeploymentSpec
-	if spec.Runtime.Engine == "" {
+	if spec.Runtime.Engine == "" && s.Label == "" {
 		return ""
 	}
-	setup := spec.Runtime.Engine
-	if len(spec.Runtime.Args) == 0 {
-		setup += ", default settings"
-	} else {
-		setup += ", " + strings.Join(spec.Runtime.Args, " ")
+	setup := s.Label
+	if setup == "" {
+		setup = spec.Runtime.Engine
+		if len(spec.Runtime.Args) == 0 {
+			setup += ", default settings"
+		} else {
+			setup += ", " + strings.Join(spec.Runtime.Args, " ")
+		}
 	}
 	parts := []string{setup}
 	if spec.Resources.GPU != "" {

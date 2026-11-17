@@ -510,22 +510,25 @@ func schemas() map[string]any {
 		"OptimizationProposalRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"model_identity", "provider", "gpu"}, "properties": map[string]any{
 			"model_identity": map[string]any{"type": "string", "minLength": 1, "maxLength": 256}, "model_revision": map[string]any{"type": "string", "pattern": "^[a-fA-F0-9]{40,64}$"}, "provider": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}, "compute_connection_id": map[string]any{"type": "string", "maxLength": 255, "description": "Verified tenant compute connection used to derive and immutably bind the executable provider adapter."}, "region": map[string]any{"type": "string", "maxLength": 128}, "gpu": map[string]any{"type": "string", "minLength": 1, "maxLength": 128}, "gpu_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 1024, "default": 1}, "runtimes": map[string]any{"type": "array", "maxItems": 16, "uniqueItems": true, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}, "objective": map[string]any{"type": "string", "enum": []string{"interactive", "latency", "throughput", "cost-efficiency"}, "default": "interactive"}, "workload_profile": map[string]any{"type": "string", "enum": []string{"balanced", "buffered", "interactive", "long-context", "long-generation", "overload", "public-decode-heavy", "public-interactive", "public-long-prefill", "throughput"}}, "max_ttft_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_tpot_p95_ms": map[string]any{"type": "number", "minimum": 0}, "max_error_rate": map[string]any{"type": "number", "minimum": 0, "maximum": 1}, "min_goodput": map[string]any{"type": "number", "minimum": 0}, "min_output_tokens_second": map[string]any{"type": "number", "minimum": 0}, "max_hourly_cost": map[string]any{"type": "number", "minimum": 0}, "include_simulated": map[string]any{"type": "boolean", "default": false}, "workload_source": map[string]any{"type": "string", "enum": []string{"reviewed_default", "public_prior", "customer_observed"}}, "workload_fingerprint": map[string]any{"type": "string", "maxLength": 256}, "target_concurrency": map[string]any{"type": "number", "exclusiveMinimum": 0}, "max_candidates": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 10}, "search": map[string]any{"type": "string", "enum": []string{"recipes"}, "description": "Adds bounded, unmeasured runtime-recipe experiments ahead of the reviewed candidates."}, "model_features": map[string]any{"type": "array", "maxItems": 16, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"native_mtp"}}, "description": "Capabilities declared by the pinned model configuration. They gate experiments and are never performance evidence."}, "model_config_digest": map[string]any{"type": "string", "pattern": "^sha256:[a-fA-F0-9]{64}$", "description": "Digest of the pinned model configuration that declared model_features."}, "quality_check": map[string]any{"type": "string", "enum": []string{"builtin", "customer_evidence"}, "default": "builtin", "description": "builtin runs InferCrane's answer check against the campaign control; customer_evidence waits for evidence the customer signs and attaches. Attached customer evidence wins in both modes."}, "diagnosis_endpoint": map[string]any{"type": "string", "minLength": 1, "maxLength": 255, "description": "Endpoint whose recorded diagnosis (readiness assessment over the last hour, engine metrics, and a GPU profile summary when one was captured in the last 7 days) chooses and orders the candidates. The proposal then holds the starting setup plus only setups a diagnosis rule chose; when no rule applies it holds the starting setup alone and diagnosis.needed_evidence says what to collect. The server reads the diagnosis; a client cannot supply one. The proposal records it in input.diagnosis and explains the order in diagnosis and each candidate's reason."}, "quality_eval_set": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "Digest of an uploaded customer eval set that replaces the built-in prompts. Only with quality_check builtin."},
 		}},
-		"OptimizationCampaignCreate":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"proposal"}, "properties": map[string]any{"proposal": map[string]any{"type": "object", "description": "A complete infercrane.optimizer.proposal/v1 document whose normalized digest is revalidated by the server."}, "intent": map[string]any{"type": "string", "enum": []string{"new_endpoint", "evolve_endpoint"}, "default": "new_endpoint"}, "target_deployment": map[string]any{"type": "string", "description": "Required only for evolve_endpoint campaigns; names the stable deployment whose candidate revision will be compared."}}},
-		"OptimizationCampaignApproval":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"max_cost_usd", "expires_in_seconds"}, "properties": map[string]any{"max_cost_usd": map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}, "expires_in_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400}}},
-		"OptimizationCampaignActivation": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"candidate_id"}, "properties": map[string]any{"candidate_id": map[string]any{"type": "string", "minLength": 1}}},
-		"OptimizationCampaign":           optimizationCampaignSchema(),
-		"QualityEvidenceList":            qualityEvidenceListSchema(),
-		"QualityVerdicts":                qualityVerdictsSchema(),
-		"QualityEvalVerdict":             qualityEvalVerdictSchema(),
-		"QualitySubject":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"revision_id", "model"}, "properties": map[string]any{"revision_id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string", "description": "Resolved immutable model identity, else the model the revision requested; empty when neither is recorded."}}},
-		"OptimizationCampaignCandidate":  optimizationCampaignCandidateSchema(),
-		"OptimizationCandidateReason":    optimizationCandidateReasonSchema(),
-		"OptimizationDiagnosisPlan":      optimizationDiagnosisPlanSchema(),
-		"OptimizationCandidateQuality":   optimizationCandidateQualitySchema(),
-		"QualityEvalSetUpload":           qualityEvalSetUploadSchema(),
-		"QualityEvalSetEnvelope":         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"eval_set"}, "properties": map[string]any{"eval_set": ref("QualityEvalSet"), "created": map[string]any{"type": "boolean"}}},
-		"QualityEvalSet":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"digest", "name", "version", "prompt_count", "created_at"}, "properties": map[string]any{"digest": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "name": map[string]any{"type": "string"}, "version": map[string]any{"type": "string"}, "prompt_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 200}, "created_at": map[string]any{"type": "string", "format": "date-time"}}},
-		"OptimizationCampaignEnvelope":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
+		"OptimizationCampaignCreate":       map[string]any{"type": "object", "additionalProperties": false, "required": []string{"proposal"}, "properties": map[string]any{"proposal": map[string]any{"type": "object", "description": "A complete infercrane.optimizer.proposal/v1 document whose normalized digest is revalidated by the server."}, "intent": map[string]any{"type": "string", "enum": []string{"new_endpoint", "evolve_endpoint"}, "default": "new_endpoint"}, "target_deployment": map[string]any{"type": "string", "description": "Required only for evolve_endpoint campaigns; names the stable deployment whose candidate revision will be compared."}}},
+		"OptimizationCampaignApproval":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"max_cost_usd", "expires_in_seconds"}, "properties": map[string]any{"max_cost_usd": map[string]any{"type": "number", "exclusiveMinimum": 0, "maximum": 1000000}, "expires_in_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400}}},
+		"OptimizationCampaignActivation":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"candidate_id"}, "properties": map[string]any{"candidate_id": map[string]any{"type": "string", "minLength": 1}}},
+		"OptimizationCampaign":             optimizationCampaignSchema(),
+		"QualityEvidenceList":              qualityEvidenceListSchema(),
+		"QualityVerdicts":                  qualityVerdictsSchema(),
+		"QualityEvalVerdict":               qualityEvalVerdictSchema(),
+		"QualitySubject":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"revision_id", "model"}, "properties": map[string]any{"revision_id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string", "description": "Resolved immutable model identity, else the model the revision requested; empty when neither is recorded."}}},
+		"OptimizationCampaignCandidate":    optimizationCampaignCandidateSchema(),
+		"OptimizationCandidateMeasurement": optimizationCandidateMeasurementSchema(),
+		"OptimizationRunProgress":          optimizationRunProgressSchema(),
+		"OptimizationRunSpend":             optimizationRunSpendSchema(),
+		"OptimizationCandidateReason":      optimizationCandidateReasonSchema(),
+		"OptimizationDiagnosisPlan":        optimizationDiagnosisPlanSchema(),
+		"OptimizationCandidateQuality":     optimizationCandidateQualitySchema(),
+		"QualityEvalSetUpload":             qualityEvalSetUploadSchema(),
+		"QualityEvalSetEnvelope":           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"eval_set"}, "properties": map[string]any{"eval_set": ref("QualityEvalSet"), "created": map[string]any{"type": "boolean"}}},
+		"QualityEvalSet":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"digest", "name", "version", "prompt_count", "created_at"}, "properties": map[string]any{"digest": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "name": map[string]any{"type": "string"}, "version": map[string]any{"type": "string"}, "prompt_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 200}, "created_at": map[string]any{"type": "string", "format": "date-time"}}},
+		"OptimizationCampaignEnvelope":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
 
 		"CLILoginStart":                      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_name", "client_os", "client_version"}, "properties": map[string]any{"device_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}, "client_os": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}, "client_version": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}},
 		"CLILoginStartResponse":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code", "user_code", "expires_at", "expires_in", "interval"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "description": "Secret the CLI polls with. Returned once; only its hash is stored."}, "user_code": map[string]any{"type": "string", "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "expires_in": map[string]any{"type": "integer", "minimum": 1}, "interval": map[string]any{"type": "integer", "minimum": 1}, "verification_uri": map[string]any{"type": "string", "format": "uri"}, "verification_uri_complete": map[string]any{"type": "string", "format": "uri"}}},
@@ -744,12 +747,14 @@ func intentPlanEnvelopeSchema() map[string]any {
 func optimizationCampaignSchema() map[string]any {
 	text, timestamp := map[string]any{"type": "string"}, map[string]any{"type": "string", "format": "date-time"}
 	nullableTimestamp := map[string]any{"type": []string{"string", "null"}, "format": "date-time"}
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "input_digest", "model_identity", "objective", "source", "intent", "target_deployment", "state", "max_candidates", "approved_max_cost_usd", "approval_expires_at", "approved_by", "approved_at", "cancel_requested", "failure_code", "created_at", "updated_at", "candidates", "proof_boundary"}, "properties": map[string]any{
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "input_digest", "model_identity", "objective", "source", "intent", "target_deployment", "state", "max_candidates", "approved_max_cost_usd", "approval_expires_at", "approved_by", "approved_at", "cancel_requested", "failure_code", "created_at", "updated_at", "candidates", "proof_boundary", "progress"}, "properties": map[string]any{
 		"id": text, "input_digest": text, "model_identity": text, "objective": text, "source": text,
 		"intent": map[string]any{"type": "string", "enum": []string{"new_endpoint", "evolve_endpoint"}}, "target_deployment": text, "state": text,
 		"max_candidates": map[string]any{"type": "integer"}, "approved_max_cost_usd": nullableNumberSchema(), "approval_expires_at": nullableTimestamp,
 		"approved_by": text, "approved_at": nullableTimestamp, "cancel_requested": map[string]any{"type": "boolean"}, "failure_code": text,
 		"created_at": timestamp, "updated_at": timestamp, "candidates": map[string]any{"type": "array", "items": ref("OptimizationCampaignCandidate")}, "proof_boundary": text,
+		"progress":  ref("OptimizationRunProgress"),
+		"spend":     map[string]any{"allOf": []any{ref("OptimizationRunSpend")}, "description": "Returned by GET /optimization/campaigns/{id} only."},
 		"warnings":  map[string]any{"type": "array", "items": text, "description": "Warnings recorded on the immutable proposal, such as skipped experiments or unmeasured arms. Empty when the proposal recorded none; absent when the stored proposal cannot be read. Warnings are not performance evidence."},
 		"diagnosis": ref("OptimizationDiagnosisPlan"),
 		"workload": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"source", "fingerprint", "profile"}, "description": "The load the immutable proposal bound this campaign to. Absent when the stored proposal cannot be read or recorded no workload source. It states what the campaign replays, not what was measured.", "properties": map[string]any{
@@ -847,13 +852,66 @@ func optimizationCampaignReportSchema() map[string]any {
 
 func optimizationCampaignCandidateSchema() map[string]any {
 	text, timestamp, object := map[string]any{"type": "string"}, map[string]any{"type": "string", "format": "date-time"}, map[string]any{"type": "object"}
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "proposal_candidate_id", "rank", "state", "evidence_state", "target_endpoint", "deployment_spec", "predicted_evidence", "actual_evidence", "deployment_name", "revision_id", "benchmark_id", "quality_evidence_id", "lab_evaluation_id", "release_guard_evaluation_id", "optimized_artifact_id", "failure_code", "created_at", "updated_at"}, "properties": map[string]any{
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "proposal_candidate_id", "rank", "state", "evidence_state", "target_endpoint", "deployment_spec", "predicted_evidence", "actual_evidence", "deployment_name", "revision_id", "benchmark_id", "quality_evidence_id", "lab_evaluation_id", "release_guard_evaluation_id", "optimized_artifact_id", "failure_code", "created_at", "updated_at", "label", "control", "state_entered_at", "measurement"}, "properties": map[string]any{
 		"id": text, "proposal_candidate_id": text, "rank": map[string]any{"type": "integer", "minimum": 1}, "state": text, "evidence_state": text, "target_endpoint": text,
 		"deployment_spec": object, "predicted_evidence": object, "actual_evidence": object,
 		"deployment_name": text, "revision_id": text, "benchmark_id": text, "quality_evidence_id": text, "lab_evaluation_id": text, "release_guard_evaluation_id": text, "optimized_artifact_id": text, "failure_code": text,
 		"quality":    ref("OptimizationCandidateQuality"),
 		"reason":     ref("OptimizationCandidateReason"),
 		"created_at": timestamp, "updated_at": timestamp,
+		"label":            map[string]any{"type": "string", "description": "What the setup changes, in plain words: the description written into the proposal when it has one, else the recognized serving flags (for example \"Speculative decoding (n-gram)\"), else \"<engine> defaults\". It describes configuration, never performance."},
+		"control":          map[string]any{"type": "boolean", "description": "True for the campaign control, the current setup every other candidate is measured against."},
+		"state_entered_at": map[string]any{"type": "object", "additionalProperties": timestamp, "description": "First time the candidate entered each state, keyed by state. States the candidate never reached, or that a control plane released before this field never timed, are absent."},
+		"measurement":      map[string]any{"oneOf": []any{ref("OptimizationCandidateMeasurement"), map[string]any{"type": "null"}}},
+	}}
+}
+
+// optimizationCandidateMeasurementSchema is a candidate's live interleaved
+// measurement. Values are copied from AIPerf; absent means not reported.
+func optimizationCandidateMeasurementSchema() map[string]any {
+	text, timestamp, integer, number := map[string]any{"type": "string"}, map[string]any{"type": "string", "format": "date-time"}, map[string]any{"type": "integer", "minimum": 0}, map[string]any{"type": "number"}
+	run := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "arm", "started_at", "requests"}, "properties": map[string]any{
+		"kind": map[string]any{"type": "string", "enum": []string{"warmup", "turn"}}, "arm": map[string]any{"type": "string", "enum": []string{"control", "candidate"}},
+		"turn":       map[string]any{"type": "integer", "minimum": 1, "description": "1-based turn number; absent for warmups."},
+		"started_at": timestamp, "ended_at": timestamp, "duration_seconds": number, "requests": integer, "failed": integer,
+		"output_token_throughput": number, "ttft_p95_ms": number, "latency_p95_ms": number,
+		"error": map[string]any{"type": "string", "description": "Bounded reason when the invocation failed."},
+	}}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"method", "started_at", "updated_at", "turns_planned", "warmups_planned", "turns_done", "current", "runs"}, "description": "Each AIPerf invocation of the candidate's measurement so far. A turn is one measured run of either arm: with a live control, C X C X C X C after one warmup per arm. turns_planned shrinks when the control drops out.", "properties": map[string]any{
+		"method": text, "started_at": timestamp, "updated_at": timestamp,
+		"turns_planned": integer, "warmups_planned": integer, "turns_done": integer,
+		"current": map[string]any{"oneOf": []any{run, map[string]any{"type": "null"}}, "description": "The invocation running now, or null."},
+		"runs":    map[string]any{"type": "array", "items": run},
+	}}
+}
+
+// optimizationRunProgressSchema is where a run is as a whole.
+func optimizationRunProgressSchema() map[string]any {
+	nullableTimestamp := map[string]any{"type": []string{"string", "null"}, "format": "date-time"}
+	nullable := nullableNumberSchema()
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"stage", "started_at", "ended_at", "elapsed_seconds", "setups_total", "setups_measured", "turns_done", "turns_total", "eta"}, "description": "Where the run is, derived from candidate states rather than the aggregate campaign state, which reads ranked as soon as one candidate is ranked.", "properties": map[string]any{
+		"stage":           map[string]any{"type": "string", "enum": []string{"awaiting_approval", "running", "comparing", "decided", "cancelled"}},
+		"started_at":      map[string]any{"type": []string{"string", "null"}, "format": "date-time", "description": "Approval time."},
+		"ended_at":        map[string]any{"type": []string{"string", "null"}, "format": "date-time", "description": "When the last candidate reached its decision; null while running or when a decision time was never recorded."},
+		"elapsed_seconds": nullable, "setups_total": map[string]any{"type": "integer"}, "setups_measured": map[string]any{"type": "integer"},
+		"turns_done":  map[string]any{"type": "integer"},
+		"turns_total": map[string]any{"type": []string{"integer", "null"}, "description": "Measured turns the run expects; null when a finished candidate's turns were never recorded."},
+		"eta": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"state", "basis", "remaining_seconds", "completes_at", "observed"}, "description": "An estimate, built only from step durations this run already observed. Unknown until every remaining kind of step was timed once; never covers waiting for a person.", "properties": map[string]any{
+			"state": map[string]any{"type": "string", "enum": []string{"estimated", "unknown"}}, "basis": map[string]any{"type": "string", "const": "observed_durations"},
+			"remaining_seconds": nullable, "completes_at": nullableTimestamp,
+			"observed": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "integer"}, "description": "How many provisioning, warmup, turn, and answer-check durations the estimate uses."},
+			"reason":   map[string]any{"type": "string"},
+		}},
+	}}
+}
+
+// optimizationRunSpendSchema is the run's spend so far.
+func optimizationRunSpendSchema() map[string]any {
+	nullable := nullableNumberSchema()
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"state", "basis", "label", "estimated_usd", "replica_seconds", "cap_usd"}, "description": "Spend so far, estimated from each candidate's sourced hourly quote, divided by its quoted maximum replica count, times how long its replicas existed. It is not an invoice. Unknown when a setup held servers without a recorded quote or its servers cannot be attributed yet.", "properties": map[string]any{
+		"state": map[string]any{"type": "string", "enum": []string{"estimated", "unknown"}}, "basis": map[string]any{"type": "string", "const": "quoted_rate_x_replica_seconds"},
+		"label": map[string]any{"type": "string", "const": "estimated from quoted rate"}, "estimated_usd": nullable, "replica_seconds": nullable, "cap_usd": nullable,
+		"reason": map[string]any{"type": "string"},
 	}}
 }
 
