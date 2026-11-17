@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
@@ -43,23 +44,27 @@ var metricWords = map[string]string{
 	sourceOutputTPS: "output throughput", sourceTTFTP95: "p95 time to first token",
 }
 
-// view is the formatted report shared by the text and HTML renderers.
-type view struct {
+// View is the formatted report shared by the text and HTML renderers and the
+// CLI's styled terminal rendering. Every value is already formatted, and every
+// missing value already reads "unknown", so a renderer only lays it out.
+type View struct {
 	Title, Subtitle, Banner, Headline string
 	Kind                              string
-	Rows                              []viewRow
+	Rows                              []ViewRow
 	Measurement                       []string
-	Candidates                        []viewCandidate
+	Candidates                        []ViewCandidate
 	SignalsNote                       string
-	Signals                           []viewSignal
-	Winner, Baseline                  []viewField
+	Signals                           []ViewSignal
+	Winner, Baseline                  []ViewField
 	WinnerTitle, BaselineTitle        string
-	Evidence                          []viewField
-	Unknown                           []viewField
+	Evidence                          []ViewField
+	Unknown                           []ViewField
 	Digest                            string
 }
 
-type viewRow struct {
+// ViewRow is one outcome: the current setup against the winner. Tone is good,
+// bad, neutral, watch, or unknown.
+type ViewRow struct {
 	Label, Baseline, Winner, Change, Decision, Noise, Reason string
 	Tone                                                     string
 	// Lead is an outcome card's large value and LeadNote the line under it.
@@ -69,7 +74,7 @@ type viewRow struct {
 // lead fills the card values. A card leads with the chosen setup; when the
 // campaign chose none it leads with the current setup, so measured values
 // stay visible instead of a large "unknown".
-func (row *viewRow) lead(chosen bool) {
+func (row *ViewRow) lead(chosen bool) {
 	if chosen {
 		row.Lead, row.LeadNote = row.Winner, "current setup: "+row.Baseline
 		return
@@ -77,20 +82,29 @@ func (row *viewRow) lead(chosen bool) {
 	row.Lead, row.LeadNote = row.Baseline, "current setup"
 }
 
-type viewCandidate struct {
+// ViewCandidate is one measured setup. Measured joins the known measurements;
+// TokensPerSecond, TTFTP95, and CostPerMillion hold them one by one and read
+// "unknown" when the setup did not record them. State is the raw lifecycle
+// state behind Status.
+type ViewCandidate struct {
 	Label, Role, Status, Measured, Versus, Tone string
+	State                                       string
+	TokensPerSecond, TTFTP95, CostPerMillion    string
 }
 
-type viewSignal struct {
+// ViewSignal is one engine signal for both setups.
+type ViewSignal struct {
 	Name, Stat, Baseline, Winner string
 }
 
-type viewField struct {
+// ViewField is one labelled value.
+type ViewField struct {
 	Name, Value string
 }
 
-func newView(r Report) view {
-	v := view{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Digest: r.ReportDigest}
+// NewView formats a report for display without adding or dropping a value.
+func NewView(r Report) View {
+	v := View{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Digest: r.ReportDigest}
 	for _, metric := range r.Metrics {
 		v.Rows = append(v.Rows, metricRow(metric))
 	}
@@ -106,7 +120,7 @@ func newView(r Report) view {
 	if r.Bottleneck.State != BasisUnknown {
 		v.SignalsNote = "What the serving engine reported while each setup was measured. GPU telemetry: " + strings.ReplaceAll(r.Bottleneck.GPUTelemetry, "_", " ") + "."
 		for _, signal := range r.Bottleneck.Signals {
-			v.Signals = append(v.Signals, viewSignal{Name: signal.Name, Stat: signal.Stat, Baseline: plainNumber(signal.Baseline), Winner: plainNumber(signal.Winner)})
+			v.Signals = append(v.Signals, ViewSignal{Name: signal.Name, Stat: signal.Stat, Baseline: plainNumber(signal.Baseline), Winner: plainNumber(signal.Winner)})
 		}
 	}
 	if r.Appendix.Winner != nil {
@@ -126,13 +140,26 @@ func newView(r Report) view {
 		if entry.Subject != "" {
 			value += "  " + entry.Subject
 		}
-		v.Evidence = append(v.Evidence, viewField{strings.ReplaceAll(entry.Kind, "_", " "), value})
+		v.Evidence = append(v.Evidence, ViewField{strings.ReplaceAll(entry.Kind, "_", " "), value})
 	}
-	v.Evidence = append(v.Evidence, viewField{"this report", r.ReportDigest})
+	if eval := r.Quality.Eval; eval != "" && !evidenceNames(v.Evidence, eval) {
+		v.Evidence = append(v.Evidence, ViewField{"quality eval", eval})
+	}
+	v.Evidence = append(v.Evidence, ViewField{"this report", r.ReportDigest})
 	for _, field := range r.Unknown {
-		v.Unknown = append(v.Unknown, viewField{field, unknownReason(r, field)})
+		v.Unknown = append(v.Unknown, ViewField{field, unknownReason(r, field)})
 	}
 	return v
+}
+
+// evidenceNames reports whether an evidence entry already names value.
+func evidenceNames(fields []ViewField, value string) bool {
+	for _, field := range fields {
+		if strings.Contains(field.Value, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func subtitle(r Report) string {
@@ -147,9 +174,9 @@ func subtitle(r Report) string {
 	return strings.Join(parts, " · ")
 }
 
-func metricRow(metric Metric) viewRow {
+func metricRow(metric Metric) ViewRow {
 	format := formatterFor(metric.Key)
-	row := viewRow{Label: metric.Label, Baseline: orUnknown(metric.Baseline, format), Winner: orUnknown(metric.Winner, format), Decision: decisionWords[metric.Decision], Reason: metric.Reason}
+	row := ViewRow{Label: metric.Label, Baseline: orUnknown(metric.Baseline, format), Winner: orUnknown(metric.Winner, format), Decision: decisionWords[metric.Decision], Reason: metric.Reason}
 	if metric.ChangePercent != nil {
 		row.Change = signedPercent(*metric.ChangePercent)
 	} else if metric.Decision == DecisionUnchanged {
@@ -170,11 +197,8 @@ func metricRow(metric Metric) viewRow {
 	return row
 }
 
-func qualityRow(quality Quality) viewRow {
-	row := viewRow{Label: "Answer quality", Baseline: orUnknown(quality.BaselineScore, score), Winner: orUnknown(quality.WinnerScore, score), Decision: quality.Verdict, Reason: quality.Reason}
-	if quality.Eval != "" {
-		row.Label += " (" + quality.Eval + ")"
-	}
+func qualityRow(quality Quality) ViewRow {
+	row := ViewRow{Label: qualityLabel(quality), Baseline: orUnknown(quality.BaselineScore, score), Winner: orUnknown(quality.WinnerScore, score), Decision: quality.Verdict, Reason: quality.Reason}
 	switch {
 	case quality.Delta != nil:
 		row.Change = fmt.Sprintf("%+.3f", *quality.Delta)
@@ -199,8 +223,21 @@ func qualityRow(quality Quality) viewRow {
 	return row
 }
 
-func monthlyRow(monthly Monthly) viewRow {
-	row := viewRow{Label: "Monthly cost at your traffic", Baseline: orUnknown(monthly.BaselineUSD, usd), Winner: orUnknown(monthly.WinnerUSD, usd), Reason: monthly.Reason, Tone: tone(monthly.Decision)}
+// qualityLabel names the answer-quality outcome in a few words: the built-in
+// check, or the eval suite's name. The full suite identity, whose version
+// carries a content digest, is listed under the evidence instead.
+func qualityLabel(quality Quality) string {
+	if quality.Source == domain.QualityEvidenceSourceInferCrane {
+		return "Answer quality · InferCrane answer check"
+	}
+	if name, _, _ := strings.Cut(quality.Eval, "@"); name != "" {
+		return "Answer quality · " + name
+	}
+	return "Answer quality"
+}
+
+func monthlyRow(monthly Monthly) ViewRow {
+	row := ViewRow{Label: "Monthly cost at your traffic", Baseline: orUnknown(monthly.BaselineUSD, usd), Winner: orUnknown(monthly.WinnerUSD, usd), Reason: monthly.Reason, Tone: tone(monthly.Decision)}
 	if monthly.Decision != DecisionUnknown {
 		row.Decision = decisionWords[monthly.Decision]
 	}
@@ -282,8 +319,11 @@ func measurementLines(r Report) []string {
 	return lines
 }
 
-func candidateView(candidate CandidateResult) viewCandidate {
-	result := viewCandidate{Label: candidate.Label, Status: candidateStatus(candidate)}
+func candidateView(candidate CandidateResult) ViewCandidate {
+	result := ViewCandidate{Label: candidate.Label, Status: candidateStatus(candidate), State: candidate.State}
+	result.TokensPerSecond = orUnknown(candidate.OutputTokensPerSecond, tokens)
+	result.TTFTP95 = orUnknown(candidate.TTFTP95MS, ms)
+	result.CostPerMillion = orUnknown(candidate.CostPerMillionOutputTokens, usd)
 	switch candidate.Role {
 	case "baseline":
 		result.Role = "current setup"
@@ -317,8 +357,8 @@ func candidateView(candidate CandidateResult) viewCandidate {
 	return result
 }
 
-func setupFields(setup Setup) []viewField {
-	fields := []viewField{{"Setup", setup.Label}}
+func setupFields(setup Setup) []ViewField {
+	fields := []ViewField{{"Setup", setup.Label}}
 	engine := setup.Engine
 	if engine == "" {
 		engine = "unknown"
@@ -326,14 +366,14 @@ func setupFields(setup Setup) []viewField {
 	if setup.EngineVersion != "" {
 		engine += " " + setup.EngineVersion
 	}
-	fields = append(fields, viewField{"Engine", engine})
+	fields = append(fields, ViewField{"Engine", engine})
 	args := "default settings"
 	if len(setup.Args) > 0 {
 		args = strings.Join(setup.Args, " ")
 	}
-	fields = append(fields, viewField{"Args", args})
+	fields = append(fields, ViewField{"Args", args})
 	if setup.Image != "" {
-		fields = append(fields, viewField{"Image", setup.Image})
+		fields = append(fields, ViewField{"Image", setup.Image})
 	}
 	hardware := "unknown"
 	if setup.Accelerator != "" {
@@ -358,17 +398,17 @@ func setupFields(setup Setup) []viewField {
 	if setup.MaxReplicas > 0 {
 		hardware += fmt.Sprintf(" · %d–%d replicas", setup.MinReplicas, setup.MaxReplicas)
 	}
-	fields = append(fields, viewField{"Hardware", hardware})
+	fields = append(fields, ViewField{"Hardware", hardware})
 	if setup.Model != "" {
-		fields = append(fields, viewField{"Model", setup.Model})
+		fields = append(fields, ViewField{"Model", setup.Model})
 	}
 	price := "unknown (no sourced price)"
 	if setup.HourlyUSD != nil {
 		price = usd(*setup.HourlyUSD) + " per hour per replica · " + setup.PriceSource
 	}
-	fields = append(fields, viewField{"Price", price})
+	fields = append(fields, ViewField{"Price", price})
 	if setup.RevisionID != "" {
-		fields = append(fields, viewField{"Revision", setup.DeploymentName + " " + setup.RevisionID})
+		fields = append(fields, ViewField{"Revision", setup.DeploymentName + " " + setup.RevisionID})
 	}
 	return fields
 }
@@ -564,7 +604,7 @@ func emptyAs(value, fallback string) string {
 
 // Text renders the report as plain text for terminals and logs.
 func Text(r Report) string {
-	v := newView(r)
+	v := NewView(r)
 	var b strings.Builder
 	b.WriteString(v.Title + "\n" + v.Subtitle + "\n\n")
 	if v.Banner != "" {
@@ -612,7 +652,7 @@ func Text(r Report) string {
 	}
 	for _, block := range []struct {
 		title  string
-		fields []viewField
+		fields []ViewField
 	}{{v.WinnerTitle, v.Winner}, {v.BaselineTitle, v.Baseline}} {
 		if len(block.fields) == 0 {
 			continue

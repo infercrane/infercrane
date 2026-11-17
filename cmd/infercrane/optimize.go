@@ -600,6 +600,7 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	expiresIn := fs.Duration("expires-in", time.Hour, "approval expiry, from 1m through 24h")
 	candidateID := fs.String("candidate", "", "exact qualified candidate ID to activate or promote")
 	output := fs.String("output", "human", "human or json")
+	yes := fs.Bool("yes", false, "approve without the confirmation prompt")
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
@@ -614,14 +615,26 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		if fs.NArg() != 0 {
 			return errors.New("usage: infercrane optimize list [--limit N]")
 		}
+		var raw json.RawMessage
+		if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/optimization/campaigns?limit="+strconv.Itoa(*limit), "", nil, &raw); err != nil {
+			return err
+		}
 		var response struct {
 			Data []optimizationCampaignView `json:"data"`
 		}
-		if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/optimization/campaigns?limit="+strconv.Itoa(*limit), "", nil, &response); err != nil {
+		if err = decodeRaw(raw, &response); err != nil {
 			return err
 		}
 		if *output == "json" {
 			return printJSON(response)
+		}
+		if t := outputTheme(*output); t.styled {
+			var times struct {
+				Data []campaignTimes `json:"data"`
+			}
+			_ = json.Unmarshal(raw, &times)
+			fmt.Print(renderCampaignList(t, response.Data, times.Data, time.Now()))
+			return nil
 		}
 		for _, campaign := range response.Data {
 			fmt.Printf("%-36s  %-18s  %-14s  %s\n", campaign.ID, campaign.State, campaign.Objective, campaign.ModelIdentity)
@@ -641,31 +654,55 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 		Activation       *domain.Operation        `json:"activation_operation,omitempty"`
 		CleanupOperation *domain.Operation        `json:"cleanup_operation,omitempty"`
 	}
+	var raw json.RawMessage
 	switch action {
 	case "inspect", "results":
-		err = controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &response)
+		err = controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &raw)
 	case "approve":
 		if *maxCost <= 0 || *expiresIn < time.Minute || *expiresIn > 24*time.Hour {
 			return errors.New("approve requires --max-cost-usd greater than zero and --expires-in between 1m and 24h")
 		}
-		err = controlJSON(ctx, cfg, http.MethodPost, path+"/approve", "", map[string]any{"max_cost_usd": *maxCost, "expires_in_seconds": int(expiresIn.Seconds())}, &response)
+		if !*yes && promptAllowed(*output) {
+			if err = confirmApproval(ctx, cfg, outputTheme(*output), id, *maxCost, *expiresIn, time.Now()); err != nil {
+				return err
+			}
+		}
+		err = controlJSON(ctx, cfg, http.MethodPost, path+"/approve", "", map[string]any{"max_cost_usd": *maxCost, "expires_in_seconds": int(expiresIn.Seconds())}, &raw)
 	case "activate":
 		if strings.TrimSpace(*candidateID) == "" {
 			return errors.New("activate requires --candidate CANDIDATE_ID")
 		}
-		err = controlJSON(ctx, cfg, http.MethodPost, path+"/activate", "", map[string]any{"candidate_id": strings.TrimSpace(*candidateID)}, &response)
+		err = controlJSON(ctx, cfg, http.MethodPost, path+"/activate", "", map[string]any{"candidate_id": strings.TrimSpace(*candidateID)}, &raw)
 	case "cancel":
-		err = controlJSON(ctx, cfg, http.MethodPost, path+"/cancel", "", map[string]any{}, &response)
+		err = controlJSON(ctx, cfg, http.MethodPost, path+"/cancel", "", map[string]any{}, &raw)
 	default:
 		return errors.New("unknown optimization campaign action")
 	}
 	if err != nil {
 		return err
 	}
+	if err = decodeRaw(raw, &response); err != nil {
+		return err
+	}
 	if *output == "json" {
 		return printJSON(response)
 	}
 	view := response.Campaign
+	if t := outputTheme(*output); t.styled {
+		var setups struct {
+			Campaign struct {
+				Candidates []approvalSetup `json:"candidates"`
+			} `json:"campaign"`
+		}
+		_ = json.Unmarshal(raw, &setups)
+		described := map[string]string{}
+		for _, setup := range setups.Campaign.Candidates {
+			described[setup.ID] = setup.describe()
+		}
+		fmt.Print(renderCampaign(t, view, described, response.Operation, response.Activation, response.CleanupOperation, time.Now()))
+		printResourceLink(cfg, "run", view.ID)
+		return nil
+	}
 	fmt.Printf("Optimization campaign %s · %s\n", view.ID, view.State)
 	fmt.Printf("Model      %s\nObjective  %s\nIntent     %s\nSource     %s\n", view.ModelIdentity, view.Objective, view.Intent, view.Source)
 	if view.TargetDeployment != "" {
@@ -769,6 +806,18 @@ func printDiagnosisPlan(proposal optimizer.Proposal) error {
 		fmt.Printf("Collect: %s\n", needed)
 	}
 	fmt.Println("Expected benefit orders what to measure first; it is not a measured result.")
+	return nil
+}
+
+// decodeRaw decodes a response kept raw so styled views can read fields the
+// JSON view omits. An empty body leaves out unchanged, as controlJSON does.
+func decodeRaw(raw json.RawMessage, out any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("decode control-plane response: %w", err)
+	}
 	return nil
 }
 
