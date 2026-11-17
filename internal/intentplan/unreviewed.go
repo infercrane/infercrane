@@ -11,7 +11,10 @@ import (
 	"github.com/infercrane/infercrane/internal/modelcheck"
 )
 
-const checkedWarning = "Not reviewed: checked automatically. This setup comes from the model's published metadata and the pinned runtimes' model registries. Throughput, latency, answer quality, capacity, and final cost are unknown until measured."
+const (
+	checkedWarning   = "Not reviewed: checked automatically. This setup comes from the model's published metadata and the pinned runtimes' model registries. Throughput, latency, answer quality, capacity, and final cost are unknown until measured."
+	uncheckedWarning = "Not reviewed and not checked: InferCrane could not read this model, so its runtime support, size, license, and access are unknown."
+)
 
 // UnreviewedRepository returns the exact Hugging Face repository the request
 // names, or "" when the model field is not one. Only an explicit model field
@@ -56,6 +59,7 @@ func (p Planner) planUnreviewed(result Plan, request Request, recipes []curatedr
 	repository := unreviewed.Repository
 	result.Warnings = []string{checkedWarning}
 	if unreviewed.Report == nil {
+		result.Warnings = []string{uncheckedWarning}
 		remediation := "Check the repository name, or choose a reviewed model."
 		switch unreviewed.Code {
 		case modelcheck.CodeUnavailable:

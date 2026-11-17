@@ -142,7 +142,7 @@ func TestPlanExplainsAnUncheckableModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Status != "needs_input" || plan.Model != nil || plan.ModelCheck != nil || missing(plan, "model").Reason != planner.Unreviewed.Reason || plan.Warnings[0] != checkedWarning {
+	if plan.Status != "needs_input" || plan.Model != nil || plan.ModelCheck != nil || missing(plan, "model").Reason != planner.Unreviewed.Reason || plan.Warnings[0] != uncheckedWarning {
 		t.Fatalf("unexpected plan: %+v", plan)
 	}
 	// A check for another repository never answers this request.
