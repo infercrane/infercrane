@@ -563,7 +563,15 @@ type optimizationCampaignView struct {
 		// Quality is the control API's answer-check view, passed through
 		// unchanged in --output json.
 		Quality *watchQualityDetail `json:"quality,omitempty"`
+		// Label, Control, StateEnteredAt, and Measurement are passed through
+		// unchanged in --output json; older control planes omit them.
+		Label          string          `json:"label,omitempty"`
+		Control        bool            `json:"control"`
+		StateEnteredAt json.RawMessage `json:"state_entered_at,omitempty"`
+		Measurement    json.RawMessage `json:"measurement,omitempty"`
 	} `json:"candidates"`
+	Progress json.RawMessage `json:"progress,omitempty"`
+	Spend    json.RawMessage `json:"spend,omitempty"`
 }
 
 // watchQualityDetail keeps every field of the answer-check view so JSON output
@@ -647,6 +655,19 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("usage: infercrane optimize " + action + " CAMPAIGN [flags]")
 	}
+	if action == "results" && *output == "human" {
+		// results is the decided-run summary: the same view as watch, once.
+		snapshot := loadWatchSnapshot(ctx, cfg, id)
+		if snapshot.err != nil {
+			return snapshot.err
+		}
+		fmt.Print(renderOptimizeWatch(snapshot, newUIStyles(true), 100, false))
+		if !watchDecided(snapshot.campaign) {
+			fmt.Println("\nStill running. Follow it live: infercrane optimize watch " + id)
+		}
+		printResourceLink(cfg, "run", id)
+		return nil
+	}
 	path := "/api/v1/optimization/campaigns/" + url.PathEscape(id)
 	var response struct {
 		Campaign         optimizationCampaignView `json:"campaign"`
@@ -729,7 +750,15 @@ func optimizeCampaignCommand(ctx context.Context, args []string) error {
 	if len(view.Candidates) > 0 {
 		fmt.Println("\nCANDIDATES")
 		for _, candidate := range view.Candidates {
-			fmt.Printf("  %d  %-16s  %-11s  %s", candidate.Rank, candidate.State, candidate.EvidenceState, candidate.ID)
+			name := candidate.Label
+			if name == "" {
+				name = fmt.Sprintf("Setup %d", candidate.Rank)
+			}
+			if candidate.Control {
+				name += " (current setup)"
+			}
+			fmt.Printf("  %d  %s\n", candidate.Rank, name)
+			fmt.Printf("     %-16s  %-11s  %s", candidate.State, candidate.EvidenceState, candidate.ID)
 			if candidate.TargetEndpoint != "" {
 				fmt.Printf(" · endpoint %s", candidate.TargetEndpoint)
 			}

@@ -47,12 +47,20 @@ var campaignActions = [][]string{
 
 func TestOptimizeCampaignActionsPrintProposalWarnings(t *testing.T) {
 	serveCampaign(t, `["speculative decoding skipped: no draft model is reviewed for acme/model","every recipe arm is unmeasured until benchmarked"]`)
+	block := campaignWarningsHeading + "\n  - speculative decoding skipped: no draft model is reviewed for acme/model\n  - every recipe arm is unmeasured until benchmarked\n"
 	for _, args := range campaignActions {
 		output, err := captureStdout(t, func() error { return optimizeCampaignCommand(context.Background(), args) })
 		if err != nil {
 			t.Fatalf("args=%v err=%v", args, err)
 		}
-		block := campaignWarningsHeading + "\n  - speculative decoding skipped: no draft model is reviewed for acme/model\n  - every recipe arm is unmeasured until benchmarked\n"
+		if args[0] == "results" {
+			// results prints the run summary that watch shows, warnings before progress.
+			header, warnings, progress := strings.Index(output, "Optimization · acme/model"), strings.Index(output, block), strings.Index(output, "Progress")
+			if header < 0 || warnings < header || progress < warnings {
+				t.Fatalf("args=%v: warnings block missing or out of order:\n%s", args, output)
+			}
+			continue
+		}
 		header := strings.Index(output, "Optimization campaign campaign-1 · awaiting_approval")
 		warnings := strings.Index(output, block)
 		candidates := strings.Index(output, "CANDIDATES")

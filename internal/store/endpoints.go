@@ -630,6 +630,31 @@ func (s *Store) EndpointsForTenant(ctx context.Context, tenant string) ([]domain
 	return out, rows.Err()
 }
 
+// CustomerEndpointsForTenant lists the endpoints a customer works with. It
+// leaves out the endpoint that every new deployment row gets from the
+// deployments_create_legacy_endpoint trigger when that deployment is a
+// new-endpoint optimization candidate: candidates are measured directly
+// against their replicas, and activation publishes the winner under the
+// requested name. A candidate's deployment is matched by its recorded name
+// or, while it is still provisioning, by the "-opt-<candidate>" name the
+// campaign driver gives it. Routing still uses EndpointsForTenant.
+func (s *Store) CustomerEndpointsForTenant(ctx context.Context, tenant string) ([]domain.Endpoint, error) {
+	rows, err := s.QueryContext(ctx, `SELECT e.id,e.tenant_id,e.logical_model_id,e.environment_id,e.name,e.desired_state,e.observed_state,COALESCE(e.active_serving_plan_id,''),COALESCE(e.candidate_serving_plan_id,''),e.created_at,e.updated_at FROM endpoints e WHERE e.tenant_id=? AND e.desired_state<>'deleted' AND NOT EXISTS (SELECT 1 FROM deployments d JOIN optimization_candidate_runs c ON c.tenant_id=d.tenant_id AND (c.deployment_name=d.name OR d.name LIKE ('%-opt-' || left(c.id,8))) AND d.created_at>=c.created_at JOIN optimization_campaigns campaign ON campaign.tenant_id=c.tenant_id AND campaign.id=c.campaign_id AND campaign.intent='new_endpoint' WHERE d.tenant_id=e.tenant_id AND e.id=d.id || '-endpoint') ORDER BY e.name`, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Endpoint
+	for rows.Next() {
+		item, scanErr := scanEndpoint(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) TenantsWithEndpoints(ctx context.Context) ([]string, error) {
 	rows, err := s.QueryContext(ctx, `SELECT DISTINCT tenant_id FROM endpoints WHERE desired_state<>'deleted' ORDER BY tenant_id`)
 	if err != nil {

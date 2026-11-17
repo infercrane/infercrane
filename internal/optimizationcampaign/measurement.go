@@ -222,19 +222,26 @@ func (i *invocations) run(ctx context.Context, target armTarget, requests int) (
 // runs from the same time window. Without a live control it runs the candidate
 // alone and records why the comparison is unavailable. A broken control never
 // fails the candidate: it makes the comparison invalid.
-func measureInterleaved(ctx context.Context, runs *invocations, candidate armTarget, control *armTarget, controlEvidence ControlEvidence) (measurement, error) {
+// A tracker, when given, records each invocation as it starts and ends so the
+// run's progress can be read while it measures.
+func measureInterleaved(ctx context.Context, runs *invocations, candidate armTarget, control *armTarget, controlEvidence ControlEvidence, tracker *progressTracker) (measurement, error) {
 	result := measurement{evidence: MeasuredEvidence{Method: MeasurementMethod, InvocationBase: runs.base, Control: controlEvidence, ServerMetricsRequested: candidate.serverMetrics, GPUTelemetry: "not_collected"}}
 	result.evidence.Control.DriftLimit = maxControlDrift
+	tracker.plan(control != nil)
+	invoke := func(kind, arm string, target armTarget, requests int) (benchmark.Result, error) {
+		return tracker.run(kind, arm, requests, func() (benchmark.Result, error) { return runs.run(ctx, target, requests) })
+	}
 	var controlRuns []benchmark.Result
 	controlFailed := func(reason string) {
 		control = nil
 		result.evidence.Control.Role, result.evidence.Control.Reason = ControlRoleInvalid, reason
+		tracker.dropControl()
 	}
 	runControl := func() {
 		if control == nil {
 			return
 		}
-		measured, err := runs.run(ctx, *control, runs.plan.requests)
+		measured, err := invoke(RunKindTurn, ArmControl, *control, runs.plan.requests)
 		result.evidence.Order = append(result.evidence.Order, "control")
 		if err != nil {
 			controlFailed("control run failed: " + boundedReason(err))
@@ -245,19 +252,19 @@ func measureInterleaved(ctx context.Context, runs *invocations, candidate armTar
 	}
 	if control != nil {
 		result.evidence.Control.ServerMetrics = control.serverMetrics
-		if _, err := runs.run(ctx, *control, runs.plan.warmup); err != nil {
+		if _, err := invoke(RunKindWarmup, ArmControl, *control, runs.plan.warmup); err != nil {
 			controlFailed("control warmup failed: " + boundedReason(err))
 		} else {
 			result.evidence.Order = append(result.evidence.Order, "warmup:control")
 		}
 	}
-	if _, err := runs.run(ctx, candidate, runs.plan.warmup); err != nil {
+	if _, err := invoke(RunKindWarmup, ArmCandidate, candidate, runs.plan.warmup); err != nil {
 		return measurement{}, fmt.Errorf("candidate warmup: %w", err)
 	}
 	result.evidence.Order = append(result.evidence.Order, "warmup:candidate")
 	for index := 0; index < measurementRunsPerArm; index++ {
 		runControl()
-		measured, err := runs.run(ctx, candidate, runs.plan.requests)
+		measured, err := invoke(RunKindTurn, ArmCandidate, candidate, runs.plan.requests)
 		if err != nil {
 			return measurement{}, fmt.Errorf("candidate run %d: %w", index+1, err)
 		}

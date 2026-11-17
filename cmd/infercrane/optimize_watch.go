@@ -25,7 +25,7 @@ import (
 var watchStateWords = map[string]string{
 	"proposed": "queued", "provisioning": "starting a server", "ready": "server ready",
 	"measuring": "measuring against your current setup", "validating": "checking answer quality",
-	"ranked": "measured and ranked", "guarding": "running the safety check", "guard_passed": "passed the safety check",
+	"ranked": "measured, waiting to compare", "guarding": "running the safety check", "guard_passed": "passed the safety check",
 	"qualified": "winner, ready to activate", "rejected": "rejected", "inconclusive": "no clear result",
 	"failed": "failed", "cancelled": "cancelled", "cleaned": "server removed",
 }
@@ -60,6 +60,51 @@ type watchCandidate struct {
 	// Control is set by control APIs that mark the campaign control; without
 	// it the control is the proposal's first-ranked setup.
 	Control *bool `json:"control,omitempty"`
+	// Label and Measurement come from the control API. A control plane
+	// released before them leaves them empty.
+	Label       string     `json:"label"`
+	Measurement *watchLive `json:"measurement"`
+}
+
+// watchLive is the control API's live record of a candidate's interleaved
+// measurement.
+type watchLive struct {
+	TurnsPlanned int        `json:"turns_planned"`
+	TurnsDone    int        `json:"turns_done"`
+	Current      *watchRun  `json:"current"`
+	Runs         []watchRun `json:"runs"`
+}
+
+type watchRun struct {
+	Kind      string     `json:"kind"`
+	Arm       string     `json:"arm"`
+	Turn      int        `json:"turn"`
+	EndedAt   *time.Time `json:"ended_at"`
+	OutputTPS *float64   `json:"output_token_throughput"`
+	Error     string     `json:"error"`
+}
+
+// watchProgress is where the run is as a whole. Every number comes from the
+// control API; the ETA is the API's estimate from observed step durations.
+type watchProgress struct {
+	Stage          string   `json:"stage"`
+	ElapsedSeconds *float64 `json:"elapsed_seconds"`
+	SetupsTotal    int      `json:"setups_total"`
+	TurnsDone      int      `json:"turns_done"`
+	TurnsTotal     *int     `json:"turns_total"`
+	ETA            struct {
+		State            string   `json:"state"`
+		RemainingSeconds *float64 `json:"remaining_seconds"`
+		Reason           string   `json:"reason"`
+	} `json:"eta"`
+}
+
+type watchSpend struct {
+	State        string   `json:"state"`
+	Label        string   `json:"label"`
+	EstimatedUSD *float64 `json:"estimated_usd"`
+	CapUSD       *float64 `json:"cap_usd"`
+	Reason       string   `json:"reason"`
 }
 
 // watchQuality is the control API's view of a candidate's answer check.
@@ -78,14 +123,18 @@ var watchQualityWords = map[string]string{
 }
 
 type watchCampaign struct {
-	ID                string           `json:"id"`
-	ModelIdentity     string           `json:"model_identity"`
-	Objective         string           `json:"objective"`
-	Intent            string           `json:"intent"`
-	TargetDeployment  string           `json:"target_deployment"`
-	State             string           `json:"state"`
-	ApprovalExpiresAt *time.Time       `json:"approval_expires_at"`
-	Candidates        []watchCandidate `json:"candidates"`
+	ID                 string           `json:"id"`
+	ModelIdentity      string           `json:"model_identity"`
+	Objective          string           `json:"objective"`
+	Intent             string           `json:"intent"`
+	TargetDeployment   string           `json:"target_deployment"`
+	State              string           `json:"state"`
+	ApprovalExpiresAt  *time.Time       `json:"approval_expires_at"`
+	ApprovedMaxCostUSD *float64         `json:"approved_max_cost_usd"`
+	Candidates         []watchCandidate `json:"candidates"`
+	Progress           *watchProgress   `json:"progress"`
+	Spend              *watchSpend      `json:"spend"`
+	Warnings           []string         `json:"warnings"`
 }
 
 type watchComparison struct {
@@ -278,8 +327,13 @@ func unwrapJSONString(raw json.RawMessage) []byte {
 	return raw
 }
 
-// watchLabel describes a candidate by what it changes, in plain words.
+// watchLabel describes a candidate by what it changes, in plain words: the
+// control API's name for it, else its engine and flags from an older control
+// plane that names no setup.
 func watchLabel(candidate watchCandidate) string {
+	if strings.TrimSpace(candidate.Label) != "" {
+		return candidate.Label
+	}
 	var spec struct {
 		Runtime struct {
 			Engine string   `json:"engine"`
@@ -319,6 +373,9 @@ func watchStatus(candidate watchCandidate, measurement watchMeasurement, kept bo
 	text := watchStateWords[candidate.State]
 	if candidate.State == "validating" && candidate.Quality != nil && watchQualityWords[candidate.Quality.State] != "" {
 		text = watchQualityWords[candidate.Quality.State]
+	}
+	if candidate.State == "measuring" && candidate.Measurement != nil {
+		text = "measuring · " + watchTurn(*candidate.Measurement)
 	}
 	if text == "" {
 		text = strings.ReplaceAll(candidate.State, "_", " ")
@@ -379,19 +436,30 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 		width = 60
 	}
 	campaign := snapshot.campaign
-	candidates := append([]watchCandidate(nil), campaign.Candidates...)
-	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].Rank < candidates[j].Rank })
+	candidates := watchOrder(campaign.Candidates)
 	control, winner := watchControl(candidates), watchWinner(candidates)
 	kept := control != nil && winner != nil && winner.ID == control.ID
 	var b strings.Builder
 	title := "Optimization · " + campaign.ModelIdentity
-	headline := watchStatus(watchCandidate{State: campaign.State}, watchMeasurement{}, false)
-	if kept && watchTerminal[campaign.State] {
+	headline := watchStageWord(campaign)
+	if kept && watchDecided(campaign) {
 		headline = "kept your current setup"
 	}
 	b.WriteString(paint(s.title, title) + "  " + paint(s.subtle, headline) + "\n")
-	b.WriteString(paint(s.subtle, "Each setup is measured against your current setup on the same traffic, then checked for answer quality.") + "\n\n")
-	b.WriteString(paint(s.title, "Progress") + "\n")
+	b.WriteString(paint(s.subtle, "Each setup is measured against your current setup on the same traffic, then checked for answer quality.") + "\n")
+	if line := watchRunLine(campaign, candidates); line != "" {
+		b.WriteString("  " + line + "\n")
+	}
+	if line := watchSpendLine(campaign); line != "" {
+		b.WriteString("  " + paint(s.subtle, line) + "\n")
+	}
+	if len(campaign.Warnings) > 0 {
+		b.WriteString("\n" + paint(s.title, "Proposal warnings") + "\n")
+		for _, warning := range campaign.Warnings {
+			b.WriteString("  - " + warning + "\n")
+		}
+	}
+	b.WriteString("\n" + paint(s.title, "Progress") + "\n")
 	for _, candidate := range candidates {
 		index := -1
 		for i, stage := range watchStages {
@@ -416,8 +484,13 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 			track.WriteString(mark)
 		}
 		isKept := kept && candidate.ID == control.ID
-		b.WriteString("  " + track.String() + "  " + truncateText(watchLabel(candidate), 40) + "  " + paint(s.subtle, watchStatus(candidate, snapshot.measurements[candidate.ID], isKept)) + "\n")
+		name := watchLabel(candidate)
+		if control != nil && candidate.ID == control.ID && !strings.Contains(strings.ToLower(name), "current setup") {
+			name += " · current setup"
+		}
+		b.WriteString("  " + track.String() + "  " + padText(truncateText(name, 44), 44) + "  " + paint(s.subtle, watchStatus(candidate, snapshot.measurements[candidate.ID], isKept)) + "\n")
 	}
+	b.WriteString(renderWatchTurns(candidates, s, paint))
 	b.WriteString("\n" + paint(s.title, "Measured") + "\n")
 	measuredAny := false
 	for i, candidate := range candidates {
@@ -433,7 +506,7 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 		b.WriteString(line + "\n")
 		kind, verdict := watchVerdict(measurement)
 		switch {
-		case i == 0 && verdict == "":
+		case (control != nil && candidate.ID == control.ID || control == nil && i == 0) && verdict == "":
 			b.WriteString("    " + paint(s.subtle, "your current setup") + "\n")
 		case kind == "better":
 			b.WriteString("    " + paint(s.healthyText, verdict) + "\n")
@@ -447,7 +520,7 @@ func renderOptimizeWatch(snapshot watchSnapshot, s uiStyles, width int, styled b
 		b.WriteString("  " + paint(s.subtle, "results appear as each setup finishes measuring") + "\n")
 	}
 	b.WriteString(renderWatchAnswers(candidates, s, paint))
-	if watchTerminal[campaign.State] {
+	if watchDecided(campaign) {
 		b.WriteString("\n" + paint(s.title, "Decision") + "\n")
 		switch {
 		case campaign.State == "cancelled":
@@ -526,6 +599,195 @@ func watchWinner(candidates []watchCandidate) *watchCandidate {
 		}
 	}
 	return waiting
+}
+
+// watchOrder lists setups in the order the run measures them: the current
+// setup first, then planning rank.
+func watchOrder(candidates []watchCandidate) []watchCandidate {
+	ordered := append([]watchCandidate(nil), candidates...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := watchMarked(ordered[i]), watchMarked(ordered[j])
+		if left != right {
+			return left
+		}
+		return ordered[i].Rank < ordered[j].Rank
+	})
+	return ordered
+}
+
+// watchMarked reports whether the control API marked the setup as the control.
+func watchMarked(candidate watchCandidate) bool {
+	return candidate.Control != nil && *candidate.Control
+}
+
+// padText right-pads to width runes so status words line up.
+func padText(value string, width int) string {
+	return value + strings.Repeat(" ", max(0, width-len([]rune(value))))
+}
+
+// watchDecided reads the run's stage. The aggregate campaign state reads
+// "ranked" as soon as one setup is ranked, so it is used only when the
+// control plane reports no progress.
+func watchDecided(campaign watchCampaign) bool {
+	if campaign.Progress != nil {
+		return campaign.Progress.Stage == "decided" || campaign.Progress.Stage == "cancelled"
+	}
+	return watchTerminal[campaign.State]
+}
+
+var watchStageWords = map[string]string{
+	"awaiting_approval": "waiting for approval", "running": "running", "comparing": "comparing results",
+	"decided": "decided", "cancelled": "cancelled",
+}
+
+func watchStageWord(campaign watchCampaign) string {
+	if campaign.Progress != nil && watchStageWords[campaign.Progress.Stage] != "" {
+		return watchStageWords[campaign.Progress.Stage]
+	}
+	return watchStatus(watchCandidate{State: campaign.State}, watchMeasurement{}, false)
+}
+
+// watchTurn says which measured turn is running, as the control API counts it.
+func watchTurn(live watchLive) string {
+	if live.Current != nil && live.Current.Kind == "warmup" {
+		return "warming up"
+	}
+	turn := live.TurnsDone
+	if live.Current != nil {
+		turn++
+	}
+	if live.TurnsPlanned <= 0 {
+		return fmt.Sprintf("turn %d", max(turn, 1))
+	}
+	return fmt.Sprintf("turn %d of %d", min(max(turn, 1), live.TurnsPlanned), live.TurnsPlanned)
+}
+
+// watchRunLine is one line on where the run is: which setup, which turn, time
+// elapsed, and the API's estimate of time left. Unknown values are said so.
+func watchRunLine(campaign watchCampaign, ordered []watchCandidate) string {
+	progress := campaign.Progress
+	if progress == nil {
+		return ""
+	}
+	var parts []string
+	switch progress.Stage {
+	case "awaiting_approval":
+		return "Waiting for approval. Nothing runs until a spend cap is approved."
+	case "running":
+		for index, candidate := range ordered {
+			if candidate.State == "provisioning" || candidate.State == "ready" || candidate.State == "measuring" || candidate.State == "validating" {
+				parts = append(parts, fmt.Sprintf("Setup %d of %d", index+1, len(ordered)))
+				if candidate.State == "measuring" && candidate.Measurement != nil {
+					parts = append(parts, watchTurn(*candidate.Measurement))
+				}
+				break
+			}
+		}
+	case "comparing":
+		parts = append(parts, "Comparing the measured setups")
+	case "decided":
+		if progress.ElapsedSeconds != nil {
+			return "Decided after " + watchDuration(*progress.ElapsedSeconds)
+		}
+		return "Decided"
+	case "cancelled":
+		return "Cancelled"
+	}
+	if progress.ElapsedSeconds != nil {
+		parts = append(parts, watchDuration(*progress.ElapsedSeconds)+" elapsed")
+	}
+	if progress.Stage == "running" {
+		if progress.ETA.State == "estimated" && progress.ETA.RemainingSeconds != nil {
+			parts = append(parts, "about "+watchDuration(*progress.ETA.RemainingSeconds)+" left (estimate from this run's measured steps)")
+		} else if progress.ETA.Reason != "" {
+			parts = append(parts, "time left unknown, "+progress.ETA.Reason)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// watchSpendLine shows spend so far against the cap. The control API
+// estimates it from the quoted rate; unknown stays unknown.
+func watchSpendLine(campaign watchCampaign) string {
+	spend := campaign.Spend
+	capText := ""
+	if campaign.ApprovedMaxCostUSD != nil {
+		capText = fmt.Sprintf("$%.2f cap", *campaign.ApprovedMaxCostUSD)
+	}
+	switch {
+	case spend == nil && capText == "":
+		return ""
+	case spend == nil:
+		return "Spend so far not reported · " + capText
+	case spend.State == "estimated" && spend.EstimatedUSD != nil:
+		line := fmt.Sprintf("Spend so far about $%.2f", *spend.EstimatedUSD)
+		if capText != "" {
+			line += " of the " + capText
+		}
+		return line + " · " + spend.Label
+	default:
+		line := "Spend so far unknown"
+		if spend.Reason != "" {
+			line += " · " + spend.Reason
+		}
+		if capText != "" {
+			line += " · " + capText
+		}
+		return line
+	}
+}
+
+func watchDuration(seconds float64) string {
+	minutes := int(seconds/60 + 0.5)
+	switch {
+	case seconds < 60:
+		return "under a minute"
+	case minutes < 60:
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return fmt.Sprintf("%dh %02dm", minutes/60, minutes%60)
+	}
+}
+
+// renderWatchTurns draws the measuring setup's turns as they finish: C is the
+// current setup and X the setup being tested, each with its measured output
+// tokens per second. Nothing is drawn for a turn before it ends.
+func renderWatchTurns(candidates []watchCandidate, s uiStyles, paint func(lipgloss.Style, string) string) string {
+	for _, candidate := range candidates {
+		live := candidate.Measurement
+		if candidate.State != "measuring" || live == nil {
+			continue
+		}
+		var cells []string
+		for _, run := range live.Runs {
+			if run.Kind != "turn" {
+				continue
+			}
+			arm := "X"
+			if run.Arm == "control" {
+				arm = "C"
+			}
+			switch {
+			case run.EndedAt == nil:
+				cells = append(cells, arm+" "+paint(s.warningText, "running"))
+			case run.Error != "":
+				cells = append(cells, arm+" "+paint(s.failureText, "failed"))
+			case run.OutputTPS != nil:
+				cells = append(cells, fmt.Sprintf("%s %.0f", arm, *run.OutputTPS))
+			default:
+				cells = append(cells, arm+" —")
+			}
+		}
+		for len(cells) < live.TurnsPlanned {
+			cells = append(cells, paint(s.subtle, "·"))
+		}
+		var b strings.Builder
+		b.WriteString("\n" + paint(s.title, "Now measuring") + "  " + truncateText(watchLabel(candidate), 48) + " · " + watchTurn(*live) + "\n")
+		b.WriteString("  " + strings.Join(cells, "  ") + "\n")
+		b.WriteString("  " + paint(s.subtle, "C your current setup · X this setup · output tokens/s per turn") + "\n")
+		return b.String()
+	}
+	return ""
 }
 
 // renderWatchAnswers shows each setup's answer check as the control API

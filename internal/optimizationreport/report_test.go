@@ -189,7 +189,7 @@ func TestAssembleComparesWinnerWithBaselineMeasuredInTheSameWindow(t *testing.T)
 	if report.Outcome.Kind != OutcomeWinnerSelected || report.Outcome.WinnerCandidateID != "winner" || report.Outcome.BaselineCandidateID != "control" || !report.Finished {
 		t.Fatalf("outcome = %+v finished=%v", report.Outcome, report.Finished)
 	}
-	if report.Outcome.Headline != "Roll out “vllm, --max-num-seqs 256”: it measured better than your current setup on the same traffic." {
+	if report.Outcome.Headline != "Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic." {
 		t.Fatalf("headline = %q", report.Outcome.Headline)
 	}
 	if report.SimulatedAccelerator || report.Banner != "" {
@@ -281,7 +281,7 @@ func TestActivatedWinnerHeadlineAndRankingDigest(t *testing.T) {
 	f.state, f.arms[1].state = optimizationcampaign.CampaignPromoted, optimizationcampaign.CandidatePromoted
 	f.arms[0].labID, f.arms[1].labID = "lab-row-7", "lab-row-7"
 	report := Assemble(f.evidence())
-	if !report.Outcome.Activated || report.Outcome.Headline != "“vllm, --max-num-seqs 256” is live: it measured better than your previous setup on the same traffic." {
+	if !report.Outcome.Activated || report.Outcome.Headline != "“Up to 256 concurrent requests” is live: it measured better than your previous setup on the same traffic." {
 		t.Fatalf("outcome = %+v", report.Outcome)
 	}
 	for _, entry := range report.Appendix.Evidence {

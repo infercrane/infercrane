@@ -27,7 +27,7 @@ func orderedIn(t *testing.T, text string, parts ...string) {
 func TestTextLeadsWithOutcomesThenEvidence(t *testing.T) {
 	text := Text(Assemble(winnerFixture().evidence()))
 	orderedIn(t, text,
-		"Roll out “vllm, --max-num-seqs 256”",
+		"Roll out “Up to 256 concurrent requests”",
 		"Cost per 1M output tokens", "p95 time to first token", "Output tokens/s per user", "Output tokens/s per GPU", "Requests/s", "Answer quality · gsm8k", "Monthly cost at your traffic",
 		"How it was measured", "Noise band: ±3.0% on output throughput", "Load: a replay of your traffic",
 		"Every setup measured", "Bottleneck signals", "\nWinning setup\n", "\nYour current setup\n", "\nEvidence\n", "this report")

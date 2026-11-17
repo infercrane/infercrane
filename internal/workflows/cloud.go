@@ -62,11 +62,14 @@ type CloudRequest struct {
 	TenantID               string                   `json:"tenant_id,omitempty"`
 	Workload               runtimecontract.Workload `json:"workload,omitzero"`
 	Serving                servingcontract.Topology `json:"serving,omitzero"`
-	// NoEndpoint keeps the deployment off the tenant's endpoint list: converge
-	// and scale never publish a stable endpoint for it. Optimization campaigns
-	// set it on candidate deployments, which are measured directly against
-	// their replicas; activation publishes the requested endpoint for the
-	// winner. The public deployment API rejects it.
+	// NoEndpoint stops converge and scale from publishing a stable endpoint
+	// for the deployment. Optimization campaigns set it on candidate
+	// deployments, which are measured directly against their replicas;
+	// activation publishes the requested endpoint for the winner. The
+	// deployments_create_legacy_endpoint trigger still gives every new
+	// deployment row an endpoint of the same name, so the customer endpoint
+	// list leaves candidates out on read (store.CustomerEndpointsForTenant).
+	// The public deployment API rejects it.
 	NoEndpoint bool `json:"no_endpoint,omitempty"`
 }
 
@@ -1436,7 +1439,7 @@ func checkpoint(ctx context.Context, store CloudStore, operation domain.Operatio
 
 // publishStableEndpoint publishes the request's stable endpoint and records
 // its name in the operation result. A deployment without an endpoint of its
-// own publishes nothing, so it never appears on the tenant's endpoint list.
+// own publishes nothing.
 func publishStableEndpoint(ctx context.Context, store CloudStore, operation domain.Operation, request CloudRequest, result map[string]any) error {
 	name := request.PublishedEndpointName()
 	if name == "" {

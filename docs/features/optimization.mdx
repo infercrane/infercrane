@@ -360,7 +360,41 @@ published, for an evolution the endpoint keeps serving its current revision, and
 is `infercrane optimize cancel CAMPAIGN_ID`, which removes the measurement servers now instead of
 when the approval ends. `infercrane inbox` shows the same step. When a setup waits on you, for your
 eval set or your signed evaluation, it prints the exact command that unblocks it. It only reads the
-control API; `--once` prints one plain snapshot for scripts and logs.
+control API; `--once` prints one plain snapshot for scripts and logs. `infercrane optimize results
+CAMPAIGN_ID` prints the same summary once, and adds a pointer to `watch` while the run is still
+going.
+
+### Follow a run live
+
+A run takes hours, so every campaign read says where it is without guessing. Each candidate has:
+
+| Field | Meaning |
+|---|---|
+| `label` | What the setup changes, in plain words. A description written into the proposal wins, such as "Speculative decoding (n-gram)". Otherwise the label is built from the serving flags InferCrane recognizes, such as "FP8 KV cache, prefill chunks of 2,048 tokens", and a setup with none is "vLLM defaults". An unrecognized flag is shown as written, never guessed. Labels describe configuration, never performance. |
+| `control` | `true` for the current setup every other candidate is measured against. |
+| `state_entered_at` | When the candidate first entered each state. A state it never reached is absent. |
+| `measurement` | The live measurement while and after the candidate measures: every AIPerf invocation with its arm (`control` or `candidate`), times, and measured output tokens per second, p95 time to first token, and p95 latency. A turn is one measured run of either arm. With a live control there is one warmup per arm and then seven turns, C X C X C X C. `turns_planned` drops when the control stops answering mid-measurement. `null` before measuring starts. |
+
+The campaign's `progress` summarizes the run:
+
+| Field | Meaning |
+|---|---|
+| `stage` | `awaiting_approval`, `running`, `comparing`, `decided`, or `cancelled`. It comes from the candidates, not the campaign `state`, which reads `ranked` as soon as the first setup is ranked while later setups still measure. |
+| `started_at`, `ended_at`, `elapsed_seconds` | From approval to the moment the last setup reached its decision. `ended_at` is `null` while the run goes on or when a decision time was never recorded. |
+| `turns_done`, `turns_total` | Measured turns so far and expected in all. |
+| `eta` | An estimate of the time left, labelled `basis: observed_durations`. It uses only step durations this run already observed: provisioning, warmups, turns, and answer checks. It stays `unknown`, with a reason, until each remaining kind of step was timed once, and it never covers waiting for a person. |
+
+`GET /api/v1/optimization/campaigns/{id}` also returns `spend`: spend so far, estimated as each
+candidate's sourced hourly quote, divided by its quoted maximum replica count, times how long its
+replicas existed. The quote is the first one that authorized the candidate's servers. The value is
+labelled `estimated from quoted rate` and is not an invoice. It is `unknown`, never zero, when a
+setup held servers without a recorded quote (any candidate provisioned by an earlier control plane)
+or when its servers cannot be attributed yet, such as an evolution candidate whose revision is
+still being created. `cap_usd` is the approved cap.
+
+`infercrane optimize watch` and the console's run page show the same values: the setup and turn the
+run is on, time elapsed, the estimate of time left, spend against the cap, and each turn's measured
+output tokens per second as it finishes.
 
 ### Get told when a run needs you
 
@@ -539,14 +573,16 @@ campaign may promote only a `guard_passed` candidate and delegates the traffic m
 normal guarded rollout workflow. Approval expiry is checked before mutation, while a retry after a
 completed activation remains a successful no-op.
 
-A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, with no
-endpoint of its own. Candidates are measured directly against their replicas, so they never appear
-on the endpoint list, during the run or after it. The only endpoint a new-endpoint campaign creates
-is the one activation publishes for the winner. Cleanup deletes the deployments of the other
-candidates. It never touches the activated endpoint, the winner's deployment, or an endpoint you
-created. Candidates provisioned by a control plane released before this behavior published an
-endpoint under the candidate deployment name, and cleanup leaves it without a backend. Remove such
-an endpoint with `infercrane endpoint delete <endpoint>-opt-<candidate> --yes`.
+A new-endpoint candidate runs on its own deployment, named `<endpoint>-opt-<candidate>`, and is
+measured directly against its replicas. Converge publishes no endpoint for it. The database still
+gives every new deployment an endpoint record of the same name, so the endpoint list
+(`GET /api/v1/endpoints`, the console's Home and Endpoints pages, and `infercrane endpoint list`)
+leaves out the record of every new-endpoint candidate, during the run and after it, including
+candidates of earlier runs. The only endpoint a new-endpoint campaign adds to that list is the one
+activation publishes for the winner. Cleanup deletes the deployments of the other candidates. It
+never touches the activated endpoint, the winner's deployment, or an endpoint you created.
+Candidate deployments still appear under dedicated deployments while their servers exist, because
+they are billed resources.
 
 Approval first verifies every candidate against a fresh sourced price for its exact cloud, region,
 GPU, and maximum replica count. It then records a bounded authority window and queues one durable

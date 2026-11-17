@@ -308,6 +308,7 @@ type Evidence struct {
 
 // arm is one candidate with its decoded evidence.
 type arm struct {
+	label    string
 	run      domain.OptimizationCandidateRun
 	draft    optimizer.DeploymentDraft
 	draftOK  bool
@@ -327,8 +328,10 @@ func Assemble(e Evidence) Report {
 	proposalOK := json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) == nil
 
 	arms := map[string]*arm{}
+	labels := optimizationcampaign.CandidateLabels(campaign)
 	for _, run := range campaign.Candidates {
 		arms[run.ID] = newArm(run, e)
+		arms[run.ID].label = labels[run.ID]
 	}
 	var baseline, winner *arm
 	if control, ok := optimizationcampaign.CampaignControl(campaign); ok {
@@ -1287,21 +1290,13 @@ func setup(a *arm) *Setup {
 }
 
 // label describes a setup by what it changes, in the words optimize watch uses.
+// label is the setup's name from optimizationcampaign.CandidateLabels, the
+// same name the campaign API, console, and CLI show.
 func label(a *arm) string {
 	if a == nil {
 		return ""
 	}
-	if !a.draftOK {
-		return "setup " + shortID(a.run.ID)
-	}
-	engine := a.draft.Runtime.Engine
-	if engine == "custom-oci" {
-		engine = "custom image"
-	}
-	if len(a.draft.Runtime.Args) == 0 {
-		return engine + ", default settings"
-	}
-	return engine + ", " + strings.Join(a.draft.Runtime.Args, " ")
+	return a.label
 }
 
 func shortID(id string) string {
