@@ -243,9 +243,12 @@ curl -sS "$INFERCRANE_CONTROL_URL/api/v1/catalog/hugging-face/search?query=phi&l
   -H "Authorization: Bearer $INFERCRANE_API_KEY"
 ```
 
-The control plane asks Hugging Face for public `text-generation` and `feature-extraction` models
-whose repository name matches `query`, merges the two lists, and returns the most downloaded first.
-`query` takes 2 to 100 characters. `limit` takes 1 to 50 and defaults to 20.
+The control plane asks Hugging Face for public `text-generation`, `image-text-to-text`, and
+`feature-extraction` models whose repository name matches `query`, merges the three lists, and
+returns the most downloaded first. Hugging Face files each model under one pipeline tag, so a
+vision-language model such as `Qwen/Qwen2.5-VL-7B-Instruct` is found through `image-text-to-text`
+and reports that tag. The response lists the tags it asked for in `pipelines`. `query` takes 2 to
+100 characters. `limit` takes 1 to 50 and defaults to 20.
 
 Each result reports `repository`, `pipeline_tag`, `license`, `gated` and `gated_mode`, `downloads`,
 `last_modified`, and `library_name` exactly as Hugging Face returned them. A value Hugging Face did

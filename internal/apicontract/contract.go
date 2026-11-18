@@ -47,7 +47,7 @@ var Routes = []Route{
 	{"GET", "/catalog/models", "listCatalogModels", "Model catalog", "Search reviewed model starting points", "", "ObjectList", 200, false},
 	{"GET", "/catalog/models/{name}", "getCatalogModel", "Model catalog", "Inspect one reviewed model and its serving profiles", "", "Object", 200, false},
 	{"GET", "/catalog/hugging-face/models", "listHuggingFaceCatalogModels", "Model catalog", "List reviewed model identities and publisher-optimized checkpoint candidates", "", "Object", 200, false},
-	{"GET", "/catalog/hugging-face/search", "searchHuggingFaceModels", "Model catalog", "Search public Hugging Face text-generation and embedding models; results are not reviewed", "", "Object", 200, false},
+	{"GET", "/catalog/hugging-face/search", "searchHuggingFaceModels", "Model catalog", "Search public Hugging Face text-generation, vision-language, and embedding models; results are not reviewed", "", "Object", 200, false},
 	{"GET", "/catalog/hugging-face/check", "checkHuggingFaceModel", "Model catalog", "Check automatically whether an unreviewed Hugging Face model runs on the pinned runtimes and which GPUs it fits; not a performance claim", "", "ModelCheckEnvelope", 200, false},
 	{"POST", "/planning/intents", "planIntent", "Planning", "Compile bounded user intent into an editable reviewed configuration", "IntentPlanRequest", "IntentPlanEnvelope", 200, false},
 	{"GET", "/model-api-catalog", "listModelAPICatalog", "Model APIs", "Browse supplier-neutral managed Model API identities", "", "ObjectList", 200, false},
@@ -403,7 +403,7 @@ func gpuPriceQueryParameters(public bool) []map[string]any {
 func huggingFaceSearchQueryParameters() []map[string]any {
 	return []map[string]any{
 		{"name": "query", "in": "query", "required": true, "description": "Text matched against public Hugging Face model repository names. Two to 100 characters.", "schema": map[string]any{"type": "string", "minLength": 2, "maxLength": 100}},
-		{"name": "limit", "in": "query", "required": false, "description": "Maximum models returned across the text-generation and feature-extraction pipelines, most downloaded first.", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 20}},
+		{"name": "limit", "in": "query", "required": false, "description": "Maximum models returned across the text-generation, image-text-to-text, and feature-extraction pipelines, most downloaded first.", "schema": map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "default": 20}},
 	}
 }
 

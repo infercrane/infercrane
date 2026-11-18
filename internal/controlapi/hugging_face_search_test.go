@@ -45,6 +45,8 @@ func TestHuggingFaceSearchReturnsUnreviewedLiveResults(t *testing.T) {
 		switch r.URL.Query().Get("pipeline_tag") {
 		case "text-generation":
 			_, _ = w.Write([]byte(`[{"id":"microsoft/Phi-3.5-mini-instruct","gated":false,"lastModified":"2025-12-10T20:22:56.000Z","downloads":340333,"tags":["license:mit"],"pipeline_tag":"text-generation","library_name":"transformers"},{"id":"someone/phi-without-metadata","pipeline_tag":"text-generation"}]`))
+		case "image-text-to-text":
+			_, _ = w.Write([]byte(`[{"id":"microsoft/Phi-3.5-vision-instruct","gated":false,"downloads":800,"tags":["license:mit"],"pipeline_tag":"image-text-to-text"}]`))
 		case "feature-extraction":
 			_, _ = w.Write([]byte(`[{"id":"someone/phi-embed","gated":"auto","downloads":12,"tags":["license:apache-2.0"],"pipeline_tag":"feature-extraction"}]`))
 		default:
@@ -98,13 +100,16 @@ func TestHuggingFaceSearchReturnsUnreviewedLiveResults(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, body.FetchedAt); err != nil {
 		t.Fatalf("fetched_at %q: %v", body.FetchedAt, err)
 	}
-	if strings.Join(body.Pipelines, ",") != "text-generation,feature-extraction" {
+	if strings.Join(body.Pipelines, ",") != "text-generation,image-text-to-text,feature-extraction" {
 		t.Fatalf("pipelines = %v", body.Pipelines)
 	}
-	if len(body.Models) != 3 {
+	if len(body.Models) != 4 {
 		t.Fatalf("models = %s", response.Body.String())
 	}
-	phi, embed, bare := body.Models[0], body.Models[1], body.Models[2]
+	phi, vision, embed, bare := body.Models[0], body.Models[1], body.Models[2], body.Models[3]
+	if vision.Repository != "microsoft/Phi-3.5-vision-instruct" || vision.PipelineTag != "image-text-to-text" || *vision.Downloads != 800 || vision.Reviewed {
+		t.Fatalf("vision-language model = %+v", vision)
+	}
 	if phi.Repository != "microsoft/Phi-3.5-mini-instruct" || *phi.License != "mit" || *phi.Gated || *phi.Downloads != 340333 || *phi.LastModified != "2025-12-10T20:22:56.000Z" || phi.Reviewed || phi.SourceKind != "hugging-face-search" {
 		t.Fatalf("phi = %+v", phi)
 	}
@@ -121,7 +126,7 @@ func TestHuggingFaceSearchReturnsUnreviewedLiveResults(t *testing.T) {
 	}
 
 	cached := searchRequest(handler, "/api/v1/catalog/hugging-face/search?query=PHI&limit=5", true)
-	if cached.Code != http.StatusOK || !strings.Contains(cached.Body.String(), `"cached":true`) || !strings.Contains(cached.Body.String(), `"query":"PHI"`) || calls.Load() != 2 {
+	if cached.Code != http.StatusOK || !strings.Contains(cached.Body.String(), `"cached":true`) || !strings.Contains(cached.Body.String(), `"query":"PHI"`) || calls.Load() != int64(len(huggingfacesearch.Pipelines)) {
 		t.Fatalf("repeat search was not cached: calls=%d body=%s", calls.Load(), cached.Body.String())
 	}
 }

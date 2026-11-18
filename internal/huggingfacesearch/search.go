@@ -40,8 +40,10 @@ const (
 )
 
 // Pipelines are the Hugging Face pipeline tags the search covers, in the
-// order they are queried.
-var Pipelines = []string{"text-generation", "feature-extraction"}
+// order they are queried: text models, vision-language models that also take
+// images, and embedding models. Hugging Face files a model under one tag, so
+// a vision-language model is found only by asking for image-text-to-text.
+var Pipelines = []string{"text-generation", "image-text-to-text", "feature-extraction"}
 
 var expandFields = []string{"downloads", "gated", "lastModified", "library_name", "pipeline_tag", "tags"}
 
