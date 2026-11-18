@@ -14249,7 +14249,7 @@
             }
           },
           {
-            "description": "Maximum models returned across the text-generation and feature-extraction pipelines, most downloaded first.",
+            "description": "Maximum models returned across the text-generation, image-text-to-text, and feature-extraction pipelines, most downloaded first.",
             "in": "query",
             "name": "limit",
             "required": false,
@@ -14288,7 +14288,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Search public Hugging Face text-generation and embedding models; results are not reviewed",
+        "summary": "Search public Hugging Face text-generation, vision-language, and embedding models; results are not reviewed",
         "tags": [
           "Model catalog"
         ]

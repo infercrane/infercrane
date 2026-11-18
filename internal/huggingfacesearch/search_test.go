@@ -74,14 +74,24 @@ const textGeneration = `[
   {"_id":"6","id":"someone/mislabeled","downloads":9999999,"pipeline_tag":"image-classification"}
 ]`
 
+// A vision-language model is filed under image-text-to-text only. The second
+// row reports another pipeline than the one asked for and must be skipped.
+const imageTextToText = `[
+  {"_id":"9","id":"microsoft/Phi-3.5-vision-instruct","gated":false,"lastModified":"2025-12-10T20:23:12.000Z","downloads":800000,"tags":["transformers","image-text-to-text","license:mit"],"pipeline_tag":"image-text-to-text","library_name":"transformers"},
+  {"_id":"10","id":"someone/phi-text-in-vision-listing","downloads":9999999,"pipeline_tag":"text-generation"}
+]`
+
 const featureExtraction = `[
   {"_id":"7","id":"BAAI/bge-m3","gated":false,"lastModified":"2024-07-03T14:50:10.000Z","downloads":5000000,"tags":["sentence-transformers","license:mit"],"pipeline_tag":"feature-extraction","library_name":"sentence-transformers"},
   {"_id":"8","id":"MICROSOFT/phi-3.5-mini-instruct","downloads":1,"pipeline_tag":"feature-extraction"}
 ]`
 
+// perSearch is the number of upstream requests one uncached search makes.
+var perSearch = int64(len(Pipelines))
+
 func newHub(t *testing.T) (*fakeHub, *httptest.Server) {
 	t.Helper()
-	hub := &fakeHub{t: t, listings: map[string]string{"text-generation": textGeneration, "feature-extraction": featureExtraction}}
+	hub := &fakeHub{t: t, listings: map[string]string{"text-generation": textGeneration, "image-text-to-text": imageTextToText, "feature-extraction": featureExtraction}}
 	server := httptest.NewServer(hub)
 	t.Cleanup(server.Close)
 	return hub, server
@@ -117,12 +127,12 @@ func TestSearchMergesPipelinesMostDownloadedFirstAndKeepsUnknownsNull(t *testing
 	}
 	// Private, malformed, and mislabeled rows are skipped; the second spelling
 	// of the Phi repository is a case-insensitive duplicate.
-	want := []string{"BAAI/bge-m3", "meta-llama/Llama-3.2-1B-Instruct", "microsoft/Phi-3.5-mini-instruct", "someone/phi-unknown"}
+	want := []string{"BAAI/bge-m3", "meta-llama/Llama-3.2-1B-Instruct", "microsoft/Phi-3.5-vision-instruct", "microsoft/Phi-3.5-mini-instruct", "someone/phi-unknown"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("models = %v, want %v", got, want)
 	}
 
-	phi := result.Models[2]
+	phi := result.Models[3]
 	if phi.PipelineTag != "text-generation" || phi.License == nil || *phi.License != "mit" || phi.Gated == nil || *phi.Gated || phi.GatedMode != nil ||
 		phi.Downloads == nil || *phi.Downloads != 340333 || phi.LastModified == nil || *phi.LastModified != "2025-12-10T20:22:56.000Z" ||
 		phi.LibraryName == nil || *phi.LibraryName != "transformers" {
@@ -132,15 +142,35 @@ func TestSearchMergesPipelinesMostDownloadedFirstAndKeepsUnknownsNull(t *testing
 	if llama.Gated == nil || !*llama.Gated || llama.GatedMode == nil || *llama.GatedMode != "manual" || *llama.License != "llama3.2" {
 		t.Fatalf("gated model fields are wrong: %+v", llama)
 	}
-	unknown := result.Models[3]
+	unknown := result.Models[4]
 	if unknown.License != nil || unknown.Gated != nil || unknown.GatedMode != nil || unknown.Downloads != nil || unknown.LastModified != nil || unknown.LibraryName != nil {
 		t.Fatalf("missing upstream values must stay unknown: %+v", unknown)
 	}
 	if result.Models[0].PipelineTag != "feature-extraction" {
 		t.Fatalf("embedding model pipeline = %q", result.Models[0].PipelineTag)
 	}
-	if hub.calls.Load() != 2 {
+	vision := result.Models[2]
+	if vision.PipelineTag != "image-text-to-text" || vision.Downloads == nil || *vision.Downloads != 800000 || vision.License == nil || *vision.License != "mit" {
+		t.Fatalf("vision-language model was not reported under its own pipeline: %+v", vision)
+	}
+	if strings.Join(Pipelines, ",") != "text-generation,image-text-to-text,feature-extraction" {
+		t.Fatalf("pipelines = %v", Pipelines)
+	}
+	if hub.calls.Load() != perSearch {
 		t.Fatalf("expected one upstream call per pipeline, got %d", hub.calls.Load())
+	}
+	hub.mu.Lock()
+	asked := map[string]bool{}
+	for _, query := range hub.queries {
+		for _, pipeline := range Pipelines {
+			if strings.Contains(query, "pipeline_tag="+pipeline) {
+				asked[pipeline] = true
+			}
+		}
+	}
+	hub.mu.Unlock()
+	if len(asked) != len(Pipelines) {
+		t.Fatalf("pipelines asked = %v, want each of %v once", asked, Pipelines)
 	}
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -177,7 +207,7 @@ func TestSearchCachesSuccessesCaseInsensitivelyUntilExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hub.calls.Load() != 2 || !second.Cached || second.Query != "PHI" || len(second.Models) != len(first.Models) {
+	if hub.calls.Load() != perSearch || !second.Cached || second.Query != "PHI" || len(second.Models) != len(first.Models) {
 		t.Fatalf("second search was not served from cache: calls=%d cached=%v", hub.calls.Load(), second.Cached)
 	}
 	second.Models[0].Repository = "mutated/by-caller"
@@ -191,7 +221,7 @@ func TestSearchCachesSuccessesCaseInsensitivelyUntilExpiry(t *testing.T) {
 	if _, err = searcher.Search(context.Background(), "phi", 6); err != nil {
 		t.Fatal(err)
 	}
-	if hub.calls.Load() != 4 {
+	if hub.calls.Load() != 2*perSearch {
 		t.Fatalf("a different limit must not reuse the cached answer, calls=%d", hub.calls.Load())
 	}
 	clock.Add(int64(time.Minute))
@@ -199,7 +229,7 @@ func TestSearchCachesSuccessesCaseInsensitivelyUntilExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expired.Cached || hub.calls.Load() != 6 {
+	if expired.Cached || hub.calls.Load() != 3*perSearch {
 		t.Fatalf("expired entry was reused: cached=%v calls=%d", expired.Cached, hub.calls.Load())
 	}
 }
@@ -238,7 +268,7 @@ func TestSearchReportsUpstreamFailuresWithoutCachingThem(t *testing.T) {
 			hub, server := newHub(t)
 			hub.status = test.status
 			if test.body != "" {
-				hub.listings = map[string]string{"text-generation": test.body, "feature-extraction": test.body}
+				hub.listings = map[string]string{"text-generation": test.body, "image-text-to-text": test.body, "feature-extraction": test.body}
 			}
 			searcher := newSearcher(t, Options{Endpoint: server.URL})
 			_, err := searcher.Search(context.Background(), "phi", 5)
@@ -285,7 +315,7 @@ func TestSearchBoundsConcurrentUpstreamRequests(t *testing.T) {
 		firstDone <- err
 	}()
 	deadline := time.Now().Add(2 * time.Second)
-	for hub.calls.Load() < 2 && time.Now().Before(deadline) {
+	for hub.calls.Load() < perSearch && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -295,7 +325,7 @@ func TestSearchBoundsConcurrentUpstreamRequests(t *testing.T) {
 	if !errors.As(err, &unavailable) || unavailable.Reason != "too many searches are in flight" {
 		t.Fatalf("err = %#v, want the in-flight bound", err)
 	}
-	if hub.calls.Load() != 2 {
+	if hub.calls.Load() != perSearch {
 		t.Fatalf("second search reached Hugging Face while the slot was held: calls=%d", hub.calls.Load())
 	}
 	close(hub.block)
