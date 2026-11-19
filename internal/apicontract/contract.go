@@ -875,9 +875,16 @@ func optimizationCampaignReportSchema() map[string]any {
 		"price_source":           text,
 	})
 	nullableSetup := map[string]any{"oneOf": []any{setup, map[string]any{"type": "null"}}}
+	guard := object([]string{"code", "metric", "baseline", "value", "basis", "reason"}, map[string]any{
+		"code":     map[string]any{"type": "string", "enum": []string{"measured_error_rate_regression", "measured_output_length_regression"}},
+		"metric":   map[string]any{"type": "string", "enum": []string{"error_rate_percent", "output_tokens_per_request"}},
+		"baseline": number, "value": number,
+		"basis":  map[string]any{"type": "string", "enum": []string{"same_window", "separate_runs"}, "description": "same_window compares with the baseline runs measured in turns with the setup; separate_runs with the baseline's own runs."},
+		"reason": text,
+	})
 	comparison := object([]string{"metric", "change_percent", "noise_floor_percent", "decision"}, map[string]any{"metric": text, "change_percent": number, "noise_floor_percent": number, "decision": decision,
 		"basis": map[string]any{"type": "string", "enum": []string{"interleaved_control", "drifted_control_runs"}, "description": "Set on a regression: drifted_control_runs is read from runs whose control drifted and can show a setup is worse, never better."}})
-	return object([]string{"schema_version", "algorithm_version", "campaign_id", "model_identity", "objective", "intent", "campaign_state", "finished", "simulated_accelerator", "outcome", "metrics", "quality", "noise", "monthly", "workload", "candidates", "bottleneck", "appendix", "unknown", "report_digest"}, map[string]any{
+	return object([]string{"schema_version", "algorithm_version", "campaign_id", "model_identity", "objective", "intent", "campaign_state", "finished", "simulated_accelerator", "outcome", "metrics", "quality", "noise", "monthly", "workload", "candidates", "warnings", "bottleneck", "appendix", "unknown", "report_digest"}, map[string]any{
 		"schema_version": map[string]any{"type": "string", "const": "infercrane.optimization-report/v1"}, "algorithm_version": text,
 		"campaign_id": text, "model_identity": text, "objective": text, "intent": text, "campaign_state": text, "finished": boolean,
 		"simulated_accelerator": map[string]any{"type": "boolean", "description": "True when any setup ran on a simulated accelerator or a CPU. Its numbers prove the pipeline, not GPU speed."},
@@ -898,19 +905,26 @@ func optimizationCampaignReportSchema() map[string]any {
 			"control_runs": integer, "candidate_runs": integer, "control_drift_percent": nullable, "drift_limit_percent": nullable,
 			"objective_metric": text, "objective_change_percent": nullable, "objective_noise_floor_percent": nullable, "objective_decision": decision, "reason": text,
 		}),
-		"monthly": object([]string{"basis", "window_seconds", "requests_in_window", "output_tokens_in_window", "monthly_output_tokens", "hours_per_month", "baseline_usd", "winner_usd", "change_usd", "change_percent", "decision"}, map[string]any{
+		"monthly": object([]string{"basis", "window_seconds", "capture_window_seconds", "capture_cut_off", "requests_in_window", "output_tokens_in_window", "monthly_output_tokens", "hours_per_month", "baseline_usd", "winner_usd", "change_usd", "change_percent", "decision"}, map[string]any{
 			"basis": map[string]any{"type": "string", "enum": []string{"replayed_traffic", "unknown"}}, "trace_digest": text,
-			"window_seconds": nullable, "requests_in_window": nullableInteger, "output_tokens_in_window": nullableInteger, "monthly_output_tokens": nullable,
+			"window_seconds":         map[string]any{"type": []string{"number", "null"}, "description": "Time the replayed volume is divided by: the capture window, or, when the capture was cut off at its request limit, the span from the first to the last kept request."},
+			"capture_window_seconds": map[string]any{"type": []string{"number", "null"}, "description": "The whole capture window."},
+			"capture_cut_off":        map[string]any{"type": []string{"boolean", "null"}, "description": "True when the capture reached its request limit and kept only its newest requests. Null for a capture that did not record it; such a projection may be too low."},
+			"requests_in_window":     nullableInteger, "output_tokens_in_window": nullableInteger, "monthly_output_tokens": nullable,
 			"hours_per_month": number, "baseline_usd": nullable, "winner_usd": nullable, "change_usd": nullable, "change_percent": nullable,
 			"decision": decision, "assumption": text, "reason": text,
 		}),
 		"workload": object([]string{"source", "concurrency", "requests_per_run"}, map[string]any{"source": text, "profile": text, "concurrency": nullableInteger, "requests_per_run": nullableInteger, "method": text}),
-		"candidates": map[string]any{"type": "array", "items": object([]string{"id", "label", "role", "state", "output_tokens_per_second", "requests_per_second", "ttft_p95_ms", "tpot_p95_ms", "latency_p95_ms", "cost_per_million_output_tokens", "versus_baseline"}, map[string]any{
+		"candidates": map[string]any{"type": "array", "items": object([]string{"id", "label", "role", "state", "output_tokens_per_second", "requests_per_second", "ttft_p95_ms", "tpot_p95_ms", "latency_p95_ms", "cost_per_million_output_tokens", "error_rate_percent", "output_tokens_per_request", "versus_baseline"}, map[string]any{
 			"id": text, "label": text, "role": map[string]any{"type": "string", "enum": []string{"baseline", "baseline_kept", "winner", "candidate"}}, "state": text, "failure_code": text,
 			"output_tokens_per_second": nullable, "requests_per_second": nullable, "ttft_p95_ms": nullable, "tpot_p95_ms": nullable, "latency_p95_ms": nullable, "cost_per_million_output_tokens": nullable,
-			"versus_baseline": map[string]any{"oneOf": []any{comparison, map[string]any{"type": "null"}}}, "reason": text,
+			"error_rate_percent":        map[string]any{"type": []string{"number", "null"}, "description": "Share of the setup's measured requests that failed, in percent. Null when not recorded."},
+			"output_tokens_per_request": map[string]any{"type": []string{"number", "null"}, "description": "Mean server-counted output tokens of a successful request in the setup's own runs. Null when any run did not record it."},
+			"guards":                    map[string]any{"type": "array", "items": guard, "description": "Why the setup cannot be chosen whatever it gained: it failed more requests than the baseline, or answered more than 5% shorter."},
+			"versus_baseline":           map[string]any{"oneOf": []any{comparison, map[string]any{"type": "null"}}}, "reason": text,
 			"regressions": map[string]any{"type": "array", "items": comparison, "description": "Headline outcomes (throughput, p95 time to first token, p95 latency) on which the setup measured worse than the baseline in its own window."},
 		})},
+		"warnings": map[string]any{"type": "array", "items": text, "description": "One line per setup that failed more requests or answered shorter than the baseline. A speed or cost gain may come from that."},
 		"bottleneck": object([]string{"state", "source", "gpu_telemetry", "signals"}, map[string]any{
 			"state": map[string]any{"type": "string", "enum": []string{"measured", "unknown"}}, "source": text, "gpu_telemetry": text, "reason": text,
 			"signals": map[string]any{"type": "array", "items": object([]string{"name", "stat", "baseline", "winner"}, map[string]any{"name": text, "stat": text, "unit": text, "baseline": nullable, "winner": nullable})},

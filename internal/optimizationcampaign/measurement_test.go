@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,8 +36,13 @@ type scriptedAIPerf struct {
 	traces     [][][]int
 	throughput map[string][]float64
 	ttft       map[string][]float64
-	failAt     map[string]int
-	calls      map[string]int
+	// failed and answerTokens script each measured run's failed requests
+	// and mean output tokens of a successful request; absent means none
+	// failed and no count was reported.
+	failed       map[string][]int
+	answerTokens map[string][]float64
+	failAt       map[string]int
+	calls        map[string]int
 }
 
 func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchmark.Result, error) {
@@ -79,7 +85,16 @@ func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchm
 		}
 	}
 	tpot := 20.0
-	return benchmark.Result{Tool: "aiperf", ToolVersion: benchmark.AIPerfVersion, Command: "aiperf profile --input-file " + config.InputFile, Requests: config.Requests, Succeeded: config.Requests, DurationSeconds: 10, OutputTokenThroughput: &throughput, TTFTP95MS: &ttft, TPOTP95MS: &tpot, ProfileRuns: 1}, nil
+	result := benchmark.Result{Tool: "aiperf", ToolVersion: benchmark.AIPerfVersion, Command: "aiperf profile --input-file " + config.InputFile, Requests: config.Requests, Succeeded: config.Requests, DurationSeconds: 10, OutputTokenThroughput: &throughput, TTFTP95MS: &ttft, TPOTP95MS: &tpot, ProfileRuns: 1}
+	if call > 0 {
+		if values := r.failed[config.Endpoint]; len(values) >= call {
+			result.Failed, result.Succeeded = values[call-1], config.Requests-values[call-1]
+		}
+		if values := r.answerTokens[config.Endpoint]; len(values) >= call {
+			result.OutputTokensPerRequest = &values[call-1]
+		}
+	}
+	return result, nil
 }
 
 type replaySourceFixture struct {
@@ -218,6 +233,40 @@ func TestBenchmarkExecutorInterleavesControlWithWarmupRepeatsAndUniqueSeeds(t *t
 	}
 	if len(evidence.Runs) != 7 || strings.Join(evidence.Order[:2], ",") != "warmup:control,warmup:candidate" {
 		t.Fatalf("run audit=%+v order=%v", evidence.Runs, evidence.Order)
+	}
+}
+
+// TestBenchmarkExecutorRecordsFailedRequestsAndAnswerLengthPerArm keeps the
+// evidence the guards read: every run's failed requests and mean answer
+// length, labelled by arm, so a ranking can compare the candidate with the
+// control runs of its own window.
+func TestBenchmarkExecutorRecordsFailedRequestsAndAnswerLengthPerArm(t *testing.T) {
+	fixture := newExecutorFixture(t, optimizer.Request{})
+	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101}
+	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129}
+	fixture.runner.failed = map[string][]int{candidateEndpoint: {10, 12, 14}}
+	fixture.runner.answerTokens = map[string][]float64{controlEndpoint: {200, 202, 198, 200}, candidateEndpoint: {150, 152, 148}}
+	row, workload := fixture.run(t)
+	evidence := measuredEvidence(t, workload)
+	var arms []string
+	for _, run := range evidence.Runs {
+		arms = append(arms, run.Arm)
+		if run.OutputTokensPerRequest == nil {
+			t.Fatalf("run %+v lost its answer length", run)
+		}
+	}
+	if strings.Join(arms, ",") != "control,candidate,control,candidate,control,candidate,control" || evidence.Runs[1].Failed != 10 || *evidence.Runs[1].OutputTokensPerRequest != 150 || *evidence.Runs[0].OutputTokensPerRequest != 200 {
+		t.Fatalf("runs=%+v", evidence.Runs)
+	}
+	if row.Failed != 36 || row.RequestCount != 3*fixture.profile.Requests {
+		t.Fatalf("the candidate row did not pool its failed requests: %+v", row)
+	}
+	check, ok := CheckGuards(row, domain.BenchmarkResult{}, "control")
+	if !ok || check.Basis != GuardBasisSameWindow || check.Control.Requests != 4*fixture.profile.Requests || check.Control.Failed != 0 || check.Candidate.Failed != 36 || *check.Control.OutputTokensPerRequest != 200 || math.Round(*check.Candidate.OutputTokensPerRequest) != 150 {
+		t.Fatalf("guard check=%+v ok=%v", check, ok)
+	}
+	if len(check.Guards) != 2 || check.Guards[0].Code != FailureErrorRateRegression || check.Guards[1].Code != FailureOutputLengthRegression {
+		t.Fatalf("guards=%+v", check.Guards)
 	}
 }
 

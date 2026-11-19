@@ -116,6 +116,18 @@ func renderStyledReport(v optimizationreport.View, t theme) string {
 		headline = append(headline, t.title(line))
 	}
 	b.WriteString(t.card(strings.Join(headline, "\n"), t.width, accent) + "\n\n")
+	for _, warning := range v.Warnings {
+		for index, line := range wrapWords(warning, t.width-2) {
+			prefix := "  "
+			if index == 0 {
+				prefix = "▲ "
+			}
+			b.WriteString(t.tone(toneWatch, prefix+line) + "\n")
+		}
+	}
+	if len(v.Warnings) > 0 {
+		b.WriteString("\n")
+	}
 	b.WriteString(renderOutcomeCards(v, t))
 	b.WriteString("\n" + t.section("How it was measured") + "\n")
 	names, values := make([]string, 0, len(v.Measurement)), make([]string, 0, len(v.Measurement))
@@ -371,6 +383,8 @@ func renderSetupTable(candidates []optimizationreport.ViewCandidate, t theme) st
 			for _, measured := range wrapWords(candidate.Measured, detail) {
 				b.WriteString("    " + measured + "\n")
 			}
+		} else if answers := setupAnswers(candidate); answers != "" {
+			b.WriteString("    " + t.muted(answers) + "\n")
 		}
 		for index, status := range wrapWords(candidate.Status, detail-2) {
 			prefix := "      "
@@ -388,6 +402,19 @@ func renderSetupTable(candidates []optimizationreport.ViewCandidate, t theme) st
 		}
 	}
 	return b.String()
+}
+
+// setupAnswers states a setup's failed requests and answer length when the
+// report recorded either; the wide table has no column for them.
+func setupAnswers(candidate optimizationreport.ViewCandidate) string {
+	parts := []string{}
+	if candidate.ErrorRate != "" && candidate.ErrorRate != "unknown" {
+		parts = append(parts, candidate.ErrorRate+" of requests failed")
+	}
+	if candidate.OutputTokensPerRequest != "" && candidate.OutputTokensPerRequest != "unknown" {
+		parts = append(parts, candidate.OutputTokensPerRequest+" output tokens per request")
+	}
+	return strings.Join(parts, " · ")
 }
 
 // splitSetupLabel separates a setup label such as "vllm, --kv-cache-dtype fp8"

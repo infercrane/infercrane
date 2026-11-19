@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 )
 
@@ -35,6 +36,8 @@ var watchReasonWords = map[string]string{
 	"measured_no_measurable_difference":               "no real difference from your current setup",
 	"measured_candidate_regressed":                    "worse than your current setup",
 	"measured_comparison_unavailable":                 "not compared reliably with your current setup",
+	"measured_error_rate_regression":                  "failed more requests than your current setup",
+	"measured_output_length_regression":               "answered shorter than your current setup",
 	"measured_candidate_superseded":                   "another setup measured better",
 	"quality_gate_rejected":                           "answers changed too much",
 	"quality_reference_unavailable":                   "no reference answers to compare with",
@@ -160,6 +163,9 @@ type watchMeasurement struct {
 	// Regressions are the outcomes measured worse than the control in this
 	// setup's own window, including a window the control's drift invalidated.
 	Regressions []optimizationcampaign.Regression
+	// Guards are the failed-request and answer-length checks that fired
+	// against the control runs of this setup's own window.
+	Guards []optimizationcampaign.Guard
 }
 
 type watchSnapshot struct {
@@ -313,6 +319,13 @@ func parseWatchBenchmark(raw json.RawMessage, benchmarkID string) (watchMeasurem
 	}
 	if json.Unmarshal(unwrapJSONString(row.Workload), &evidence) == nil {
 		measurement.Regressions = optimizationcampaign.MeasuredRegressions(evidence.Measured)
+		if evidence.Measured != nil {
+			// Only the control runs in this window are at hand; a control
+			// measured apart is compared by the ranking, whose code still shows.
+			if check, found := optimizationcampaign.CheckGuards(domain.BenchmarkResult{WorkloadJSON: string(unwrapJSONString(row.Workload))}, domain.BenchmarkResult{}, evidence.Measured.Control.CandidateID); found && check.Basis == optimizationcampaign.GuardBasisSameWindow {
+				measurement.Guards = check.Guards
+			}
+		}
 	}
 	var cost struct {
 		Available bool     `json:"available"`
@@ -367,6 +380,12 @@ var watchMeasuredLoss = map[string]bool{
 	optimizationcampaign.FailureComparisonUnavailable: true, "measured_candidate_superseded": true,
 }
 
+// watchGuardLoss lists the ranking codes a guard sets; the guard's own words
+// name the failed requests or the shorter answers.
+var watchGuardLoss = map[string]bool{
+	optimizationcampaign.FailureErrorRateRegression: true, optimizationcampaign.FailureOutputLengthRegression: true,
+}
+
 // watchKeptWords describe a current setup the run kept. Rolling it out would
 // change nothing, so it is never called a winner.
 const watchKeptWords = "kept · nothing to roll out"
@@ -394,6 +413,9 @@ func watchStatus(candidate watchCandidate, measurement watchMeasurement, current
 	}
 	if text == "" {
 		text = strings.ReplaceAll(candidate.State, "_", " ")
+	}
+	if watchGuardLoss[candidate.FailureCode] && len(measurement.Guards) > 0 {
+		return text + " · " + optimizationcampaign.DescribeGuards(measurement.Guards)
 	}
 	if watchMeasuredLoss[candidate.FailureCode] && len(measurement.Regressions) > 0 {
 		return text + " · " + optimizationcampaign.DescribeRegressions(measurement.Regressions)

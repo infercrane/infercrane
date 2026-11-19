@@ -4264,6 +4264,7 @@ func replayTraceResponse(trace domain.ReplayTrace) map[string]any {
 		"shape": json.RawMessage(trace.ShapeJSON), "summary": json.RawMessage(trace.SummaryJSON),
 		"shape_digest": trace.ShapeDigest, "request_count": trace.RequestCount,
 		"window_start": trace.WindowStart, "window_end": trace.WindowEnd, "created_at": trace.CreatedAt,
+		"request_limit_reached": trace.RequestLimitReached,
 	}
 }
 

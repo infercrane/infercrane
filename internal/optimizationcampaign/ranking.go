@@ -18,8 +18,9 @@ const (
 )
 
 // RankingAlgorithmVersion is appended to the Lab algorithm version on every
-// persisted campaign ranking. It names the control and noise-floor gate.
-const RankingAlgorithmVersion = "campaign-control-noise-floor-v2"
+// persisted campaign ranking. It names the control and noise-floor gate; v3
+// adds the failed-request and answer-length guards.
+const RankingAlgorithmVersion = "campaign-control-noise-floor-v3"
 
 // FailureNoMeasurableDifference marks a candidate whose objective result is
 // inside the measurement noise of the campaign control. It is reported as no
@@ -154,6 +155,14 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 	for candidateID, reason := range gate.reasons {
 		reasons[candidateID] = reason
 	}
+	// With the control outside the constraints, a guard can leave nothing to
+	// select. Every candidate is then rejected, as when all miss constraints.
+	if selectedCandidate == "" && len(gate.held) > 0 {
+		allFailedConstraints = true
+		for _, row := range rows {
+			allFailedConstraints = allFailedConstraints && (gate.held[evidenceToCandidate[row.EvidenceID]] || row.MeetsSLO != nil && !*row.MeetsSLO)
+		}
+	}
 	for _, candidate := range campaign.Candidates {
 		if (candidate.State == CandidateRejected || candidate.State == CandidateInconclusive || candidate.State == CandidateCleaned) && candidate.LabEvaluationID == "" {
 			continue
@@ -169,6 +178,9 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			if reasons[candidate.ID] == "" {
 				reasons[candidate.ID] = "another measured exact-workload candidate ranked higher"
 			}
+		case gate.held[candidate.ID]:
+			// A guard kept it from selection and nothing else qualified.
+			decisions[candidate.ID] = RankReject
 		case allComparable && allFailedConstraints:
 			decisions[candidate.ID] = RankReject
 			if reasons[candidate.ID] == "" {

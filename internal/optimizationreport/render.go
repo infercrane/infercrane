@@ -28,6 +28,8 @@ var reasonWords = map[string]string{
 	"measured_no_measurable_difference":      "no real difference from your current setup",
 	"measured_candidate_regressed":           "worse than your current setup",
 	"measured_comparison_unavailable":        "not compared reliably with your current setup",
+	"measured_error_rate_regression":         "failed more requests than your current setup",
+	"measured_output_length_regression":      "answered shorter than your current setup",
 	"measured_candidate_superseded":          "another setup measured better",
 	"measured_candidate_outside_constraints": "missed your speed or cost limits",
 	"measured_ranking_inconclusive":          "results were not comparable",
@@ -49,9 +51,12 @@ var metricWords = map[string]string{
 // View is the formatted report shared by the text and HTML renderers and the
 // CLI's styled terminal rendering. Every value is already formatted, and every
 // missing value already reads "unknown", so a renderer only lays it out.
+// Warnings, which name setups that failed more requests or answered shorter
+// than the current setup, go under the headline.
 type View struct {
 	Title, Subtitle, Banner, Headline string
 	Kind                              string
+	Warnings                          []string
 	Rows                              []ViewRow
 	Measurement                       []string
 	Candidates                        []ViewCandidate
@@ -85,13 +90,14 @@ func (row *ViewRow) lead(chosen bool) {
 }
 
 // ViewCandidate is one measured setup. Measured joins the known measurements;
-// TokensPerSecond, TTFTP95, and CostPerMillion hold them one by one and read
-// "unknown" when the setup did not record them. State is the raw lifecycle
-// state behind Status.
+// TokensPerSecond, TTFTP95, CostPerMillion, ErrorRate, and
+// OutputTokensPerRequest hold them one by one and read "unknown" when the
+// setup did not record them. State is the raw lifecycle state behind Status.
 type ViewCandidate struct {
 	Label, Role, Status, Measured, Versus, Tone string
 	State                                       string
 	TokensPerSecond, TTFTP95, CostPerMillion    string
+	ErrorRate, OutputTokensPerRequest           string
 }
 
 // ViewSignal is one engine signal for both setups.
@@ -106,7 +112,7 @@ type ViewField struct {
 
 // NewView formats a report for display without adding or dropping a value.
 func NewView(r Report) View {
-	v := View{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Digest: r.ReportDigest}
+	v := View{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Warnings: r.Warnings, Digest: r.ReportDigest}
 	for _, metric := range r.Metrics {
 		v.Rows = append(v.Rows, metricRow(metric))
 	}
@@ -317,6 +323,9 @@ func measurementLines(r Report) []string {
 	m := r.Monthly
 	if m.Basis == BasisReplayVolume && m.RequestsInWindow != nil && m.OutputTokensInWindow != nil && m.WindowSeconds != nil {
 		lines = append(lines, fmt.Sprintf("Monthly projection: %s requests and %s output tokens in %s of your traffic, scaled to a %.0f-hour month; %s.", grouped(int64(*m.RequestsInWindow)), grouped(*m.OutputTokensInWindow), duration(*m.WindowSeconds), m.HoursPerMonth, m.Assumption))
+		if m.CaptureCutOff != nil && *m.CaptureCutOff && m.CaptureWindowSeconds != nil {
+			lines = append(lines, fmt.Sprintf("Capture: it reached its request limit and kept only the newest requests, so the projection uses the %s from the first to the last kept request, not the whole %s window.", duration(*m.WindowSeconds), duration(*m.CaptureWindowSeconds)))
+		}
 	}
 	switch r.Quality.Basis {
 	case BasisReleaseGuard:
@@ -335,6 +344,8 @@ func candidateView(candidate CandidateResult) ViewCandidate {
 	result.TokensPerSecond = orUnknown(candidate.OutputTokensPerSecond, tokens)
 	result.TTFTP95 = orUnknown(candidate.TTFTP95MS, ms)
 	result.CostPerMillion = orUnknown(candidate.CostPerMillionOutputTokens, usd)
+	result.ErrorRate = orUnknown(candidate.ErrorRatePercent, percent)
+	result.OutputTokensPerRequest = orUnknown(candidate.OutputTokensPerRequest, tokens)
 	switch candidate.Role {
 	case "baseline":
 		result.Role = "current setup"
@@ -352,6 +363,12 @@ func candidateView(candidate CandidateResult) ViewCandidate {
 	}
 	if candidate.CostPerMillionOutputTokens != nil {
 		parts = append(parts, usd(*candidate.CostPerMillionOutputTokens)+" per 1M output tokens")
+	}
+	if candidate.ErrorRatePercent != nil {
+		parts = append(parts, percent(*candidate.ErrorRatePercent)+" of requests failed")
+	}
+	if candidate.OutputTokensPerRequest != nil {
+		parts = append(parts, tokens(*candidate.OutputTokensPerRequest)+" output tokens per request")
 	}
 	if len(parts) == 0 {
 		parts = append(parts, "not measured")
@@ -443,6 +460,8 @@ func unknownReason(r Report, field string) string {
 		return "Answer quality: " + emptyAs(r.Quality.Reason, "missing input")
 	case field == "noise":
 		return "Noise band: " + emptyAs(r.Noise.Reason, "missing input")
+	case field == "monthly.capture_cut_off":
+		return "Monthly cost: the capture did not record whether it reached its request limit; if it did, the projection is too low"
 	case strings.HasPrefix(field, "monthly"):
 		return "Monthly cost: " + emptyAs(r.Monthly.Reason, "missing input")
 	case field == "bottleneck":
@@ -463,6 +482,13 @@ func candidateStatus(candidate CandidateResult) string {
 	if candidate.Role == "baseline_kept" && (candidate.State == optimizationcampaign.CandidateQualified || candidate.State == optimizationcampaign.CandidateGuardPassed) {
 		return keptWords
 	}
+	if guardLoss[candidate.FailureCode] && len(candidate.Guards) > 0 {
+		reasons := make([]string, 0, len(candidate.Guards))
+		for _, guard := range candidate.Guards {
+			reasons = append(reasons, guard.Reason)
+		}
+		return statusWords(candidate.State, "") + " · " + strings.Join(reasons, " · ")
+	}
 	if measuredLoss[candidate.FailureCode] && len(candidate.Regressions) > 0 {
 		regressions := make([]optimizationcampaign.Regression, 0, len(candidate.Regressions))
 		for _, regression := range candidate.Regressions {
@@ -474,6 +500,12 @@ func candidateStatus(candidate CandidateResult) string {
 		return statusWords(baselineWord, candidate.FailureCode)
 	}
 	return statusWords(candidate.State, candidate.FailureCode)
+}
+
+// guardLoss lists the ranking codes a guard sets; the setup's own guard
+// reasons replace their words, so the numbers are shown.
+var guardLoss = map[string]bool{
+	optimizationcampaign.FailureErrorRateRegression: true, optimizationcampaign.FailureOutputLengthRegression: true,
 }
 
 // keptWords describe a baseline the run kept. It is not a winner, and
@@ -570,6 +602,8 @@ func signedPercent(value float64) string {
 
 func ms(value float64) string { return fmt.Sprintf("%.0f ms", value) }
 
+func percent(value float64) string { return fmt.Sprintf("%.1f%%", value) }
+
 func tokens(value float64) string {
 	switch {
 	case value >= 100:
@@ -636,6 +670,12 @@ func Text(r Report) string {
 		b.WriteString("!! " + v.Banner + " !!\n\n")
 	}
 	b.WriteString(v.Headline + "\n\n")
+	for _, warning := range v.Warnings {
+		b.WriteString("Warning: " + warning + "\n")
+	}
+	if len(v.Warnings) > 0 {
+		b.WriteString("\n")
+	}
 	labelWidth := 0
 	for _, row := range v.Rows {
 		labelWidth = max(labelWidth, len([]rune(row.Label)))

@@ -80,6 +80,10 @@ func (r PersistedRanker) Rank(ctx context.Context, candidate domain.Optimization
 		}
 	case RankReject:
 		failureCode = "measured_candidate_outside_constraints"
+		// A rejection a guard caused names that guard instead.
+		if override := ranking.FailureCodes[candidate.ID]; override != "" {
+			failureCode = override
+		}
 	case RankInconclusive:
 		failureCode = "measured_ranking_inconclusive"
 	}

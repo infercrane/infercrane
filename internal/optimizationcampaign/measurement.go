@@ -78,19 +78,24 @@ type loadPlan struct {
 	trace                                            *replay.AIPerfTrace
 }
 
-// RunSummary is one AIPerf invocation's result, kept for audit.
+// RunSummary is one AIPerf invocation's result, kept for audit. Failed and
+// OutputTokensPerRequest feed the guards (see CheckGuards): latency
+// percentiles leave failed requests out, and shorter answers finish sooner.
+// OutputTokensPerRequest is absent when a successful request reported no
+// server count, and on runs measured before it was recorded.
 type RunSummary struct {
-	Arm                   string                   `json:"arm"`
-	Requests              int                      `json:"requests"`
-	Failed                int                      `json:"failed"`
-	DurationSeconds       float64                  `json:"duration_seconds"`
-	OutputTokenThroughput *float64                 `json:"output_token_throughput,omitempty"`
-	RequestThroughput     *float64                 `json:"request_throughput,omitempty"`
-	TTFTP95MS             *float64                 `json:"ttft_p95_ms,omitempty"`
-	TPOTP95MS             *float64                 `json:"tpot_p95_ms,omitempty"`
-	LatencyP95MS          *float64                 `json:"latency_p95_ms,omitempty"`
-	Goodput               *float64                 `json:"goodput,omitempty"`
-	ServerMetrics         *benchmark.ServerMetrics `json:"server_metrics,omitempty"`
+	Arm                    string                   `json:"arm"`
+	Requests               int                      `json:"requests"`
+	Failed                 int                      `json:"failed"`
+	DurationSeconds        float64                  `json:"duration_seconds"`
+	OutputTokenThroughput  *float64                 `json:"output_token_throughput,omitempty"`
+	RequestThroughput      *float64                 `json:"request_throughput,omitempty"`
+	TTFTP95MS              *float64                 `json:"ttft_p95_ms,omitempty"`
+	TPOTP95MS              *float64                 `json:"tpot_p95_ms,omitempty"`
+	LatencyP95MS           *float64                 `json:"latency_p95_ms,omitempty"`
+	Goodput                *float64                 `json:"goodput,omitempty"`
+	OutputTokensPerRequest *float64                 `json:"output_tokens_per_request,omitempty"`
+	ServerMetrics          *benchmark.ServerMetrics `json:"server_metrics,omitempty"`
 }
 
 // ControlEvidence says whether the campaign control was measured alongside
@@ -349,7 +354,7 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 }
 
 func summarizeRun(arm string, result benchmark.Result) RunSummary {
-	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, ServerMetrics: result.ServerMetrics}
+	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
 }
 
 func warmupRequests(concurrency int) int {

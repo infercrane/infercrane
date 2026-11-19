@@ -579,6 +579,10 @@ type ReplayTrace struct {
 	WindowStart    time.Time `json:"window_start"`
 	WindowEnd      time.Time `json:"window_end"`
 	CreatedAt      time.Time `json:"created_at"`
+	// RequestLimitReached is true when the window held more requests than the
+	// capture limit, so only the newest were kept and they span less than the
+	// window. It is nil for a trace captured before this was recorded.
+	RequestLimitReached *bool `json:"request_limit_reached"`
 }
 
 type ArtifactCacheObservation struct {

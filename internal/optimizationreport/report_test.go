@@ -149,7 +149,8 @@ func replayTrace(outputs ...*int) *domain.ReplayTrace {
 	}
 	encoded, _ := json.Marshal(shapes)
 	start := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
-	return &domain.ReplayTrace{ID: "trace-1", ShapeJSON: string(encoded), ShapeDigest: traceDigest, RequestCount: len(shapes), WindowStart: start, WindowEnd: start.Add(time.Hour)}
+	complete := false
+	return &domain.ReplayTrace{ID: "trace-1", ShapeJSON: string(encoded), ShapeDigest: traceDigest, RequestCount: len(shapes), WindowStart: start, WindowEnd: start.Add(time.Hour), RequestLimitReached: &complete}
 }
 
 func tokensOf(value int) *int { return &value }

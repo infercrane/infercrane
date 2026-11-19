@@ -260,11 +260,14 @@ func generationOperation(operation string) bool {
 // OutputVolume is the generation output-token volume a stored trace observed
 // during its capture window. Missing counts generation requests without a
 // recorded output-token count; a caller must not treat a total with missing
-// requests as the window's volume.
+// requests as the window's volume. KeptSpanSeconds is the time from the
+// first to the last kept request's arrival, of any operation: the span a
+// capture cut off at its request limit really covers.
 type OutputVolume struct {
-	GenerationRequests int   `json:"generation_requests"`
-	OutputTokens       int64 `json:"output_tokens"`
-	Missing            int   `json:"missing"`
+	GenerationRequests int     `json:"generation_requests"`
+	OutputTokens       int64   `json:"output_tokens"`
+	Missing            int     `json:"missing"`
+	KeptSpanSeconds    float64 `json:"kept_span_seconds"`
 }
 
 // TraceOutputVolume sums the output tokens of every generation request in a
@@ -275,6 +278,13 @@ func TraceOutputVolume(trace domain.ReplayTrace) (OutputVolume, error) {
 		return OutputVolume{}, fmt.Errorf("decode replay trace shape: %w", err)
 	}
 	var volume OutputVolume
+	if len(shapes) > 0 {
+		first, last := shapes[0].ArrivalMS, shapes[0].ArrivalMS
+		for _, row := range shapes {
+			first, last = min(first, row.ArrivalMS), max(last, row.ArrivalMS)
+		}
+		volume.KeptSpanSeconds = float64(last-first) / 1000
+	}
 	for _, row := range shapes {
 		if !generationOperation(row.Operation) {
 			continue
