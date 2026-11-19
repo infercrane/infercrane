@@ -1,11 +1,14 @@
 package benchmark
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,11 +37,30 @@ func workerPID(t *testing.T, pidFile string) int {
 	return pid
 }
 
+// running reports whether pid is a live process. A killed worker whose new
+// parent never reaps it (PID 1 in a test container, for example) stays a
+// zombie: it no longer runs, but signal 0 still finds it.
+func running(pid int) bool {
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err == nil {
+		// The state letter follows the command name, which is in parentheses.
+		if end := bytes.LastIndexByte(raw, ')'); end >= 0 && end+2 < len(raw) {
+			state := raw[end+2]
+			return state != 'Z' && state != 'X'
+		}
+		return true
+	}
+	if runtime.GOOS == "linux" {
+		return false
+	}
+	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+}
+
 func requireStopped(t *testing.T, pid int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		if !running(pid) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
