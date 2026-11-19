@@ -20,13 +20,20 @@ func kernelDiagnosis(lab bool, operators ...TraceOperator) *Diagnosis {
 	return diagnosis
 }
 
+// kernelRequest is a run on recorded traffic, which a kernel lane replays.
+func kernelRequest(gpu string, diagnosis *Diagnosis) Request {
+	request := genericRequest(gpu, diagnosis)
+	request.WorkloadSource, request.WorkloadFingerprint = WorkloadSourceCustomerObserved, "sha256:"+strings.Repeat("b", 64)
+	return request
+}
+
 func operatorTime(class string, share float64, efficiency *float64) TraceOperator {
 	return TraceOperator{Operator: class, Share: share, CoveredShare: .8, Efficiency: efficiency}
 }
 
 func TestKernelSetupIsPlannedLastOnlyWhenEveryGateHolds(t *testing.T) {
 	weak := floatPointer(.32)
-	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, weak), operatorTime(gpuprofile.OperatorAttention, .2, nil))))
+	proposal, err := catalogSource(t).Propose(context.Background(), kernelRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, weak), operatorTime(gpuprofile.OperatorAttention, .2, nil))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +75,7 @@ func TestKernelSetupNeedsEveryGate(t *testing.T) {
 		"another operator dominates": {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .32, weak),
 			operatorTime(gpuprofile.OperatorAttention, .5, nil))},
 	} {
-		proposal, err := catalogSource(t).Propose(context.Background(), genericRequest(test.gpu, test.diagnosis))
+		proposal, err := catalogSource(t).Propose(context.Background(), kernelRequest(test.gpu, test.diagnosis))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -92,7 +99,7 @@ func TestKernelSetupWaitsForASettingChangeOnTheSameOperator(t *testing.T) {
 }
 
 func TestProposalValidationRefusesAForgedKernelLane(t *testing.T) {
-	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, floatPointer(.32)))))
+	proposal, err := catalogSource(t).Propose(context.Background(), kernelRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, floatPointer(.32)))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,5 +125,18 @@ func TestProposalValidationRefusesAForgedKernelLane(t *testing.T) {
 		if ValidateProposal(copied) == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestKernelSetupNeedsRecordedTraffic(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, floatPointer(.32)))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order := reasonOrder(proposal); order[len(order)-1] == TechniqueCustomKernel {
+		t.Fatalf("a run on a public sample planned a kernel: %v", order)
+	}
+	if skipped := plannedTechnique(t, proposal, TechniqueCustomKernel).Skipped; !strings.Contains(skipped, "recorded traffic") {
+		t.Fatalf("skip reason = %q", skipped)
 	}
 }

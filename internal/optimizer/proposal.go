@@ -261,7 +261,8 @@ type KernelLane struct {
 // validateKernelLane checks a custom-kernel setup in an untrusted proposal
 // against the reviewed packs and the pinned image, so a proposal cannot aim
 // lab time at an operator, engine, or image InferCrane has not reviewed.
-func validateKernelLane(candidate Candidate, gpu string) error {
+func validateKernelLane(candidate Candidate, request Request) error {
+	gpu := request.GPU
 	lane := candidate.KernelLane
 	isKernel := candidate.Reason != nil && candidate.Reason.Technique == TechniqueCustomKernel
 	if lane == nil {
@@ -272,6 +273,9 @@ func validateKernelLane(candidate Candidate, gpu string) error {
 	}
 	if !isKernel {
 		return errors.New("only a custom-kernel setup has a kernel lane")
+	}
+	if request.WorkloadSource != WorkloadSourceCustomerObserved || request.Diagnosis == nil || !request.Diagnosis.KernelLab {
+		return errors.New("a kernel lane needs recorded traffic and a control plane that runs kernel lanes")
 	}
 	pack, reviewed := kernelplanner.ReviewedPackFor(lane.Operator, lane.Vendor, lane.Engine, lane.EngineVersion)
 	image, pinned := pinnedImage(lane.Engine, lane.EngineVersion, gpu)
@@ -375,7 +379,7 @@ func ValidateProposal(proposal Proposal) error {
 				return err
 			}
 		}
-		if err := validateKernelLane(candidate, request.GPU); err != nil {
+		if err := validateKernelLane(candidate, request); err != nil {
 			return err
 		}
 		if _, duplicate := seenIDs[candidate.ID]; duplicate {

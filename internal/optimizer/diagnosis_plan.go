@@ -710,6 +710,9 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, e
 // on the exact engine version and image, within KernelLabGPUHours of the
 // run's cap. It never joins the settings race.
 func kernelCandidate(control Candidate, technique technique, target TraceOperator, pack kernelplanner.ReviewedPack, request Request) (Candidate, error) {
+	if request.WorkloadSource != WorkloadSourceCustomerObserved || !strings.HasPrefix(request.WorkloadFingerprint, "sha256:") {
+		return Candidate{}, errors.New("A kernel lane replays your recorded traffic, and this run uses a public sample or test profile, so no kernel setup was added.")
+	}
 	image, ok := pinnedImage(control.Deployment.Runtime.Engine, control.Deployment.Runtime.Version, request.GPU)
 	if !ok {
 		return Candidate{}, errors.New("The starting setup's engine version has no pinned runtime image, so a kernel cannot be pinned to it.")

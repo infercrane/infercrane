@@ -4355,6 +4355,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	var acceleratorEngine *acceleratorlab.Engine
 	var acceleratorCatalog acceleratorlab.CapabilityCatalog
+	var acceleratorWorker *acceleratorlab.WorkerClient
 	if cfg.AcceleratorLabEnabled() {
 		worker, workerErr := acceleratorlab.NewWorkerClientFromTokenFile(acceleratorlab.WorkerConfig{
 			BaseURL: cfg.AcceleratorWorkerURL,
@@ -4363,6 +4364,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if workerErr != nil {
 			return fmt.Errorf("configure Accelerator Lab target worker: %w", workerErr)
 		}
+		acceleratorWorker = worker
 		buildRunner, runnerErr := brezelexecutor.NewFromTokenFile(brezelexecutor.Config{
 			BaseURL:             cfg.BrezelSandboxURL,
 			ProjectID:           cfg.BrezelSandboxProjectID,
@@ -4721,7 +4723,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, KernelLaneEnabled: cfg.OptimizationKernelLane && acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
 	huggingFaceSearch, huggingFaceSearchErr := huggingfacesearch.New(huggingfacesearch.Options{})
 	if huggingFaceSearchErr != nil {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
@@ -4755,6 +4757,11 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if acceleratorEngine != nil {
 		for kind, handler := range acceleratorlab.Handlers(*acceleratorEngine, s) {
 			handlers[kind] = handler
+		}
+		if cfg.OptimizationKernelLane {
+			for kind, handler := range optimizationcampaign.KernelLaneHandlers(s, acceleratorWorker, nil) {
+				handlers[kind] = handler
+			}
 		}
 	}
 	for kind, handler := range workflows.RolloutHandlers(s) {
