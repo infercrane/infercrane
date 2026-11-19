@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
+	"github.com/infercrane/infercrane/internal/secrets"
 )
 
 // RunPodPods launches immutable OCI workloads through RunPod's native Pod API.
@@ -120,6 +121,16 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if err != nil {
 		return ProviderHandle{}, err
 	}
+	// A Pod has no cloud identity to read an object store. A model credential
+	// becomes a RunPod secret in the account that runs the Pod; Hugging Face
+	// adapters are fetched in the Pod at their pinned commit.
+	if err = refuseModelInputs("runpod-pods", spec, ModelInputs{Credential: true, Adapters: true}, secrets.ResolverSealed, secrets.ResolverEnvironment); err != nil {
+		return ProviderHandle{}, err
+	}
+	hfTokenSecret := r.HFTokenSecret
+	if spec.ModelCredential != nil {
+		hfTokenSecret = runPodModelSecretName(spec.TenantID, spec.ModelCredential.ReferenceID)
+	}
 	name := r.Handle(spec.ExternalKey).ResourceID
 	pods, err := r.list(ctx)
 	if err != nil {
@@ -129,16 +140,24 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if len(matches) > 1 {
 		return ProviderHandle{}, fmt.Errorf("%w: multiple RunPod Pods match durable key %q", ErrRequestFailed, spec.ExternalKey)
 	}
-	command := expandWorkloadCommand(spec.Workload.Command, spec.Model, spec.ModelRevision, spec.Workload.Port, spec.RuntimeArgs)
+	command := expandWorkloadCommand(servedCommand(spec.Workload.Command, spec), spec.Model, spec.ModelRevision, spec.Workload.Port, spec.RuntimeArgs)
+	if hubFetchNeeded(spec) {
+		command = wrapWithFetch(command, fetchScript(spec, false, true))
+	}
 	volumeID, err := r.configuredNetworkVolume(spec)
 	if err != nil {
 		return ProviderHandle{}, err
 	}
 	if len(matches) == 1 {
-		if err = validateRunPodIntent(matches[0], spec, command, volumeID, r.HFTokenSecret); err != nil {
+		if err = validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret); err != nil {
 			return ProviderHandle{}, err
 		}
 		return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
+	}
+	if spec.ModelCredential != nil {
+		if err = r.ensureModelSecret(ctx, hfTokenSecret, spec.ModelCredential); err != nil {
+			return ProviderHandle{}, err
+		}
 	}
 	var volume runPodNetworkVolume
 	if volumeID != "" {
@@ -158,11 +177,11 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	for _, variable := range engineVariables {
 		environment[variable] = spec.RuntimeEnv[variable]
 	}
-	if r.HFTokenSecret != "" {
-		if !validRunPodIdentifier(r.HFTokenSecret) {
+	if hfTokenSecret != "" {
+		if !validRunPodIdentifier(hfTokenSecret) {
 			return ProviderHandle{}, fmt.Errorf("%w: RunPod Hugging Face secret name is invalid", ErrInvalidReplicaSpec)
 		}
-		environment["HF_TOKEN"] = "{{ RUNPOD_SECRET_" + r.HFTokenSecret + " }}"
+		environment["HF_TOKEN"] = "{{ RUNPOD_SECRET_" + hfTokenSecret + " }}"
 	}
 	// RunPod REST v2 CreatePodRequest. v2 rejects unknown body fields with 422,
 	// so only schema fields are sent. One exact GPU type is placed per create;
@@ -196,7 +215,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		// and adopt the deterministic name before surfacing a retryable failure.
 		if current, listErr := r.list(ctx); listErr == nil {
 			matches = matchingRunPodRecords(current, name)
-			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID, r.HFTokenSecret) == nil {
+			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret) == nil {
 				return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 			}
 		}

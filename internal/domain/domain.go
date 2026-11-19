@@ -64,6 +64,7 @@ type DeploymentRevisionSpec struct {
 	Model                  string                   `json:"model"`
 	ModelRevision          string                   `json:"model_revision,omitempty"`
 	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
+	ModelAdapters          []ModelAdapter           `json:"model_adapters,omitempty"`
 	Runtime                string                   `json:"runtime"`
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
@@ -95,6 +96,67 @@ type ControlPlaneInstance struct {
 	StartedAt     time.Time `json:"started_at"`
 	HeartbeatAt   time.Time `json:"heartbeat_at"`
 	Draining      bool      `json:"draining"`
+}
+
+// ModelAdapter is a LoRA adapter served on a deployment's base model. The
+// repository is a Hugging Face OWNER/NAME pinned to a 40-character commit, or
+// an s3:// or gs:// location pinned to the sha256 digest of its imported
+// manifest. Rank is the adapter's r from adapter_config.json, when known.
+type ModelAdapter struct {
+	Name       string `json:"name" yaml:"name"`
+	Repository string `json:"repository" yaml:"repository"`
+	Revision   string `json:"revision" yaml:"revision"`
+	Rank       int    `json:"rank,omitempty" yaml:"rank,omitempty"`
+}
+
+// Source is huggingface, s3, or gs.
+func (a ModelAdapter) Source() string {
+	switch {
+	case len(a.Repository) > 5 && a.Repository[:5] == "s3://":
+		return "s3"
+	case len(a.Repository) > 5 && a.Repository[:5] == "gs://":
+		return "gs"
+	}
+	return "huggingface"
+}
+
+// ModelImport is model weights or a LoRA adapter in a customer's own S3 or GCS
+// bucket, registered by its file manifest. InferCrane never reads the bucket:
+// workers download the listed files with their own identity and check each
+// sha256. Checks record what the import verified and what stays unknown.
+type ModelImport struct {
+	ID             string           `json:"id"`
+	TenantID       string           `json:"-"`
+	Kind           string           `json:"kind"`
+	Source         string           `json:"source"`
+	URI            string           `json:"uri"`
+	ManifestDigest string           `json:"manifest_digest"`
+	Files          []ModelFile      `json:"files"`
+	Checks         ModelImportCheck `json:"checks"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
+// ModelFile is one manifest entry.
+type ModelFile struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// ModelImportCheck is the import's verdict on what it could verify from the
+// manifest and the configuration bytes it was given. Unknown stays unknown:
+// whether the bucket holds these exact bytes is checked by the worker.
+type ModelImportCheck struct {
+	Verified       []string `json:"verified"`
+	Unknown        []string `json:"unknown"`
+	Failed         []string `json:"failed"`
+	TotalBytes     int64    `json:"total_bytes"`
+	Architecture   string   `json:"architecture,omitempty"`
+	ModelType      string   `json:"model_type,omitempty"`
+	AdapterRank    int      `json:"adapter_rank,omitempty"`
+	AdapterBase    string   `json:"adapter_base_model,omitempty"`
+	ConfigDigest   string   `json:"config_digest,omitempty"`
+	TokenizerFiles []string `json:"tokenizer_files,omitempty"`
 }
 
 type ModelArtifact struct {
@@ -1084,6 +1146,8 @@ type ConsoleIdentity struct {
 	Access      bool     `json:"access"`
 }
 
+// SecretReference names where a workspace secret lives. For the sealed
+// resolver the value is stored only as ciphertext, which is never serialized.
 type SecretReference struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -1092,6 +1156,10 @@ type SecretReference struct {
 	Reference string    `json:"reference"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Sealed and KeyReference hold a sealed value. They never leave the
+	// control plane.
+	Sealed       SealedCredential `json:"-"`
+	KeyReference string           `json:"-"`
 }
 
 type ExternalTargetPolicy struct {

@@ -45,6 +45,7 @@ import (
 )
 
 type fakeStore struct {
+	sealedSecret               *domain.SecretReference
 	operation                  domain.Operation
 	deployment                 domain.Deployment
 	cancelled                  bool
@@ -3104,6 +3105,10 @@ func (f *fakeStore) TrainingArtifactHandoffs(context.Context, string, string) ([
 func (f *fakeStore) CreateSecretReference(_ context.Context, tenant, name, resolver, reference string) (domain.SecretReference, error) {
 	return domain.SecretReference{ID: "secret", TenantID: tenant, Name: name, Resolver: resolver, Reference: reference}, f.err
 }
+func (f *fakeStore) CreateSealedSecretReference(_ context.Context, tenant, name string, sealed domain.SealedCredential, keyReference string) (domain.SecretReference, error) {
+	f.sealedSecret = &domain.SecretReference{ID: "sealed", TenantID: tenant, Name: name, Resolver: "sealed", Sealed: sealed, KeyReference: keyReference}
+	return *f.sealedSecret, f.err
+}
 func (f *fakeStore) SecretReferencesForTenant(context.Context, string) ([]domain.SecretReference, error) {
 	return []domain.SecretReference{{ID: "secret", Name: "openrouter", Resolver: "env", Reference: "OPENROUTER_API_KEY"}}, f.err
 }
@@ -4085,7 +4090,8 @@ func TestSecretAPIAcceptsReferencesButNeverRawValues(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret")
 	response = httptest.NewRecorder()
 	(API{Store: store, APIKey: "secret"}).Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "must-not-persist") {
+	// A value is accepted only for a sealed secret; an env reference with one is refused.
+	if response.Code != http.StatusUnprocessableEntity || strings.Contains(response.Body.String(), "must-not-persist") {
 		t.Fatalf("raw value was accepted or reflected: %d %s", response.Code, response.Body.String())
 	}
 }

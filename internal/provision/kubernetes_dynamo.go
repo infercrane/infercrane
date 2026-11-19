@@ -349,6 +349,9 @@ func (k KubernetesDynamo) validate(spec ReplicaSpec) error {
 	if err := refuseEngineEnvironment("the Kubernetes Dynamo adapter", spec); err != nil {
 		return err
 	}
+	if err := refuseModelInputs("the Kubernetes Dynamo adapter", spec, ModelInputs{}); err != nil {
+		return err
+	}
 	if _, _, err := k.runtime(spec.Runtime); err != nil {
 		return err
 	}
