@@ -1,6 +1,6 @@
 ---
 title: Community, Cloud, and Enterprise
-description: Understand the open-source product, hosted direction, managed-compute boundary, and commercial enterprise capabilities.
+description: Understand the open-source product, the hosted console, the managed-compute boundary, and what InferCrane Enterprise includes.
 sidebarTitle: Product editions
 ---
 
@@ -62,16 +62,33 @@ Hosted supplier credentials, payment systems, abuse controls, rate cards, and wa
 belong outside the open-source process. Cloud code may consume public InferCrane APIs and extension
 contracts; the open-source core must never depend on a proprietary package.
 
-## InferCrane Enterprise direction
+## InferCrane Enterprise
 
-Enterprise packaging is for contractual operation and organization-wide governance, not a second
-inference engine. Expected commercial capabilities include SSO and SCIM, fine-grained access
-control, audit export, private connectivity, residency policy, customer-managed encryption,
-multi-region recovery, approval workflows, support, and SLAs.
+Enterprise is the paid way to run InferCrane across an organization, not a second inference engine.
+It starts with a Proof: one production workload over four weeks, the current setup measured against
+better ones side by side on the customer's own traffic, and a signed before-and-after report. The
+Proof has a fixed price that is credited to the subscription when the subscription follows it.
+
+The Enterprise subscription is a yearly price for the platform, which includes 16 GPUs, plus each
+further GPU under management, priced by GPU class. A GPU under management is a GPU serving an
+endpoint that InferCrane manages, counted as the monthly average. The subscription includes:
+
+- the hosted console for the whole team;
+- re-optimization as models, engines, and GPUs change;
+- spend caps, change approvals, and rollback;
+- a named engineer and a quarterly savings review.
+
+A subscription is proposed only when the Proof's verified saving is at least three times its yearly
+price. Current prices are on the [pricing page](https://infercrane.com/pricing).
+
+SAML single sign-on, SCIM provisioning, audit export, fine-grained access control, private
+connectivity, residency policy, customer-managed encryption, multi-region recovery, and contractual
+SLAs are not available today. Ask before relying on any of them.
 
 Basic deployment, monitoring, autoscaling, release safety, and provider/runtime extensibility stay
-in Community. Commercial value comes from operating InferCrane, providing governed capacity,
-reducing organizational risk, and accepting contractual responsibility.
+in Community. Commercial value comes from proving and keeping a lower cost on the customer's own
+traffic, operating InferCrane, providing governed capacity, reducing organizational risk, and
+accepting contractual responsibility.
 
 ## Repository and license boundary
 
