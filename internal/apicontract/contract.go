@@ -96,7 +96,6 @@ var Routes = []Route{
 	{"GET", "/endpoints/{name}/gpu-profiles", "listEndpointGPUProfiles", "Monitoring", "List every retained GPU profile capture behind an endpoint, including revisions that no longer serve", "", "GPUProfileSummaryList", 200, false},
 	{"GET", "/endpoints/{name}/gpu-profiles/compare", "compareEndpointGPUProfiles", "Monitoring", "Compare two analyzed GPU profile captures behind an endpoint, for example before and after a rollout", "", "GPUProfileComparison", 200, false},
 	{"GET", "/endpoints/{name}/gpu-profiles/{id}", "getEndpointGPUProfileByID", "Monitoring", "Read one retained GPU profile capture behind an endpoint", "", "GPUProfile", 200, false},
-	{"GET", "/endpoints/{name}/kernel-opportunities", "getEndpointKernelOpportunities", "Inference optimization", "Screen the newest GPU profile behind an endpoint for operators a custom-kernel lab run may try; nothing runs and ceilings are not gains", "", "EndpointKernelOpportunities", 200, false},
 	{"GET", "/endpoints/{name}/optimization-readiness", "getEndpointOptimizationReadiness", "Inference optimization", "Turn content-free monitoring into a conservative next profiling action", "", "Object", 200, false},
 	{"POST", "/endpoints/{name}/doctor", "diagnoseEndpoint", "Diagnostics", "Persist deterministic endpoint findings", "Object", "ObjectList", 200, false},
 	{"GET", "/endpoints/{name}/alerts", "listAlertPolicies", "Alerts", "List signed webhook alert policies", "", "ObjectList", 200, false},
@@ -626,9 +625,6 @@ func schemas() map[string]any {
 		result[name] = schema
 	}
 	for name, schema := range acceleratorLabRunSchemas() {
-		result[name] = schema
-	}
-	for name, schema := range kernelScreenSchemas() {
 		result[name] = schema
 	}
 	return result

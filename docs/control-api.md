@@ -70,7 +70,6 @@ Errors are stable JSON objects:
 | `GET /operations/{id}` | viewer | Inspect durable progress and result. |
 | `GET /operations/{id}/events` | viewer | List ordered durable operation progress events. |
 | `POST /operations/{id}/cancel` | operator | Request cooperative cancellation. |
-| `GET /endpoints/{name}/kernel-opportunities` | viewer | Screen the newest GPU profile of the endpoint's active revision with the kernel planner's gates: each operator's share of kernel time, its Amdahl ceiling (never a gain), whether a lab run may try it, and reviewed existing implementations. Runs and spends nothing; `404 gpu_profile_not_found` without a capture. See [Custom kernels](/features/custom-kernels). |
 | `GET /optimization/accelerator-lab/runs` | viewer | List the organization's Accelerator Lab runs, newest first; optional `campaign_id` (exact) and `limit` (1 to 100, default 20). Returns target, policy, and recorded evidence with digests only; `result_state` is `pending`, `recorded`, or `unreadable`. |
 | `GET /targets` | viewer | List registered tenant targets. |
 | `POST /targets` | operator | Register an existing HTTP(S) inference target. |

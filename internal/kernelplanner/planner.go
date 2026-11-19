@@ -220,9 +220,23 @@ func Build(request Request) (Plan, error) {
 		SelectionBoundary: "local checks establish semantic parity and memory safety only; target-GPU microbenchmarks plus end-to-end AIPerf, quality, SLO, cost, and Release Guard evidence are required before promotion",
 	}
 	for _, hotspot := range request.Profile.Hotspots {
-		tmpl, maxSpeedup, reason := gate(request.Hardware.Vendor, hotspot, request.Policy)
-		if reason != "" {
-			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: reason})
+		vendorTemplates, vendorSupported := templates[request.Hardware.Vendor]
+		tmpl, supported := vendorTemplates[hotspot.Family]
+		if !vendorSupported || !supported {
+			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: "operator family has no reviewed kernel template"})
+			continue
+		}
+		maxSpeedup := 1 / (1 - hotspot.DeviceTimeFraction)
+		if hotspot.DeviceTimeFraction < request.Policy.MinHotspotFraction {
+			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: fmt.Sprintf("device-time fraction %.4f is below policy minimum %.4f", hotspot.DeviceTimeFraction, request.Policy.MinHotspotFraction)})
+			continue
+		}
+		if maxSpeedup < request.Policy.MinMaxEndToEndSpeedup {
+			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: fmt.Sprintf("Amdahl ceiling %.4fx is below policy minimum %.4fx", maxSpeedup, request.Policy.MinMaxEndToEndSpeedup)})
+			continue
+		}
+		if request.Policy.TargetEndToEndSpeedup >= maxSpeedup {
+			plan.Rejected = append(plan.Rejected, Rejection{HotspotID: hotspot.ID, Reason: fmt.Sprintf("target end-to-end speedup %.4fx is not reachable below Amdahl ceiling %.4fx", request.Policy.TargetEndToEndSpeedup, maxSpeedup)})
 			continue
 		}
 		target := request.Policy.TargetEndToEndSpeedup
@@ -284,7 +298,18 @@ func normalize(request Request) Request {
 	request.Profile.Tool = strings.TrimSpace(request.Profile.Tool)
 	request.Profile.ToolVersion = strings.TrimSpace(request.Profile.ToolVersion)
 	request.Profile.EvidenceClass = strings.ToLower(strings.TrimSpace(request.Profile.EvidenceClass))
-	request.Policy = DefaultPolicy(request.Policy)
+	if request.Policy.MinHotspotFraction == 0 {
+		request.Policy.MinHotspotFraction = .05
+	}
+	if request.Policy.MinMaxEndToEndSpeedup == 0 {
+		request.Policy.MinMaxEndToEndSpeedup = 1.05
+	}
+	if request.Policy.TargetEndToEndSpeedup == 0 {
+		request.Policy.TargetEndToEndSpeedup = 1.02
+	}
+	if request.Policy.MaxCandidates == 0 {
+		request.Policy.MaxCandidates = 3
+	}
 	for index := range request.Profile.Hotspots {
 		hotspot := &request.Profile.Hotspots[index]
 		hotspot.ID = strings.TrimSpace(hotspot.ID)
@@ -344,122 +369,6 @@ func validate(request Request) error {
 		return fmt.Errorf("hotspot device-time fractions sum to %.6f, greater than one", total)
 	}
 	return nil
-}
-
-// DefaultPolicy fills the thresholds a request left unset: a hotspot must
-// hold at least 5% of device time, its Amdahl ceiling must reach 1.05x, and
-// the end-to-end target is 1.02x, with at most three candidates.
-func DefaultPolicy(policy Policy) Policy {
-	if policy.MinHotspotFraction == 0 {
-		policy.MinHotspotFraction = .05
-	}
-	if policy.MinMaxEndToEndSpeedup == 0 {
-		policy.MinMaxEndToEndSpeedup = 1.05
-	}
-	if policy.TargetEndToEndSpeedup == 0 {
-		policy.TargetEndToEndSpeedup = 1.02
-	}
-	if policy.MaxCandidates == 0 {
-		policy.MaxCandidates = 3
-	}
-	return policy
-}
-
-// gate applies the planner's thresholds to one measured hotspot. It returns
-// the reviewed template and Amdahl ceiling, and a reason when the hotspot is
-// turned down. Build and Screen share it, so both turn down the same hotspots.
-func gate(vendor string, hotspot Hotspot, policy Policy) (template, float64, string) {
-	tmpl, supported := templates[vendor][hotspot.Family]
-	if !supported {
-		return template{}, 0, "operator family has no reviewed kernel template"
-	}
-	maxSpeedup := 1 / (1 - hotspot.DeviceTimeFraction)
-	if hotspot.DeviceTimeFraction < policy.MinHotspotFraction {
-		return tmpl, maxSpeedup, fmt.Sprintf("device-time fraction %.4f is below policy minimum %.4f", hotspot.DeviceTimeFraction, policy.MinHotspotFraction)
-	}
-	if maxSpeedup < policy.MinMaxEndToEndSpeedup {
-		return tmpl, maxSpeedup, fmt.Sprintf("Amdahl ceiling %.4fx is below policy minimum %.4fx", maxSpeedup, policy.MinMaxEndToEndSpeedup)
-	}
-	if policy.TargetEndToEndSpeedup >= maxSpeedup {
-		return tmpl, maxSpeedup, fmt.Sprintf("target end-to-end speedup %.4fx is not reachable below Amdahl ceiling %.4fx", policy.TargetEndToEndSpeedup, maxSpeedup)
-	}
-	return tmpl, maxSpeedup, ""
-}
-
-// ScreenRequest is a measured profile before a run's exact identities are
-// pinned: no model revision, runtime image, or workload digest is needed.
-type ScreenRequest struct {
-	Runtime  string
-	Hardware HardwareIdentity
-	Phase    Phase
-	Hotspots []Hotspot
-	Policy   Policy
-}
-
-// Screened is one profiled operator after Build's gates. MaxEndToEndSpeedup
-// is the ceiling if the operator took no time at all, never a gain.
-// RequiredKernelSpeedup is set only for an eligible hotspot.
-type Screened struct {
-	HotspotID               string         `json:"hotspot_id"`
-	Kernel                  string         `json:"kernel"`
-	OperatorFamily          OperatorFamily `json:"operator_family"`
-	DeviceTimeFraction      float64        `json:"device_time_fraction"`
-	MaxEndToEndSpeedup      float64        `json:"max_end_to_end_speedup"`
-	RequiredKernelSpeedup   *float64       `json:"required_kernel_speedup"`
-	Template                string         `json:"template"`
-	Eligible                bool           `json:"eligible"`
-	Reason                  string         `json:"reason"`
-	ExistingImplementations []KernelMatch  `json:"existing_implementations"`
-}
-
-// Screen applies Build's gates to measured hotspots so a person can see
-// which operators a lab run would try, before anything is pinned or spent.
-// It plans no experiment and claims nothing: only a lab run on the target
-// GPU measures a change. Hotspots come back largest first.
-func Screen(request ScreenRequest) ([]Screened, error) {
-	policy := DefaultPolicy(request.Policy)
-	vendor := strings.ToLower(strings.TrimSpace(request.Hardware.Vendor))
-	if _, ok := templates[vendor]; !ok {
-		return nil, errors.New("hardware vendor must be nvidia, amd, google, or aws")
-	}
-	if policy.MinHotspotFraction <= 0 || policy.MinHotspotFraction >= 1 || policy.MinMaxEndToEndSpeedup <= 1 || policy.TargetEndToEndSpeedup <= 1 {
-		return nil, errors.New("kernel policy thresholds are invalid")
-	}
-	total := 0.0
-	out := make([]Screened, 0, len(request.Hotspots))
-	for _, hotspot := range request.Hotspots {
-		if hotspot.ID == "" || hotspot.Family == "" || hotspot.DeviceTimeFraction <= 0 || hotspot.DeviceTimeFraction >= 1 || math.IsNaN(hotspot.DeviceTimeFraction) {
-			return nil, fmt.Errorf("hotspot %q is incomplete or invalid", hotspot.ID)
-		}
-		total += hotspot.DeviceTimeFraction
-		tmpl, maxSpeedup, reason := gate(vendor, hotspot, policy)
-		screened := Screened{
-			HotspotID: hotspot.ID, Kernel: hotspot.Name, OperatorFamily: hotspot.Family, DeviceTimeFraction: hotspot.DeviceTimeFraction,
-			MaxEndToEndSpeedup: maxSpeedup, Template: tmpl.name, Eligible: reason == "", Reason: reason, ExistingImplementations: []KernelMatch{},
-		}
-		if reason == "" {
-			required := requiredKernelSpeedup(hotspot.DeviceTimeFraction, policy.TargetEndToEndSpeedup)
-			screened.RequiredKernelSpeedup = &required
-			matches, err := DefaultRegistry().Search(SearchRequest{Family: hotspot.Family, Runtime: request.Runtime, HardwareVendor: vendor, ComputeCapability: request.Hardware.ComputeCapability, DTypes: hotspot.DTypes, Phase: request.Phase})
-			if err != nil {
-				return nil, fmt.Errorf("search kernel registry for hotspot %s: %w", hotspot.ID, err)
-			}
-			if matches != nil {
-				screened.ExistingImplementations = matches
-			}
-		}
-		out = append(out, screened)
-	}
-	if total > 1.000001 {
-		return nil, fmt.Errorf("hotspot device-time fractions sum to %.6f, greater than one", total)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].DeviceTimeFraction != out[j].DeviceTimeFraction {
-			return out[i].DeviceTimeFraction > out[j].DeviceTimeFraction
-		}
-		return out[i].HotspotID < out[j].HotspotID
-	})
-	return out, nil
 }
 
 func requiredKernelSpeedup(fraction, targetEndToEnd float64) float64 {

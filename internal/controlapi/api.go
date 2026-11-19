@@ -650,7 +650,6 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles", a.auth(authz.Read, a.endpointGPUProfiles))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/compare", a.auth(authz.Read, a.compareEndpointGPUProfiles))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/{id}", a.auth(authz.Read, a.endpointGPUProfileByID))
-	mux.HandleFunc("GET /api/v1/endpoints/{name}/kernel-opportunities", a.auth(authz.Read, a.endpointKernelOpportunities))
 	mux.HandleFunc("DELETE /api/v1/endpoints/{name}", a.auth(authz.Delete, a.deleteEndpoint))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings", a.auth(authz.Deploy, a.createEndpointBinding))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/plans", a.auth(authz.Deploy, a.createEndpointPlan))
