@@ -144,6 +144,9 @@ func candidateQuality(campaign domain.OptimizationCampaign, candidate domain.Opt
 	case candidate.FailureCode == optimizationcampaign.FailureQualityReferenceUnavailable:
 		view.State = qualityStateInconclusive
 		view.Reason = "No serving reference to compare answers with, so this setup's answers could not be checked."
+	case candidate.FailureCode == optimizationcampaign.FailureQualityReferenceUnanswered:
+		view.State = qualityStateInconclusive
+		view.Reason = "The reference gave no answer text to some prompts within the token limit, so this setup's answers could not be checked. Reasoning does not count as an answer. Use an eval set with a larger max_tokens."
 	case candidate.State == optimizationcampaign.CandidateValidating && view.Check == "customer_evidence":
 		view.State = qualityStateWaitingEvidence
 		view.Reason = "Waiting for your signed evaluation of this setup."

@@ -170,3 +170,9 @@ InferCrane asks AIPerf for the `records` export level. This contains per-request
 The control-plane image pins AIPerf `0.12.0`. For a standalone control plane, install it with
 `pipx install aiperf==0.12.0`; the benchmark adapter rejects another version rather than silently
 mixing tool semantics.
+
+Each AIPerf run starts in its own process group. AIPerf starts worker processes, and when a model
+server dies mid-run the main process can exit while those workers keep running. InferCrane then
+waits at most 30 seconds for them and stops the whole group, so a measurement cannot hang on them.
+A cancelled measurement stops the group at once. A run whose main process exited successfully keeps
+its result; a failed run keeps its error.

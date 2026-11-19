@@ -26,11 +26,12 @@ steps.
 | Property | Built-in answer check |
 |---|---|
 | Prompts | `infercrane-default` version 1: 24 short prompts with short answers (arithmetic, facts, extraction, code, translation, summaries), pinned by SHA-256 digest in the product. Print it with `infercrane evaluation set default`. |
-| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Sent directly to one ready replica of each exact revision. |
-| Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and `<think>` blocks. Two empty answers agree. |
+| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Each request also sends `chat_template_kwargs: {"enable_thinking": false}`, so hybrid reasoning models such as Qwen3 and GLM answer directly; chat templates without that switch ignore it. Sent directly to one ready replica of each exact revision. |
+| Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and reasoning: `<think>` blocks, and any text before a `</think>` that the chat template opened in the prompt. |
+| Answers with no text | If the reference gives no answer text to any prompt within the token limit, for example because a reasoning model was cut off mid-reasoning or its server returned only reasoning, the check stops without a score. The candidate ends `inconclusive` with `quality_reference_unanswered`. Use an eval set with a larger `max_tokens`. |
 | Score | The mean over prompts. The reference's own row records 1. |
 | Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. `BLOCK` records `passed: false`. |
-| Evidence | Evaluator `infercrane-builtin` version 1, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, and an artifact digest that commits to a hash of every answer. Signed with the control plane's key. |
+| Evidence | Evaluator `infercrane-builtin` version 2, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, and an artifact digest that commits to a hash of every answer. Signed with the control plane's key. |
 | Provenance | `source: infercrane` and the reference's revision ID. Only the worker writes these rows; the attach API always records `source: customer` and refuses the evaluator name `infercrane-builtin`. |
 
 Answers are compared in memory and discarded. Prompts of the built-in suite live in the product;

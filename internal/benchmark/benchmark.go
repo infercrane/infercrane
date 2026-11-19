@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -86,12 +85,6 @@ type ServerMetricSummary struct {
 
 type commandRunner interface {
 	Run(context.Context, string, ...string) ([]byte, error)
-}
-
-type executable struct{}
-
-func (executable) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 func Run(ctx context.Context, cfg Config) (Result, error) { return run(ctx, cfg, executable{}) }

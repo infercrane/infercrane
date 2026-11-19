@@ -61,6 +61,11 @@ func TestCandidateQualityStatesComeFromPersistedState(t *testing.T) {
 	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, noReference), noReference, campaignQualityInputs{}); view.State != qualityStateInconclusive {
 		t.Fatalf("no reference = %+v", view)
 	}
+	unanswered := validating
+	unanswered.State, unanswered.FailureCode = optimizationcampaign.CandidateInconclusive, optimizationcampaign.FailureQualityReferenceUnanswered
+	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, unanswered), unanswered, campaignQualityInputs{}); view.State != qualityStateInconclusive || !strings.Contains(view.Reason, "no answer text") {
+		t.Fatalf("unanswered reference = %+v", view)
+	}
 	failed := validating
 	failed.State = optimizationcampaign.CandidateFailed
 	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, failed), failed, campaignQualityInputs{}); view.State != qualityStateNotRun {

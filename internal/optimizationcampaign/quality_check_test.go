@@ -285,6 +285,25 @@ func TestBuiltinQualityCheckWaitsForTheCustomerEvalSet(t *testing.T) {
 	}
 }
 
+func TestBuiltinQualityCheckIsInconclusiveWhenTheReferenceGivesNoAnswerText(t *testing.T) {
+	run := newQualityCampaign(t, optimizer.Request{})
+	// A reasoning model cut off at the token limit: the reference's answer is
+	// all reasoning, and so is the candidate's. Two empty answers once scored
+	// as a perfect match.
+	cutOff := map[string]string{}
+	for _, prompt := range qualitycheck.Default().Prompts {
+		cutOff[prompt.ID] = "<think>Let me work this out step by step"
+	}
+	run.completer.answers = map[string]map[string]string{"http://control": cutOff, "http://fast": cutOff}
+	validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+	if err != nil || !validated.Inconclusive || validated.Passed || validated.FailureCode != FailureQualityReferenceUnanswered {
+		t.Fatalf("validation = %+v err=%v", validated, err)
+	}
+	if run.store.recorded != 0 {
+		t.Fatalf("recorded %d evidence rows for answers that were never given", run.store.recorded)
+	}
+}
+
 func TestBuiltinQualityCheckIsInconclusiveWithoutAServingControl(t *testing.T) {
 	run := newQualityCampaign(t, optimizer.Request{})
 	run.composite.campaign.Candidates[0].State = CandidateFailed
