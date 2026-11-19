@@ -53,7 +53,11 @@ func (v OpenAI) InspectWithCredential(ctx context.Context, baseURL, credential s
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(health.Body, 4096))
 	health.Body.Close()
-	if health.StatusCode != http.StatusOK {
+	// A hosted OpenAI-compatible API (OpenAI, Anthropic's compatibility
+	// layer) has no /health route. Not found means the server has no such
+	// probe, not that it is unhealthy: its model list below must still list
+	// the model. Any other non-OK answer is a failed probe.
+	if health.StatusCode != http.StatusOK && health.StatusCode != http.StatusNotFound {
 		return false, nil
 	}
 	models, err := do("/v1/models")

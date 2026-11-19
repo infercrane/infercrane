@@ -151,7 +151,8 @@ func TestMigrationSwitchStagesCanaryPrimaryAndRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.ActivePlan.RoutingPolicy != "weighted" || resolved.ActivePlan.MigrationVerdictID != pass.ID || resolved.ActivePlan.Bindings[0].BindingID != owned.ID || resolved.ActivePlan.Bindings[0].Weight != 500 || resolved.ActivePlan.Bindings[1].Weight != 9500 {
+	// 5% as the smallest equal ratio, so the canary is interleaved one in 20.
+	if resolved.ActivePlan.RoutingPolicy != "weighted" || resolved.ActivePlan.MigrationVerdictID != pass.ID || resolved.ActivePlan.Bindings[0].BindingID != owned.ID || resolved.ActivePlan.Bindings[0].Weight != 1 || resolved.ActivePlan.Bindings[1].Weight != 19 {
 		t.Fatalf("canary plan=%+v", resolved.ActivePlan)
 	}
 	// A migration plan stays on its endpoint.

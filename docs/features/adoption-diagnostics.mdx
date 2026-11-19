@@ -43,7 +43,11 @@ used for discovery, the reconciler's health probe, and, for a traffic-managed bi
 the gateway routes to the server (as `Authorization: Bearer`, in place of the caller's InferCrane
 key). A stored key that cannot be opened (the credential key changed or was removed) marks the
 target unhealthy and leaves it unroutable rather than reaching it without the key; a temporary
-database error leaves its health and its published route unchanged until the next pass. The control plane needs
+database error leaves its health and its published route unchanged until the next pass.
+
+The health probe asks `GET /health`, then `GET /v1/models`, which must list the connected model. A
+hosted API such as OpenAI's has no `/health` route: a `404` there is treated as no such probe, and
+the model list alone decides. Any other non-OK answer marks the server unhealthy. The control plane needs
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`; otherwise the request is refused with
 `upstream_credential_unavailable`, and the agent (which keeps the key on the server's machine) is
 the path.

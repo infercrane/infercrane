@@ -283,7 +283,12 @@ func (s *Store) StageMigration(ctx context.Context, tenant, endpointName, step, 
 		if ownedErr != nil {
 			return stage, ownedErr
 		}
-		plan = domain.ServingPlan{EndpointID: resolved.Endpoint.ID, RoutingPolicy: "weighted", MigrationVerdictID: verdict.ID, Bindings: []domain.ServingPlanBinding{{BindingID: owned.ID, Priority: 0, Weight: canaryBasis}, {BindingID: verdict.BindingID, Priority: 1, Weight: 10000 - canaryBasis}}}
+		// Weighted routing hands out contiguous runs of picks per binding, so
+		// the weights are reduced to their smallest equal ratio: 500:9500
+		// would send the first 500 requests to the canary, 1:19 sends one in
+		// every 20.
+		ownedWeight, closedWeight := reducedWeights(canaryBasis, 10000-canaryBasis)
+		plan = domain.ServingPlan{EndpointID: resolved.Endpoint.ID, RoutingPolicy: "weighted", MigrationVerdictID: verdict.ID, Bindings: []domain.ServingPlanBinding{{BindingID: owned.ID, Priority: 0, Weight: ownedWeight}, {BindingID: verdict.BindingID, Priority: 1, Weight: closedWeight}}}
 	case MigrationStepPrimary:
 		active := resolved.ActivePlan
 		if active.MigrationVerdictID == "" || active.RoutingPolicy != "weighted" {
@@ -378,4 +383,16 @@ func (s *Store) findOrCreatePlan(ctx context.Context, tenant string, resolved do
 func (s *Store) StartMigrationCanary(ctx context.Context, tenant, endpoint, verdictID string) (bool, string, error) {
 	stage, err := s.StageMigration(ctx, tenant, endpoint, MigrationStepCanary, verdictID, MaxMigrationCanaryBasisPoints, time.Hour)
 	return stage.Activated, stage.Evaluation.Decision, err
+}
+
+// reducedWeights divides two weights by their greatest common divisor.
+func reducedWeights(left, right int) (int, int) {
+	a, b := left, right
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a <= 1 {
+		return left, right
+	}
+	return left / a, right / a
 }

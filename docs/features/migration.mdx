@@ -153,6 +153,9 @@ Approving the run's winner with `infercrane optimize activate` takes the canary 
 | primary | primary-fallback: your deployment first, the closed API as fallback | endpoint Release Guard comparing the two bindings' requests from the canary |
 | rollback | the closed API alone | always |
 
+The canary interleaves: at 5% it sends one request in every 20 to your deployment, not a first
+run of requests.
+
 A plan that routes between a closed API and an open model never passes the usual same-model check;
 a migration plan cites its signed verdict instead, and only for the endpoint, binding, and revision
 it judged. A weighted plan across two different models exists only as a migration canary. Release
