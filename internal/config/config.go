@@ -62,11 +62,15 @@ type Config struct {
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                string
 	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy string
 	KubernetesArtifactPVCs                                                                                      map[string]string
-	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion        string
-	DynamoModelSecretName                                                                                       string
-	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                                     int
-	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval                    time.Duration
-	OptimizationPrices                                                                                          []OptimizationPrice
+	// KubernetesObjectStoreSecret optionally names a Secret whose keys become
+	// the environment of the container that fetches imported S3 or GCS files;
+	// the fetch images override the pinned AWS and Google Cloud CLI images.
+	KubernetesObjectStoreSecret, KubernetesS3FetchImage, KubernetesGCSFetchImage                         string
+	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion string
+	DynamoModelSecretName                                                                                string
+	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                              int
+	HealthInterval, UpstreamTimeout, ShutdownTimeout, RequestRetention, GPUPriceSyncInterval             time.Duration
+	OptimizationPrices                                                                                   []OptimizationPrice
 
 	// ConsoleURL is the dashboard origin. On the server it is advertised to
 	// `infercrane login`; in the CLI it builds dashboard links.
@@ -637,6 +641,9 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesImageCachePolicy:          env("INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY", "prefer"),
 		KubernetesArtifactCachePolicy:       env("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "prefer"),
 		KubernetesArtifactPVCs:              kubernetesArtifactPVCs,
+		KubernetesObjectStoreSecret:         env("INFERCRANE_KUBERNETES_OBJECT_STORE_SECRET", ""),
+		KubernetesS3FetchImage:              env("INFERCRANE_KUBERNETES_S3_FETCH_IMAGE", ""),
+		KubernetesGCSFetchImage:             env("INFERCRANE_KUBERNETES_GCS_FETCH_IMAGE", ""),
 		DynamoVLLMImageDigest:               env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
 		DynamoVLLMRuntimeVersion:            env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
 		DynamoSGLangImageDigest:             env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),

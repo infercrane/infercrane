@@ -370,7 +370,7 @@ func writeObjectFetch(script *strings.Builder, source ObjectSource, dir string) 
 			script.WriteString("aws s3 cp --only-show-errors " + shellQuote(base+"/"+file.Path) + " " + shellQuote(target) + "\n")
 		}
 	}
-	script.WriteString("(cd " + shellQuote(dir) + " && sha256sum -c --strict --quiet) <<'INFERCRANE_MANIFEST'\n")
+	script.WriteString("(cd " + shellQuote(dir) + " && sha256sum -c -) <<'INFERCRANE_MANIFEST'\n")
 	for _, file := range files {
 		script.WriteString(file.SHA256 + "  " + file.Path + "\n")
 	}
