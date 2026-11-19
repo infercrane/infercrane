@@ -3,8 +3,6 @@ title: Custom kernels
 description: See which GPU operators could be faster, try a kernel on your exact GPU under a spend cap, and keep it only if it is correct and measurably faster end to end.
 ---
 
-# Custom kernels
-
 When configuration changes have done what they can, the Accelerator Lab tries faster GPU kernels for
 the operators that take the most time on your endpoint. A kernel counts as a result only when it
 gives the same answers as the kernel it replaces and makes your endpoint measurably faster on your
@@ -19,18 +17,21 @@ configured for it. Every run carries a spend cap and an approval that expires wi
 
 ## In the dashboard
 
-Open an endpoint, then **Stack → Custom kernels**, or **Optimize → Custom kernels**.
+Open an endpoint's **Stack** tab and choose **Open** on **Custom kernels**. **Optimize → Custom
+kernels** lists every kernel run in the workspace.
 
 1. **Where GPU time goes.** The screen reads the endpoint's newest
    [GPU profile](/features/gpu-profiling) and lists each operator with its share of kernel time and
    the ceiling if it took no time at all, for example "at most ×1.23". The ceiling is not a gain.
 2. **Start a kernel run.** InferCrane fills in what it knows: the model and its commit, the engine,
-   the GPU, and the optimization run whose setup the kernel would improve. You add what only your lab
-   host holds: the runtime image digest and the digests of the traffic replay and quality suite.
+   the GPU, the optimization run whose setup the kernel would improve, and that run's workload. You add
+   what only your lab host holds: the runtime image digest, and the replay and quality-suite files the
+   worker reads, each named `NAME@sha256:DIGEST`.
 3. **Approve the spend.** Set the cap and how long the approval lasts (at most 24 hours). Nothing runs
-   before you approve.
+   before you approve. Letting the lab write a kernel when no reviewed one exists is off by default;
+   with **Advanced** on, the form offers it.
 4. **Watch it run.** The screen refreshes while the run moves through profile, search, build, and
-   measure.
+   measure; **Watch** opens the run's operation with its stages and spend so far.
 5. **Read the verdicts.** Each experiment is Qualified, Rejected, Inconclusive, or Not tried, with the
    correctness checks it passed or failed, its kernel timing, and, only when serving replay measured
    it, the end-to-end change.
@@ -91,9 +92,9 @@ The dashboard and the CLI send the same request to `POST /api/v1/optimization/ac
   "hardware": { "vendor": "nvidia", "accelerator": "H100" },
   "topology": { "mode": "aggregated", "nodes": 1, "accelerators": 1, "tensor_parallel": 1, "pipeline_parallel": 1, "expert_parallel": 1 },
   "workload": {
-    "digest": "sha256:TRAFFIC_REPLAY", "modality": "text", "phase": "decode",
+    "digest": "sha256:WORKLOAD", "modality": "text", "phase": "decode",
     "batch_size": 8, "concurrency": 8, "input_tokens": 1024, "output_tokens": 256,
-    "quality_suite": "sha256:QUALITY_SUITE", "replay": "sha256:TRAFFIC_REPLAY"
+    "quality_suite": "answers@sha256:QUALITY_SUITE_FILE", "replay": "traffic@sha256:REPLAY_FILE"
   },
   "policy": {
     "max_cost_usd": 40, "authorized_until": "2026-11-20T12:00:00Z",
@@ -105,9 +106,12 @@ The dashboard and the CLI send the same request to `POST /api/v1/optimization/ac
 }
 ```
 
-The control plane refuses a request whose approval has expired or ends more than 24 hours ahead, whose
-model commit or image is not pinned, or that names a vendor, runtime, or modality no registered worker
-adapter covers. The same request is queued once: its digest is the idempotency key.
+`workload.digest` is the workload the optimization run was bound to. `replay` and `quality_suite` name
+files in the worker's `INFERCRANE_KERNEL_REPLAY_DIR` by content digest; the worker checks each file's
+digest before it uses it. The control plane refuses a request whose approval has expired or ends more
+than 24 hours ahead, whose model commit or image is not pinned, or that names a vendor, runtime, or
+modality no registered worker adapter covers. The same request is queued once: its digest is the
+idempotency key.
 
 ## What a run does
 
