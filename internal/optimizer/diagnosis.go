@@ -64,6 +64,10 @@ type Diagnosis struct {
 	// name. Unavailable signals are omitted.
 	Signals    map[string]float64 `json:"signals"`
 	GPUProfile *GPUProfileSummary `json:"gpu_profile,omitempty"`
+	// KernelLab is set by the control plane when it can run a custom-kernel
+	// lane inside a run: an Accelerator Lab worker is configured and the
+	// kernel lane is turned on. A client cannot set it.
+	KernelLab bool `json:"kernel_lab,omitempty"`
 }
 
 // DiagnosisFinding is one readiness rule that fired, with the observed value
@@ -104,6 +108,20 @@ type GPUTraceSummary struct {
 	WindowMS         float64            `json:"window_ms"`
 	Findings         []GPUTraceFinding  `json:"findings"`
 	Measurements     map[string]float64 `json:"measurements"`
+	// Operators is kernel time and efficiency per operator class, when the
+	// analysis measured them.
+	Operators []TraceOperator `json:"operators,omitempty"`
+}
+
+// TraceOperator is one operator class's share of kernel time and, when the
+// trace's shapes covered enough of it, its efficiency: achieved throughput
+// over what the roofline allows at its intensity. Absent efficiency is
+// unknown, never zero.
+type TraceOperator struct {
+	Operator     string   `json:"operator"`
+	Share        float64  `json:"share"`
+	CoveredShare float64  `json:"covered_share"`
+	Efficiency   *float64 `json:"efficiency,omitempty"`
 }
 
 // GPUTraceFinding is one trace analysis rule that fired.
@@ -258,7 +276,30 @@ func summarizeTrace(profile gpuprofile.Profile) *GPUTraceSummary {
 	}
 	measure(TraceStepP50MS, analysis.Steps.P50MS, 3)
 	measure(TraceStepP95MS, analysis.Steps.P95MS, 3)
+	for _, operator := range analysis.Operators {
+		summary := TraceOperator{Operator: operator.Operator, Share: round(operator.Share, 4), CoveredShare: round(operator.CoveredShare, 4)}
+		if operator.Efficiency != nil && finite(*operator.Efficiency) {
+			summary.Efficiency = pointerTo(round(*operator.Efficiency, 4))
+		}
+		trace.Operators = append(trace.Operators, summary)
+	}
 	return trace
+}
+
+func pointerTo[T any](value T) *T { return &value }
+
+// traceOperator returns an operator class from the trace summary.
+func (d Diagnosis) traceOperator(class string) (TraceOperator, bool) {
+	trace := d.trace()
+	if trace == nil {
+		return TraceOperator{}, false
+	}
+	for _, operator := range trace.Operators {
+		if operator.Operator == class {
+			return operator, true
+		}
+	}
+	return TraceOperator{}, false
 }
 
 // KernelClass groups a GPU kernel by its name into attention, GEMM,
@@ -363,6 +404,18 @@ func validateTraceSummary(trace GPUTraceSummary) error {
 		default:
 			return errors.New("diagnosis GPU trace measurement is unknown or out of range")
 		}
+	}
+	operators := map[string]bool{}
+	for _, operator := range trace.Operators {
+		known := false
+		for _, class := range gpuprofile.Operators {
+			known = known || class == operator.Operator
+		}
+		share := func(value float64) bool { return finite(value) && value >= 0 && value <= 1 }
+		if !known || operators[operator.Operator] || !share(operator.Share) || !share(operator.CoveredShare) || operator.Efficiency != nil && (!finite(*operator.Efficiency) || *operator.Efficiency <= 0 || *operator.Efficiency > 4) {
+			return errors.New("diagnosis GPU trace operator is unknown, repeated, or out of range")
+		}
+		operators[operator.Operator] = true
 	}
 	return nil
 }

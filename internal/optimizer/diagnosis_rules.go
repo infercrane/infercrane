@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
+	"github.com/infercrane/infercrane/internal/gpuprofile"
+	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/metrics"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/provideridentity"
@@ -17,7 +19,7 @@ import (
 // DiagnosisRulesVersion identifies the rule set that maps a diagnosis to the
 // techniques worth measuring. A change to a rule, priority, gate, or flag
 // value changes this version.
-const DiagnosisRulesVersion = "diagnosis-technique-rules-v4"
+const DiagnosisRulesVersion = "diagnosis-technique-rules-v5"
 
 // Techniques the diagnosis rule set can choose. A technique is one change to
 // the starting setup; its candidate is measured against that setup.
@@ -43,6 +45,9 @@ const (
 	// TechniqueAITER turns on AMD's AITER kernels in vLLM on a reviewed AMD
 	// Instinct accelerator through a reviewed engine environment variable.
 	TechniqueAITER = "aiter-kernels"
+	// TechniqueCustomKernel replaces one operator's kernel with one the
+	// Accelerator Lab writes or adapts, in a lane of its own after approval.
+	TechniqueCustomKernel = "custom-kernel"
 )
 
 // Rule identifiers the planner adds to the readiness finding rules it reuses.
@@ -57,6 +62,10 @@ const (
 	// RuleAcceleratorKernels fires when the GPU's work is the bottleneck on a
 	// reviewed accelerator whose tuned kernels the pinned engine leaves off.
 	RuleAcceleratorKernels = "accelerator.kernels_off_by_default"
+	// RuleKernelDominantOperator fires when one operator dominates kernel
+	// time, runs far below what the GPU allows for its shapes, and the lab
+	// has a reviewed kernel for it on the exact engine version.
+	RuleKernelDominantOperator = "gpu_trace.kernel_dominant_operator"
 )
 
 // Planning thresholds. They choose what to measure, never what to ship.
@@ -86,6 +95,15 @@ const (
 	// captureHeadroom sizes a larger CUDA graph capture a quarter above the
 	// observed concurrency, so batches a little above it still use graphs.
 	captureHeadroom = 1.25
+	// A custom kernel is planned last and only for one operator holding at
+	// least this share of kernel time that runs below this share of what the
+	// GPU allows for its shapes.
+	kernelDominantShare  = 0.3
+	kernelWeakEfficiency = 0.5
+	kernelLanePriority   = 30
+	// KernelLabGPUHours bounds the lab's GPU time for one kernel setup: a
+	// target profile, a build, and a qualification replay.
+	KernelLabGPUHours = 2.0
 )
 
 type runtimeArg struct{ flag, value string }
@@ -120,6 +138,13 @@ type technique struct {
 	modelFeature   string
 	// outOfScope explains why the technique is never a derived candidate.
 	outOfScope string
+	// targets are the trace operator classes (gpuprofile.Operators) whose
+	// kernels the technique changes, so a custom kernel for one of them
+	// waits until the setting change is measured.
+	targets []string
+	// kernelLane marks the custom-kernel technique: its setup keeps the
+	// starting setup's flags and runs in the run's kernel lane.
+	kernelLane bool
 }
 
 // techniqueOrder breaks priority ties and lists every technique once.
@@ -127,7 +152,7 @@ var techniqueOrder = []string{
 	TechniqueFP8KVCache, TechniqueBatchBudget, TechniqueAITER, TechniquePrefixCache, TechniquePrefixScheduling, TechniqueSpeculativeMTP,
 	TechniqueSpeculativeDraft, TechniqueFP8Weights, TechniqueInt4Weights, TechniqueLargePrefill, TechniqueKVSequenceCap,
 	TechniqueAPIServers, TechniqueStreamInterval, TechniqueCUDAGraphs, TechniqueAsyncScheduling, TechniquePrefixRouting, TechniqueParallelism,
-	TechniqueSpeculationTune, TechniqueRightSizing,
+	TechniqueSpeculationTune, TechniqueRightSizing, TechniqueCustomKernel,
 }
 
 var techniques = map[string]technique{
@@ -148,11 +173,11 @@ var techniques = map[string]technique{
 		args: map[string][]runtimeArg{"sglang": {{"--schedule-policy", "lpm"}}}},
 	TechniquePrefixRouting: {id: TechniquePrefixRouting, label: "Route requests that share a prompt to the same server",
 		outOfScope: "Routing is set on the endpoint, not on one server, so it is planned as a separate change."},
-	TechniqueFP8Weights: {id: TechniqueFP8Weights, label: "FP8 weights", changesPrecision: true, lowersWeights: true, nativeFP8: true,
+	TechniqueFP8Weights: {id: TechniqueFP8Weights, label: "FP8 weights", changesPrecision: true, lowersWeights: true, nativeFP8: true, targets: []string{gpuprofile.OperatorMoEExperts},
 		args: map[string][]runtimeArg{"vllm": {{"--quantization", "fp8"}}, "sglang": {{"--quantization", "fp8"}}}},
-	TechniqueInt4Weights: {id: TechniqueInt4Weights, label: "4-bit weights", changesPrecision: true, lowersWeights: true,
+	TechniqueInt4Weights: {id: TechniqueInt4Weights, label: "4-bit weights", changesPrecision: true, lowersWeights: true, targets: []string{gpuprofile.OperatorMoEExperts},
 		outOfScope: "4-bit weights come only from reviewed publisher checkpoints, which serve different model files; a campaign cannot rank those against the starting setup yet."},
-	TechniqueFP8KVCache: {id: TechniqueFP8KVCache, label: "FP8 KV cache", changesPrecision: true, nativeFP8: true,
+	TechniqueFP8KVCache: {id: TechniqueFP8KVCache, label: "FP8 KV cache", changesPrecision: true, nativeFP8: true, targets: []string{gpuprofile.OperatorAttention},
 		args: map[string][]runtimeArg{"vllm": {{"--kv-cache-dtype", "fp8"}}, "sglang": {{"--kv-cache-dtype", "fp8_e4m3"}}}},
 	TechniqueKVSequenceCap: {id: TechniqueKVSequenceCap, label: "Fewer requests at once",
 		args: map[string][]runtimeArg{"vllm": {{"--max-num-seqs", ""}}, "sglang": {{"--max-running-requests", ""}}}},
@@ -178,8 +203,9 @@ var techniques = map[string]technique{
 		outOfScope: "Changing how many GPUs each server uses changes the hardware, so it is planned as a separate run."},
 	TechniqueSpeculationTune: {id: TechniqueSpeculationTune, label: "Shorter speculation",
 		outOfScope: "Setups start from an untuned server without speculation, so there is no speculation length to shorten here."},
-	TechniqueAITER: {id: TechniqueAITER, label: "AMD AITER kernels", changesKernels: true,
+	TechniqueAITER: {id: TechniqueAITER, label: "AMD AITER kernels", changesKernels: true, targets: gpuprofile.Operators,
 		env: map[string][]engineVariable{"vllm": {{"VLLM_ROCM_USE_AITER", "1"}}}},
+	TechniqueCustomKernel: {id: TechniqueCustomKernel, label: "Custom kernel", changesKernels: true, kernelLane: true},
 	TechniqueRightSizing: {id: TechniqueRightSizing, label: "A smaller or cheaper GPU",
 		outOfScope: "Few requests run at once, so this GPU may be larger than the traffic needs. Comparing GPUs needs capacity measured at your SLO, which is planned as a separate run."},
 }
@@ -413,6 +439,9 @@ func diagnosisOutcomes(d Diagnosis, facts planContext) []ruleOutcome {
 		add(ruleOutcome{rule: finding.Rule, evidence: findingEvidence(finding), picks: []techniquePick{
 			{TechniqueParallelism, 80, fmt.Sprintf("Links between the server's GPUs ran at %s of their peak (threshold %s).", percentWords(finding.Observed), percentWords(finding.Threshold))},
 		}})
+	}
+	if outcome := kernelLaneOutcome(d, facts); outcome != nil {
+		add(*outcome)
 	}
 	if finding, ok := d.finding(optimizationreadiness.RuleSpeculativeAccept); ok {
 		add(ruleOutcome{rule: finding.Rule, evidence: findingEvidence(finding), picks: []techniquePick{
@@ -655,6 +684,74 @@ func acceleratorKernelOutcome(d Diagnosis, facts planContext) *ruleOutcome {
 	cause := strings.Join(causes, ", and ")
 	why := fmt.Sprintf("%s. On the %s, %s %s runs its own attention and matrix-multiply kernels unless AMD's AITER kernels, built for this GPU, are switched on, so measuring with them on is worth a setup.", strings.ToUpper(cause[:1])+cause[1:], accelerator.Product, engineName(facts.engine), facts.version)
 	return &ruleOutcome{rule: RuleAcceleratorKernels, evidence: evidence, picks: []techniquePick{{TechniqueAITER, priority, why}}}
+}
+
+// kernelTarget is the operator a custom kernel would replace: the trace's
+// largest operator class, when it holds at least kernelDominantShare of
+// kernel time, its measured efficiency is below kernelWeakEfficiency, and the
+// lab has a reviewed pack for it on this GPU's vendor and the starting
+// setup's exact engine version. An efficiency the trace did not measure is
+// unknown, so no kernel is planned.
+func kernelTarget(d Diagnosis, facts planContext) (TraceOperator, kernelplanner.ReviewedPack, bool) {
+	trace := d.trace()
+	if !d.KernelLab || trace == nil {
+		return TraceOperator{}, kernelplanner.ReviewedPack{}, false
+	}
+	var dominant TraceOperator
+	for _, operator := range trace.Operators {
+		if operator.Share > dominant.Share {
+			dominant = operator
+		}
+	}
+	if dominant.Share < kernelDominantShare || dominant.Efficiency == nil || *dominant.Efficiency >= kernelWeakEfficiency {
+		return TraceOperator{}, kernelplanner.ReviewedPack{}, false
+	}
+	pack, reviewed := kernelplanner.ReviewedPackFor(dominant.Operator, plannerVendor(facts.gpu), facts.engine, facts.version)
+	return dominant, pack, reviewed
+}
+
+// kernelLaneOutcome plans a custom kernel last: only for a dominant operator
+// the engine runs far below the GPU's limit, with a reviewed lab pack.
+func kernelLaneOutcome(d Diagnosis, facts planContext) *ruleOutcome {
+	target, _, ok := kernelTarget(d, facts)
+	if !ok {
+		return nil
+	}
+	shareFloor, efficiencyCeiling := kernelDominantShare, kernelWeakEfficiency
+	evidence := []ReasonEvidence{
+		{Signal: "gpu_trace_" + strings.ReplaceAll(target.Operator, "-", "_") + "_share", Observed: target.Share, Comparison: ">=", Threshold: &shareFloor, Unit: "ratio"},
+		{Signal: "gpu_trace_" + strings.ReplaceAll(target.Operator, "-", "_") + "_efficiency", Observed: *target.Efficiency, Comparison: "<", Threshold: &efficiencyCeiling, Unit: "ratio"},
+	}
+	why := fmt.Sprintf("%s took %s of kernel time and ran at %s of what this GPU allows for its shapes, and InferCrane has a reviewed kernel for it on %s %s. It is tried last, in its own lane: the setting changes report first and never wait for it.",
+		operatorWords(target.Operator), percentWords(target.Share*100), percentWords(*target.Efficiency*100), engineName(facts.engine), facts.version)
+	return &ruleOutcome{rule: RuleKernelDominantOperator, evidence: evidence, picks: []techniquePick{{TechniqueCustomKernel, kernelLanePriority, why}}}
+}
+
+// operatorWords names a trace operator class in a sentence.
+func operatorWords(class string) string {
+	switch class {
+	case gpuprofile.OperatorAttention:
+		return "Attention"
+	case gpuprofile.OperatorMoEExperts:
+		return "Expert matrix multiplies"
+	case gpuprofile.OperatorMoERouting:
+		return "Expert routing"
+	case gpuprofile.OperatorNorm:
+		return "Normalization"
+	}
+	return class
+}
+
+// plannerVendor is the kernel planner's vendor for a GPU name: a reviewed
+// accelerator's own vendor, else NVIDIA for the default CUDA platform.
+func plannerVendor(gpu string) string {
+	if accelerator, ok := provideridentity.LookupAccelerator(gpu); ok {
+		return accelerator.Vendor
+	}
+	if provideridentity.AcceleratorPlatform(gpu) == provideridentity.PlatformCUDA {
+		return "nvidia"
+	}
+	return ""
 }
 
 // kernelSwitchAccelerator reports the reviewed accelerator when every switch

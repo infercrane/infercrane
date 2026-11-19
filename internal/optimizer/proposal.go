@@ -24,6 +24,7 @@ import (
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -233,8 +234,55 @@ type Candidate struct {
 	ModeledEvidence       *ModeledEvidence `json:"modeled_evidence,omitempty"`
 	ArtifactSeed          *ArtifactSeed    `json:"artifact_seed,omitempty"`
 	// Reason is set on every candidate of a diagnosis-ordered proposal.
-	Reason     *CandidateReason `json:"reason,omitempty"`
-	Deployment DeploymentDraft  `json:"deployment"`
+	Reason *CandidateReason `json:"reason,omitempty"`
+	// KernelLane is set on a custom-kernel setup only.
+	KernelLane *KernelLane     `json:"kernel_lane,omitempty"`
+	Deployment DeploymentDraft `json:"deployment"`
+}
+
+// KernelLane marks a custom-kernel setup. It is never measured in the
+// settings race: after approval the run's kernel lane has the Accelerator Lab
+// write or adapt a kernel for one operator, build it, check it, and measure
+// it on the exact engine version and image, within LabGPUHours of the run's
+// one spend cap. Share and Efficiency are the trace measurements that chose
+// it; they are not a predicted gain.
+type KernelLane struct {
+	Operator      string  `json:"operator"`
+	Family        string  `json:"family"`
+	Vendor        string  `json:"vendor"`
+	Engine        string  `json:"engine"`
+	EngineVersion string  `json:"engine_version"`
+	ImageDigest   string  `json:"image_digest"`
+	Share         float64 `json:"share"`
+	Efficiency    float64 `json:"efficiency"`
+	LabGPUHours   float64 `json:"lab_gpu_hours"`
+}
+
+// validateKernelLane checks a custom-kernel setup in an untrusted proposal
+// against the reviewed packs and the pinned image, so a proposal cannot aim
+// lab time at an operator, engine, or image InferCrane has not reviewed.
+func validateKernelLane(candidate Candidate, gpu string) error {
+	lane := candidate.KernelLane
+	isKernel := candidate.Reason != nil && candidate.Reason.Technique == TechniqueCustomKernel
+	if lane == nil {
+		if isKernel {
+			return errors.New("a custom-kernel setup needs its kernel lane")
+		}
+		return nil
+	}
+	if !isKernel {
+		return errors.New("only a custom-kernel setup has a kernel lane")
+	}
+	pack, reviewed := kernelplanner.ReviewedPackFor(lane.Operator, lane.Vendor, lane.Engine, lane.EngineVersion)
+	image, pinned := pinnedImage(lane.Engine, lane.EngineVersion, gpu)
+	if !reviewed || string(pack.Family) != lane.Family || plannerVendor(gpu) != lane.Vendor || !pinned || image != lane.ImageDigest ||
+		candidate.Deployment.Runtime.Engine != lane.Engine || candidate.Deployment.Runtime.Version != lane.EngineVersion {
+		return errors.New("a kernel lane must name a reviewed pack for the setup's GPU vendor, exact engine version, and pinned image")
+	}
+	if !finite(lane.Share) || lane.Share < kernelDominantShare || lane.Share > 1 || !finite(lane.Efficiency) || lane.Efficiency <= 0 || lane.Efficiency >= kernelWeakEfficiency || !finite(lane.LabGPUHours) || lane.LabGPUHours <= 0 || lane.LabGPUHours > KernelLabGPUHours {
+		return errors.New("a kernel lane's measurements or lab GPU hours are out of range")
+	}
+	return nil
 }
 
 // StartingPoint identifies the first deployable configuration selected from
@@ -326,6 +374,9 @@ func ValidateProposal(proposal Proposal) error {
 			if err := validateCandidateReason(*candidate.Reason); err != nil {
 				return err
 			}
+		}
+		if err := validateKernelLane(candidate, request.GPU); err != nil {
+			return err
 		}
 		if _, duplicate := seenIDs[candidate.ID]; duplicate {
 			return errors.New("proposal candidate IDs must be unique")
