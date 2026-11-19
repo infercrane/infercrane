@@ -116,6 +116,7 @@ trace cannot support is `null` and its section's `reason` says why; it is never 
 | Steps | Engine steps from step annotations (`ProfilerStep#N`, `execute_model`, and similar) or, without them, from GPU idle gaps of 100 µs or more on the busiest GPU. Count, p50, p95, and up to 1,000 steps with their GPU busy time. |
 | Prefill and decode | Kernel time by step phase. A step is prefill or decode when its annotation says so or when its attention kernels name one phase only (FlashInfer `BatchPrefill`/`BatchDecode`, paged-attention, TensorRT-LLM XQA); both is mixed; neither is unknown. |
 | Roofline | For each 16-bit matrix-multiply shape with recorded input shapes: FLOPs (2·M·N·K), the minimum bytes moved, arithmetic intensity, and achieved TFLOPS, against the GPU's datasheet peak and ridge point. A position is named only when at least half of matrix-multiply time has shapes; CUDA-graph replays never record them. |
+| Operators | Kernel time and efficiency for attention, mixture-of-experts expert matrix multiplies, expert routing, and normalization. Time comes from kernel names. Efficiency is achieved throughput over what the roofline allows at the operator's arithmetic intensity, from the shapes its host operator recorded, and is stated only when shapes cover at least half of the operator's kernel time and the GPU's peak is known. See [operator efficiency](#operator-efficiency). |
 
 ### Verdict rules
 
@@ -142,6 +143,25 @@ the last 7 days carries these findings, with their measured values and threshold
 Host-launch, exposed-communication, roofline, and attention findings can choose a setup to measure;
 `gpu.idle`, `gpu.long_bubbles`, and `gpu.decode_dominant` choose nothing on their own. See
 [rules from a GPU trace](/features/optimization#rules-from-a-gpu-trace).
+
+### Operator efficiency
+
+Each class reads only these registered operators, and counts each operand read once and each result
+written once:
+
+| Class | Host operators | FLOPs and bytes from recorded shapes |
+|---|---|---|
+| `norm` | vLLM `_C::rms_norm`, `_C::fused_add_rms_norm`; PyTorch `aten::rms_norm`, `aten::layer_norm`, `aten::native_layer_norm` | rows × width read and written; the fused residual form also reads and writes the residual |
+| `attention` | `aten::scaled_dot_product_attention` and its flash, efficient, and cuDNN forms | 2·B·H·Sq·Sk·(D + Dv); every query-key pair is counted, an upper bound for causal attention |
+| `moe-experts` | vLLM `outplace_fused_experts`, `inplace_fused_experts` | 2·tokens·top-k·(up·hidden + hidden·down); weights of up to min(experts, tokens × top-k) experts, read once each |
+| `moe-routing` | vLLM `_moe_C::topk_softmax` | the router logits read, and the top-k weights and indices written |
+
+Where a byte count is a bound, it can only overstate achieved throughput, so a low efficiency is never
+an artifact of the count. vLLM's paged attention (`unified_attention`) keeps context lengths in
+metadata rather than shapes, and kernels replayed from a CUDA graph have no host operator, so their
+time is counted but their efficiency stays `null` with a `reason`. Profile eager prefill steps with
+`record_shapes` on to measure them. Analyses recorded before this section existed have no
+`operators`.
 
 ### Roofline peaks
 
@@ -191,11 +211,11 @@ With nothing recorded, the dashboard shows the command and the overhead first:
 ### JSON output
 
 `--output json` is stable. A capture, trace analysis, or stored read prints
-`infercrane.profile-result/v1`:
+`infercrane.profile-result/v2`. v2 adds `analysis.operators`; nothing else changed from v1:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | `infercrane.profile-result/v1` |
+| `schema_version` | `infercrane.profile-result/v2` |
 | `endpoint`, `deployment`, `revision` | What the capture belongs to; `deployment` and `revision` are null when not recorded |
 | `source` | `capture`, `trace_files`, or `stored` |
 | `capture_id`, `uploaded`, `dashboard_url` | The recorded capture, or null with `uploaded: false` |

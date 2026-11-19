@@ -245,7 +245,7 @@ func TestProfileJSONIsStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != string(want) {
-		t.Fatalf("profile JSON fields changed; a change to infercrane.profile-result/v1 needs a new schema version.\n%s", got)
+		t.Fatalf("profile JSON fields changed; a change to infercrane.profile-result/v2 needs a new schema version.\n%s", got)
 	}
 	if document["schema_version"] != profileResultSchema || document["uploaded"] != false || document["capture_id"] != nil {
 		t.Fatalf("document %v", document)

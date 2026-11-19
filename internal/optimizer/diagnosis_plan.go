@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/kernelplanner"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/support"
@@ -162,6 +163,18 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		}
 		usable[choice.technique.id] = choice
 	}
+	// A custom kernel comes last: when a setting change in the same plan
+	// already changes that operator's kernels, it waits for that measurement.
+	target, pack, kernelPlanned := kernelTarget(diagnosis, facts)
+	if usable[TechniqueCustomKernel] != nil {
+		for _, choice := range choices {
+			if usable[choice.technique.id] != nil && contains(choice.technique.targets, target.Operator) {
+				skipped[TechniqueCustomKernel] = fmt.Sprintf("%s in this plan already changes the %s kernels, so a custom kernel waits until that change is measured.", choice.technique.label, strings.ToLower(operatorWords(target.Operator)))
+				delete(usable, TechniqueCustomKernel)
+				break
+			}
+		}
+	}
 	var ranked []rankedCandidate
 	covered := map[string]bool{}
 	for index, candidate := range proposal.Candidates[1:] {
@@ -193,6 +206,20 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 	for index := range choices {
 		choice := &choices[index]
 		if usable[choice.technique.id] == nil || covered[choice.technique.id] {
+			continue
+		}
+		if choice.technique.kernelLane {
+			if !kernelPlanned {
+				continue
+			}
+			derived, err := kernelCandidate(control, choice.technique, target, pack, request)
+			if err != nil {
+				if skipped[choice.technique.id] == "" {
+					skipped[choice.technique.id] = err.Error()
+				}
+				continue
+			}
+			ranked = append(ranked, rankedCandidate{candidate: derived, choice: choice, derived: true, order: len(ranked)})
 			continue
 		}
 		args, env, reason := control.Deployment.Runtime.Args, map[string]string(nil), ""
@@ -675,4 +702,50 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, e
 	sum := sha256.Sum256(identity)
 	candidate.ID = hex.EncodeToString(sum[:])
 	return candidate, nil
+}
+
+// kernelCandidate is the starting setup with nothing changed but a kernel
+// lane: after approval the Accelerator Lab writes or adapts a kernel for the
+// target operator, builds it, checks it on edge-case shapes, and measures it
+// on the exact engine version and image, within KernelLabGPUHours of the
+// run's cap. It never joins the settings race.
+func kernelCandidate(control Candidate, technique technique, target TraceOperator, pack kernelplanner.ReviewedPack, request Request) (Candidate, error) {
+	if request.WorkloadSource != WorkloadSourceCustomerObserved || !strings.HasPrefix(request.WorkloadFingerprint, "sha256:") {
+		return Candidate{}, errors.New("A kernel lane replays your recorded traffic, and this run uses a public sample or test profile, so no kernel setup was added.")
+	}
+	image, ok := pinnedImage(control.Deployment.Runtime.Engine, control.Deployment.Runtime.Version, request.GPU)
+	if !ok {
+		return Candidate{}, errors.New("The starting setup's engine version has no pinned runtime image, so a kernel cannot be pinned to it.")
+	}
+	candidate, err := diagnosisCandidate(control, technique, control.Deployment.Runtime.Args, nil, request)
+	if err != nil {
+		return Candidate{}, err
+	}
+	candidate.KernelLane = &KernelLane{
+		Operator: target.Operator, Family: string(pack.Family), Vendor: pack.Vendor,
+		Engine: control.Deployment.Runtime.Engine, EngineVersion: control.Deployment.Runtime.Version, ImageDigest: image,
+		Share: target.Share, Efficiency: *target.Efficiency, LabGPUHours: KernelLabGPUHours,
+	}
+	candidate.Limitations = append(candidate.Limitations,
+		"A custom kernel is pinned to this exact engine version and image; an engine change means qualifying it again or turning it off.",
+		"It runs in its own lane after the setting changes, and is offered as a follow-up change only if it qualifies.")
+	candidate.RequiredEvidence = append(candidate.RequiredEvidence,
+		"kernel correctness against the engine's own kernel on edge-case and unusual input shapes",
+		"a kernel microbenchmark against the engine's own kernel on the target GPU",
+		"an end-to-end replay with the kernel, measured against the run's chosen setup")
+	return candidate, nil
+}
+
+// pinnedImage is the support matrix's digest-pinned runtime image for an
+// engine version on a GPU's platform, as image@sha256:… → sha256:….
+func pinnedImage(engine, version, gpu string) (string, bool) {
+	platform := provideridentity.AcceleratorPlatform(gpu)
+	for _, image := range support.RuntimeImages() {
+		if strings.EqualFold(image.Runtime, engine) && image.EngineVersion == version && image.Platform == platform {
+			if index := strings.LastIndex(image.Image, "@sha256:"); index >= 0 {
+				return image.Image[index+1:], true
+			}
+		}
+	}
+	return "", false
 }

@@ -38,6 +38,17 @@ analysis.launch.launches
 analysis.launch.per_second
 analysis.launch.reason
 analysis.launch.short_kernel_share
+analysis.operators
+analysis.operators[].achieved_tbps
+analysis.operators[].achieved_tflops
+analysis.operators[].bound
+analysis.operators[].covered_share
+analysis.operators[].efficiency
+analysis.operators[].intensity
+analysis.operators[].kernel_ms
+analysis.operators[].operator
+analysis.operators[].reason
+analysis.operators[].share
 analysis.overlap
 analysis.overlap.communication_ms
 analysis.overlap.overlapped_share

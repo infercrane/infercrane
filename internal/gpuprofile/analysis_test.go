@@ -50,9 +50,19 @@ func TestV2RecordingNeedsAValidAnalysis(t *testing.T) {
 		"roofline known without peak": func(r *gpuprofile.Recording) {
 			r.Analysis.Roofline.Position, r.Analysis.Roofline.Peak = "memory_bound", nil
 		},
-		"excerpt event outside": func(r *gpuprofile.Recording) { r.TimelineExcerpt.Events[0][2] = 1e9 },
-		"excerpt unknown lane":  func(r *gpuprofile.Recording) { r.TimelineExcerpt.Events[0][0] = 999 },
-		"excerpt past window":   func(r *gpuprofile.Recording) { r.TimelineExcerpt.StartMS = r.Analysis.Trace.WindowMS },
+		"unknown operator": func(r *gpuprofile.Recording) { r.Analysis.Operators[0].Operator = "magic" },
+		"repeated operator": func(r *gpuprofile.Recording) {
+			r.Analysis.Operators = append(r.Analysis.Operators, r.Analysis.Operators[0])
+		},
+		"operator unknown without a reason": func(r *gpuprofile.Recording) { r.Analysis.Operators[0].Reason = "" },
+		"operator efficiency without throughput": func(r *gpuprofile.Recording) {
+			efficiency, bound := 0.4, "memory"
+			r.Analysis.Operators[0].Efficiency, r.Analysis.Operators[0].Bound = &efficiency, &bound
+		},
+		"operator share above one": func(r *gpuprofile.Recording) { r.Analysis.Operators[0].Share = 1.5 },
+		"excerpt event outside":    func(r *gpuprofile.Recording) { r.TimelineExcerpt.Events[0][2] = 1e9 },
+		"excerpt unknown lane":     func(r *gpuprofile.Recording) { r.TimelineExcerpt.Events[0][0] = 999 },
+		"excerpt past window":      func(r *gpuprofile.Recording) { r.TimelineExcerpt.StartMS = r.Analysis.Trace.WindowMS },
 		"hardware unknown field": func(r *gpuprofile.Recording) {
 			value := 50.0
 			r.Analysis.Hardware = &gpuprofile.HardwareSeries{Source: "dcgm-exporter", IntervalMS: 1000, Series: []gpuprofile.FieldSeries{{Field: "gpu_magic", Unit: "percent", Values: []*float64{&value}}}}
@@ -79,6 +89,14 @@ func TestV2RecordingNeedsAValidAnalysis(t *testing.T) {
 		if err := gpuprofile.Validate(recording, now); err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
+	}
+	if len(clone().Analysis.Operators) == 0 {
+		t.Fatal("the vLLM sample names its attention and norm time")
+	}
+	older := clone()
+	older.Analysis.Operators = nil
+	if err := gpuprofile.Validate(older, now); err != nil {
+		t.Fatalf("an analysis written before operators were measured stays valid: %v", err)
 	}
 	withHardware := clone()
 	value := 61.5

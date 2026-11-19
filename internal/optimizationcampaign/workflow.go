@@ -189,7 +189,9 @@ func Handlers(coordinator Coordinator) map[string]operations.Handler {
 			}
 			waiting := make([]string, 0, len(request.Candidates))
 			if campaign, err := coordinator.Repository.OptimizationCampaign(ctx, request.TenantID, request.CampaignID); err == nil {
-				request.Candidates = controlFirst(campaign, request.Candidates)
+				// A custom-kernel setup runs in its own lane; the settings race
+				// never measures or waits for it.
+				request.Candidates = settingsLane(campaign, controlFirst(campaign, request.Candidates))
 			} else {
 				return "", executionFailure(err)
 			}

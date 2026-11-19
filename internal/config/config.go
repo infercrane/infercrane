@@ -37,6 +37,10 @@ type Config struct {
 	StripePriceIDs                                                                                                        map[int64]string
 	StripeLivemode                                                                                                        bool
 	ManagedDeploymentsEnabled                                                                                             bool
+	// OptimizationKernelLane lets an optimization run plan and run a
+	// custom-kernel setup in its own lane. It needs the Accelerator Lab, and
+	// stays off until a qualified kernel can be served.
+	OptimizationKernelLane bool
 	// HuggingFaceMetadataEnabled lets the control plane read Hugging Face
 	// model metadata (model info, config.json, safetensors summary) to check
 	// models outside the reviewed catalog. Off by default; never used on the
@@ -467,6 +471,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	optimizationKernelLane, err := envBool("INFERCRANE_OPTIMIZATION_KERNEL_LANE", false)
+	if err != nil {
+		return Config{}, err
+	}
 	managedSandboxesEnabled, err := envBool("INFERCRANE_MANAGED_SANDBOXES_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -560,6 +568,7 @@ func load(requireAPIKey bool) (Config, error) {
 		StripeLivemode:                      stripeLivemode,
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
 		HuggingFaceMetadataEnabled:          huggingFaceMetadataEnabled,
+		OptimizationKernelLane:              optimizationKernelLane,
 		OperatorComputeTenants:              splitCSV(env("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "")),
 		ManagedSandbox:                      managedSandboxPolicy,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
@@ -779,6 +788,9 @@ func (c Config) AcceleratorLabEnabled() bool {
 
 func validateAcceleratorLab(config Config) error {
 	configured := config.AcceleratorWorkerURL != "" || config.AcceleratorWorkerTokenFile != "" || config.BrezelOptimizationEnvironment != ""
+	if config.OptimizationKernelLane && !config.AcceleratorLabEnabled() {
+		return errors.New("INFERCRANE_OPTIMIZATION_KERNEL_LANE needs the Accelerator Lab: the Brezel sandbox configuration, an accelerator worker URL and token file, and an optimization environment")
+	}
 	if !configured {
 		return nil
 	}

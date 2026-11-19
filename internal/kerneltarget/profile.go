@@ -27,47 +27,6 @@ const (
 
 var defaultProfileRequest = json.RawMessage(`{"output_dir":"/profiles","activities":["CPU","GPU"],"with_stack":false,"record_shapes":true}`)
 
-// operatorMarkers is reviewed vocabulary from kernel names observed in real
-// traces. Unmatched kernels stay in the denominator but never become hotspots.
-var operatorMarkers = []struct {
-	family  kernelplanner.OperatorFamily
-	markers []string
-}{
-	{kernelplanner.LinearRecurrence, []string{"deltanet", "delta_rule", "gdn", "linear_attn", "mamba"}},
-	{kernelplanner.StateCommit, []string{"state_commit", "state_scatter", "scatter_state"}},
-	{kernelplanner.ResidualRMSNorm, []string{"rmsnorm", "rms_norm", "layernorm", "norm_kernel"}},
-	{kernelplanner.MoERouting, []string{"fused_moe", "moe_", "expert"}},
-	{kernelplanner.QuantizedLinear, []string{"gemm", "matmul", "cutlass", "cublas", "wgmma", "nvjet"}},
-	{kernelplanner.SwiGLU, []string{"swiglu", "silu_and_mul"}},
-	{kernelplanner.KVCache, []string{"kv_cache", "kvcache"}},
-	{kernelplanner.Sampling, []string{"sampling", "topk", "topp", "softmax"}},
-}
-
-var attentionMarkers = []string{"attention", "flash_attn", "flashinfer", "fmha", "mha_"}
-
-func classify(name string, phase kernelplanner.Phase) (kernelplanner.OperatorFamily, bool) {
-	lowered := strings.ToLower(name)
-	for _, entry := range operatorMarkers {
-		for _, marker := range entry.markers {
-			if strings.Contains(lowered, marker) {
-				return entry.family, true
-			}
-		}
-	}
-	for _, marker := range attentionMarkers {
-		if strings.Contains(lowered, marker) {
-			switch phase {
-			case kernelplanner.PhasePrefill:
-				return kernelplanner.AttentionPrefill, true
-			case kernelplanner.PhaseDecode:
-				return kernelplanner.AttentionDecode, true
-			}
-			return "", false // A mixed trace cannot say which attention path this was.
-		}
-	}
-	return "", false
-}
-
 type traceEvent struct {
 	Phase    string         `json:"ph"`
 	Category string         `json:"cat"`
@@ -210,7 +169,7 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 	}
 	families := map[kernelplanner.OperatorFamily]*familyTotals{}
 	for name, totals := range primary {
-		family, known := classify(name, phase)
+		family, known := kernelplanner.ClassifyKernel(name, phase)
 		if !known {
 			continue
 		}

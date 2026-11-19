@@ -68,9 +68,14 @@ type Op struct {
 	Name       int32
 	Thread     int32
 	Start, End int64
-	// FLOPs and Bytes are set for matrix multiplies with recorded shapes.
+	// FLOPs and Bytes are set for matrix multiplies, and for operators of a
+	// measured class, with recorded shapes. ShapeLabel is set for matrix
+	// multiplies only, so the roofline reads no other operator.
 	FLOPs, Bytes float64
 	ShapeLabel   int32
+	// Operator is the 1-based index of the operator's class in
+	// gpuprofile.Operators, or 0.
+	Operator int8
 }
 
 // Device is one GPU the trace names.

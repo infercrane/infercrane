@@ -1,0 +1,467 @@
+{
+  "algorithm_version": "gpu-trace-analysis-v1",
+  "trace": {
+    "format": "kineto",
+    "engine": "vllm",
+    "engine_version": "0.22.1",
+    "devices": 1,
+    "streams": 1,
+    "kernels": 96,
+    "cpu_ops_recorded": true,
+    "shapes_recorded": true,
+    "launches_recorded": true,
+    "window_ms": 55.23,
+    "truncated": false
+  },
+  "verdict": {
+    "bottleneck": "busy",
+    "sentence": "The GPU stayed busy 97% of the capture, and no single bottleneck stands out.",
+    "evidence": "busy 97% of 55 ms · gemm 93% of kernel time"
+  },
+  "utilization": {
+    "busy_share": 0.9743,
+    "compute_share": 0.9743,
+    "non_compute_share": 0,
+    "idle_share": 0.0257,
+    "bucket_ms": 0.5,
+    "busy_series": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0.794,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0.206,
+      0.566,
+      1,
+      0.99,
+      1,
+      0.99,
+      1,
+      0.89,
+      1,
+      0.99,
+      1,
+      0.99,
+      1,
+      0.89,
+      1,
+      0.99,
+      1,
+      0.99,
+      1,
+      0.89,
+      1,
+      0.99,
+      1,
+      0.99,
+      1,
+      1
+    ]
+  },
+  "idle": {
+    "idle_ms": 1.422,
+    "host_wait_share": 0.9606,
+    "launch_gap_share": 0.0394,
+    "other_share": 0,
+    "reason": "",
+    "bubbles": {
+      "count": 61,
+      "p50_us": 1,
+      "p95_us": 51,
+      "max_us": 610,
+      "top": [
+        {
+          "start_ms": 42.603,
+          "duration_us": 610,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 21,
+          "duration_us": 603,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 46.179,
+          "duration_us": 51,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 49.196,
+          "duration_us": 51,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 52.213,
+          "duration_us": 51,
+          "device": 0,
+          "cause": "host_wait"
+        },
+        {
+          "start_ms": 44.201,
+          "duration_us": 1,
+          "device": 0,
+          "cause": "launch_gap"
+        },
+        {
+          "start_ms": 44.208,
+          "duration_us": 1,
+          "device": 0,
+          "cause": "launch_gap"
+        },
+        {
+          "start_ms": 44.269,
+          "duration_us": 1,
+          "device": 0,
+          "cause": "launch_gap"
+        },
+        {
+          "start_ms": 46.317,
+          "duration_us": 1,
+          "device": 0,
+          "cause": "launch_gap"
+        },
+        {
+          "start_ms": 47.286,
+          "duration_us": 1,
+          "device": 0,
+          "cause": "launch_gap"
+        }
+      ]
+    }
+  },
+  "launch": {
+    "launches": 34,
+    "graph_launches": 4,
+    "per_second": 615.6,
+    "host_launch_share": 0.0036,
+    "launch_delay_p50_us": 6992,
+    "launch_delay_p95_us": 14362,
+    "short_kernel_share": 0,
+    "reason": ""
+  },
+  "categories": [
+    {
+      "category": "gemm",
+      "kernel_ms": 49.8,
+      "share": 0.9255,
+      "count": 24
+    },
+    {
+      "category": "attention",
+      "kernel_ms": 3.12,
+      "share": 0.058,
+      "count": 18
+    },
+    {
+      "category": "norm",
+      "kernel_ms": 0.372,
+      "share": 0.0069,
+      "count": 18
+    },
+    {
+      "category": "other",
+      "kernel_ms": 0.3,
+      "share": 0.0056,
+      "count": 18
+    },
+    {
+      "category": "sampling",
+      "kernel_ms": 0.216,
+      "share": 0.004,
+      "count": 18
+    }
+  ],
+  "top_kernels": [
+    {
+      "name": "fused_moe_kernel",
+      "category": "gemm",
+      "phase": null,
+      "count": 24,
+      "total_ms": 49.8,
+      "mean_us": 2075,
+      "max_us": 3300,
+      "share": 0.9255
+    },
+    {
+      "name": "void flashinfer::BatchPrefillWithPagedKVCacheKernel\u003c128u, 4u, 1u\u003e(flashinfer::BatchPrefillPagedParams)",
+      "category": "attention",
+      "phase": "prefill",
+      "count": 6,
+      "total_ms": 2.4,
+      "mean_us": 400,
+      "max_us": 400,
+      "share": 0.0446
+    },
+    {
+      "name": "void flashinfer::BatchDecodeWithPagedKVCacheKernel\u003c128u, 4u, 8u, 16u, 1u\u003e(flashinfer::BatchDecodeParams)",
+      "category": "attention",
+      "phase": "decode",
+      "count": 12,
+      "total_ms": 0.72,
+      "mean_us": 60,
+      "max_us": 60,
+      "share": 0.0134
+    },
+    {
+      "name": "void vllm::fused_add_rms_norm_kernel\u003cc10::BFloat16, 8\u003e(c10::BFloat16*, c10::BFloat16*, c10::BFloat16 const*, float, int, int)",
+      "category": "norm",
+      "phase": null,
+      "count": 18,
+      "total_ms": 0.372,
+      "mean_us": 20.67,
+      "max_us": 50,
+      "share": 0.0069
+    },
+    {
+      "name": "void vllm::moe::moe_align_block_size_kernel\u003cint\u003e(int const*, int*, int*, int*, int, int, int, int, unsigned long, int*)",
+      "category": "other",
+      "phase": null,
+      "count": 18,
+      "total_ms": 0.3,
+      "mean_us": 16.67,
+      "max_us": 30,
+      "share": 0.0056
+    },
+    {
+      "name": "void vllm::moe::topkGatingSoftmax\u003c8, 256, 4, 16, 32, int, float\u003e(float const*, bool const*, float*, int, int*, int*, int, int, int)",
+      "category": "sampling",
+      "phase": null,
+      "count": 18,
+      "total_ms": 0.216,
+      "mean_us": 12,
+      "max_us": 20,
+      "share": 0.004
+    }
+  ],
+  "operators": [
+    {
+      "operator": "attention",
+      "kernel_ms": 3.12,
+      "share": 0.058,
+      "covered_share": 0,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "Shapes cover 0% of this operator's kernel time, under 50%; kernels replayed from a CUDA graph have no host operator, so its efficiency is unknown."
+    },
+    {
+      "operator": "moe-experts",
+      "kernel_ms": 49.8,
+      "share": 0.9255,
+      "covered_share": 0.7831,
+      "intensity": 127.337,
+      "achieved_tflops": 222.016771,
+      "achieved_tbps": 1.74354,
+      "bound": "memory",
+      "efficiency": 0.3632,
+      "reason": ""
+    },
+    {
+      "operator": "moe-routing",
+      "kernel_ms": 0.516,
+      "share": 0.0096,
+      "covered_share": 0.2326,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "Shapes cover 23% of this operator's kernel time, under 50%; kernels replayed from a CUDA graph have no host operator, so its efficiency is unknown."
+    },
+    {
+      "operator": "norm",
+      "kernel_ms": 0.372,
+      "share": 0.0069,
+      "covered_share": 0.8065,
+      "intensity": 0.625,
+      "achieved_tflops": 1.468006,
+      "achieved_tbps": 2.349097,
+      "bound": "memory",
+      "efficiency": 0.4894,
+      "reason": ""
+    }
+  ],
+  "overlap": {
+    "communication_ms": 0,
+    "overlapped_share": null,
+    "reason": "No collective communication kernels ran, so there is nothing to overlap."
+  },
+  "phases": {
+    "source": "kernel_names",
+    "prefill": {
+      "gpu_ms": 42,
+      "share": 0.7806,
+      "steps": 2
+    },
+    "decode": {
+      "gpu_ms": 11.808,
+      "share": 0.2194,
+      "steps": 4
+    },
+    "mixed": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    },
+    "unknown": {
+      "gpu_ms": 0,
+      "share": 0,
+      "steps": 0
+    }
+  },
+  "steps": {
+    "source": "annotations",
+    "marker": "ProfilerStep#0",
+    "count": 6,
+    "p50_ms": 2.977,
+    "p95_ms": 21.003,
+    "items": [
+      {
+        "start_ms": 0,
+        "duration_ms": 21.003,
+        "gpu_busy_ms": 21,
+        "kernels": 18,
+        "phase": "prefill"
+      },
+      {
+        "start_ms": 21.6,
+        "duration_ms": 21.003,
+        "gpu_busy_ms": 21,
+        "kernels": 18,
+        "phase": "prefill"
+      },
+      {
+        "start_ms": 43.203,
+        "duration_ms": 2.977,
+        "gpu_busy_ms": 2.952,
+        "kernels": 15,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 46.22,
+        "duration_ms": 2.977,
+        "gpu_busy_ms": 2.952,
+        "kernels": 15,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 49.237,
+        "duration_ms": 2.977,
+        "gpu_busy_ms": 2.952,
+        "kernels": 15,
+        "phase": "decode"
+      },
+      {
+        "start_ms": 52.254,
+        "duration_ms": 2.977,
+        "gpu_busy_ms": 2.952,
+        "kernels": 15,
+        "phase": "decode"
+      }
+    ],
+    "reason": ""
+  },
+  "roofline": {
+    "accelerator": "NVIDIA H200",
+    "peak": {
+      "compute_tflops": 989.5,
+      "precision": "BF16 dense tensor",
+      "memory_tbps": 4.8,
+      "source": "NVIDIA H200 datasheet, SXM (half the sparse figure)"
+    },
+    "ridge_flop_per_byte": 206.1,
+    "position": "unknown",
+    "memory_bound_share": null,
+    "covered_share": 0,
+    "points": [],
+    "reason": "No 16-bit matrix multiply had recorded shapes. Enable record_shapes; kernels replayed from CUDA graphs never have them."
+  },
+  "hardware": null,
+  "findings": []
+}

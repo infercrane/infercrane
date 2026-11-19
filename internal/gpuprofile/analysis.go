@@ -49,6 +49,20 @@ const (
 // Categories lists every kernel category.
 var Categories = []string{CategoryAttention, CategoryGEMM, CategoryCommunication, CategoryMemory, CategoryNorm, CategoryActivation, CategorySampling, CategoryOther}
 
+// Operators whose efficiency an analysis measures. Attention, mixture-of-
+// experts expert matrix multiplies, expert routing, and normalization are
+// the operator classes a custom kernel is planned for; plain matrix
+// multiplies are on the roofline.
+const (
+	OperatorAttention  = "attention"
+	OperatorMoEExperts = "moe-experts"
+	OperatorMoERouting = "moe-routing"
+	OperatorNorm       = "norm"
+)
+
+// Operators lists every measured operator class.
+var Operators = []string{OperatorAttention, OperatorMoEExperts, OperatorMoERouting, OperatorNorm}
+
 // Bottlenecks a verdict can name.
 const (
 	BottleneckHostLaunch      = "host-launch"
@@ -87,20 +101,23 @@ var (
 // fractions in 0..1. A nil value is unknown and its section says why; it is
 // never reported as zero.
 type Analysis struct {
-	AlgorithmVersion string          `json:"algorithm_version"`
-	Trace            TraceSource     `json:"trace"`
-	Verdict          Verdict         `json:"verdict"`
-	Utilization      Utilization     `json:"utilization"`
-	Idle             IdleBreakdown   `json:"idle"`
-	Launch           LaunchStats     `json:"launch"`
-	Categories       []CategoryTime  `json:"categories"`
-	TopKernels       []KernelStat    `json:"top_kernels"`
-	Overlap          Overlap         `json:"overlap"`
-	Phases           PhaseSplit      `json:"phases"`
-	Steps            StepStats       `json:"steps"`
-	Roofline         Roofline        `json:"roofline"`
-	Hardware         *HardwareSeries `json:"hardware"`
-	Findings         []Finding       `json:"findings"`
+	AlgorithmVersion string         `json:"algorithm_version"`
+	Trace            TraceSource    `json:"trace"`
+	Verdict          Verdict        `json:"verdict"`
+	Utilization      Utilization    `json:"utilization"`
+	Idle             IdleBreakdown  `json:"idle"`
+	Launch           LaunchStats    `json:"launch"`
+	Categories       []CategoryTime `json:"categories"`
+	TopKernels       []KernelStat   `json:"top_kernels"`
+	// Operators is kernel time and efficiency per operator class. Absent from
+	// an analysis written before it was measured.
+	Operators []OperatorTime  `json:"operators,omitempty"`
+	Overlap   Overlap         `json:"overlap"`
+	Phases    PhaseSplit      `json:"phases"`
+	Steps     StepStats       `json:"steps"`
+	Roofline  Roofline        `json:"roofline"`
+	Hardware  *HardwareSeries `json:"hardware"`
+	Findings  []Finding       `json:"findings"`
 }
 
 // TraceSource describes the trace an analysis read and what it recorded.
@@ -198,6 +215,29 @@ type KernelStat struct {
 	MeanUS   float64 `json:"mean_us"`
 	MaxUS    float64 `json:"max_us"`
 	Share    float64 `json:"share"`
+}
+
+// OperatorTime is one operator class's kernel time and, when its host
+// operators recorded shapes for at least half of that time, how close it
+// came to what those shapes allow on this accelerator. Efficiency is the
+// achieved throughput over the roofline's attainable throughput at the
+// operator's intensity. A value the trace could not measure is nil and
+// Reason says why; it is never zero.
+type OperatorTime struct {
+	Operator string  `json:"operator"`
+	KernelMS float64 `json:"kernel_ms"`
+	// Share is of all kernel time in the trace.
+	Share float64 `json:"share"`
+	// CoveredShare is the part of this operator's kernel time whose host
+	// operator recorded usable shapes. Kernels replayed from a CUDA graph have
+	// no host operator, so decode time is often uncovered.
+	CoveredShare   float64  `json:"covered_share"`
+	Intensity      *float64 `json:"intensity"`
+	AchievedTFLOPS *float64 `json:"achieved_tflops"`
+	AchievedTBps   *float64 `json:"achieved_tbps"`
+	Bound          *string  `json:"bound"`
+	Efficiency     *float64 `json:"efficiency"`
+	Reason         string   `json:"reason"`
 }
 
 // Overlap is how much collective communication ran under compute.
@@ -361,6 +401,9 @@ func ValidateAnalysis(analysis Analysis) error {
 			return errors.New("analysis category is unknown, repeated, or out of range")
 		}
 		seen[category.Category] = true
+	}
+	if err := validateOperators(analysis.Operators); err != nil {
+		return err
 	}
 	if len(analysis.TopKernels) > MaxTopKernels {
 		return fmt.Errorf("analysis lists at most %d top kernels", MaxTopKernels)
@@ -527,6 +570,26 @@ func validateRoofline(roofline Roofline) error {
 	for _, point := range roofline.Points {
 		if !boundedText(point.Label, 200) || !oneOf(point.Category, Categories) || !positive(point.FLOPs) || !positive(point.Bytes) || !positive(point.KernelMS) || !positive(point.Intensity) || !positive(point.AchievedTFLOPS) || point.Bound != "memory" && point.Bound != "compute" {
 			return errors.New("analysis roofline point is malformed")
+		}
+	}
+	return nil
+}
+
+func validateOperators(operators []OperatorTime) error {
+	seen := map[string]bool{}
+	for _, operator := range operators {
+		if !oneOf(operator.Operator, Operators) || seen[operator.Operator] || !positive(operator.KernelMS) || !share(operator.Share) || !share(operator.CoveredShare) || len(operator.Reason) > 280 {
+			return errors.New("analysis operator is unknown, repeated, or out of range")
+		}
+		seen[operator.Operator] = true
+		measured := operator.Efficiency != nil
+		for _, value := range []*float64{operator.Intensity, operator.AchievedTFLOPS, operator.AchievedTBps} {
+			if (value != nil) != measured || value != nil && !positive(*value) {
+				return errors.New("analysis operator throughput is measured together with its efficiency, and positive")
+			}
+		}
+		if measured && (!positive(*operator.Efficiency) || *operator.Efficiency > 4 || operator.Bound == nil || *operator.Bound != "memory" && *operator.Bound != "compute") || !measured && (operator.Bound != nil || operator.Reason == "") {
+			return errors.New("analysis operator efficiency needs a bound, or a reason it is unknown")
 		}
 	}
 	return nil

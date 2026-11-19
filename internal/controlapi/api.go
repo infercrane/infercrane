@@ -365,6 +365,9 @@ type API struct {
 	// candidate; nil disables the candidate chat route.
 	CandidatePrompts      *CandidatePrompts
 	AcceleratorLabEnabled bool
+	// KernelLaneEnabled lets a run plan a custom-kernel setup; it needs the
+	// Accelerator Lab and is off by default.
+	KernelLaneEnabled     bool
 	AcceleratorLabCatalog acceleratorlab.CapabilityCatalog
 	AdmissionState        interface {
 		State(string) (admission.State, bool)
@@ -1586,6 +1589,17 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
+		if candidate.KernelLane != nil {
+			// A custom-kernel setup runs in the run's kernel lane, never the
+			// settings race, and only where this control plane runs one.
+			if !a.KernelLaneEnabled || !a.AcceleratorLabEnabled {
+				writeError(w, http.StatusUnprocessableEntity, "kernel_lane_unavailable", "this control plane does not run custom-kernel lanes; plan the run again")
+				return
+			}
+			predictedFields["technique"] = "custom_kernel"
+			predictedFields["lane"] = optimizationcampaign.LaneKernel
+			predictedFields["kernel_lane"] = candidate.KernelLane
+		}
 		if candidate.ArtifactSeed != nil {
 			predictedFields["candidate_kind"] = "publisher_optimized_checkpoint"
 			predictedFields["technique"] = strings.ReplaceAll(candidate.ArtifactSeed.Tool, "-", "_") + "_quantization"
@@ -1805,6 +1819,15 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	// says how many lost machines per setup the cap covers.
 	replacementsCovered := optimizationcampaign.MaxMachineReplacements
 	for _, candidate := range pending.Candidates {
+		// A kernel setup provisions no machines: its share of the cap is the
+		// lab's hard limit, enforced by the lab against the worker's prices.
+		if optimizationcampaign.IsKernelLane(candidate) {
+			if !a.KernelLaneEnabled || !a.AcceleratorLabEnabled {
+				writeError(w, http.StatusConflict, "kernel_lane_unavailable", "this control plane no longer runs custom-kernel lanes; plan the run again")
+				return
+			}
+			continue
+		}
 		var draft optimizer.DeploymentDraft
 		if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) != nil {
 			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "a setup's deployment specification is invalid")
@@ -1843,6 +1866,16 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "optimization_execution_enqueue_failed", "run was approved but durable execution could not be queued; retry the same approval")
 		return
+	}
+	for _, candidate := range campaign.Candidates {
+		if !optimizationcampaign.IsKernelLane(candidate) {
+			continue
+		}
+		lane, _ := json.Marshal(optimizationcampaign.KernelLaneRequest{TenantID: actor.TenantID, CampaignID: campaign.ID, CandidateID: candidate.ID, MaxCostUSD: perCandidateBudget})
+		if _, _, err = a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.KernelLaneKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-kernel-lane:" + candidate.ID, RequestJSON: string(lane), MaxAttempts: 2000}); err != nil {
+			writeError(w, http.StatusInternalServerError, "optimization_execution_enqueue_failed", "run was approved but its kernel lane could not be queued; retry the same approval")
+			return
+		}
 	}
 	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
 	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false, "machine_replacements_covered": replacementsCovered})
@@ -3034,6 +3067,7 @@ func (a API) endpointDiagnosis(ctx context.Context, tenant, endpoint string) (*o
 		assessment.Endpoint = endpoint
 	}
 	diagnosis := optimizer.DiagnosisFromAssessment(assessment, snapshot.WindowStart, snapshot.WindowEnd)
+	diagnosis.KernelLab = a.KernelLaneEnabled && a.AcceleratorLabEnabled
 	if profiles, ok := a.Store.(gpuProfileStore); ok {
 		profile, profileErr := profiles.EndpointGPUProfile(ctx, tenant, endpoint)
 		switch {

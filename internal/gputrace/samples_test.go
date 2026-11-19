@@ -26,6 +26,7 @@ func samples() []sample {
 	gpu, api := tracefixture.NsysCSV()
 	return []sample{
 		{"vllm-h100", FormatKineto, map[string][]byte{"rank0.pt.trace.json.gz": tracefixture.VLLMSingleGPU(tracefixture.SampleBase)}, Options{Engine: "vllm", EngineVersion: "0.22.1"}},
+		{"vllm-moe-h200", FormatKineto, map[string][]byte{"rank0.pt.trace.json.gz": tracefixture.VLLMMoE(tracefixture.SampleBase)}, Options{Engine: "vllm", EngineVersion: "0.22.1"}},
 		{"sglang-tp2", FormatKineto, map[string][]byte{"rank0.trace.json.gz": sglang[0], "rank1.trace.json.gz": sglang[1]}, Options{Engine: "sglang"}},
 		{"rocprofv3-mi300x", FormatRocprofV3, map[string][]byte{"kernel_trace.csv": kernels, "hip_api_trace.csv": hip, "memory_copy_trace.csv": copies}, Options{Accelerator: "AMD Instinct MI300X"}},
 		{"nsys-l40s", FormatNsys, map[string][]byte{"report_cuda_gpu_trace.csv": gpu, "report_cuda_api_trace.csv": api}, Options{}},

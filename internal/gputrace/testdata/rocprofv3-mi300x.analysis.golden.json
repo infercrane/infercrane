@@ -396,6 +396,32 @@
       "share": 0.0032
     }
   ],
+  "operators": [
+    {
+      "operator": "attention",
+      "kernel_ms": 4.16,
+      "share": 0.1319,
+      "covered_share": 0,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "The trace recorded no operator shapes, so this operator's efficiency is unknown."
+    },
+    {
+      "operator": "norm",
+      "kernel_ms": 0.72,
+      "share": 0.0228,
+      "covered_share": 0,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "The trace recorded no operator shapes, so this operator's efficiency is unknown."
+    }
+  ],
   "overlap": {
     "communication_ms": 0,
     "overlapped_share": null,

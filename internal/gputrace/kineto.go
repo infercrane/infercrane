@@ -241,11 +241,20 @@ func (s *kinetoState) add(event kinetoEvent) bool {
 			return true
 		}
 		trace.CPUOpsRecorded = true
-		op := Op{Name: trace.Intern(event.Name), Thread: s.thread(event), Start: start, End: end, ShapeLabel: -1}
+		op := Op{Name: trace.Intern(event.Name), Thread: s.thread(event), Start: start, End: end, ShapeLabel: -1, Operator: operatorIndex(hostOperators[event.Name])}
 		if len(event.Args.InputDims) > 0 {
 			trace.ShapesRecorded = true
 			if flops, bytes, label, ok := matmulShape(event.Name, event.Args.InputDims, event.Args.InputType); ok {
 				op.FLOPs, op.Bytes, op.ShapeLabel = flops, bytes, trace.Intern(label)
+			} else if op.Operator > 0 {
+				var dims [][]int64
+				var types []string
+				if json.Unmarshal(event.Args.InputDims, &dims) == nil {
+					_ = json.Unmarshal(event.Args.InputType, &types)
+					if flops, bytes, ok := operatorShape(event.Name, dims, types); ok {
+						op.FLOPs, op.Bytes = flops, bytes
+					}
+				}
 			}
 		}
 		return trace.addOp(op)
