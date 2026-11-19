@@ -4286,6 +4286,15 @@ func formatGuardEvidence(metrics domain.RevisionMetrics) string {
 	return metrics.EvidenceSource + ":" + metrics.EvidenceID
 }
 
+// environmentSecrets resolves "env" secret references for the operator's
+// workspaces only: the operator API key's workspace, the Model API operator
+// workspace, and INFERCRANE_ENV_SECRET_TENANTS. This process's environment
+// holds the operator's own keys, so any other workspace is refused.
+func environmentSecrets(cfg config.Config) secrets.Environment {
+	tenants := append([]string{secrets.BootstrapTenant, cfg.ModelAPIOperatorTenantID}, cfg.EnvSecretTenants...)
+	return secrets.Environment{Tenants: secrets.NewTenantPolicy(tenants...)}
+}
+
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -4323,7 +4332,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
 	externalBudgets := external.NewBudgetPool()
-	externalCoordinator := &external.Coordinator{Store: s, Secrets: secrets.Environment{}, Budgets: externalBudgets}
+	externalCoordinator := &external.Coordinator{Store: s, Secrets: environmentSecrets(cfg), Budgets: externalBudgets}
 	logger := slog.Default()
 	recorder := accounting.New(s, logger, 8192, 4)
 	defer func() {
@@ -4611,7 +4620,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if cipherErr != nil {
 			return fmt.Errorf("configure async inference encryption: %w", cipherErr)
 		}
-		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secrets.Environment{}}
+		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: environmentSecrets(cfg)}
 	}
 	computeConnectionService, err := newComputeConnectionService(cfg, s)
 	if err != nil {
@@ -4675,7 +4684,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	var hostedModels *modelapirouting.Runtime
 	if len(cfg.HostedModelAPIEndpoints) > 0 {
 		hostedRoutes := modelapirouting.NewDirectory()
-		targetResolver, resolverErr := modelapirouting.NewRegistryTargetResolver(cfg.HostedModelAPIEndpoints, s, secrets.Environment{})
+		targetResolver, resolverErr := modelapirouting.NewRegistryTargetResolver(cfg.HostedModelAPIEndpoints, s, environmentSecrets(cfg))
 		if resolverErr != nil {
 			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
 		}
@@ -4723,7 +4732,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secrets.Environment{}, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secrets.Environment{}}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: environmentSecrets(cfg), AlertDeliverer: alert.Deliverer{Store: s, Secrets: environmentSecrets(cfg)}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
 	huggingFaceSearch, huggingFaceSearchErr := huggingfacesearch.New(huggingfacesearch.Options{})
 	if huggingFaceSearchErr != nil {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
@@ -4890,7 +4899,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
-	huggingFaceResolver := artifact.TenantHuggingFace{Public: artifact.HuggingFace{}, Store: s, Secrets: secrets.Environment{}}
+	huggingFaceResolver := artifact.TenantHuggingFace{Public: artifact.HuggingFace{}, Store: s, Secrets: environmentSecrets(cfg)}
 	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtimeBackends, directory, huggingFaceResolver) {
 		handlers[kind] = handler
 	}

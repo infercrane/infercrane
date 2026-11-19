@@ -85,6 +85,15 @@ value. Resolved values stay in process memory and are excluded from API response
 payloads and qualification evidence. Operators should inject referenced variables from their
 existing secret manager and restrict the control-plane process environment.
 
+An `env` reference reads the control-plane process environment, which also holds the operator's own
+keys. So only the operator's workspaces may create or resolve one: the workspace of the operator API
+key, the Model API operator workspace (`INFERCRANE_MODEL_API_OPERATOR_TENANT_ID`), and the workspaces
+named in `INFERCRANE_ENV_SECRET_TENANTS`. Any other workspace gets `env_secret_reference_not_allowed`
+when it creates one, and a reference it already holds stops resolving instead of returning a value.
+Left unset, `INFERCRANE_ENV_SECRET_TENANTS` is `*` on a control plane that serves one customer and
+empty where it sells managed capacity or provisions workspaces at sign-up; there, startup also refuses
+`*`. Workspaces on such a control plane keep their provider keys in their own compute connection.
+
 ## Validate provider access without enabling traffic
 
 Infrastructure adapters expose provider-specific read-only checks:

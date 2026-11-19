@@ -6489,6 +6489,12 @@ func (a API) createSecretReference(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
 		return
 	}
+	// The control plane's environment holds the operator's keys. A workspace the
+	// resolver would refuse may not name it at all.
+	if checker, ok := a.Secrets.(interface{ AllowsTenant(string) bool }); ok && request.Resolver == "env" && !checker.AllowsTenant(actor.TenantID) {
+		writeError(w, http.StatusForbidden, "env_secret_reference_not_allowed", secrets.ErrTenantNotAllowed.Error())
+		return
+	}
 	item, err := a.Store.CreateSecretReference(r.Context(), actor.TenantID, request.Name, request.Resolver, request.Reference)
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
