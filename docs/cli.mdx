@@ -1114,17 +1114,35 @@ New and rotated tokens are returned once. Service-account scopes can only restri
 they can never grant an action unavailable to `viewer`, `operator`, or `admin`. Omitting `--scopes`
 uses every action allowed by the selected role for compatibility.
 
-## Secret references
+## Secrets
 
-Register metadata that points to an injected environment value. InferCrane never accepts the raw
-secret on the command line or through its API.
+Seal a value from a local environment variable, or name a secret that stays in your own cluster or
+AWS account. A raw secret is never accepted as a command-line argument, and a sealed value is never
+shown again.
 
 ```bash
-infercrane secret create openrouter --from-env OPENROUTER_API_KEY
+export HF_TOKEN='hf_...'
+infercrane secret create hf-token --sealed-from-env HF_TOKEN
+infercrane secret create hf-token --kubernetes hf-token/HF_TOKEN
+infercrane secret create hf-token --aws-secret arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY   # operator workspaces only
 infercrane secret list
 infercrane secret list --output json
 infercrane secret delete SECRET_ID --yes
 ```
+
+## Bring a model you trained
+
+```bash
+infercrane deploy acme/support-model --model-secret SECRET_ID --compute-connection my-runpod --gpu H100
+infercrane models import s3://acme-models/run-42 --from ./run-42
+infercrane deploy s3://acme-models/run-42 --model-revision sha256:DIGEST --cloud kubernetes --gpu L4 --name run-42
+infercrane models adapter-check acme/support-lora --base-model Qwen/Qwen3-8B
+infercrane deploy Qwen/Qwen3-8B --adapter support-bot=acme/support-lora@COMMIT --compute-connection my-runpod --gpu H100
+```
+
+`models import` hashes the local copy into a manifest; workers check every downloaded file against
+it. See [model artifacts](/features/model-artifacts).
 
 ## Signed alerts
 

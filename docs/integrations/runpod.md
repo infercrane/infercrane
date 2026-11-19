@@ -86,6 +86,15 @@ plan or local simulation is not real-provider qualification.
     InferCrane fails closed on an invalid secret name and cannot verify the secret value without
     launching a workload.
 
+    A workspace that deploys a private model with its own sealed token (`model_secret_reference_id`)
+    does not need this setting: before creating the Pod, InferCrane stores the token as a RunPod
+    secret named `infercrane_model_<hash>` in the account that runs the Pod, through
+    `/v2/account/secrets`, and the Pod names only that secret. Through a compute connection that is
+    the workspace's own RunPod account, so its key must be allowed to manage secrets. InferCrane
+    keeps the secret's value current; remove it in the RunPod console when you no longer need it.
+    RunPod Pods have no cloud identity, so weights in S3 or GCS need Kubernetes or AWS; LoRA
+    adapters from Hugging Face are fetched in the Pod at their pinned commit.
+
     To populate a new identity-named volume with a resumable transfer, first set the exact
     model/commit, data center, size, current provider rates, retention window, and watchdog, then run
     `make plan-runpod-artifact-cache`. Review its JSON worst-case cost before setting

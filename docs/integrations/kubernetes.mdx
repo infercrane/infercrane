@@ -159,6 +159,34 @@ creating a workload:
 infercrane doctor --kubernetes
 ```
 
+## Private models, your own bucket, and LoRA adapters
+
+A private Hugging Face token stays in a Secret in this namespace. Name it with a `kubernetes`
+reference and pass its ID as `model_secret_reference_id`; the runtime gets `HF_TOKEN` through a
+`secretKeyRef`, and the control plane needs no Secret permissions:
+
+```bash
+kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" -n infercrane-system create secret generic hf-token --from-literal=HF_TOKEN="$HF_TOKEN"
+infercrane secret create hf-token --kubernetes hf-token/HF_TOKEN
+```
+
+Weights or adapters imported from S3 or GCS (`infercrane models import`) are fetched by an init
+container into the Pod's own volume, and every file's sha256 is checked before the server starts.
+The fetch uses the runtime service account's workload identity (IRSA or GKE Workload Identity), or
+the keys of an optional Secret you name. For an S3-compatible store such as MinIO, put
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_ENDPOINT_URL` in that Secret:
+
+```bash
+export INFERCRANE_KUBERNETES_OBJECT_STORE_SECRET='model-bucket-reader'   # optional
+export INFERCRANE_KUBERNETES_S3_FETCH_IMAGE='amazon/aws-cli@sha256:...'  # optional, pinned by digest
+export INFERCRANE_KUBERNETES_GCS_FETCH_IMAGE='gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:...'  # optional
+```
+
+By default the fetch images are the pinned AWS CLI 2.31.38 and Google Cloud CLI 548.0.0 slim
+images; mirror them into a private registry for offline clusters. The serving container never
+receives the object store keys. LoRA adapters are rendered for `vllm` and `sglang`. See
+[model artifacts](/features/model-artifacts).
+
 ## Deploy
 
 The GPU value maps to the configured product-label value. It is never silently substituted.
