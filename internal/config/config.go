@@ -78,6 +78,12 @@ type Config struct {
 	// own BYOC providers without a tenant compute connection. "*" grants every
 	// workspace on a single-customer control plane. Empty grants nobody.
 	OperatorComputeTenants []string
+	// EnvSecretTenants names the workspaces whose secret references may read
+	// this process's environment, which holds the operator's own keys. The
+	// operator's API key workspace and the Model API operator workspace are
+	// always allowed. Unset, it is "*" on a single-customer control plane and
+	// nobody else where managed capacity or hosted sign-up is enabled.
+	EnvSecretTenants []string
 }
 
 type OptimizationPrice struct {
@@ -561,6 +567,7 @@ func load(requireAPIKey bool) (Config, error) {
 		ManagedDeploymentsEnabled:           managedDeploymentsEnabled,
 		HuggingFaceMetadataEnabled:          huggingFaceMetadataEnabled,
 		OperatorComputeTenants:              splitCSV(env("INFERCRANE_OPERATOR_COMPUTE_TENANTS", "")),
+		EnvSecretTenants:                    splitCSV(env("INFERCRANE_ENV_SECRET_TENANTS", "")),
 		ManagedSandbox:                      managedSandboxPolicy,
 		ModelAPICatalogFile:                 env("INFERCRANE_MODEL_API_CATALOG_FILE", ""),
 		ModelAPIOperatorTenantID:            env("INFERCRANE_MODEL_API_OPERATOR_TENANT_ID", ""),
@@ -678,6 +685,12 @@ func load(requireAPIKey bool) (Config, error) {
 		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
 	}
 	if err := validateOperatorComputeTenants(config); err != nil {
+		return Config{}, err
+	}
+	if len(config.EnvSecretTenants) == 0 && !config.sharedControlPlane() {
+		config.EnvSecretTenants = []string{"*"}
+	}
+	if err := validateEnvSecretTenants(config); err != nil {
 		return Config{}, err
 	}
 	if config.CredentialEncryptionKey != "" && len(config.CredentialEncryptionKey) < 32 {
@@ -1333,6 +1346,35 @@ func validateOperatorComputeTenants(config Config) error {
 	}
 	if wildcard && (config.ManagedDeploymentsEnabled || config.ManagedSandbox.Enabled || config.HostedAuthAutoProvision) {
 		return fmt.Errorf("INFERCRANE_OPERATOR_COMPUTE_TENANTS=* is only allowed on a single-customer control plane; list workspace IDs when managed capacity or hosted sign-up is enabled")
+	}
+	return nil
+}
+
+// sharedControlPlane reports whether this control plane serves more than one
+// customer: it sells capacity or admits self-service sign-ups.
+func (c Config) sharedControlPlane() bool {
+	return c.ManagedDeploymentsEnabled || c.ManagedSandbox.Enabled || c.HostedAuthAutoProvision
+}
+
+// validateEnvSecretTenants keeps the environment-reference grant explicit on a
+// shared control plane: there a wildcard would let any new workspace name the
+// operator's keys.
+func validateEnvSecretTenants(config Config) error {
+	wildcard := false
+	for _, tenant := range config.EnvSecretTenants {
+		if tenant == "*" {
+			wildcard = true
+			continue
+		}
+		if len(tenant) > 128 || strings.ContainsAny(tenant, " \t*") {
+			return fmt.Errorf("INFERCRANE_ENV_SECRET_TENANTS entries must be workspace IDs or a single *")
+		}
+	}
+	if wildcard && len(config.EnvSecretTenants) != 1 {
+		return fmt.Errorf("INFERCRANE_ENV_SECRET_TENANTS must be either * or a list of workspace IDs")
+	}
+	if wildcard && config.sharedControlPlane() {
+		return fmt.Errorf("INFERCRANE_ENV_SECRET_TENANTS=* is only allowed on a single-customer control plane; list the operator's workspace IDs when managed capacity or hosted sign-up is enabled")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/infercrane/infercrane/internal/domain"
 )
@@ -18,8 +19,65 @@ type Resolver interface {
 	Resolve(context.Context, domain.SecretReference) (string, error)
 }
 
+// BootstrapTenant is the workspace of the operator's own API key. It may always
+// read the control plane's environment.
+const BootstrapTenant = "global"
+
+// ErrTenantNotAllowed refuses an environment reference from a workspace that
+// may not read the control plane's environment. That environment holds the
+// operator's own keys, so on a control plane shared by many workspaces only
+// the operator's workspaces may name it.
+var ErrTenantNotAllowed = errors.New("this workspace may not reference the control plane's environment; environment secret references are reserved for the operator's workspaces")
+
+// TenantPolicy names the workspaces whose secret references may read the
+// control plane's environment. The zero value allows none.
+type TenantPolicy struct {
+	all     bool
+	tenants map[string]struct{}
+}
+
+// NewTenantPolicy allows the named workspace IDs; "*" allows every workspace
+// and is only for a control plane that serves one customer.
+func NewTenantPolicy(ids ...string) TenantPolicy {
+	policy := TenantPolicy{tenants: map[string]struct{}{}}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		switch {
+		case id == "*":
+			policy.all = true
+		case id != "":
+			policy.tenants[id] = struct{}{}
+		}
+	}
+	return policy
+}
+
+// Allows reports whether the workspace may create or resolve environment
+// references.
+func (p TenantPolicy) Allows(tenant string) bool {
+	if p.all {
+		return true
+	}
+	if tenant == "" {
+		return false
+	}
+	_, ok := p.tenants[tenant]
+	return ok
+}
+
+// Environment resolves "env" references from the process environment. It
+// resolves only references whose workspace Tenants allows: a workspace that
+// could name any variable could read the operator's keys.
 type Environment struct {
 	Lookup func(string) (string, bool)
+	// Tenants are the workspaces whose references may be resolved. The zero
+	// value resolves none.
+	Tenants TenantPolicy
+}
+
+// AllowsTenant reports whether the workspace may create environment references.
+func (e Environment) AllowsTenant(tenant string) bool {
+	return e.Tenants.Allows(tenant)
 }
 
 func ValidateReference(reference domain.SecretReference) error {
@@ -32,6 +90,9 @@ func ValidateReference(reference domain.SecretReference) error {
 func (e Environment) Resolve(_ context.Context, reference domain.SecretReference) (string, error) {
 	if err := ValidateReference(reference); err != nil {
 		return "", err
+	}
+	if !e.Tenants.Allows(reference.TenantID) {
+		return "", ErrTenantNotAllowed
 	}
 	lookup := e.Lookup
 	if lookup == nil {
