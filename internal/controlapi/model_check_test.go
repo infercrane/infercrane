@@ -81,7 +81,7 @@ func modelCheckAPI(t *testing.T, resolver *modelcheck.Resolver) http.Handler {
 	return (API{
 		APIKey: "secret", Store: &fakeStore{}, Integrations: registry.Snapshot(), GPUPriceCatalog: catalog, ModelCheck: resolver,
 		ComputeProviders: []ComputeProvider{{ID: "runpod", Label: "RunPod", State: "ready"}},
-		Secrets:          secrets.Environment{Lookup: func(name string) (string, bool) { return recordedToken, name == "OPENROUTER_API_KEY" }},
+		Secrets:          secrets.Environment{Tenants: secrets.NewTenantPolicy("*"), Lookup: func(name string) (string, bool) { return recordedToken, name == "OPENROUTER_API_KEY" }},
 	}).Handler()
 }
 

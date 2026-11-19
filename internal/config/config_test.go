@@ -166,6 +166,39 @@ func TestOperatorComputeTenantsAreExplicitAndWildcardIsSingleCustomerOnly(t *tes
 	}
 }
 
+func TestEnvSecretTenantsDefaultToSingleCustomerAndStayExplicitWhenShared(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	config, err := Load()
+	if err != nil || strings.Join(config.EnvSecretTenants, "|") != "*" {
+		t.Fatalf("a single-customer control plane should keep environment references working: cfg=%#v err=%v", config.EnvSecretTenants, err)
+	}
+
+	t.Setenv("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", "true")
+	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	config, err = Load()
+	if err != nil || len(config.EnvSecretTenants) != 0 {
+		t.Fatalf("a shared control plane must not grant environment references by default: cfg=%#v err=%v", config.EnvSecretTenants, err)
+	}
+
+	t.Setenv("INFERCRANE_ENV_SECRET_TENANTS", "*")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "single-customer") {
+		t.Fatalf("wildcard accepted on a shared control plane: %v", err)
+	}
+
+	t.Setenv("INFERCRANE_ENV_SECRET_TENANTS", " ops , research ")
+	config, err = Load()
+	if err != nil || strings.Join(config.EnvSecretTenants, "|") != "ops|research" {
+		t.Fatalf("named workspaces were not loaded: cfg=%#v err=%v", config.EnvSecretTenants, err)
+	}
+
+	for _, invalid := range []string{"*,ops", "ops*", "team one"} {
+		t.Setenv("INFERCRANE_ENV_SECRET_TENANTS", invalid)
+		if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_ENV_SECRET_TENANTS") {
+			t.Fatalf("invalid grant %q accepted: %v", invalid, err)
+		}
+	}
+}
+
 func TestTenantComputeCredentialEncryptionRequiresStrongKey(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_CREDENTIAL_ENCRYPTION_KEY", "too-short")

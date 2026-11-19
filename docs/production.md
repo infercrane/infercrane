@@ -122,6 +122,12 @@ Leave `INFERCRANE_OPERATOR_COMPUTE_TENANTS` unset on the hosted control plane. I
 the control plane's own provider accounts, which only fits a control plane that serves one
 customer. Startup rejects the `*` value together with hosted sign-up or managed capacity.
 
+On the hosted control plane, set `INFERCRANE_ENV_SECRET_TENANTS` only to the operator's own workspace
+IDs that keep `env` secret references, or leave it unset. Every other workspace is refused, because
+an `env` reference reads this process's environment, which holds the operator's keys. Before turning
+on a release with this rule, list the existing `env` references by workspace: those outside the
+operator's workspaces stop resolving and should be replaced.
+
 For a test-mode Stripe account authenticated with the Stripe CLI, create or verify the fixed-price
 prepaid catalog with `scripts/bootstrap-stripe-prepaid.sh`. The command is idempotent by product
 name and denomination and prints the non-secret `INFERCRANE_STRIPE_PRICE_IDS_JSON` value. It never
