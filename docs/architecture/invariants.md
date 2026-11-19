@@ -14,6 +14,12 @@ plan, and an update to this document in the same pull request.
 - A control-plane route may hand a principal it has already authenticated to the gateway
   (`POST /api/v1/playground/chat/completions`). Authentication for `/v1/*` is unchanged, and
   routing the handed-over request reads no PostgreSQL.
+- An InferCrane agent's data plane runs the same gateway code on a snapshot it pulls over its
+  outbound channel. It has no database access, routes only to servers it detected itself (the
+  snapshot names them by server key, never by address), and stops serving when the snapshot is
+  older than its validity window.
+- The hosted gateway never forwards a request for a `customer-cloud` endpoint, not even to another
+  supply; it refuses it.
 
 ## Control plane
 
@@ -24,7 +30,12 @@ plan, and an update to this document in the same pull request.
 - Durable operation work has one unexpired lease owner and bounded attempts.
 - Lifecycle core does not branch on provider or runtime names; composition binds versioned adapters.
 - The control plane never dials, probes, or routes to a target reached through an InferCrane agent;
-  agents only dial out, and such a target's health comes from its agent's reports.
+  agents only dial out, and such a target's health comes from its agent's reports. Such a target
+  is never `traffic-managed`; its traffic is served by its agent (`agent-managed`) or not at all.
+- A `customer-cloud` endpoint has only bindings to servers an InferCrane agent owns; a database
+  trigger refuses any other binding whichever path adds it.
+- Commands queued for an agent are bounded specs checked against the agent's local allowlists,
+  never shell commands, and an agent key can neither queue them nor read other agents' work.
 - Agent-relayed engine metrics go through the same parser and window rules as a direct scrape.
 - Adapter registration, hermetic qualification, real qualification, and public support are distinct.
 - A supported integration capability cites executable evidence and cannot be inferred from protocol labels.
@@ -45,8 +56,11 @@ plan, and an update to this document in the same pull request.
 - Production secrets have no built-in defaults and do not enter logs or provider metadata.
 - Credential secrets are never stored; only cryptographic hashes are persisted.
 - An agent key calls only the agent API, never other control-plane routes or the inference gateway.
-- Prompts, completions, and request content never leave an agent's machine; it sends hardware,
-  server details, filtered engine metrics, and content-free request shapes only.
+- Prompts, completions, and request content never leave an agent's machine or cluster; it sends
+  hardware, server details, filtered engine metrics, content-free request shapes, quota lease
+  counts, and candidate-run numbers only (the list is in the agent page, "What leaves your cloud").
+- An agent receives API key digests only for keys that may call one of its agent-managed
+  endpoints; no key itself is ever sent.
 - External input sizes, concurrency, queues, timeouts and identifiers are bounded.
 - Liveness does not depend on downstream systems; readiness verifies required dependencies.
 - Development fakes are excluded from the production image target.

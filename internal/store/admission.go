@@ -75,7 +75,12 @@ func (s *Store) AdmissionPolicies(ctx context.Context) ([]admission.Policy, erro
 		return nil, err
 	}
 	defer rows.Close()
+	return scanAdmissionPolicies(rows)
+}
+
+func scanAdmissionPolicies(rows *sql.Rows) ([]admission.Policy, error) {
 	var out []admission.Policy
+	var err error
 	for rows.Next() {
 		var tenant, endpoint, priorities string
 		var policy admission.Policy

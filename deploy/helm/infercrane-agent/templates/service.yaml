@@ -1,0 +1,17 @@
+{{- if .Values.dataPlane.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "infercrane-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "infercrane-agent.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.dataPlane.service.type }}
+  selector:
+    {{- include "infercrane-agent.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.dataPlane.service.port }}
+      targetPort: http
+{{- end }}

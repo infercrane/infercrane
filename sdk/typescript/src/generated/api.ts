@@ -303,6 +303,51 @@ export class ControlApi {
     return this.transport.request('POST', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
   }
 
+  agentDataPlane(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agent/data-plane';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  leaseAgentQuota(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agent/quota-leases';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  agentCommands(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/agent/commands';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  updateAgentCommand(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agent/commands/${encodeURIComponent(id)}`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  createCandidateRun(id: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}/candidate-runs`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listCandidateRuns(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}/candidate-runs`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getCandidateRun(id: string, run: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}/candidate-runs/${encodeURIComponent(run)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  cancelCandidateRun(id: string, run: string, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/agents/${encodeURIComponent(id)}/candidate-runs/${encodeURIComponent(run)}`;
+    return this.transport.request('DELETE', requestPath, { idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
+  setEndpointResidency(name: string, body: JsonValue, idempotencyKey: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/residency`;
+    return this.transport.request('PUT', requestPath, { body, idempotencyKey }) as Promise<Record<string, JsonValue>>;
+  }
+
   adoptEndpoint(body: JsonValue): Promise<Record<string, JsonValue>> {
     const requestPath = '/adoptions/endpoints';
     return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;

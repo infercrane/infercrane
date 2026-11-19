@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -11,6 +12,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
+
+// ErrResidency refuses a binding, route, or request that would let request
+// content leave a customer-cloud endpoint. It is a conflict.
+var ErrResidency = fmt.Errorf("%w: endpoint residency customer-cloud allows only servers an InferCrane agent owns", ErrConflict)
 var ErrInsufficientCredits = errors.New("insufficient prepaid credits")
 
 type Target struct {
@@ -199,7 +204,11 @@ type Endpoint struct {
 	ID, TenantID, LogicalModelID, EnvironmentID string
 	Name, DesiredState, ObservedState           string
 	ActiveServingPlanID, CandidateServingPlanID string
-	CreatedAt, UpdatedAt                        time.Time
+	// Residency is "any" or "customer-cloud". A customer-cloud endpoint is
+	// served only by servers an InferCrane agent owns, so request content
+	// never reaches the control plane.
+	Residency            string
+	CreatedAt, UpdatedAt time.Time
 }
 
 type BackendBinding struct {

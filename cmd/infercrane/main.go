@@ -4758,7 +4758,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	bindUpstreamCredentials(&controlAPI, rec, upstreamCredentials)
 	// The agent protocol is part of the open-source core: any control plane
 	// can accept agents. Agents only ever dial in; nothing here dials them.
-	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints}
+	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
+		backend, err := runtimeBackends.ForRuntime(runtime)
+		if err != nil {
+			return runtimecontract.ProtocolCapabilities{}
+		}
+		return backend.Profile.ProtocolCapabilities()
+	}}
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {

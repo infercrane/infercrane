@@ -17,12 +17,14 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/metrics"
+	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 var (
@@ -67,10 +69,21 @@ type Service struct {
 	// runs in the background, bounded to 30 seconds.
 	RefreshEndpoints func(context.Context) error
 	Now              func() time.Time
+	// DataPlaneValidity is how long an agent may serve on a snapshot it could
+	// not refresh; zero means agentprotocol.DataPlaneValidity.
+	DataPlaneValidity time.Duration
+	// Capabilities resolves an engine's OpenAI surface from the runtime
+	// registry; nil or an unknown engine means chat, completions,
+	// embeddings, and streaming.
+	Capabilities func(string) runtimecontract.ProtocolCapabilities
 
 	// refreshing coalesces endpoint refreshes: at most one runs at a time,
 	// and registrations during a run ask for one more pass.
 	refreshing, refreshAgain atomic.Bool
+
+	// waiters ends held command long polls when a command is queued.
+	wakeMu  sync.Mutex
+	waiters map[string]chan struct{}
 }
 
 func (s *Service) now() time.Time {
@@ -362,17 +375,28 @@ func requestRecord(agent domain.Agent, server domain.AgentServer, shape agentpro
 		value := shape.LatencyMS - *shape.TTFTMS
 		generation = &value
 	}
-	return domain.InferenceRecord{
+	record := domain.InferenceRecord{
 		RequestID: "agent-" + hex.EncodeToString(digest[:]), TenantID: agent.TenantID,
 		TargetID: server.TargetID, LogicalModelID: server.LogicalModelID, EnvironmentID: server.EnvironmentID,
 		EndpointID: server.EndpointID, ServingPlanID: server.ServingPlanID, BindingID: server.BindingID,
-		Provider: "external", Runtime: server.Runtime, ComputeMode: "agent-gateway",
+		Provider: "external", Runtime: server.Runtime, ComputeMode: agentprotocol.ComputeModeGateway,
 		OperationName: shape.Operation, RequestModel: shape.RequestModel,
 		SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0",
 		StartedAt:                started, StatusCode: shape.StatusCode, LatencyMS: shape.LatencyMS, TTFTMS: shape.TTFTMS, GenerationMS: generation,
 		InputTokens: shape.InputTokens, OutputTokens: shape.OutputTokens, Streaming: shape.Streaming,
 		ErrorType: shape.ErrorType, SharedPrefixHash: shape.SharedPrefixHash, SessionIDHash: shape.SessionIDHash,
-	}, nil
+	}
+	if shape.Source == agentprotocol.ShapeSourceDataPlane {
+		// The agent's data plane served this request with the endpoint's
+		// own routes, so it must name the binding it routed to.
+		if server.OwnershipMode != agentprotocol.OwnershipAgentManaged || shape.BindingID != server.BindingID {
+			return domain.InferenceRecord{}, errors.New("data-plane shape names a binding this agent does not serve")
+		}
+		record.ComputeMode = agentprotocol.ComputeModeDataPlane
+		record.ResponseModel, record.QueueMS, record.RetryCount = shape.ResponseModel, shape.QueueMS, shape.RetryCount
+		record.ParentSessionIDHash, record.ToolPauseMS = shape.ParentSessionIDHash, shape.ToolPauseMS
+	}
+	return record, nil
 }
 
 func containsModel(models []string, model string) bool {
@@ -394,6 +418,10 @@ func registered(server domain.AgentServer, gatewayKey string) agentprotocol.Regi
 	if gatewayKey != "" && gatewayKey == server.Key {
 		out.TrafficSource = "agent-gateway"
 		out.TrafficDetail = "Requests sent through the agent's local gateway are recorded as content-free shapes. Requests sent straight to the server are not."
+	}
+	if server.OwnershipMode == agentprotocol.OwnershipAgentManaged {
+		out.TrafficSource = agentprotocol.ComputeModeDataPlane
+		out.TrafficDetail = "The agent serves this endpoint's traffic inside your cloud with InferCrane API keys, routes, admission, and quota. Prompts and completions stay there; only content-free request shapes are sent."
 	}
 	return out
 }

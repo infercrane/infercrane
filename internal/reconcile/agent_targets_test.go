@@ -117,3 +117,47 @@ type failingCredentials struct{ err error }
 func (f failingCredentials) Resolve(context.Context, string, string) (string, error) {
 	return "", f.err
 }
+
+func TestAgentManagedEndpointServesThroughItsAgentAndIsNeverRoutedHere(t *testing.T) {
+	target := domain.Target{ID: "agent-target", URL: "http://vllm.models.svc:8000", Runtime: "vllm", Provider: "external", UpstreamModel: "model", Health: "healthy", AgentID: "agent-1"}
+	store, reconciler, runtime := adoptedFixture(t, target, "agent-managed")
+	store.endpoints[0].Residency = "customer-cloud"
+	store.resolvedEndpoint.Endpoint.Residency = "customer-cloud"
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if route, _, ok := reconciler.Routes.AcquireForTenant("global", "local-qwen"); ok {
+		t.Fatalf("an agent-managed endpoint published a hosted route: %#v", route)
+	}
+	if !reconciler.Routes.ResidentForTenant("global", "local-qwen") {
+		t.Fatal("the gateway was not told the endpoint is served in the customer's cloud")
+	}
+	if store.endpointState != "serving" || runtime.calls != 0 {
+		t.Fatalf("state=%q probes=%d", store.endpointState, runtime.calls)
+	}
+	// When its agent reports the server unhealthy, the endpoint is degraded.
+	store.target.Health = "unhealthy"
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.endpointState != "degraded" {
+		t.Fatalf("state=%q", store.endpointState)
+	}
+	// Leaving customer-cloud clears the marker; a deleted endpoint too.
+	store.endpoints[0].Residency = "any"
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if reconciler.Routes.ResidentForTenant("global", "local-qwen") {
+		t.Fatal("the residency marker outlived the residency")
+	}
+	store.endpoints[0].Residency = "customer-cloud"
+	_ = reconciler.RefreshEndpoints(context.Background())
+	store.endpoints = nil
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if reconciler.Routes.ResidentForTenant("global", "local-qwen") {
+		t.Fatal("a deleted endpoint kept its residency marker")
+	}
+}

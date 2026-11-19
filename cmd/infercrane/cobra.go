@@ -100,7 +100,13 @@ var commandExamples = map[string]string{
   infercrane agent run --gateway 127.0.0.1:4000
 
   # See what would be connected, without sending anything
-  infercrane agent detect`,
+  infercrane agent detect
+
+  # Serve agent-managed endpoints inside your cluster and test new setups
+  # there (normally through the Helm chart deploy/helm/infercrane-agent)
+  infercrane agent run --server http://vllm:8000 --serve 0.0.0.0:8080 \
+    --executor kubernetes --kubernetes-namespace models --worker-secret infercrane-worker/api-key \
+    --allow-image vllm/vllm-openai`,
 	"profile": `  # On the GPU host: record 10 s through the engine's own profiler, analyze, and record
   infercrane profile coder --engine-url http://127.0.0.1:8000 --trace-dir /profiles --duration 10s
 
@@ -525,6 +531,18 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("key-env", "INFERCRANE_AGENT_KEY", "environment variable holding the agent key")
 		boolFlag("no-detect", "only observe servers named with --server")
 		boolFlag("once", "detect, register, sync once, and exit")
+		stringFlag("serve", "", "serve this agent's agent-managed endpoints inside your cloud on this address, for example 0.0.0.0:8080")
+		stringFlag("executor", "", "test setups the control plane queues, in this cluster: kubernetes")
+		stringFlag("kubernetes-context", "", "kubectl context for setup tests (default: this pod's service account)")
+		stringFlag("kubernetes-namespace", "", "namespace test setups are started in")
+		stringFlag("runtime-service-account", "infercrane-runtime", "service account of test setup pods")
+		stringFlag("worker-secret", "", "Secret NAME/KEY mounted into test setup pods as their API key")
+		stringFlag("worker-key-env", "INFERCRANE_WORKER_KEY", "environment variable holding that Secret's value")
+		stringFlag("gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
+		stringFlag("gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
+		stringFlag("allow-image", "", "image repository test setups may use (repeatable); nothing else runs")
+		stringFlag("allow-accelerator", "", "accelerator test setups may request (repeatable); default any")
+		stringFlag("eval-set", "", "a local eval set NAME=PATH for the answer check (repeatable); it never leaves this cluster")
 	case "request":
 		stringFlag("message", "Say hello in one sentence.", "user message")
 		stringFlag("protocol", "chat", "chat, responses, embeddings, completions, or batch")

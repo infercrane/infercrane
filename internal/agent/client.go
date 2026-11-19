@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 )
@@ -88,9 +89,23 @@ func (c Client) post(ctx context.Context, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Authorization", "Bearer "+c.Key)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Content-Encoding", "gzip")
+	return c.do(request, 4<<20, out)
+}
+
+// get makes one bounded GET. limit bounds the response body.
+func (c Client) get(ctx context.Context, path string, limit int64, out any) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.ControlURL, "/")+path, nil)
+	if err != nil {
+		return err
+	}
+	return c.do(request, limit, out)
+}
+
+func (c Client) do(request *http.Request, limit int64, out any) error {
+	request.Header.Set("Authorization", "Bearer "+c.Key)
+	request.Header.Set("Accept-Encoding", "gzip")
 	if c.UserAgent != "" {
 		request.Header.Set("User-Agent", c.UserAgent)
 	}
@@ -103,9 +118,21 @@ func (c Client) post(ctx context.Context, path string, body, out any) error {
 		return fmt.Errorf("control plane is unreachable: %w", err)
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	var body io.Reader = response.Body
+	if strings.EqualFold(response.Header.Get("Content-Encoding"), "gzip") {
+		decompressed, gzipErr := gzip.NewReader(response.Body)
+		if gzipErr != nil {
+			return fmt.Errorf("control plane sent an invalid gzip body: %w", gzipErr)
+		}
+		defer decompressed.Close()
+		body = decompressed
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return err
+	}
+	if int64(len(data)) > limit {
+		return fmt.Errorf("control plane response exceeds %d bytes", limit)
 	}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		if out == nil {
@@ -142,6 +169,40 @@ func (c Client) Sync(ctx context.Context, request agentprotocol.SyncRequest) (ag
 func (c Client) Register(ctx context.Context, request agentprotocol.RegisterServerRequest) (agentprotocol.RegisterServerResponse, error) {
 	var response agentprotocol.RegisterServerResponse
 	err := c.post(ctx, "/api/v1/agent/servers", request, &response)
+	return response, err
+}
+
+// DataPlane pulls the routes, key digests, admission policies, and quota for
+// this agent's agent-managed endpoints. generation is the snapshot the agent
+// already holds; an unchanged snapshot comes back without its contents.
+func (c Client) DataPlane(ctx context.Context, generation string) (agentprotocol.DataPlaneSnapshot, error) {
+	var snapshot agentprotocol.DataPlaneSnapshot
+	path := "/api/v1/agent/data-plane"
+	if generation != "" {
+		path += "?generation=" + url.QueryEscape(generation)
+	}
+	err := c.get(ctx, path, agentprotocol.MaxDataPlaneBodyBytes, &snapshot)
+	return snapshot, err
+}
+
+// LeaseQuota asks for part of the current minute's request quota.
+func (c Client) LeaseQuota(ctx context.Context, request agentprotocol.QuotaLeaseRequest) (agentprotocol.QuotaLeaseResponse, error) {
+	var response agentprotocol.QuotaLeaseResponse
+	err := c.post(ctx, "/api/v1/agent/quota-leases", request, &response)
+	return response, err
+}
+
+// Commands long-polls for queued work.
+func (c Client) Commands(ctx context.Context, wait time.Duration) (agentprotocol.CommandsResponse, error) {
+	var response agentprotocol.CommandsResponse
+	err := c.get(ctx, fmt.Sprintf("/api/v1/agent/commands?wait=%ds", int(wait/time.Second)), 4<<20, &response)
+	return response, err
+}
+
+// UpdateCommand reports progress or the result of one command.
+func (c Client) UpdateCommand(ctx context.Context, id string, update agentprotocol.CommandUpdate) (agentprotocol.CommandUpdateResponse, error) {
+	var response agentprotocol.CommandUpdateResponse
+	err := c.post(ctx, "/api/v1/agent/commands/"+url.PathEscape(id), update, &response)
 	return response, err
 }
 

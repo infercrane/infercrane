@@ -1,0 +1,39 @@
+{{- if .Values.executor.enabled }}
+# The same namespaced grant the control plane's Kubernetes provider uses
+# (deploy/kubernetes/base/provider-rbac.yaml): one Deployment and one Service
+# per candidate, and read-only PersistentVolumeClaims for model caches. No
+# cluster-scoped permission, no Secrets, no Pods/exec.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "infercrane-agent.fullname" . }}-candidates
+  namespace: {{ include "infercrane-agent.executorNamespace" . }}
+  labels:
+    {{- include "infercrane-agent.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "infercrane-agent.fullname" . }}-candidates
+  namespace: {{ include "infercrane-agent.executorNamespace" . }}
+  labels:
+    {{- include "infercrane-agent.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "infercrane-agent.fullname" . }}-candidates
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "infercrane-agent.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

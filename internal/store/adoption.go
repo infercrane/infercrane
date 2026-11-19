@@ -195,9 +195,16 @@ func normalizeAdoptionURL(raw string) (string, error) {
 	return NormalizeURL(parsed.String()), nil
 }
 
+// PromoteAdoptionOwnership changes who serves an adopted endpoint's traffic.
+// A directly reached server may become traffic-managed (the control plane
+// routes to it). A server only an InferCrane agent reaches may become
+// agent-managed (the agent serves its traffic inside the customer's cloud)
+// and return to observe-only; it can never become traffic-managed, because
+// the control plane cannot reach it. Promotion to agent-managed also sets
+// the endpoint's residency to customer-cloud in the same transaction.
 func (s *Store) PromoteAdoptionOwnership(ctx context.Context, tenant, name, ownership string) (domain.AdoptedWorkload, error) {
-	if ownership != "traffic-managed" {
-		return domain.AdoptedWorkload{}, errors.New("adopted workload can only be promoted explicitly to traffic-managed")
+	if ownership != "traffic-managed" && ownership != "agent-managed" && ownership != "observe-only" {
+		return domain.AdoptedWorkload{}, errors.New("adoption ownership can be changed only to traffic-managed, agent-managed, or observe-only")
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -218,20 +225,32 @@ func (s *Store) PromoteAdoptionOwnership(ctx context.Context, tenant, name, owne
 		}
 		return item, nil
 	}
-	if item.OwnershipMode != "observe-only" {
-		return domain.AdoptedWorkload{}, fmt.Errorf("%w: unsupported adoption ownership transition", ErrConflict)
-	}
 	var throughAgent bool
 	if err = tx.QueryRowContext(ctx, `SELECT agent_id IS NOT NULL FROM targets WHERE id=? AND tenant_id=?`, item.TargetID, tenant).Scan(&throughAgent); err != nil {
 		return domain.AdoptedWorkload{}, err
 	}
-	if throughAgent {
+	switch {
+	case ownership == "traffic-managed" && throughAgent:
 		// The control plane cannot reach a server that only an agent sees, so
-		// it cannot route its traffic. The agent's local gateway is the
-		// traffic path for such a server.
-		return domain.AdoptedWorkload{}, fmt.Errorf("%w: this server is observed through an InferCrane agent and stays observe-only; send traffic through the agent's local gateway instead", ErrConflict)
+		// it cannot route its traffic. The agent serves it instead.
+		return domain.AdoptedWorkload{}, fmt.Errorf("%w: this server is reached only through an InferCrane agent; make it agent-managed so the agent serves its traffic inside your cloud", ErrConflict)
+	case ownership == "traffic-managed" && item.OwnershipMode != "observe-only":
+		return domain.AdoptedWorkload{}, fmt.Errorf("%w: unsupported adoption ownership transition", ErrConflict)
+	case ownership == "agent-managed" && !throughAgent:
+		return domain.AdoptedWorkload{}, fmt.Errorf("%w: agent-managed needs a server an InferCrane agent owns; run infercrane agent run beside it", ErrConflict)
+	case ownership == "observe-only" && item.OwnershipMode != "agent-managed":
+		return domain.AdoptedWorkload{}, fmt.Errorf("%w: unsupported adoption ownership transition", ErrConflict)
 	}
 	stamp := now()
+	if ownership == "agent-managed" {
+		var endpointID string
+		if err = tx.QueryRowContext(ctx, `SELECT id FROM endpoints WHERE tenant_id=? AND id=? FOR UPDATE`, tenant, item.EndpointID).Scan(&endpointID); err != nil {
+			return domain.AdoptedWorkload{}, err
+		}
+		if err = setEndpointResidencyTx(ctx, tx, tenant, endpointID, ResidencyCustomerCloud, stamp); err != nil {
+			return domain.AdoptedWorkload{}, err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `UPDATE adopted_workloads SET ownership_mode=?,updated_at=? WHERE id=? AND tenant_id=?`, ownership, stamp, item.ID, tenant); err != nil {
 		return domain.AdoptedWorkload{}, err
 	}

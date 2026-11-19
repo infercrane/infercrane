@@ -1,0 +1,39 @@
+# Development fixture: the customer's current model server, a development
+# fake engine (no GPU, no model weights), in the customer's namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: models
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3
+  namespace: models
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: qwen3}
+  template:
+    metadata:
+      labels: {app: qwen3}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: engine
+          image: @@ENGINE_IMAGE@@
+          args: ["--port", "8000", "--model", "Qwen/Qwen3-0.6B", "--worker", "qwen3"]
+          ports: [{containerPort: 8000}]
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 2
+          resources: {requests: {cpu: 50m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3
+  namespace: models
+spec:
+  selector: {app: qwen3}
+  ports: [{port: 8000, targetPort: 8000}]

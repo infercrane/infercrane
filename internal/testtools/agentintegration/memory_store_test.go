@@ -28,6 +28,7 @@ type memoryStore struct {
 	endpoints    map[string]string // endpoint name -> agent/key
 	audits       []string
 	next         int
+	dataPlane    *dataPlaneState
 }
 
 func newMemoryStore() *memoryStore {
