@@ -41,6 +41,25 @@ may read PostgreSQL to authenticate, and it does so before routing starts.
 Inference errors keep the OpenAI error shape (`error.type`), while a failed authentication uses the
 control API's shape (`error.code`).
 
+## Closed APIs behind an endpoint
+
+An endpoint can route to a closed OpenAI-compatible API (an external binding connected with
+`infercrane connect --manage-traffic`). The gateway then:
+
+- sends the API key stored when the server was connected as `Authorization: Bearer`, never the
+  caller's InferCrane key. A stored key that cannot be opened makes the route unavailable; the
+  gateway never calls such a server without its key.
+- asks for token usage on streamed chat and completions requests with
+  `stream_options.include_usage`, because closed APIs omit it otherwise. When the caller did not
+  ask for usage, the gateway removes the usage-only chunk (empty `choices`, `usage` set) the API
+  adds, so the caller's stream is unchanged; other events pass through whole. A caller that set
+  `include_usage` itself, either way, is left as it asked.
+- records cached input tokens (`usage.prompt_tokens_details.cached_tokens`, or
+  `input_tokens_details` on the Responses API) next to input and output tokens. A cached count
+  larger than the input is discarded.
+
+These are what a [migration Proof](./migration.mdx) prices and replays.
+
 ## Failure behavior
 
 - Unknown aliases return an OpenAI-compatible 404.
@@ -53,7 +72,9 @@ control API's shape (`error.code`).
 `internal/gateway/gateway_test.go` and `internal/routes/routes_test.go` cover authentication,
 alias rewriting, proxying, ordering, and removal. `TestServeChatAs*` and
 `internal/controlapi/playground_test.go` cover the dashboard entry: tenant isolation, endpoint
-restrictions, quota, recording, and that the caller's credential stays out of the runtime request. Add streaming fragmentation, cancellation,
+restrictions, quota, recording, and that the caller's credential stays out of the runtime request.
+`internal/gateway/stream_usage_test.go` covers the usage request on closed-API streams, removing the
+added usage chunk across split and CRLF events, and cached input tokens. Add streaming fragmentation, cancellation,
 header filtering, and telemetry assertions as the public API expands.
 
 Related: [system architecture](../architecture/system.mdx) and

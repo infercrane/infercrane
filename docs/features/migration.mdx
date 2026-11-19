@@ -1,0 +1,171 @@
+---
+title: Migrate from a closed API
+description: Measure your OpenAI, Anthropic, or other closed-API workload as the baseline, compare open models you own on cost, speed, and graded quality, then switch in stages with the closed API as fallback.
+---
+
+# Migrate from a closed API
+
+A migration Proof answers one question with your own traffic: can an open model you run do this
+workload for less, at the same quality? Your current closed API is the baseline. InferCrane measures
+what it costs and how fast it answers, compares open-model setups with it, and switches only in
+stages, with the closed API kept as the fallback.
+
+```bash
+OPENAI_API_KEY=... infercrane connect https://api.openai.com/v1 --as support-bot \
+  --model gpt-4.1-mini --manage-traffic --token-env OPENAI_API_KEY
+infercrane migrate capture support-bot --binding primary --window 24h
+infercrane migrate price support-bot primary --authority list_price \
+  --input-usd 0.40 --cached-input-usd 0.10 --output-usd 1.60 --valid-until 2026-12-31
+infercrane optimize create Qwen/Qwen3-8B --provider runpod --gpu H100 \
+  --migrate-from support-bot/primary --dialect openai \
+  --workload-fingerprint sha256:TRACE_DIGEST --eval-set sha256:EVAL_DIGEST
+```
+
+<Warning>
+With `--manage-traffic`, your application's requests to `support-bot` go through InferCrane to the
+closed API, and InferCrane sends the stored key with each one. Prompts and answers pass through the
+gateway; InferCrane records only their timing and token counts. The candidates' GPUs and the graded
+check's requests to the closed API cost money: approve the run's spend cap before it starts.
+</Warning>
+
+## 1. Measure your current API
+
+Connect the closed API as a traffic-managed endpoint and point your application at InferCrane's
+gateway with the endpoint name as the model. The key you pass with `--token-env` is stored
+encrypted and sent to the closed API on every routed request; a key that cannot be opened makes the
+route unavailable rather than calling the API without it.
+
+On streams, the gateway asks the closed API for token usage (`stream_options.include_usage`) and
+removes that extra usage chunk again when your application did not ask for it, so your stream is
+unchanged. Each request records its input, cached input, and output tokens.
+
+When the traffic history lives elsewhere, import it as content-free shapes:
+
+```bash
+curl -X POST "$INFERCRANE_URL/api/v1/endpoints/support-bot/traffic-observations" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" -H "Content-Type: application/json" \
+  -d @observations.json   # {"source":"openai","schema_version":"infercrane.traffic-observations/v1","binding":"primary","observations":[...]}
+```
+
+Then capture the workload the setups will replay:
+
+```bash
+infercrane migrate capture support-bot --binding primary --window 24h
+```
+
+The capture keeps timing and token counts only, newest first, up to `--max-requests`. Its digest is
+the `--workload-fingerprint` of the run.
+
+## 2. Record what it costs
+
+```bash
+infercrane migrate price support-bot primary --authority contract \
+  --input-usd 0.32 --cached-input-usd 0.08 --output-usd 1.28 --valid-until 2027-03-31
+```
+
+`--authority list_price` is the supplier's published price; `contract` is your negotiated price.
+The cost of the captured requests is priced at this rate card: uncached input, cached input (the
+input price when no cached price is given), and output. The report shows the blended cost per
+million tokens and the monthly cost at the captured traffic rate over a 730-hour month. Without a
+rate card, or after `valid_until`, the cost is **unknown**, never zero and never estimated.
+
+## 3. Compare open models with it
+
+A migration run measures open-model setups exactly like any optimization run: every setup is
+replayed on the captured traffic, in turns with the run's control, on the same hardware. The
+setups share one open base model; to compare two open models, run two migrations.
+
+Answer quality is compared with the closed API on a **graded** eval set: each prompt lists the
+answers that count as right, and both the closed API and each setup are scored against them.
+
+```json
+{
+  "schema": "infercrane.dev/quality-eval-set/v1",
+  "name": "support-graded",
+  "version": "1",
+  "grading": "exact_match",
+  "max_tokens": 64,
+  "prompts": [
+    {"id": "refund-window", "prompt": "How many days do customers have to request a refund?", "expected": ["30", "30 days"]}
+  ]
+}
+```
+
+`exact_match` scores 1 when the answer's words equal an expected answer's, ignoring case and
+punctuation; `token_f1` scores the best word overlap. A migration needs at least 30 graded
+prompts. Upload the set with `infercrane evaluation set upload` and pass its digest as `--eval-set`.
+
+InferCrane asks the closed API and each setup every prompt with greedy decoding (`--dialect openai`
+sends `max_completion_tokens`; neither dialect sends model-server-only fields), scores both, and
+compares the two score lists with a paired bootstrap (10,000 resamples, 95% interval, fixed seed):
+
+| Verdict | Meaning |
+|---|---|
+| PASS | The upper bound of the setup's quality drop is within `--max-quality-drop` (default 5%) |
+| BLOCK | The lower bound of the drop is above the margin: the setup is rejected |
+| UNKNOWN | Too few prompts, or the interval straddles the margin: the setup cannot be switched to |
+
+A failed request on either side stops the check instead of scoring zero, so a rate-limited closed
+API never makes a setup look better. An answer with no text scores zero. The verdict is signed with
+the control plane's key and binds both sides' evidence digests. Answers are compared in memory and
+never stored.
+
+To use your own evaluator instead, create the run with `--quality-check customer_evidence`, then
+attach signed results for both sides from the same suite and evaluator: the setup's revision as
+usual, and the closed API with `deployment` set to the endpoint name and `revision_id` set to
+`binding:<binding id>`:
+
+```bash
+curl -X POST "$INFERCRANE_URL/api/v1/endpoints/support-bot/bindings/primary/quality-evidence" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" -H "Content-Type: application/json" \
+  -d @closed-api-evidence.json
+```
+
+Both need paired per-prompt scores (`distribution`) for the bootstrap.
+
+## 4. Read the report
+
+`infercrane optimize report RUN` adds a **Your current API** section:
+
+- **Cost**: the closed API's monthly cost at your traffic, the chosen setup's monthly cost at the
+  same traffic, and the change.
+- **Observed latency**: the closed API's p95 time to first token and total latency on your live
+  requests. This is observed while the traffic was captured, a different window from the setups'
+  measurements, and is labelled so; it is not a side-by-side run.
+- **Answer quality**: the signed verdict, both scores, and the interval.
+
+Anything missing stays in the report's `unknown` list with the reason.
+
+## 5. Switch in stages
+
+```bash
+infercrane migrate verdicts RUN            # the signed PASS verdict of the setup to switch to
+infercrane migrate canary support-bot --verdict VERDICT_ID
+infercrane migrate primary support-bot     # after the canary has served enough traffic
+infercrane migrate rollback support-bot    # at any time
+```
+
+Approving the run's winner with `infercrane optimize activate` takes the canary step for you.
+
+| Step | Plan | Admitted on |
+|---|---|---|
+| canary | weighted: your deployment at most 5%, the closed API the rest | the signed PASS verdict for that deployment's active revision |
+| primary | primary-fallback: your deployment first, the closed API as fallback | endpoint Release Guard comparing the two bindings' requests from the canary |
+| rollback | the closed API alone | always |
+
+A plan that routes between a closed API and an open model never passes the usual same-model check;
+a migration plan cites its signed verdict instead, and only for the endpoint, binding, and revision
+it judged. A weighted plan across two different models exists only as a migration canary. Release
+Guard reads each binding's own requests (`request_records.binding_id`), so the comparison uses the
+latency, error rate, and throughput both sides served on the same endpoint. With primary-fallback,
+the closed API takes the traffic whenever your deployment stops being routable (unhealthy or
+unavailable at the routing pass); a single failed request is not retried on the fallback.
+
+A migration plan cannot be promoted to another environment: its verdict belongs to this endpoint.
+Run the migration there.
+
+## Next
+
+- [Optimization runs](/features/optimization) for how setups are measured and ranked.
+- [Release Guard](/features/release-guard) for the endpoint policy the primary step applies.
+- [Replay and capacity intelligence](/features/replay-capacity) for what a capture stores.

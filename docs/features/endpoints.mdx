@@ -104,6 +104,13 @@ An append-only managed fallback is eligible only when it preserves the active ro
 has immutable consent plus hard-budget policy; the persisted evaluation records that topology
 classification explicitly.
 
+A **migration plan** routes between a closed API's external binding and an owned deployment binding
+and records `migration_verdict_id`: the signed verdict that the deployment's active revision answers
+a graded suite as well as that closed API. It is the only way a weighted plan may span two different
+models, and it cannot be promoted to another environment. `POST /api/v1/endpoints/{name}/migration`
+with `step` `canary`, `primary`, or `rollback` creates the step's plan, evaluates Release Guard, and
+activates it on `PASS`. See [Migrate from a closed API](/features/migration).
+
 ## Ownership boundaries
 
 Bindings record `observe-only`, `traffic-managed`, or `lifecycle-managed` ownership. InferCrane supports

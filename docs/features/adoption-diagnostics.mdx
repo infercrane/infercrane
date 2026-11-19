@@ -39,9 +39,11 @@ the agent's local gateway; the agent says when no traffic is visible.
 
 `infercrane connect URL --as NAME --token-env VAR`, or `upstream_credential` on
 `POST /api/v1/adoptions/endpoints`, sends the key once. It is stored encrypted, never returned, and
-used for discovery and the reconciler's health probe. A stored key that cannot be opened (the
-credential key changed or was removed) marks the target unhealthy rather than probing without it; a
-temporary database error leaves its health unchanged until the next pass. The control plane needs
+used for discovery, the reconciler's health probe, and, for a traffic-managed binding, every request
+the gateway routes to the server (as `Authorization: Bearer`, in place of the caller's InferCrane
+key). A stored key that cannot be opened (the credential key changed or was removed) marks the
+target unhealthy and leaves it unroutable rather than reaching it without the key; a temporary
+database error leaves its health and its published route unchanged until the next pass. The control plane needs
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`; otherwise the request is refused with
 `upstream_credential_unavailable`, and the agent (which keeps the key on the server's machine) is
 the path.

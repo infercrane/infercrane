@@ -51,23 +51,41 @@ var (
 	digestPattern   = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 )
 
-// Prompt is one single-turn request in an eval set.
+// Prompt is one single-turn request in an eval set. Expected holds the
+// accepted answers of a graded set and is empty otherwise.
 type Prompt struct {
-	ID     string `json:"id"`
-	System string `json:"system,omitempty"`
-	Prompt string `json:"prompt"`
+	ID       string   `json:"id"`
+	System   string   `json:"system,omitempty"`
+	Prompt   string   `json:"prompt"`
+	Expected []string `json:"expected,omitempty"`
 }
 
 // EvalSet is a bounded list of prompts. Digest is the SHA-256 of the exact
-// bytes it was decoded from.
+// bytes it was decoded from. Grading is empty for a set scored by agreement
+// with a reference, or names how a graded set scores an answer against its
+// expected answers.
 type EvalSet struct {
 	Schema    string   `json:"schema"`
 	Name      string   `json:"name"`
 	Version   string   `json:"version"`
 	MaxTokens int      `json:"max_tokens,omitempty"`
+	Grading   string   `json:"grading,omitempty"`
 	Prompts   []Prompt `json:"prompts"`
 	Digest    string   `json:"-"`
 }
+
+// Grading methods of a graded eval set.
+const (
+	// GradingExactMatch scores 1 when the answer's words equal one expected
+	// answer's words, ignoring case and punctuation, else 0.
+	GradingExactMatch = "exact_match"
+	// GradingTokenF1 scores the best token F1 against any expected answer.
+	GradingTokenF1 = "token_f1"
+	maxExpected    = 8
+)
+
+// Graded reports whether the set scores answers against expected answers.
+func (s EvalSet) Graded() bool { return s.Grading != "" }
 
 // Default returns the embedded default suite.
 func Default() EvalSet {
@@ -91,9 +109,10 @@ func Digest(body []byte) string {
 func ValidDigest(value string) bool { return digestPattern.MatchString(value) }
 
 // DecodeEvalSet strictly decodes and bounds an eval set. Unknown fields are
-// rejected so expected answers or other private fields are not accepted by
-// accident; the built-in check scores agreement with the reference revision,
-// not against stored answers.
+// rejected so private fields are not accepted by accident. Expected answers
+// are accepted only in a set that names its grading, because only a graded
+// set is scored against them; any other set scores agreement with the
+// reference.
 func DecodeEvalSet(body []byte) (EvalSet, error) {
 	if len(body) == 0 || len(body) > MaxEvalSetBytes {
 		return EvalSet{}, fmt.Errorf("eval set must be between 1 byte and %d KiB", MaxEvalSetBytes>>10)
@@ -119,6 +138,9 @@ func DecodeEvalSet(body []byte) (EvalSet, error) {
 			return EvalSet{}, fmt.Errorf("eval set %s must be 1 to %d characters without @ or control characters", field, maxNameBytes)
 		}
 	}
+	if set.Grading != "" && set.Grading != GradingExactMatch && set.Grading != GradingTokenF1 {
+		return EvalSet{}, fmt.Errorf("eval set grading must be %s or %s", GradingExactMatch, GradingTokenF1)
+	}
 	if set.MaxTokens == 0 {
 		set.MaxTokens = defaultMaxToken
 	}
@@ -140,6 +162,9 @@ func DecodeEvalSet(body []byte) (EvalSet, error) {
 		if strings.TrimSpace(prompt.Prompt) == "" || len(prompt.Prompt) > maxPromptBytes || len(prompt.System) > maxPromptBytes || !utf8.ValidString(prompt.Prompt) || !utf8.ValidString(prompt.System) {
 			return EvalSet{}, fmt.Errorf("prompt %q must be valid UTF-8, non-empty, and at most %d KiB", prompt.ID, maxPromptBytes>>10)
 		}
+		if err := validExpected(set.Grading, prompt); err != nil {
+			return EvalSet{}, err
+		}
 	}
 	set.Digest = Digest(body)
 	return set, nil
@@ -159,4 +184,22 @@ func (s EvalSet) PairingDigest() string {
 	}
 	encoded, _ := json.Marshal(map[string]any{"eval_set": s.Digest, "prompts": ids})
 	return Digest(encoded)
+}
+
+func validExpected(grading string, prompt Prompt) error {
+	if grading == "" {
+		if len(prompt.Expected) > 0 {
+			return fmt.Errorf("prompt %q has expected answers, which only a set with grading %s or %s uses", prompt.ID, GradingExactMatch, GradingTokenF1)
+		}
+		return nil
+	}
+	if len(prompt.Expected) < 1 || len(prompt.Expected) > maxExpected {
+		return fmt.Errorf("prompt %q of a graded set needs 1 to %d expected answers", prompt.ID, maxExpected)
+	}
+	for _, expected := range prompt.Expected {
+		if !Answered(expected) || len(expected) > maxPromptBytes || !utf8.ValidString(expected) {
+			return fmt.Errorf("prompt %q expected answers must hold words and be at most %d KiB", prompt.ID, maxPromptBytes>>10)
+		}
+	}
+	return nil
 }

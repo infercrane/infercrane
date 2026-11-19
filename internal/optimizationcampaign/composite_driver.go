@@ -15,6 +15,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/releaseguard"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -85,7 +86,10 @@ type CompositeDriver struct {
 	// checks it before any provider mutation, so a campaign that cannot
 	// replay its trace fails before it spends.
 	Replays ReplayTraceSource
-	Now     func() time.Time
+	// Migration decides the candidates of a migration campaign against the
+	// closed API they would replace.
+	Migration MigrationChecker
+	Now       func() time.Time
 }
 
 func (d CompositeDriver) Provision(ctx context.Context, candidateID string, candidate domain.OptimizationCandidateRun, budget Budget) (ProvisionResult, error) {
@@ -192,8 +196,12 @@ func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candi
 	// exact identity. Requiring it to be newer than the candidate state
 	// transition incorrectly rejects evidence attached between measurement
 	// and validation.
-	if row := newestEvidence(rows, candidate.RevisionID, func(row domain.QualityEvidence) bool { return row.Source != domain.QualityEvidenceSourceInferCrane }); row != nil {
-		return evidenceResult(*row), nil
+	customer := newestEvidence(rows, candidate.RevisionID, func(row domain.QualityEvidence) bool { return row.Source != domain.QualityEvidenceSourceInferCrane })
+	if campaignRequest(campaign).Migration != nil {
+		return d.validateMigration(ctx, campaign, candidate, customer)
+	}
+	if customer != nil {
+		return evidenceResult(*customer), nil
 	}
 	if QualityWaitsForCustomer(campaign) || d.Quality == nil {
 		return ValidationResult{}, operations.Retryable(retryQualityEvidencePending, errors.New("attach passing signed semantic quality evidence for the exact candidate revision"))
@@ -214,6 +222,40 @@ func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candi
 		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, err)
 	}
 	return evidenceResult(row), nil
+}
+
+// validateMigration decides a migration candidate by its signed verdict
+// against the closed API: PASS qualifies, BLOCK rejects, and an undecided
+// comparison ends inconclusive. Even a passing customer evaluation of the
+// candidate alone does not qualify it; it must be compared with the closed
+// API's.
+func (d CompositeDriver) validateMigration(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, customer *domain.QualityEvidence) (ValidationResult, error) {
+	if d.Migration == nil {
+		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, errors.New("the migration quality check is not configured"))
+	}
+	result, err := d.Migration.CheckMigration(ctx, campaign, candidate, customer)
+	switch {
+	case errors.Is(err, ErrMigrationEvidencePending):
+		return ValidationResult{}, operations.Retryable(retryQualityEvidencePending, err)
+	case errors.Is(err, ErrQualityEvalSetMissing):
+		return ValidationResult{}, operations.Retryable(retryQualityEvalSetPending, err)
+	case errors.Is(err, ErrQualityReferenceUnavailable):
+		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityReferenceUnavailable}, nil
+	case err != nil:
+		var failure operations.Failure
+		if errors.As(err, &failure) {
+			return ValidationResult{}, err
+		}
+		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, err)
+	}
+	switch result.Verdict.Verdict {
+	case releaseguard.QualityPass:
+		return ValidationResult{QualityEvidenceID: result.Evidence.ID, Passed: true}, nil
+	case releaseguard.QualityBlock:
+		return ValidationResult{QualityEvidenceID: result.Evidence.ID, Passed: false, FailureCode: FailureQualityRejected}, nil
+	default:
+		return ValidationResult{QualityEvidenceID: result.Evidence.ID, Inconclusive: true, FailureCode: FailureMigrationQualityInconclusive}, nil
+	}
 }
 
 func evidenceResult(row domain.QualityEvidence) ValidationResult {

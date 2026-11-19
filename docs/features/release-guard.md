@@ -89,6 +89,16 @@ explicit privacy consent and hard request/cost reservations. Weighted changes or
 topology changes persist `INCONCLUSIVE` with `serving_plan_topology_unqualified`; they cannot be
 promoted until per-binding evidence exists.
 
+A staged switch from a closed API ([migration Proof](/features/migration)) is the exception, and it
+measures per binding. Its plans cite a signed migration quality verdict in place of the same-model
+check:
+
+| Step | Decision |
+|---|---|
+| `[closed API]` → weighted canary, owned deployment at most 5% | `PASS` with `migration_canary_admitted_on_quality_verdict` when the verdict is a valid PASS for the owned deployment's active revision; `REJECT` with `migration_quality_verdict_invalid` or `migration_canary_too_large` otherwise |
+| canary → `primary-fallback [owned, closed API]` | the endpoint policy applied to each binding's own requests in the window (`request_records.binding_id`, evidence source `binding_request_telemetry`), the closed API as active and the owned deployment as candidate |
+| any migration plan → `[closed API]` | `PASS` with `migration_rollback_to_closed_api` |
+
 Infrastructure can be healthy while model behavior has regressed. For quality-sensitive changes,
 run a task-specific customer-owned evaluation and attach its
 [signed aggregate evidence](/features/semantic-quality). Release Guard can require comparable

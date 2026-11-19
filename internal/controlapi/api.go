@@ -658,6 +658,15 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/release-guard/policy", a.auth(authz.Read, a.endpointGuardPolicy))
 	mux.HandleFunc("PUT /api/v1/endpoints/{name}/release-guard/policy", a.auth(authz.Deploy, a.setEndpointGuardPolicy))
 	mux.HandleFunc("POST /api/v1/endpoints/{name}/release-guard/evaluate", a.auth(authz.Deploy, a.evaluateEndpointGuard))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/replays", a.auth(authz.Deploy, a.captureEndpointReplay))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/replays", a.auth(authz.Read, a.endpointReplays))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/traffic-observations", a.auth(authz.Deploy, a.importEndpointTrafficObservations))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/bindings/{binding}/rate-card", a.auth(authz.Deploy, a.setBindingRateCard))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/bindings/{binding}/rate-card", a.auth(authz.Read, a.bindingRateCard))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/bindings/{binding}/quality-evidence", a.auth(authz.Deploy, a.recordBindingQualityEvidence))
+	mux.HandleFunc("GET /api/v1/endpoints/{name}/bindings/{binding}/quality-evidence", a.auth(authz.Read, a.bindingQualityEvidence))
+	mux.HandleFunc("POST /api/v1/endpoints/{name}/migration", a.auth(authz.Deploy, a.stageEndpointMigration))
+	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}/migration-verdicts", a.auth(authz.Read, a.campaignMigrationVerdicts))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/release-guard/evaluations", a.auth(authz.Read, a.endpointGuardEvaluations))
 	mux.HandleFunc("GET /api/v1/operations/{id}/events", a.auth(authz.Read, a.operationEvents))
 	mux.HandleFunc("POST /api/v1/operations/{id}/cancel", a.auth(authz.Deploy, a.cancel))
@@ -744,8 +753,8 @@ func (a API) recordQualityEvidence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "revision_mismatch", "quality evidence deployment does not match the request path")
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(payload.Evaluator), qualitycheck.Evaluator) {
-		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator name "+qualitycheck.Evaluator+" is reserved for InferCrane's built-in answer check")
+	if reservedEvaluator(payload.Evaluator) {
+		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator names "+qualitycheck.Evaluator+" and "+qualitycheck.GradedEvaluator+" are reserved for InferCrane's own checks")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -1565,6 +1574,15 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment")
 		return
 	}
+	if migration := request.Proposal.Input.Migration; migration != nil {
+		if request.Intent != optimizationcampaign.IntentNewEndpoint {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "a migration Proof measures new owned setups; it cannot evolve a deployment")
+			return
+		}
+		if !a.validMigrationCampaign(w, r, actor.TenantID, request.Proposal.Input) {
+			return
+		}
+	}
 	proposalJSON, err := json.Marshal(request.Proposal)
 	if err != nil || len(proposalJSON) > 1<<20 {
 		writeError(w, http.StatusRequestEntityTooLarge, "proposal_too_large", "optimization proposal exceeds the one MiB storage boundary")
@@ -1973,6 +1991,9 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 		if recorded.Diagnosis != nil {
 			response["diagnosis"] = recorded.Diagnosis
 		}
+		if recorded.Migration != nil {
+			response["migration"] = recorded.Migration
+		}
 	}
 	return response
 }
@@ -2014,6 +2035,8 @@ type campaignProposalView struct {
 	Warnings  []string
 	Workload  *campaignWorkloadView
 	Diagnosis *campaignDiagnosisView
+	// Migration names the closed API a migration campaign would replace.
+	Migration *optimizer.MigrationBaseline
 	// Reasons maps a proposal candidate ID to why it was proposed.
 	Reasons map[string]*optimizer.CandidateReason
 }
@@ -2027,10 +2050,11 @@ func readCampaignProposal(proposalJSON string) (campaignProposalView, bool) {
 	var proposal struct {
 		Warnings []string `json:"warnings"`
 		Input    struct {
-			WorkloadProfile     string               `json:"workload_profile"`
-			WorkloadSource      string               `json:"workload_source"`
-			WorkloadFingerprint string               `json:"workload_fingerprint"`
-			Diagnosis           *optimizer.Diagnosis `json:"diagnosis"`
+			WorkloadProfile     string                       `json:"workload_profile"`
+			WorkloadSource      string                       `json:"workload_source"`
+			WorkloadFingerprint string                       `json:"workload_fingerprint"`
+			Diagnosis           *optimizer.Diagnosis         `json:"diagnosis"`
+			Migration           *optimizer.MigrationBaseline `json:"migration"`
 		} `json:"input"`
 		Diagnosis  *optimizer.DiagnosisPlan `json:"diagnosis"`
 		Candidates []struct {
@@ -2041,7 +2065,7 @@ func readCampaignProposal(proposalJSON string) (campaignProposalView, bool) {
 	if json.Unmarshal([]byte(proposalJSON), &proposal) != nil {
 		return campaignProposalView{}, false
 	}
-	view := campaignProposalView{Warnings: proposal.Warnings, Reasons: map[string]*optimizer.CandidateReason{}}
+	view := campaignProposalView{Warnings: proposal.Warnings, Reasons: map[string]*optimizer.CandidateReason{}, Migration: proposal.Input.Migration}
 	for _, candidate := range proposal.Candidates {
 		if candidate.Reason != nil {
 			view.Reasons[candidate.ID] = candidate.Reason
@@ -3100,9 +3124,12 @@ func (a API) recordOperationalMeasurements(w http.ResponseWriter, r *http.Reques
 }
 
 type trafficObservationImport struct {
-	Source        string               `json:"source"`
-	SchemaVersion string               `json:"schema_version"`
-	Observations  []trafficObservation `json:"observations"`
+	Source        string `json:"source"`
+	SchemaVersion string `json:"schema_version"`
+	// Binding narrows an endpoint import to one binding, such as the closed
+	// API behind an external binding. Deployment imports refuse it.
+	Binding      string               `json:"binding,omitempty"`
+	Observations []trafficObservation `json:"observations"`
 }
 
 // trafficObservation is deliberately shape-only. Strict request decoding
@@ -3117,6 +3144,7 @@ type trafficObservation struct {
 	GenerationMS        *float64  `json:"generation_ms,omitempty"`
 	InputTokens         *int      `json:"input_tokens,omitempty"`
 	OutputTokens        *int      `json:"output_tokens,omitempty"`
+	CachedInputTokens   *int      `json:"cached_input_tokens,omitempty"`
 	StatusCode          int       `json:"status_code"`
 	Operation           string    `json:"operation"`
 	Provider            string    `json:"provider,omitempty"`
@@ -3139,17 +3167,12 @@ func (a API) importTrafficObservations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotImplemented, "capability_unavailable", "traffic observation storage is not configured")
 		return
 	}
-	var request trafficObservationImport
-	if !decodeMutationBody(w, r, &request) {
+	request, ok := decodeTrafficImport(w, r)
+	if !ok {
 		return
 	}
-	if request.SchemaVersion != "infercrane.traffic-observations/v1" {
-		writeError(w, http.StatusUnprocessableEntity, "unsupported_schema", "schema_version must be infercrane.traffic-observations/v1")
-		return
-	}
-	allowedSources := map[string]bool{"opentelemetry": true, "datadog": true, "baseten": true, "fireworks": true, "custom": true}
-	if !allowedSources[request.Source] || len(request.Observations) < 1 || len(request.Observations) > 1000 {
-		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "source must be opentelemetry, datadog, baseten, fireworks, or custom and observations must contain 1..1000 rows")
+	if request.Binding != "" {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "binding applies to an endpoint's traffic, not a deployment's")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -3162,21 +3185,32 @@ func (a API) importTrafficObservations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "deployment could not be resolved")
 		return
 	}
+	a.recordTrafficObservations(w, r, store, request, "deployment", domain.InferenceRecord{DeploymentID: resolved.Deployment.ID, RevisionID: resolved.Deployment.ActiveRevisionID}, resolved.Deployment.ID)
+}
+
+// recordTrafficObservations validates and records imported shape-only
+// observations under scope: a deployment's revision, or an endpoint and
+// optionally one of its bindings. scopeID keeps request IDs of different
+// scopes apart, so re-importing the same rows is idempotent per scope.
+func (a API) recordTrafficObservations(w http.ResponseWriter, r *http.Request, store trafficObservationStore, request trafficObservationImport, resourceType string, scope domain.InferenceRecord, scopeID string) {
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	now := time.Now().UTC()
 	records := make([]domain.InferenceRecord, 0, len(request.Observations))
 	for index, observation := range request.Observations {
-		if err = validateTrafficObservation(observation, now); err != nil {
+		if err := validateTrafficObservation(observation, now); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "invalid_traffic_observation", fmt.Sprintf("observation %d: %v", index, err))
 			return
 		}
-		digest := sha256.Sum256([]byte(actor.TenantID + "\x00" + resolved.Deployment.ID + "\x00" + request.Source + "\x00" + observation.SourceRequestID))
+		digest := sha256.Sum256([]byte(actor.TenantID + "\x00" + scopeID + "\x00" + request.Source + "\x00" + observation.SourceRequestID))
 		provider := observation.Provider
 		if provider == "" {
 			provider = request.Source
 		}
 		records = append(records, domain.InferenceRecord{
 			RequestID: "import-" + hex.EncodeToString(digest[:]), TenantID: actor.TenantID,
-			DeploymentID: resolved.Deployment.ID, RevisionID: resolved.Deployment.ActiveRevisionID,
+			DeploymentID: scope.DeploymentID, RevisionID: scope.RevisionID,
+			EndpointID: scope.EndpointID, LogicalModelID: scope.LogicalModelID, EnvironmentID: scope.EnvironmentID,
+			BindingID: scope.BindingID, TargetID: scope.TargetID, CachedInputTokens: observation.CachedInputTokens,
 			Provider: provider, Runtime: observation.Runtime, ComputeMode: "imported",
 			OperationName: observation.Operation, RequestModel: observation.RequestModel,
 			ResponseModel: observation.ResponseModel, SemanticConventionSchema: observation.SemanticSchema,
@@ -3191,12 +3225,12 @@ func (a API) importTrafficObservations(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	for _, record := range records {
-		if err = store.RecordRequest(r.Context(), record); err != nil {
+		if err := store.RecordRequest(r.Context(), record); err != nil {
 			writeError(w, http.StatusInternalServerError, "traffic_import_failed", "traffic observations could not be persisted; retrying the same source request IDs is safe")
 			return
 		}
 	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "traffic_observations.import", ResourceType: "deployment", ResourceName: r.PathValue("name"), Outcome: "succeeded"})
+	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "traffic_observations.import", ResourceType: resourceType, ResourceName: r.PathValue("name"), Outcome: "succeeded"})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"imported": len(records), "source": request.Source, "schema_version": request.SchemaVersion,
 		"content_recorded": false, "idempotent": true,
@@ -3218,10 +3252,13 @@ func validateTrafficObservation(value trafficObservation, now time.Time) error {
 			return fmt.Errorf("%s must be finite and between 0 and 86400000", name)
 		}
 	}
-	for name, tokens := range map[string]*int{"input_tokens": value.InputTokens, "output_tokens": value.OutputTokens} {
+	for name, tokens := range map[string]*int{"input_tokens": value.InputTokens, "output_tokens": value.OutputTokens, "cached_input_tokens": value.CachedInputTokens} {
 		if tokens != nil && (*tokens < 0 || *tokens > 10_000_000) {
 			return fmt.Errorf("%s must be between 0 and 10000000", name)
 		}
+	}
+	if value.CachedInputTokens != nil && (value.InputTokens == nil || *value.CachedInputTokens > *value.InputTokens) {
+		return errors.New("cached_input_tokens is part of input_tokens and cannot exceed it")
 	}
 	if value.StatusCode < 100 || value.StatusCode > 599 || value.RetryCount < 0 || value.RetryCount > 100 {
 		return errors.New("status_code must be 100..599 and retry_count 0..100")
@@ -3711,7 +3748,11 @@ func customerManagedBindingConfig(raw map[string]any) map[string]any {
 }
 
 func servingPlanResponse(item domain.ServingPlan) map[string]any {
-	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "version": item.Version, "routing_policy": item.RoutingPolicy, "spec_digest": item.SpecDigest, "bindings": item.Bindings, "created_at": item.CreatedAt}
+	response := map[string]any{"id": item.ID, "tenant_id": item.TenantID, "endpoint_id": item.EndpointID, "version": item.Version, "routing_policy": item.RoutingPolicy, "spec_digest": item.SpecDigest, "bindings": item.Bindings, "created_at": item.CreatedAt}
+	if item.MigrationVerdictID != "" {
+		response["migration_verdict_id"] = item.MigrationVerdictID
+	}
+	return response
 }
 
 func resolvedEndpointResponse(item domain.ResolvedEndpoint) map[string]any {
@@ -4265,6 +4306,7 @@ func replayTraceResponse(trace domain.ReplayTrace) map[string]any {
 		"shape_digest": trace.ShapeDigest, "request_count": trace.RequestCount,
 		"window_start": trace.WindowStart, "window_end": trace.WindowEnd, "created_at": trace.CreatedAt,
 		"request_limit_reached": trace.RequestLimitReached,
+		"endpoint_id":           trace.EndpointID, "endpoint_name": trace.EndpointName, "binding_id": trace.BindingID,
 	}
 }
 

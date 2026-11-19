@@ -578,7 +578,14 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 					if target.Health != "healthy" {
 						continue
 					}
-					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight, ProtocolCapabilities: r.protocolCapabilities(target.Runtime)})
+					credential, routable, credentialErr := r.adoptedCredential(ctx, tenant, target.ID)
+					if credentialErr != nil {
+						return credentialErr
+					}
+					if !routable {
+						continue
+					}
+					compiled = append(compiled, routes.Snapshot{TenantID: tenant, Alias: endpoint.Name, TargetID: target.ID, UpstreamModel: target.UpstreamModel, RouterURL: target.URL, Provider: target.Provider, Runtime: target.Runtime, ComputeMode: "external", UpstreamAPIKey: credential, LogicalModelID: endpoint.LogicalModelID, EnvironmentID: endpoint.EnvironmentID, EndpointID: endpoint.ID, ServingPlanID: resolved.ActivePlan.ID, BindingID: binding.ID, RoutingWeight: planned.Weight, ProtocolCapabilities: r.protocolCapabilities(target.Runtime)})
 					continue
 				}
 				if binding.Kind != "deployment" {
@@ -627,6 +634,29 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 		}
 	}
 	return nil
+}
+
+// adoptedCredential opens the bearer credential sealed for a directly
+// connected server so its route sends it, as the health probe already does.
+// A server without one routes without one. A stored credential that cannot be
+// opened makes the server unroutable: a request must never reach a server
+// that expects a credential without it. Any other read error is returned so
+// this pass keeps the routes already published.
+func (r *Reconciler) adoptedCredential(ctx context.Context, tenant, targetID string) (string, bool, error) {
+	if r.UpstreamCredentials == nil {
+		return "", true, nil
+	}
+	credential, err := r.UpstreamCredentials.Resolve(ctx, tenant, targetID)
+	switch {
+	case err == nil:
+		return credential, true, nil
+	case errors.Is(err, domain.ErrNotFound):
+		return "", true, nil
+	case errors.Is(err, upstreamcredential.ErrUnreadable):
+		return "", false, nil
+	default:
+		return "", false, err
+	}
 }
 
 // RefreshEndpoints recompiles only the stable endpoint layer from already
