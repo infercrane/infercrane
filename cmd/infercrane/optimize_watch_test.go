@@ -278,6 +278,30 @@ func TestWatchDurationIsPlain(t *testing.T) {
 	}
 }
 
+// TestRenderOptimizeWatchNamesTheFailedRequestsASetupWasHeldBackFor reads
+// the guard from the setup's own window, so the watch gives the numbers the
+// ranking used rather than only the code's words.
+func TestRenderOptimizeWatchNamesTheFailedRequestsASetupWasHeldBackFor(t *testing.T) {
+	run := func(arm string, failed int, tokens float64) map[string]any {
+		return map[string]any{"arm": arm, "requests": 100, "failed": failed, "duration_seconds": 60, "output_token_throughput": 200, "output_tokens_per_request": tokens}
+	}
+	measured := map[string]any{"method": "campaign-interleaved-control-v1", "control": map[string]any{"role": "interleaved", "candidate_id": "control", "runs": 4, "drift_limit": 0.05},
+		"runs": []any{run("control", 0, 200), run("candidate", 3, 200), run("control", 0, 200), run("candidate", 4, 200), run("control", 0, 200), run("candidate", 2, 200), run("control", 0, 200)}}
+	workload, _ := json.Marshal(map[string]any{"measured": measured})
+	row, _ := json.Marshal(map[string]any{"id": "bench-fast", "output_token_throughput": 260.0, "workload": string(workload)})
+	measurement, ok := parseWatchBenchmark(row, "bench-fast")
+	if !ok || len(measurement.Guards) != 1 {
+		t.Fatalf("measurement = %+v", measurement)
+	}
+	held := watchCandidate{ID: "fast", Rank: 2, State: "rejected", FailureCode: "measured_error_rate_regression", DeploymentSpec: watchSpec("vllm", "--max-num-seqs", "512")}
+	if status := watchStatus(held, measurement, false, false); status != "rejected · failed 3.0% of requests; the current setup failed 0.0%" {
+		t.Fatalf("status = %q", status)
+	}
+	if status := watchStatus(held, watchMeasurement{}, false, false); status != "rejected · failed more requests than your current setup" {
+		t.Fatalf("status without the window = %q", status)
+	}
+}
+
 func TestWatchStatusNamesTheMeasuringTurnAndPrefersTheAPIName(t *testing.T) {
 	if got := watchLabel(watchCandidate{Label: "Speculative decoding (n-gram)", Rank: 2}); got != "Speculative decoding (n-gram)" {
 		t.Fatalf("label = %q", got)

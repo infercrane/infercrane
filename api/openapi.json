@@ -9305,8 +9305,64 @@
                     "null"
                   ]
                 },
+                "error_rate_percent": {
+                  "description": "Share of the setup's measured requests that failed, in percent. Null when not recorded.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
                 "failure_code": {
                   "type": "string"
+                },
+                "guards": {
+                  "description": "Why the setup cannot be chosen whatever it gained: it failed more requests than the baseline, or answered more than 5% shorter.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "baseline": {
+                        "type": "number"
+                      },
+                      "basis": {
+                        "description": "same_window compares with the baseline runs measured in turns with the setup; separate_runs with the baseline's own runs.",
+                        "enum": [
+                          "same_window",
+                          "separate_runs"
+                        ],
+                        "type": "string"
+                      },
+                      "code": {
+                        "enum": [
+                          "measured_error_rate_regression",
+                          "measured_output_length_regression"
+                        ],
+                        "type": "string"
+                      },
+                      "metric": {
+                        "enum": [
+                          "error_rate_percent",
+                          "output_tokens_per_request"
+                        ],
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "metric",
+                      "baseline",
+                      "value",
+                      "basis",
+                      "reason"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
                 },
                 "id": {
                   "type": "string"
@@ -9315,6 +9371,13 @@
                   "type": "string"
                 },
                 "latency_p95_ms": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "output_tokens_per_request": {
+                  "description": "Mean server-counted output tokens of a successful request in the setup's own runs. Null when any run did not record it.",
                   "type": [
                     "number",
                     "null"
@@ -9460,6 +9523,8 @@
                 "tpot_p95_ms",
                 "latency_p95_ms",
                 "cost_per_million_output_tokens",
+                "error_rate_percent",
+                "output_tokens_per_request",
                 "versus_baseline"
               ],
               "type": "object"
@@ -9582,6 +9647,20 @@
                 ],
                 "type": "string"
               },
+              "capture_cut_off": {
+                "description": "True when the capture reached its request limit and kept only its newest requests. Null for a capture that did not record it; such a projection may be too low.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "capture_window_seconds": {
+                "description": "The whole capture window.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "change_percent": {
                 "type": [
                   "number",
@@ -9632,6 +9711,7 @@
                 "type": "string"
               },
               "window_seconds": {
+                "description": "Time the replayed volume is divided by: the capture window, or, when the capture was cut off at its request limit, the span from the first to the last kept request.",
                 "type": [
                   "number",
                   "null"
@@ -9647,6 +9727,8 @@
             "required": [
               "basis",
               "window_seconds",
+              "capture_window_seconds",
+              "capture_cut_off",
               "requests_in_window",
               "output_tokens_in_window",
               "monthly_output_tokens",
@@ -9946,6 +10028,13 @@
             },
             "type": "array"
           },
+          "warnings": {
+            "description": "One line per setup that failed more requests or answered shorter than the baseline. A speed or cost gain may come from that.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "workload": {
             "additionalProperties": false,
             "properties": {
@@ -9996,6 +10085,7 @@
           "monthly",
           "workload",
           "candidates",
+          "warnings",
           "bottleneck",
           "appendix",
           "unknown",

@@ -99,6 +99,42 @@ func TestParseRecordsMeasuresAIPerfMetrics(t *testing.T) {
 	}
 }
 
+// TestParseRecordsAveragesOutputTokensOfSuccessfulRequestsOnly keeps the
+// answer-length evidence campaigns compare: failed requests are counted, not
+// averaged, and a successful request without a server count leaves the mean
+// unknown rather than averaging the rest.
+func TestParseRecordsAveragesOutputTokensOfSuccessfulRequestsOnly(t *testing.T) {
+	write := func(data string) string {
+		path := filepath.Join(t.TempDir(), "records.jsonl")
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	complete := write(`{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{"request_latency":{"value":30},"output_token_count":{"value":20}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"request_latency":{"value":40},"output_token_count":{"value":31}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"request_latency":{"value":90}},"error":{"code":500,"message":"overloaded"}}
+`)
+	result, err := parseRecords(complete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Requests != 3 || result.Failed != 1 || result.OutputTokensPerRequest == nil || *result.OutputTokensPerRequest != 25.5 {
+		t.Fatalf("result=%#v", result)
+	}
+	partial := write(`{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{"request_latency":{"value":30},"output_token_count":{"value":20}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"request_latency":{"value":40}}}
+`)
+	if result, err = parseRecords(partial); err != nil || result.OutputTokensPerRequest != nil {
+		t.Fatalf("a successful request without a count produced a mean: %#v err=%v", result.OutputTokensPerRequest, err)
+	}
+	failed := write(`{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{},"error":{"code":500}}
+`)
+	if result, err = parseRecords(failed); err != nil || result.Failed != 1 || result.OutputTokensPerRequest != nil {
+		t.Fatalf("a run without a successful request produced a mean: %#v err=%v", result, err)
+	}
+}
+
 func TestParseRecordsComputesSLOGoodputWithoutTreatingMissingMetricsAsPassing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "records.jsonl")
 	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{"time_to_first_token":{"value":100},"request_latency":{"value":500},"inter_token_latency":{"value":10}}}

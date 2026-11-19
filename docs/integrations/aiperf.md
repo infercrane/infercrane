@@ -19,7 +19,9 @@ infercrane benchmark qwen-prod \
 Use `--revision candidate` only when you intend to benchmark isolated candidate capacity. Benchmark data remains in the InferCrane control plane; it is not uploaded by default.
 
 InferCrane pins AIPerf `0.12.0`, requests record-only exports, and can drive constant, Poisson, or
-gamma arrival timing. Independent runs produce 95% confidence intervals in persisted workload
+gamma arrival timing. From each export it reads every request's latencies, error, and server-counted
+output tokens. Failed requests are counted and left out of the latency percentiles, and the mean output
+tokens of a successful request is recorded only when every successful request reported a count. Independent runs produce 95% confidence intervals in persisted workload
 evidence; they are not flattened into a single unexplained number.
 
 AIPerf's server-metrics scrape and GPU telemetry are off for ordinary benchmarks. Optimization

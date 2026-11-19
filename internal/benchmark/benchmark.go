@@ -60,7 +60,12 @@ type Result struct {
 	TTFTP50MS, TTFTP95MS        *float64
 	TPOTP50MS, TPOTP95MS        *float64
 	LatencyP50MS, LatencyP95MS  *float64
-	Confidence                  map[string]ConfidenceInterval
+	// OutputTokensPerRequest is the mean server-reported output token count
+	// of a successful request. It is nil unless every successful request
+	// reported a count, so a partial count never stands in for the mean.
+	// Failed requests are not in it; Failed counts them.
+	OutputTokensPerRequest *float64
+	Confidence             map[string]ConfidenceInterval
 	// ServerMetrics is nil unless Config.ServerMetrics was set.
 	ServerMetrics *ServerMetrics
 }
@@ -456,13 +461,17 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 	result.TTFTP50MS, result.TTFTP95MS = percentiles(ttft)
 	result.TPOTP50MS, result.TPOTP95MS = percentiles(tpot)
 	result.LatencyP50MS, result.LatencyP95MS = percentiles(latency)
+	var tokens float64
+	for _, value := range outputTokens {
+		tokens += value
+	}
+	if result.Succeeded > 0 && len(outputTokens) == result.Succeeded {
+		mean := tokens / float64(result.Succeeded)
+		result.OutputTokensPerRequest = &mean
+	}
 	if result.DurationSeconds > 0 {
 		throughput := float64(result.Succeeded) / result.DurationSeconds
 		result.RequestThroughput = &throughput
-		var tokens float64
-		for _, value := range outputTokens {
-			tokens += value
-		}
 		tokenThroughput := tokens / result.DurationSeconds
 		result.OutputTokenThroughput = &tokenThroughput
 		if hasSLO {

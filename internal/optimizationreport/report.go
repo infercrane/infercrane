@@ -27,7 +27,7 @@ import (
 
 const (
 	SchemaVersion    = "infercrane.optimization-report/v1"
-	AlgorithmVersion = "campaign-outcome-report-v1"
+	AlgorithmVersion = "campaign-outcome-report-v2"
 
 	// CPUBanner is shown on every report whose campaign ran on a simulated
 	// accelerator or a CPU. Its numbers are never GPU results.
@@ -77,6 +77,8 @@ const (
 
 // Report is the customer outcome of one campaign. Every pointer is null when
 // its input is missing or incomparable. Unknown lists those fields by path.
+// Warnings name every setup that failed more requests or answered shorter
+// than the baseline: a speed or cost gain may come from that.
 type Report struct {
 	SchemaVersion        string            `json:"schema_version"`
 	AlgorithmVersion     string            `json:"algorithm_version"`
@@ -95,6 +97,7 @@ type Report struct {
 	Monthly              Monthly           `json:"monthly"`
 	Workload             Workload          `json:"workload"`
 	Candidates           []CandidateResult `json:"candidates"`
+	Warnings             []string          `json:"warnings"`
 	Bottleneck           Bottleneck        `json:"bottleneck"`
 	Appendix             Appendix          `json:"appendix"`
 	Unknown              []string          `json:"unknown"`
@@ -177,10 +180,16 @@ type Noise struct {
 }
 
 // Monthly projects cost at the replayed customer traffic volume.
+// WindowSeconds is the time the volume is divided by: the capture window, or,
+// when the capture was cut off at its request limit, the span from the first
+// to the last kept request. CaptureCutOff is null for a capture that did not
+// record whether it was cut off.
 type Monthly struct {
 	Basis                string   `json:"basis"`
 	TraceDigest          string   `json:"trace_digest,omitempty"`
 	WindowSeconds        *float64 `json:"window_seconds"`
+	CaptureWindowSeconds *float64 `json:"capture_window_seconds"`
+	CaptureCutOff        *bool    `json:"capture_cut_off"`
 	RequestsInWindow     *int     `json:"requests_in_window"`
 	OutputTokensInWindow *int64   `json:"output_tokens_in_window"`
 	MonthlyOutputTokens  *float64 `json:"monthly_output_tokens"`
@@ -204,6 +213,9 @@ type Workload struct {
 }
 
 // CandidateResult is one measured setup in the measurement detail.
+// ErrorRatePercent and OutputTokensPerRequest come from the setup's own runs:
+// the share of its requests that failed, and the mean output tokens of a
+// successful request by the server's count. Each is null when not recorded.
 type CandidateResult struct {
 	ID                         string      `json:"id"`
 	Label                      string      `json:"label"`
@@ -216,11 +228,30 @@ type CandidateResult struct {
 	TPOTP95MS                  *float64    `json:"tpot_p95_ms"`
 	LatencyP95MS               *float64    `json:"latency_p95_ms"`
 	CostPerMillionOutputTokens *float64    `json:"cost_per_million_output_tokens"`
+	ErrorRatePercent           *float64    `json:"error_rate_percent"`
+	OutputTokensPerRequest     *float64    `json:"output_tokens_per_request"`
 	VersusBaseline             *Comparison `json:"versus_baseline"`
 	// Regressions are the headline outcomes on which the setup measured worse
 	// than the baseline in its own window, so a rejection can name them.
 	Regressions []Comparison `json:"regressions,omitempty"`
-	Reason      string       `json:"reason,omitempty"`
+	// Guards are why the setup cannot be chosen whatever it gained: it failed
+	// more requests than the baseline, or answered shorter.
+	Guards []Guard `json:"guards,omitempty"`
+	Reason string  `json:"reason,omitempty"`
+}
+
+// Guard is one result that keeps a setup from being chosen (see
+// optimizationcampaign.CheckGuards). Baseline and Value are percent of
+// requests for error_rate_percent and tokens for output_tokens_per_request.
+// Basis says whether the baseline's side was measured in the setup's own
+// window (same_window) or in the baseline's own runs (separate_runs).
+type Guard struct {
+	Code     string  `json:"code"`
+	Metric   string  `json:"metric"`
+	Baseline float64 `json:"baseline"`
+	Value    float64 `json:"value"`
+	Basis    string  `json:"basis"`
+	Reason   string  `json:"reason"`
 }
 
 // Comparison is a candidate's result on one metric against the baseline,
@@ -362,6 +393,7 @@ func Assemble(e Evidence) Report {
 	report.Monthly = monthly(proposal, proposalOK, kind, report.Metrics, e)
 	report.Workload = workload(baseline, winner)
 	report.Candidates = candidateResults(campaign, campaign.Objective, baseline, winner, arms)
+	report.Warnings = warnings(report.Candidates)
 	report.Bottleneck = bottleneck(kind, baseline, winner)
 	report.Appendix = appendix(campaign, proposal, proposalOK, baseline, winner, e)
 	report.Outcome.Headline = headline(report, released(campaign, winner))
@@ -939,6 +971,8 @@ func monthly(proposal optimizer.Proposal, proposalOK bool, kind string, metrics 
 		result.Reason = "the replayed traffic has no capture window"
 		return result
 	}
+	captureWindow := window
+	result.CaptureWindowSeconds, result.CaptureCutOff = &captureWindow, trace.RequestLimitReached
 	volume, err := replay.TraceOutputVolume(trace)
 	if err != nil {
 		result.Reason = "the replayed traffic could not be read"
@@ -951,6 +985,15 @@ func monthly(proposal optimizer.Proposal, proposalOK bool, kind string, metrics 
 	if volume.Missing > 0 {
 		result.Reason = fmt.Sprintf("%d of %d replayed requests have no output-token count", volume.Missing, volume.GenerationRequests)
 		return result
+	}
+	if trace.RequestLimitReached != nil && *trace.RequestLimitReached {
+		// The capture kept only its newest requests, so the window overstates
+		// the time they arrived in. Dividing by it would project too little.
+		if volume.KeptSpanSeconds <= 0 {
+			result.Reason = "the capture reached its request limit and its kept requests arrived at one instant, so there is no traffic rate to project"
+			return result
+		}
+		window = volume.KeptSpanSeconds
 	}
 	requests, tokens := volume.GenerationRequests, volume.OutputTokens
 	result.WindowSeconds, result.RequestsInWindow, result.OutputTokensInWindow = &window, &requests, &tokens
@@ -1036,6 +1079,19 @@ func candidateResults(campaign domain.OptimizationCampaign, objective string, ba
 		if finitePositive(row.OutputTokenThroughput) && current.hourly != nil {
 			result.CostPerMillionOutputTokens = ptr(*current.hourly / (*row.OutputTokenThroughput * 3600) * 1_000_000)
 		}
+		if outcome, ok := optimizationcampaign.OwnOutcome(row); ok {
+			if rate := outcome.ErrorRate(); rate != nil {
+				result.ErrorRatePercent = ptr(*rate * 100)
+			}
+			result.OutputTokensPerRequest = outcome.OutputTokensPerRequest
+		}
+		if result.Role != "baseline" && result.Role != "baseline_kept" && baseline != nil && baseline.bench != nil && sameWorkload(current, baseline) {
+			if check, ok := optimizationcampaign.CheckGuards(row, *baseline.bench, baseline.run.ID); ok {
+				for _, guard := range check.Guards {
+					result.Guards = append(result.Guards, reportGuard(guard, check.Basis))
+				}
+			}
+		}
 		if result.Role != "baseline" && result.Role != "baseline_kept" && baseline != nil && current.measured != nil && current.measured.Control.CandidateID == baseline.run.ID {
 			for _, regression := range optimizationcampaign.MeasuredRegressions(current.measured) {
 				result.Regressions = append(result.Regressions, Comparison{Metric: regression.Metric, ChangePercent: regression.Delta * 100, NoiseFloorPercent: regression.NoiseFloor * 100, Decision: DecisionRegressed, Basis: regression.Basis})
@@ -1053,6 +1109,37 @@ func candidateResults(campaign domain.OptimizationCampaign, objective string, ba
 			result.Reason = "not measured alongside the baseline" + controlReason(current.measured)
 		}
 		out = append(out, result)
+	}
+	return out
+}
+
+// reportGuard states a campaign guard in the report's units.
+func reportGuard(guard optimizationcampaign.Guard, basis string) Guard {
+	result := Guard{Code: guard.Code, Metric: guard.Metric, Baseline: guard.Control, Value: guard.Candidate, Basis: basis, Reason: guard.Reason}
+	if guard.Metric == optimizationcampaign.GuardMetricErrorRate {
+		result.Metric, result.Baseline, result.Value = "error_rate_percent", 100*guard.Control, 100*guard.Candidate
+	}
+	return result
+}
+
+// warnings name each setup a guard holds back. A chosen setup with a guard
+// was ranked before the guards existed; its gain may come from the failures
+// or the shorter answers, so the report says so.
+func warnings(candidates []CandidateResult) []string {
+	out := []string{}
+	for _, candidate := range candidates {
+		if len(candidate.Guards) == 0 {
+			continue
+		}
+		reasons := make([]string, 0, len(candidate.Guards))
+		for _, guard := range candidate.Guards {
+			reasons = append(reasons, guard.Reason)
+		}
+		if candidate.Role == "winner" {
+			out = append(out, "“"+candidate.Label+"”, the chosen setup, "+strings.Join(reasons, " · ")+". Part of its gain may come from that.")
+			continue
+		}
+		out = append(out, "“"+candidate.Label+"” was held back: "+strings.Join(reasons, " · ")+".")
 	}
 	return out
 }
@@ -1409,6 +1496,9 @@ func unknownFields(report Report) []string {
 		unknown = append(unknown, "monthly")
 	} else if report.Monthly.Decision == DecisionUnknown {
 		unknown = append(unknown, "monthly.change")
+	}
+	if report.Monthly.Basis != BasisUnknown && report.Monthly.CaptureCutOff == nil {
+		unknown = append(unknown, "monthly.capture_cut_off")
 	}
 	if report.Bottleneck.State == BasisUnknown {
 		unknown = append(unknown, "bottleneck")

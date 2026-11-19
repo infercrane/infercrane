@@ -26,7 +26,9 @@ func (s *Store) CaptureReplayTrace(ctx context.Context, tenant, deploymentName s
 	}
 	end := time.Now().UTC()
 	start := end.Add(-window)
-	rows, err := s.QueryContext(ctx, `SELECT started_at,latency_ms,input_tokens,output_tokens,operation_name,streaming,COALESCE(session_id_hash,''),COALESCE(parent_session_id_hash,''),COALESCE(shared_prefix_hash,''),tool_pause_ms FROM request_records WHERE tenant_id=? AND deployment_id=? AND started_at>=? AND started_at<=? ORDER BY started_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, start, end, limit)
+	// One row past the limit says whether the window held more requests than
+	// were kept. The query is newest first, so the extra row is the oldest.
+	rows, err := s.QueryContext(ctx, `SELECT started_at,latency_ms,input_tokens,output_tokens,operation_name,streaming,COALESCE(session_id_hash,''),COALESCE(parent_session_id_hash,''),COALESCE(shared_prefix_hash,''),tool_pause_ms FROM request_records WHERE tenant_id=? AND deployment_id=? AND started_at>=? AND started_at<=? ORDER BY started_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, start, end, limit+1)
 	if err != nil {
 		return domain.ReplayTrace{}, err
 	}
@@ -44,50 +46,61 @@ func (s *Store) CaptureReplayTrace(ctx context.Context, tenant, deploymentName s
 	if err = rows.Err(); err != nil {
 		return domain.ReplayTrace{}, err
 	}
+	limitReached := len(observations) > limit
+	if limitReached {
+		observations = observations[:limit]
+	}
 	trace, err := replay.Build(resolved.Deployment.ID, deploymentName, resolved.Deployment.ActiveRevisionID, start, end, observations)
 	if err != nil {
 		return trace, err
 	}
+	trace.RequestLimitReached = &limitReached
 	trace.ID, err = newID()
 	if err != nil {
 		return trace, err
 	}
 	stamp := now()
-	_, err = s.ExecContext(ctx, `INSERT INTO replay_traces(id,tenant_id,deployment_id,deployment_name,revision_id,schema_version,window_start,window_end,request_count,shape_json,summary_json,shape_digest,created_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?)`, trace.ID, tenant, trace.DeploymentID, trace.DeploymentName, null(trace.RevisionID), trace.SchemaVersion, trace.WindowStart, trace.WindowEnd, trace.RequestCount, trace.ShapeJSON, trace.SummaryJSON, trace.ShapeDigest, stamp)
+	_, err = s.ExecContext(ctx, `INSERT INTO replay_traces(id,tenant_id,deployment_id,deployment_name,revision_id,schema_version,window_start,window_end,request_count,shape_json,summary_json,shape_digest,created_at,request_limit_reached) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?)`, trace.ID, tenant, trace.DeploymentID, trace.DeploymentName, null(trace.RevisionID), trace.SchemaVersion, trace.WindowStart, trace.WindowEnd, trace.RequestCount, trace.ShapeJSON, trace.SummaryJSON, trace.ShapeDigest, stamp, limitReached)
 	trace.TenantID = tenant
 	trace.CreatedAt = parseTime(stamp)
 	return trace, err
 }
 
-func (s *Store) ReplayTrace(ctx context.Context, tenant, id string) (domain.ReplayTrace, error) {
-	var row domain.ReplayTrace
+// replayTraceColumns are read by scanReplayTrace, in its order.
+const replayTraceColumns = `id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at,request_limit_reached`
+
+func scanReplayTrace(row interface{ Scan(...any) error }) (domain.ReplayTrace, error) {
+	var trace domain.ReplayTrace
 	var start, end, created string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at FROM replay_traces WHERE tenant_id=? AND id=?`, tenant, id).Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.SchemaVersion, &start, &end, &row.RequestCount, &row.ShapeJSON, &row.SummaryJSON, &row.ShapeDigest, &created)
+	var limitReached sql.NullBool
+	if err := row.Scan(&trace.ID, &trace.TenantID, &trace.DeploymentID, &trace.DeploymentName, &trace.RevisionID, &trace.SchemaVersion, &start, &end, &trace.RequestCount, &trace.ShapeJSON, &trace.SummaryJSON, &trace.ShapeDigest, &created, &limitReached); err != nil {
+		return trace, err
+	}
+	trace.WindowStart, trace.WindowEnd, trace.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
+	if limitReached.Valid {
+		reached := limitReached.Bool
+		trace.RequestLimitReached = &reached
+	}
+	return trace, nil
+}
+
+func (s *Store) ReplayTrace(ctx context.Context, tenant, id string) (domain.ReplayTrace, error) {
+	row, err := scanReplayTrace(s.QueryRowContext(ctx, `SELECT `+replayTraceColumns+` FROM replay_traces WHERE tenant_id=? AND id=?`, tenant, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
-	if err != nil {
-		return row, err
-	}
-	row.WindowStart, row.WindowEnd, row.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
-	return row, nil
+	return row, err
 }
 
 // ReplayTraceByDigest resolves the content-free trace a customer-observed
 // workload fingerprint names. Identical captures share one digest, so the most
 // recent row is as good as any; the lookup never crosses tenants.
 func (s *Store) ReplayTraceByDigest(ctx context.Context, tenant, shapeDigest string) (domain.ReplayTrace, error) {
-	var row domain.ReplayTrace
-	var start, end, created string
-	err := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at FROM replay_traces WHERE tenant_id=? AND shape_digest=? ORDER BY created_at DESC, id LIMIT 1`, tenant, shapeDigest).Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.SchemaVersion, &start, &end, &row.RequestCount, &row.ShapeJSON, &row.SummaryJSON, &row.ShapeDigest, &created)
+	row, err := scanReplayTrace(s.QueryRowContext(ctx, `SELECT `+replayTraceColumns+` FROM replay_traces WHERE tenant_id=? AND shape_digest=? ORDER BY created_at DESC, id LIMIT 1`, tenant, shapeDigest))
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
-	if err != nil {
-		return row, err
-	}
-	row.WindowStart, row.WindowEnd, row.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
-	return row, nil
+	return row, err
 }
 
 func (s *Store) ReplayTraces(ctx context.Context, tenant, deploymentName string, limit int) ([]domain.ReplayTrace, error) {
@@ -98,19 +111,17 @@ func (s *Store) ReplayTraces(ctx context.Context, tenant, deploymentName string,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at FROM replay_traces WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, limit)
+	rows, err := s.QueryContext(ctx, `SELECT `+replayTraceColumns+` FROM replay_traces WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := make([]domain.ReplayTrace, 0)
 	for rows.Next() {
-		var row domain.ReplayTrace
-		var start, end, created string
-		if err = rows.Scan(&row.ID, &row.TenantID, &row.DeploymentID, &row.DeploymentName, &row.RevisionID, &row.SchemaVersion, &start, &end, &row.RequestCount, &row.ShapeJSON, &row.SummaryJSON, &row.ShapeDigest, &created); err != nil {
-			return nil, err
+		row, scanErr := scanReplayTrace(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		row.WindowStart, row.WindowEnd, row.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
 		out = append(out, row)
 	}
 	return out, rows.Err()

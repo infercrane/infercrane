@@ -73,6 +73,29 @@ func TestReplayCacheCapacityFinOpsAndAutopilotPersistence(t *testing.T) {
 	if _, err = s.ReplayTraceByDigest(ctx, "other", trace.ShapeDigest); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("cross tenant replay digest err=%v", err)
 	}
+	if trace.RequestLimitReached == nil || *trace.RequestLimitReached || loaded.RequestLimitReached == nil || *loaded.RequestLimitReached {
+		t.Fatalf("a capture that kept every request was not recorded as such: captured=%v loaded=%v", trace.RequestLimitReached, loaded.RequestLimitReached)
+	}
+	// A second request makes the window hold more than a one-request limit:
+	// the capture keeps the newest and records that it was cut off.
+	if err = s.RecordRequest(ctx, domain.InferenceRecord{RequestID: "request-newer-" + suffix, TenantID: "global", DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, StartedAt: started.Add(30 * time.Second), StatusCode: 200, LatencyMS: 100, InputTokens: &in, OutputTokens: &out, OperationName: "chat", Streaming: true}); err != nil {
+		t.Fatal(err)
+	}
+	cut, err := s.CaptureReplayTrace(ctx, "global", name, time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cutLoaded, err := s.ReplayTraceByDigest(ctx, "global", cut.ShapeDigest)
+	if err != nil || cut.RequestCount != 1 || strings.Contains(cut.ShapeJSON, "session-hash") || cut.RequestLimitReached == nil || !*cut.RequestLimitReached || cutLoaded.RequestLimitReached == nil || !*cutLoaded.RequestLimitReached {
+		t.Fatalf("a capture cut off at its limit: captured=%#v loaded=%v err=%v", cut, cutLoaded.RequestLimitReached, err)
+	}
+	// A trace captured before the column existed reads as unknown.
+	if _, err = s.ExecContext(ctx, `UPDATE replay_traces SET request_limit_reached=NULL WHERE id=?`, cut.ID); err != nil {
+		t.Fatal(err)
+	}
+	if older, olderErr := s.ReplayTrace(ctx, "global", cut.ID); olderErr != nil || older.RequestLimitReached != nil {
+		t.Fatalf("an older trace did not read as unknown: %v err=%v", older.RequestLimitReached, olderErr)
+	}
 	now := time.Now().UTC()
 	observation, err := s.RecordArtifactCacheObservation(ctx, "global", domain.ArtifactCacheObservation{ModelArtifactID: artifact.ID, Provider: fixtureProvider, Location: "zone/cache", State: "present", Source: "fixture-api", EvidenceJSON: `{"present":true}`, ObservedAt: now, ExpiresAt: now.Add(time.Minute)})
 	if err != nil || observation.ID == "" {

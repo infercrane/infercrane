@@ -202,8 +202,14 @@ func TestTraceOutputVolumeCountsGenerationOutputOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if volume.GenerationRequests != 3 || volume.OutputTokens != 100 || volume.Missing != 1 {
+	if volume.GenerationRequests != 3 || volume.OutputTokens != 100 || volume.Missing != 1 || volume.KeptSpanSeconds != 0 {
 		t.Fatalf("volume = %+v", volume)
+	}
+	// The kept span runs from the first to the last arrival of any
+	// operation, whatever order the shape lists them in.
+	spanned := domain.ReplayTrace{ShapeJSON: `[{"operation":"chat","arrival_ms":90000,"output_tokens":40},{"operation":"embeddings","arrival_ms":1500},{"operation":"chat","arrival_ms":61500,"output_tokens":60}]`}
+	if volume, err = TraceOutputVolume(spanned); err != nil || volume.KeptSpanSeconds != 88.5 {
+		t.Fatalf("span volume = %+v err=%v", volume, err)
 	}
 	if _, err = TraceOutputVolume(domain.ReplayTrace{ShapeJSON: "{"}); err == nil {
 		t.Fatal("a malformed shape was read as an empty trace")

@@ -53,6 +53,7 @@ dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;overflow-wrap:anywhere}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 footer{color:var(--muted);font-size:12.5px;margin-top:32px}
+.warning{color:var(--watch);background:var(--watch-bg);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:-12px 0 16px}
 </style>
 </head>
 <body>
@@ -60,7 +61,8 @@ footer{color:var(--muted);font-size:12.5px;margin-top:32px}
 <main>
 <p class="eyebrow">{{.Title}} · {{.Subtitle}}</p>
 <h1>{{.Headline}}</h1>
-
+{{range .Warnings}}<p class="warning" role="note">{{.}}</p>
+{{end}}
 <section aria-label="Outcomes" class="cards">
 {{range .Rows}}<div class="card">
 <div class="label">{{.Label}}</div>

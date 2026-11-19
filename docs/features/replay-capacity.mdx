@@ -13,6 +13,12 @@ identifiers. A trace records its window, sample count, schema, canonical digest,
 infercrane replay coder-production --window 24h --max-requests 1000
 ```
 
+A capture keeps at most `--max-requests` requests, newest first. When the window held more, the
+trace sets `request_limit_reached` to `true`: its requests cover less time than the window. It is
+`false` when every request in the window was kept, and `null` for a trace captured before this was
+recorded. An optimization report uses it to project monthly cost over the time the kept requests
+cover.
+
 This command only captures persisted observations. It sends no workload and creates no infrastructure.
 To approximate the captured mean token sizes and peak concurrency with AIPerf, opt in explicitly:
 

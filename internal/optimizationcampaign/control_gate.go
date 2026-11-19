@@ -35,6 +35,10 @@ type controlGate struct {
 	reasons     map[string]string
 	codes       map[string]string
 	assessments map[string]ControlAssessment
+	// guards holds each comparable candidate's check against a measured
+	// control; held marks a candidate a fired guard kept from selection.
+	guards map[string]GuardCheck
+	held   map[string]bool
 }
 
 type rankingWorkload struct {
@@ -50,12 +54,15 @@ type rankingCost struct {
 
 // applyControlGate selects the best eligible candidate that measurably beats
 // the control on the objective metric, or the control when none does. Lab's
-// choice stands unchanged only when no eligible control was measured.
-// Candidates inside the noise floor, or never shown to beat the control, are
-// reported as no measurable difference. The control's role comes from the
-// proposal, but a candidate displaces it only on evidence.
+// choice stands only when no eligible control was measured. Candidates inside
+// the noise floor, or never shown to beat the control, are reported as no
+// measurable difference. The control's role comes from the proposal, but a
+// candidate displaces it only on evidence. Whenever the control was measured,
+// a candidate that failed more requests or answered shorter is never selected
+// (see CheckGuards): such a gain may come from the failures or the shorter
+// answers themselves.
 func applyControlGate(campaign domain.OptimizationCampaign, objective string, rows []lab.Candidate, evidenceToCandidate map[string]string, benchmarks map[string]domain.BenchmarkResult, labSelected string) controlGate {
-	gate := controlGate{selected: labSelected, reasons: map[string]string{}, codes: map[string]string{}, assessments: map[string]ControlAssessment{}}
+	gate := controlGate{selected: labSelected, reasons: map[string]string{}, codes: map[string]string{}, assessments: map[string]ControlAssessment{}, guards: map[string]GuardCheck{}, held: map[string]bool{}}
 	metric, higherBetter, costScaled := objectiveMetric(objective)
 	control, hasControl := CampaignControl(campaign)
 	byCandidate := map[string]lab.Candidate{}
@@ -67,15 +74,41 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 	for _, row := range rows {
 		candidateID := evidenceToCandidate[row.EvidenceID]
 		gate.assessments[candidateID] = assessAgainstControl(candidateID, row, control.ID, controlRow, controlMeasured, metric, higherBetter, costScaled, benchmarks)
+		// Only rows Lab found comparable measured the control's workload.
+		if controlMeasured && candidateID != control.ID && row.Comparable && controlRow.Comparable {
+			if check, ok := CheckGuards(benchmarks[row.EvidenceID], benchmarks[controlRow.EvidenceID], control.ID); ok {
+				gate.guards[candidateID] = check
+			}
+		}
 	}
 	if labSelected == "" {
 		// Nothing is selected, so Lab's comparability and constraint reasons
-		// stand; the assessments are still persisted for audit.
+		// stand; the assessments and guard checks are still persisted.
 		return gate
 	}
 	if !controlMeasured || !eligible(controlRow) {
-		if controlMeasured && labSelected != control.ID {
-			gate.reasons[labSelected] = "best measured exact-workload candidate; the control does not satisfy the requested constraints, so no performance gain over it is claimed"
+		if !controlMeasured || labSelected == control.ID {
+			return gate
+		}
+		// The control misses the constraints, so the best eligible candidate
+		// is chosen without a gain over it. It still may not have failed more
+		// requests or answered shorter than the control.
+		gate.selected = ""
+		for _, row := range rows {
+			candidateID := evidenceToCandidate[row.EvidenceID]
+			if candidateID == control.ID || !eligible(row) {
+				continue
+			}
+			if fired := gate.guards[candidateID].Guards; len(fired) > 0 {
+				gate.hold(candidateID, fired, "")
+				continue
+			}
+			if gate.selected == "" {
+				gate.selected = candidateID
+			}
+		}
+		if gate.selected != "" {
+			gate.reasons[gate.selected] = "best measured exact-workload candidate; the control does not satisfy the requested constraints, so no performance gain over it is claimed"
 		}
 		return gate
 	}
@@ -87,7 +120,7 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 	gate.selected = control.ID
 	for _, row := range rows {
 		candidateID := evidenceToCandidate[row.EvidenceID]
-		if candidateID != control.ID && eligible(row) && gate.assessments[candidateID].Decision == DecisionImproved {
+		if candidateID != control.ID && eligible(row) && gate.assessments[candidateID].Decision == DecisionImproved && len(gate.guards[candidateID].Guards) == 0 {
 			gate.selected = candidateID
 			break
 		}
@@ -105,12 +138,17 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 		switch {
 		case candidateID == gate.selected && candidateID == control.ID:
 			gate.reasons[candidateID] = "control kept: no candidate beat it by more than the measurement noise"
+			if gate.heldWinner(rows, evidenceToCandidate) {
+				gate.reasons[candidateID] = "control kept: no candidate beat it by more than the measurement noise without failing more requests or answering shorter"
+			}
 		case candidateID == gate.selected:
 			gate.reasons[candidateID] = "measurably better than the control: " + assessment.Reason
 		case !eligible(row):
 			// Lab's constraint or comparability reason stands.
 		case candidateID == control.ID:
 			gate.reasons[candidateID] = "a candidate measurably beat the control"
+		case len(gate.guards[candidateID].Guards) > 0:
+			gate.hold(candidateID, gate.guards[candidateID].Guards, assessment.Reason)
 		case assessment.Decision == DecisionImproved:
 			gate.reasons[candidateID] = "measurably better than the control, but a better-ranked candidate also was: " + assessment.Reason
 		case assessment.Decision == DecisionRegressed:
@@ -128,6 +166,31 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective string, ro
 		}
 	}
 	return gate
+}
+
+// hold keeps a candidate from selection because a guard fired. The first
+// guard names the code; the reason lists every guard and, when known, the
+// objective result the candidate would otherwise have been judged on.
+func (gate controlGate) hold(candidateID string, fired []Guard, objective string) {
+	gate.held[candidateID] = true
+	gate.codes[candidateID] = fired[0].Code
+	reason := "held back whatever it gained: " + DescribeGuards(fired)
+	if objective != "" {
+		reason += "; on the objective, " + objective
+	}
+	gate.reasons[candidateID] = reason
+}
+
+// heldWinner reports an eligible candidate that measurably beat the control
+// on the objective but was held back by a guard.
+func (gate controlGate) heldWinner(rows []lab.Candidate, evidenceToCandidate map[string]string) bool {
+	for _, row := range rows {
+		candidateID := evidenceToCandidate[row.EvidenceID]
+		if eligible(row) && gate.assessments[candidateID].Decision == DecisionImproved && len(gate.guards[candidateID].Guards) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // eligible mirrors Lab's selection rule: comparable, with an objective value,
@@ -274,6 +337,10 @@ type annotatedRow struct {
 	// publisher_declared when the source revision is unknown.
 	ArtifactLineage string `json:"artifact_lineage,omitempty"`
 	ControlAssessment
+	// GuardCheck compares the row's failed requests and answer length with
+	// the measured control's; absent for the control and when either side
+	// has no measured requests.
+	GuardCheck *GuardCheck `json:"guard_check,omitempty"`
 }
 
 // annotateEvaluation persists the gate beside Lab's rows. Selection follows
@@ -287,7 +354,11 @@ func annotateEvaluation(evaluation domain.LabEvaluation, rows []lab.Candidate, e
 		if reason := reasons[candidateID]; reason != "" && row.Comparable {
 			row.SelectionReason = reason
 		}
-		annotated = append(annotated, annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ArtifactLineage: derivedLineage[candidateID], ControlAssessment: gate.assessments[candidateID]})
+		entry := annotatedRow{Candidate: row, CandidateID: candidateID, CampaignDecision: decisions[candidateID], ArtifactLineage: derivedLineage[candidateID], ControlAssessment: gate.assessments[candidateID]}
+		if check, found := gate.guards[candidateID]; found {
+			entry.GuardCheck = &check
+		}
+		annotated = append(annotated, entry)
 	}
 	encoded, err := json.Marshal(annotated)
 	if err != nil {

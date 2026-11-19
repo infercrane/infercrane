@@ -531,6 +531,19 @@ WATCH band. The monthly projection assumes servers stay busy, so idle capacity
 is not included. It is only made for a run that replayed your traffic, and only when every
 replayed request recorded its output tokens.
 
+A capture keeps at most its request limit, newest first. When it reached the limit, its requests
+arrived in less time than the capture window, so the projection divides their volume by the time from
+the first to the last kept request instead. The report says so under how it was measured and sets
+`monthly.capture_cut_off`. A capture made before this was recorded has `capture_cut_off: null`: the
+projection then uses the whole window, and the report lists `monthly.capture_cut_off` as unknown,
+because the projection is too low if that capture was cut off.
+
+Every setup measured also shows the share of its requests that failed (`error_rate_percent`) and the
+mean output tokens of a successful request (`output_tokens_per_request`), from its own runs. Either is
+`null` when the runs did not record it. A setup that failed more requests or answered shorter than
+your current setup lists why under `guards`, and the report adds a line to `warnings`, shown under
+the headline.
+
 The answer-quality outcome is named after the check that produced it: `Answer quality · InferCrane
 answer check` for the built-in check, or `Answer quality · ` and the eval suite's name for your own
 eval. The full suite identity, with its version and content digest, is listed under the evidence.
@@ -894,12 +907,33 @@ the candidate's 95% interval half-width, both relative to their means. A candida
 inside it shows no measurable difference. The workload's `measured.comparison` records the control
 mean, spread, candidate mean, delta, floor, and decision for throughput, latency, and goodput.
 
+**Failed requests and answer length.** Latency percentiles count only requests that succeeded, and a
+shorter answer finishes sooner and needs fewer tokens. So a setup could look faster or cheaper by
+failing slow requests or by answering shorter. Each run therefore records its failed requests and the
+mean output tokens of a successful request, by the server's own count, in `measured.runs[]`
+(`failed` and `output_tokens_per_request`). A candidate is never selected, whatever it gained, when:
+
+- the share of its requests that failed is more than one percentage point above the control's, or
+  is 1% or more while the control failed none, or
+- its mean output tokens per request is more than 5% below the control's.
+
+The control's side comes from its runs in the candidate's own window. When the two were not measured
+together, it comes from the control's own runs on the same workload. These checks apply whenever the
+control was measured, also when the control misses the constraints. An answer length a run did not
+record, as in runs measured before it was recorded, is unknown and stops nothing. The persisted
+ranking keeps each candidate's `guard_check`: both sides' requests, failed requests, and answer
+length, and which check fired. Rankings with these checks record algorithm
+`campaign-control-noise-floor-v3`.
+
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
-campaign selects the best of them that measurably beats the control on the objective metric. If none
-does, the control is kept. Each losing candidate is superseded with a code that says why:
+campaign selects the best of them that measurably beats the control on the objective metric and
+passes both checks above. If none does, the control is kept. Each losing candidate is superseded with
+a code that says why:
 
 | Code | Meaning |
 |---|---|
+| `measured_error_rate_regression` | Failed more of its requests than the control, by the rule above. The reason names both shares, for example `failed 3.1% of requests; the current setup failed 0.0%` |
+| `measured_output_length_regression` | Answered more than 5% shorter than the control, for example `answered 18% shorter than the current setup; a speed or cost gain may come from shorter answers` |
 | `measured_candidate_regressed` | Worse than the control by more than the noise floor on the objective, or on throughput, p95 time to first token, or p95 latency in its own window |
 | `measured_no_measurable_difference` | Inside the noise floor on the objective and not measurably worse on any of those outcomes |
 | `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted, and not shown worse |
@@ -909,7 +943,8 @@ A window the control invalidated only by drifting still holds complete, clean ru
 They can show a candidate is worse, with a noise floor no smaller than the drift; they never show it
 is better. The report and `infercrane optimize watch` name the outcomes, for example `throughput got
 worse by 24% (noise ±7.3%)`. If the control itself does not meet the
-constraints, Lab's choice stands and no gain over the control is claimed. Cost efficiency compares output
+constraints, Lab's best candidate that passes both checks is chosen and no gain over the control is
+claimed. If no such candidate passes them, the ones that failed a check are rejected with its code. Cost efficiency compares output
 throughput per sourced hourly cost. A candidate that could not be measured beside a serving control is
 compared through both arms' 95% intervals, which is weaker evidence because the arms ran at
 different times; overlapping intervals are no measurable difference. The persisted Lab evaluation
