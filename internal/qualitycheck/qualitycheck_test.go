@@ -71,6 +71,7 @@ func TestAgreementIgnoresFormattingAndReasoning(t *testing.T) {
 		{"Tokyo", "tokyo", 1},
 		{"<think>add them</think>843", "843", 1},
 		{"<think>unterminated", "", 1},
+		{"the template opened this reasoning</think>843", "843", 1},
 		{"Paris", "Paris, France", 2.0 / 3.0},
 		{"42", "41", 0},
 		{"", "something", 0},
@@ -198,15 +199,59 @@ func TestHTTPCompleterSendsGreedyBoundedRequest(t *testing.T) {
 	if messages, _ := seen["messages"].([]any); len(messages) != 2 {
 		t.Fatalf("messages = %v", seen["messages"])
 	}
+	if kwargs, _ := seen["chat_template_kwargs"].(map[string]any); kwargs["enable_thinking"] != false {
+		t.Fatalf("chat_template_kwargs = %v, want reasoning turned off", seen["chat_template_kwargs"])
+	}
+}
+
+func TestHTTPCompleterReturnsNoTextWhenOnlyReasoningCameBack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"reasoning_content":"Let me add 487"},"finish_reason":"length"}]}`))
+	}))
+	defer server.Close()
+	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, RevisionID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"})
+	if err != nil || answer != "" {
+		t.Fatalf("answer = %q, %v; want no text and no error", answer, err)
+	}
+}
+
+func TestCompareStopsWhenTheReferenceGivesNoAnswerText(t *testing.T) {
+	set := testSet(t)
+	completer := &scriptedCompleter{answers: map[string]map[string]string{
+		"ref":  {"a": "843", "b": "<think>still adding", "c": "", "d": "4"},
+		"cand": {"a": "843", "b": "<think>still adding", "c": "", "d": "4"},
+	}}
+	_, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "cand"}, nil)
+	if !errors.Is(err, ErrReferenceUnanswered) {
+		t.Fatalf("err = %v, want ErrReferenceUnanswered", err)
+	}
+	if !strings.Contains(err.Error(), "2 of 4 prompts within 64 tokens (b, c)") {
+		t.Fatalf("err = %v, want the unanswered prompts named", err)
+	}
+	// Once the check cannot pass, only the reference is asked.
+	if strings.Join(completer.calls, ",") != "ref/a,cand/a,ref/b,ref/c,ref/d" {
+		t.Fatalf("calls = %v", completer.calls)
+	}
+}
+
+func TestCompareAgainstItselfNeedsAnswerText(t *testing.T) {
+	set := testSet(t)
+	completer := &scriptedCompleter{answers: map[string]map[string]string{"ref": {"a": "", "b": "", "c": "", "d": ""}}}
+	if _, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "ref"}, nil); !errors.Is(err, ErrReferenceUnanswered) {
+		t.Fatalf("err = %v, want ErrReferenceUnanswered", err)
+	}
+}
+
+func TestPromptListNamesFiveAndCountsTheRest(t *testing.T) {
+	if got := promptList([]string{"a", "b", "c", "d", "e", "f", "g"}); got != "a, b, c, d, e and 2 more" {
+		t.Fatalf("promptList = %q", got)
+	}
 }
 
 func TestHTTPCompleterRejectsErrorsAndEmptyAnswers(t *testing.T) {
 	for name, handler := range map[string]http.HandlerFunc{
 		"status":   func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "busy", http.StatusServiceUnavailable) },
 		"no reply": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"choices":[]}`)) },
-		"null": func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null}}]}`))
-		},
 		"redirect": func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "http://example.invalid/", http.StatusFound)
 		},

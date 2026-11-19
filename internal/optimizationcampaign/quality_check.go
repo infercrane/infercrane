@@ -18,6 +18,7 @@ import (
 // persisted state to say which one a candidate is in.
 const (
 	FailureQualityReferenceUnavailable = "quality_reference_unavailable"
+	FailureQualityReferenceUnanswered  = "quality_reference_unanswered"
 	FailureQualityRejected             = "quality_gate_rejected"
 	retryQualityEvidencePending        = "optimization_quality_evidence_pending"
 	retryQualityEvalSetPending         = "optimization_quality_eval_set_pending"
@@ -32,6 +33,9 @@ var (
 	// ErrQualityReferenceUnavailable means no serving revision can supply
 	// reference answers, so the candidate's answers cannot be compared.
 	ErrQualityReferenceUnavailable = errors.New("no serving reference revision for the answer check")
+	// ErrQualityReferenceUnanswered means the reference gave no answer text
+	// to some prompts, so there is nothing to compare the candidate with.
+	ErrQualityReferenceUnanswered = qualitycheck.ErrReferenceUnanswered
 )
 
 // QualityChecker produces InferCrane-run quality evidence for one candidate.

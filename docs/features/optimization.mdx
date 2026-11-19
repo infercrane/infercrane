@@ -773,6 +773,9 @@ answers on the same prompts.
 
 The check never passes on missing evidence. When no serving reference exists, for example because
 the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
+When the reference gives no answer text to a prompt within the token limit, for example a reasoning
+model cut off mid-reasoning, the candidate ends `inconclusive` with `quality_reference_unanswered`:
+two answers with no text are not a match.
 When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
 every candidate wait for your own signed evaluation instead, create the campaign with
 `--quality-check customer_evidence`. Each candidate's `quality` object in the campaign API, the run
