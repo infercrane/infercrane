@@ -348,6 +348,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  getEndpointKernelOpportunities(name: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/kernel-opportunities`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getEndpointOptimizationReadiness(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/endpoints/${encodeURIComponent(name)}/optimization-readiness`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;

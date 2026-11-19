@@ -287,6 +287,10 @@ class ControlAPI:
         request_path = f"/endpoints/{quote(name, safe='')}/gpu-profiles/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def get_endpoint_kernel_opportunities(self, name: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/kernel-opportunities"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def get_endpoint_optimization_readiness(self, name: str) -> dict[str, Any]:
         request_path = f"/endpoints/{quote(name, safe='')}/optimization-readiness"
         return cast(dict[str, Any], self._transport.request("GET", request_path))

@@ -108,3 +108,46 @@ func acceleratorLabRunSchemas() map[string]any {
 		}),
 	}
 }
+
+// kernelScreenSchemas documents the endpoint kernel screen: operators from
+// a recorded GPU profile, after the kernel planner's gates. Nothing in it is
+// measured by a lab run, and a ceiling is never a gain.
+func kernelScreenSchemas() map[string]any {
+	text, boolean, integer, number := map[string]any{"type": "string"}, map[string]any{"type": "boolean"}, map[string]any{"type": "integer"}, map[string]any{"type": "number"}
+	timestamp := map[string]any{"type": "string", "format": "date-time"}
+	texts := map[string]any{"type": "array", "items": text}
+	object := func(required []string, properties map[string]any) map[string]any {
+		return map[string]any{"type": "object", "additionalProperties": false, "required": required, "properties": properties}
+	}
+	match := object([]string{"implementation_id", "name", "project", "source_url", "license", "kind", "backend", "status", "compatibility", "revision_policy", "execution_boundary", "priority", "reasons"}, map[string]any{
+		"implementation_id": text, "name": text, "project": text, "source_url": text, "license": text, "kind": text, "backend": text, "status": text,
+		"compatibility": text, "revision_policy": text, "execution_boundary": text, "priority": integer, "reasons": texts,
+	})
+	return map[string]any{
+		"EndpointKernelOpportunities": object([]string{"endpoint", "state", "profile", "hardware", "runtime", "source", "classified_share", "policy", "opportunities", "limitations", "boundary"}, map[string]any{
+			"endpoint": text,
+			"state": map[string]any{"type": "string", "enum": []string{"screened", "accelerator_not_recorded", "no_reviewed_operator", "no_kernel_time"},
+				"description": "screened: the planner's gates ran. accelerator_not_recorded: shares and ceilings only, no template applies. no_reviewed_operator: no kernel matched the reviewed vocabulary. no_kernel_time: the capture holds no kernel time."},
+			"profile": object([]string{"id", "deployment", "revision", "schema_version", "tool", "tool_version", "accelerator", "started_at", "ended_at", "recorded_at"}, map[string]any{
+				"id": text, "deployment": text, "revision": integer, "schema_version": text, "tool": text, "tool_version": text,
+				"accelerator": map[string]any{"type": []string{"string", "null"}}, "started_at": timestamp, "ended_at": timestamp, "recorded_at": timestamp,
+			}),
+			"hardware":         map[string]any{"oneOf": []any{object([]string{"vendor", "accelerator"}, map[string]any{"vendor": text, "accelerator": text}), map[string]any{"type": "null"}}},
+			"runtime":          map[string]any{"type": []string{"string", "null"}, "description": "The serving engine the trace recorded, or null."},
+			"source":           map[string]any{"type": "string", "enum": []string{"trace_top_kernels", "sampled_stacks"}},
+			"classified_share": map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Share of the capture's kernel time the reviewed operator vocabulary attributed."},
+			"policy": object([]string{"min_hotspot_fraction", "min_amdahl_ceiling", "target_end_to_end_speedup"}, map[string]any{
+				"min_hotspot_fraction": number, "min_amdahl_ceiling": number, "target_end_to_end_speedup": number,
+			}),
+			"opportunities": map[string]any{"type": "array", "items": object([]string{"hotspot_id", "kernel", "operator_family", "device_time_fraction", "max_end_to_end_speedup", "required_kernel_speedup", "template", "eligible", "reason", "existing_implementations"}, map[string]any{
+				"hotspot_id": text, "kernel": map[string]any{"type": "string", "description": "The kernel with the most time in this operator family."},
+				"operator_family": text, "device_time_fraction": number,
+				"max_end_to_end_speedup":  map[string]any{"type": "number", "description": "The Amdahl ceiling if the operator took no time. Not a gain."},
+				"required_kernel_speedup": map[string]any{"type": []string{"number", "null"}, "description": "Kernel speedup needed for the end-to-end target; null unless eligible."},
+				"template":                text, "eligible": boolean, "reason": map[string]any{"type": "string", "description": "Why the planner turned the operator down; empty when eligible."},
+				"existing_implementations": map[string]any{"type": "array", "items": match, "description": "Reviewed places to look before writing a kernel, pinned runtime first."},
+			})},
+			"limitations": texts, "boundary": text,
+		}),
+	}
+}

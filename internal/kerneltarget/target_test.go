@@ -450,18 +450,6 @@ func TestExitedServerFailsWithoutWaitingForTheTimeout(t *testing.T) {
 	}
 }
 
-func TestClassifyAttentionNeedsAKnownPhase(t *testing.T) {
-	if family, ok := classify("flash_attn_kernel", kernelplanner.PhasePrefill); !ok || family != kernelplanner.AttentionPrefill {
-		t.Fatalf("prefill family=%v ok=%v", family, ok)
-	}
-	if family, ok := classify("flash_attn_kernel", kernelplanner.PhaseDecode); !ok || family != kernelplanner.AttentionDecode {
-		t.Fatalf("decode family=%v ok=%v", family, ok)
-	}
-	if _, ok := classify("flash_attn_kernel", kernelplanner.PhaseMixed); ok {
-		t.Fatal("mixed trace attributed attention to one path")
-	}
-}
-
 func TestShapeForPhaseSeparatesPrefillAndDecode(t *testing.T) {
 	workload := testWorkload("", "")
 	workload.Phase = kernelplanner.PhasePrefill

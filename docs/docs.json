@@ -155,6 +155,7 @@
             "group": "Evidence and decisions",
             "pages": [
               "features/optimization",
+              "features/custom-kernels",
               "testing/competitive-benchmark-methodology",
               "testing/open-weight-optimization-poc",
               "testing/optimizer-golden-suite",
