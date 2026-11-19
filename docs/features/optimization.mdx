@@ -231,6 +231,7 @@ what to collect, such as serving-engine metrics, before planning again.
 | Trace: ≥ 60% of matrix-multiply time above the ridge (`gpu.compute_bound_gemm`), with the same coverage | FP8 weights | as above |
 | Trace: attention ≥ 35% of kernel time (`gpu.attention_heavy`), on contexts of 7,000 tokens or more | FP8 KV cache | `--kv-cache-dtype fp8` (`fp8_e4m3`) |
 | Writing answers, first tokens on prompts of 1,024 tokens or more, attention or matrix-multiply kernels dominating the profile, or a trace's `gpu.attention_heavy` finding, on a reviewed AMD Instinct GPU (`accelerator.kernels_off_by_default`) | AMD AITER kernels | engine switch `VLLM_ROCM_USE_AITER=1` in `runtime.env` (SGLang's ROCm image already turns AITER on); see [AMD Instinct GPUs](/integrations/amd-instinct#turn-on-aiter-kernels-for-vllm) |
+| Trace: one operator class ≥ 30% of kernel time running below 50% of what the GPU allows for its shapes, with a reviewed lab pack for the GPU's vendor and exact engine version, on recorded traffic, with the kernel lane on (`gpu_trace.kernel_dominant_operator`) | A custom kernel, planned last and run in its own lane | none: the starting setup's flags; see [Custom kernels](/features/custom-kernels) |
 
 Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
 When several rules choose the same change, it keeps its strongest priority plus a small bonus for
@@ -1030,8 +1031,9 @@ the price the setup would be served at.
 A custom kernel is a last resort, never a default. Monitoring can suggest which phase to profile
 (`profile_phase` on the optimization readiness response), but only an exact target-GPU profile and
 the Amdahl gate can open the kernel path, and existing implementations are tried first.
-[Custom kernels](/features/custom-kernels) covers the dashboard flow, an endpoint's opportunities,
-what a verdict proves, and the cost; this section covers the worker.
+A run plans a custom kernel itself, last and only when the trace warrants it; see
+[Custom kernels](/features/custom-kernels). This section covers the worker and the expert path below,
+which starts a lab run from a complete request without a run's plan.
 
 Start a run from a complete Accelerator Lab request, which carries its own spend cap and 24-hour
 expiry:

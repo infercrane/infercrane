@@ -1,174 +1,115 @@
 ---
 title: Custom kernels
-description: See which GPU operators could be faster, try a kernel on your exact GPU under a spend cap, and keep it only if it is correct and measurably faster end to end.
+description: How an optimization run tries a custom GPU kernel last, only when the trace shows one operator the engine runs poorly, and what a kernel has to prove.
 ---
 
-When configuration changes have done what they can, the Accelerator Lab tries faster GPU kernels for
-the operators that take the most time on your endpoint. A kernel counts as a result only when it
-gives the same answers as the kernel it replaces and makes your endpoint measurably faster on your
-own replayed traffic, on the GPU you serve on. Nothing reaches production traffic until
-[Release Guard](/features/release-guard) accepts it and you promote it.
+A custom kernel is the last thing an optimization run tries, never the first. It is part of the run:
+the run plans it next to the setting and precision changes, runs it in its own lane after your one
+approval, and records its verdict with the run's other setups. Nobody starts a kernel run on its own.
 
 <Warning>
-A lab run spends money on your GPU host and, when it writes a kernel, on the language model you
-configured for it. Every run carries a spend cap and an approval that expires within 24 hours. See
-[Cost](#cost) before you start one.
+The kernel lane is off by default and needs an Accelerator Lab worker on a GPU host you control. A
+qualified kernel is recorded but not yet served: serving one needs a runtime image with the kernel
+built in, which InferCrane does not build yet. See [What it does not do yet](#what-it-does-not-do-yet).
 </Warning>
 
-## In the dashboard
+## When a run plans a kernel
 
-Open an endpoint's **Stack** tab and choose **Open** on **Custom kernels**. **Optimize → Custom
-kernels** lists every kernel run in the workspace.
+The run plans a custom-kernel setup only when every condition holds. Each one reads measured evidence;
+a value nobody measured is unknown, and unknown never plans a kernel.
 
-1. **Where GPU time goes.** The screen reads the endpoint's newest
-   [GPU profile](/features/gpu-profiling) and lists each operator with its share of kernel time and
-   the ceiling if it took no time at all, for example "at most ×1.23". The ceiling is not a gain.
-2. **Start a kernel run.** InferCrane fills in what it knows: the model and its commit, the engine,
-   the GPU, the optimization run whose setup the kernel would improve, and that run's workload. You add
-   what only your lab host holds: the runtime image digest, and the replay and quality-suite files the
-   worker reads, each named `NAME@sha256:DIGEST`.
-3. **Approve the spend.** Set the cap and how long the approval lasts (at most 24 hours). Nothing runs
-   before you approve. Letting the lab write a kernel when no reviewed one exists is off by default;
-   with **Advanced** on, the form offers it.
-4. **Watch it run.** The screen refreshes while the run moves through profile, search, build, and
-   measure; **Watch** opens the run's operation with its stages and spend so far.
-5. **Read the verdicts.** Each experiment is Qualified, Rejected, Inconclusive, or Not tried, with the
-   correctness checks it passed or failed, its kernel timing, and, only when serving replay measured
-   it, the end-to-end change.
-
-## Find opportunities
-
-```bash Read an endpoint's kernel opportunities
-curl -fsS "$INFERCRANE_URL/api/v1/endpoints/coder-production/kernel-opportunities" \
-  -H "Authorization: Bearer $INFERCRANE_API_KEY"
-```
-
-The viewer role is enough. The read runs nothing and spends nothing. It takes the newest GPU profile
-of the endpoint's active revision and:
-
-- names each kernel's operator family with the same reviewed vocabulary the lab's own profiler uses.
-  A kernel outside that vocabulary stays in the total and is never an opportunity;
-- sums kernel time per family over all kernel time in the capture. For a trace capture
-  (`source: trace_top_kernels`) only the kernels the trace analysis lists by name are attributed. A
-  sampled capture (`sampled_stacks`) records no serving phase, so attention kernels are left out;
-- applies the kernel planner's own gates. An operator is worth a run (`eligible: true`) only when it
-  holds at least 5% of kernel time, its ceiling reaches ×1.05, and the 2% end-to-end target is
-  reachable below that ceiling. Otherwise `reason` says which gate turned it down;
-- lists reviewed places to look before writing anything, the pinned runtime's own kernel first. The
-  capture does not record the GPU's compute capability, so libraries that need one are not listed.
-
-`max_end_to_end_speedup` is the Amdahl ceiling, 1 / (1 − share). `required_kernel_speedup` is how much
-faster the kernel itself must be to reach the target. Neither is a measurement or a prediction.
-
-| `state` | Meaning |
+| Condition | Read from |
 |---|---|
-| `screened` | The gates ran. |
-| `accelerator_not_recorded` | Shares and ceilings only: without the GPU, no reviewed kernel template applies. |
-| `no_reviewed_operator` | No kernel matched the reviewed vocabulary. |
-| `no_kernel_time` | The capture holds no kernel time. |
+| One operator class holds at least 30% of kernel time | the endpoint's newest [GPU trace](/features/gpu-profiling#operator-efficiency): attention, mixture-of-experts expert matrix multiplies, expert routing, or normalization |
+| The engine's own kernel for it runs below 50% of what the GPU allows for its shapes | the trace's operator efficiency, which needs recorded shapes for at least half of that operator's time |
+| No setting change in the same plan already changes that operator's kernels | FP8 weights change expert matrix multiplies, an FP8 KV cache changes attention, AMD AITER changes all four |
+| The lab has a reviewed kernel pack for that operator on the GPU's vendor and the starting setup's exact engine version | the reviewed packs below |
+| The run replays your recorded traffic | the run's traffic; a public sample or test profile plans no kernel |
+| This control plane runs kernel lanes | `INFERCRANE_OPTIMIZATION_KERNEL_LANE` |
 
-A missing capture is `404 gpu_profile_not_found`. Capture one with `infercrane profile`; see
-[GPU profiling](/features/gpu-profiling).
+The plan says why in one sentence, for example "Normalization took 41% of kernel time and ran at 32%
+of what this GPU allows for its shapes". When a condition fails, the plan lists the kernel as skipped
+and names the condition. The rule is `gpu_trace.kernel_dominant_operator` in
+[rules from a GPU trace](/features/optimization#rules-from-a-gpu-trace).
 
-## Start a run
+Reviewed packs today:
 
-A run needs an [Accelerator Lab worker](/features/optimization#generate-a-custom-kernel) on a GPU host
-you control. `GET /api/v1/optimization/accelerator-lab/capabilities` reports `configured: true` once
-the control plane can reach one. Starting a run needs the operator role.
+| Operator | Kernel | Vendor | Engine |
+|---|---|---|---|
+| Normalization | fused residual-add + RMSNorm, Triton | NVIDIA | vLLM 0.22.1 |
 
-```bash Start a kernel run
-infercrane optimize kernel-run --file request.json
-```
+With one pack, a kernel is rarely planned. That is intended: matrix multiplies, attention, and
+mixture-of-experts kernels need their own reviewed packs first.
 
-The dashboard and the CLI send the same request to `POST /api/v1/optimization/accelerator-lab/runs`:
+## What the kernel lane does
 
-```json request.json
-{
-  "schema_version": "infercrane.accelerator-lab-request/v1",
-  "campaign_id": "OPTIMIZATION_RUN_ID",
-  "candidate_id": "SETUP_ID",
-  "model": { "repository": "Qwen/Qwen3-8B", "revision": "40_TO_64_HEX_COMMIT" },
-  "runtime": { "name": "vllm", "version": "0.22.1", "image_digest": "sha256:RUNTIME_IMAGE" },
-  "hardware": { "vendor": "nvidia", "accelerator": "H100" },
-  "topology": { "mode": "aggregated", "nodes": 1, "accelerators": 1, "tensor_parallel": 1, "pipeline_parallel": 1, "expert_parallel": 1 },
-  "workload": {
-    "digest": "sha256:WORKLOAD", "modality": "text", "phase": "decode",
-    "batch_size": 8, "concurrency": 8, "input_tokens": 1024, "output_tokens": 256,
-    "quality_suite": "answers@sha256:QUALITY_SUITE_FILE", "replay": "traffic@sha256:REPLAY_FILE"
-  },
-  "policy": {
-    "max_cost_usd": 40, "authorized_until": "2026-11-20T12:00:00Z",
-    "require_hidden_shapes": true, "require_sanitizer": true,
-    "require_serving_replay": true, "require_quality": true,
-    "allow_generated_kernels": false
-  },
-  "sources": []
-}
-```
+After you approve the run, the setting changes race as usual and report when they are ready. They
+never wait for the kernel. In parallel, the kernel lane:
 
-`workload.digest` is the workload the optimization run was bound to. `replay` and `quality_suite` name
-files in the worker's `INFERCRANE_KERNEL_REPLAY_DIR` by content digest; the worker checks each file's
-digest before it uses it. The control plane refuses a request whose approval has expired or ends more
-than 24 hours ahead, whose model commit or image is not pinned, or that names a vendor, runtime, or
-modality no registered worker adapter covers. The same request is queued once: its digest is the
-idempotency key.
+1. **Builds.** Publishes your recorded traffic and the answer-check prompts to the lab worker, then has
+   the lab profile the starting setup on the target GPU, write or adapt a kernel for the operator from
+   the reviewed pack, and build it in an isolated Brezel sandbox.
+2. **Checks correctness.** Against the engine's own kernel on a hidden suite: shape sweeps, edge-case
+   and unusual shapes, value distributions that defeat shortcuts, determinism, and a memory and race
+   sanitizer.
+3. **Measures.** A microbenchmark against the engine's own kernel, then your traffic replayed as
+   control, candidate, control on the same GPU, with the answer check. The kernel must be at least
+   ×1.01 faster on its own and reach a 2% end-to-end gain.
 
-## What a run does
+In the run, the kernel setup reads as provisioning while it builds and checks, and measuring while it
+is measured. Each kernel is pinned to the exact engine version and image it was measured with. A
+change of engine means qualifying it again or turning it off.
 
-1. **Profile.** Captures a baseline on the target GPU with the exact image and workload. The run plans
-   from this capture, not from the endpoint's GPU profile.
-2. **Search.** Plans at most `max_candidates` experiments (3 by default) from that profile, with the
-   same gates as above. Existing implementations come first.
-3. **Write, if allowed.** With `allow_generated_kernels`, an operator with no approved source gets one
-   generated draft, screened in a no-network container against a hidden test suite before any GPU
-   time. See [Generate a custom kernel](/features/optimization#generate-a-custom-kernel).
-4. **Build.** Builds the source in an isolated Brezel sandbox and records content digests.
-5. **Measure.** On the target GPU: reference correctness, held-out shapes, a memory and race
-   sanitizer, the kernel's own timing against the runtime's kernel, then your traffic replayed as
-   control, candidate, control with the quality suite. More than 5% drift between the two control
-   arms invalidates the replay.
+## What a verdict means
 
-## What a verdict proves
-
-| Verdict | What it means |
+| Verdict | Meaning |
 |---|---|
-| **Qualified** | Every gate passed: correct on every check, faster than the existing kernel by at least ×1.01, the replay measured at least the 2% end-to-end target, memory grew no more than `max_memory_regression_percent` (0 by default), and the quality suite passed. The fastest qualified experiment is the run's winner. |
-| **Rejected** | It ran and failed a gate. The reasons name which one: correctness, held-out shapes, sanitizer, kernel speed, missing replay, the end-to-end target, memory, or quality. |
-| **Inconclusive** | Generation or measurement failed, so nothing was decided. |
-| **Not tried** | No approved source and no generation. |
+| Qualified on the lab GPU | Every gate passed. The setup records the kernel speedup, the measured end-to-end change on your replayed traffic, and the lab's cost. It ends `inconclusive` with `kernel_qualified_not_servable`, because it cannot be served yet, and is never offered for roll-out. |
+| Not qualified | It ran and failed a gate: correctness, shapes, sanitizer, kernel speed, the end-to-end target, memory, or quality. The lab's reasons are kept. |
+| Failed | The lab stopped before a verdict, or the approval ended before the lane started. |
 
-Only a qualified experiment's measured end-to-end change is a result. Every value is bound to the
-model commit, runtime image, GPU, topology, and traffic digest it was measured with; changing any of
-them invalidates it.
-
-## What it does not prove
-
-- **No promotion.** A qualified kernel is a release candidate. Serving traffic with it still needs
-  [Release Guard](/features/release-guard) and your explicit promotion. The lab never promotes and
-  never changes a provider.
-- **No gain from a ceiling.** An opportunity's ceiling is what the operator would save if it took no
-  time at all. A kernel that is ×1.5 faster on an operator holding 6% of the time is worth at most
-  about 2% end to end.
-- **Not every number is recorded.** The lab records each check as passed or failed, not the numerical
-  tolerance, and it does not record per-shape timing or a separate cross-request isolation check. The
-  dashboard shows these as "not recorded".
-- **Reviewed operators only.** The first reviewed operator pack covers residual-add + RMSNorm in
-  Triton on vLLM 0.22.1. Matrix multiplies have no reviewed pack: a GEMM hotspot is planned but its
-  generation fails closed.
-- **Adapters are not support.** The worker catalog registers profiler and runtime contracts for NVIDIA,
-  AMD, Google TPU, and AWS Neuron. A registered adapter is not a performance or capacity claim. The
-  kernel measurements recorded so far, below, are all on NVIDIA H100 and H200.
+Only a qualified kernel's measured end-to-end change is a result. The share and efficiency that
+planned it are why it was tried, never a predicted gain.
 
 ## Cost
 
-The run adds the recorded cost of each stage (profile, generation, build, measurement) and stops as soon
-as the total passes `max_cost_usd`. A stage that has started finishes, so the total can pass the cap by
-up to one stage. Costs come from the prices you configure on the worker
-(`INFERCRANE_KERNEL_GPU_HOURLY_USD` and the language model's token prices). They are estimates, not an
-invoice. Each stage also checks `authorized_until`: once it passes, the run stops with
-`accelerator_lab_authority_expired`.
+A run has one approved spend cap, split evenly across its setups. A kernel setup provisions no
+servers, so its share is the lab's hard limit. The plan sizes it for 2 GPU-hours on your lab host. The
+lab adds the recorded cost of each stage at the prices your worker is configured with
+(`INFERCRANE_KERNEL_GPU_HOURLY_USD` and the language model's token prices), and stops as soon as the
+total passes the share. A stage already running finishes, so the total can pass the share by up to one
+stage. The lab host and the language model are yours, inside your own cloud account.
 
-The GPU host and the language model are yours, inside your own cloud account.
+## Turn it on
+
+The kernel lane needs a complete [Accelerator Lab](/features/optimization#generate-a-custom-kernel)
+configuration on the control plane, and:
+
+```bash
+INFERCRANE_OPTIMIZATION_KERNEL_LANE=true
+```
+
+On the GPU host, point the kernel adapter's replay directory at the worker's artifact directory, so
+the files a run publishes are the files the qualifier reads:
+
+```bash
+infercrane-accelerator-worker --artifact-dir /srv/infercrane/artifacts ...
+INFERCRANE_KERNEL_REPLAY_DIR=/srv/infercrane/artifacts
+```
+
+The control plane refuses `INFERCRANE_OPTIMIZATION_KERNEL_LANE` without the Accelerator Lab, and a run
+planned with a kernel cannot be created or approved on a control plane that has the lane off.
+
+## What it does not do yet
+
+- **Serve a qualified kernel.** It needs the kernel and its reviewed integration built into a runtime
+  image pinned to the engine version, then measured against the run's chosen setup as a follow-up change
+  through the answer check and [Release Guard](/features/release-guard), and rolled out only on your
+  approval. Until then a qualified kernel is evidence, not a change.
+- **Measure decode in CUDA graphs.** Kernels replayed from a CUDA graph have no host operator, so their
+  efficiency is unknown. Profile eager steps with `record_shapes` on.
+- **Plan for vLLM's paged attention.** Its shapes do not carry context lengths, so its efficiency is
+  unknown.
 
 ## Evidence so far
 
@@ -190,6 +131,6 @@ No custom kernel has yet been measured end to end on serving traffic.
 
 ## Next
 
-- [Capture a GPU profile](/features/gpu-profiling) so the endpoint has opportunities to show.
-- [Generate a custom kernel](/features/optimization#generate-a-custom-kernel) for the worker settings.
-- [Release Guard](/features/release-guard) for what happens after a kernel qualifies.
+- [Capture a GPU profile](/features/gpu-profiling) with shapes recorded, so a run can read operator efficiency.
+- [Optimization](/features/optimization) for how a run plans and measures its setups.
+- [Release Guard](/features/release-guard) for what any change must pass before it serves traffic.
