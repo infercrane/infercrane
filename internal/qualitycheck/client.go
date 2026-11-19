@@ -52,6 +52,10 @@ func (c HTTPCompleter) Complete(ctx context.Context, target Target, set EvalSet,
 	body, err := json.Marshal(map[string]any{
 		"model": target.Model, "messages": messages, "temperature": 0, "top_p": 1,
 		"seed": Seed, "max_tokens": set.MaxTokens, "n": 1, "stream": false,
+		// Hybrid reasoning models (Qwen3, GLM) answer directly when their chat
+		// template supports this switch; templates without it ignore it. A
+		// reasoning trace rarely finishes inside the check's token limit.
+		"chat_template_kwargs": map[string]any{"enable_thinking": false},
 	})
 	if err != nil {
 		return "", err
@@ -88,8 +92,14 @@ func (c HTTPCompleter) Complete(ctx context.Context, target Target, set EvalSet,
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err = json.Unmarshal(data, &decoded); err != nil || len(decoded.Choices) == 0 || decoded.Choices[0].Message.Content == nil {
+	if err = json.Unmarshal(data, &decoded); err != nil || len(decoded.Choices) == 0 {
 		return "", fmt.Errorf("prompt %s: server returned no answer", prompt.ID)
+	}
+	if decoded.Choices[0].Message.Content == nil {
+		// A server that splits out reasoning returns no content when the
+		// reasoning did not finish inside the token limit. That is an answer
+		// with no text, which Compare reports, not a transient failure.
+		return "", nil
 	}
 	return strings.TrimSpace(*decoded.Choices[0].Message.Content), nil
 }

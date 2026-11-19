@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -21,13 +22,21 @@ const (
 	Evaluator = "infercrane-builtin"
 	// EvaluatorVersion covers the request settings, the agreement score, and
 	// the thresholds below. Changing any of them requires a new version.
-	EvaluatorVersion = "1"
+	// Version 2 turns reasoning off where the chat template allows it, removes
+	// reasoning a template opened in the prompt, and stops instead of scoring
+	// a prompt the reference left without answer text.
+	EvaluatorVersion = "2"
 	// WatchRegressionPercent and BlockRegressionPercent are the built-in
 	// thresholds. A candidate whose answers agree with the reference less than
 	// 95% of the way is WATCH; less than 90% is BLOCK.
 	WatchRegressionPercent = 5.0
 	BlockRegressionPercent = 10.0
 )
+
+// ErrReferenceUnanswered means the reference gave no answer text to at least
+// one prompt within the eval set's token limit, so its answers cannot serve as
+// the reference. Asking again does not help: decoding is greedy.
+var ErrReferenceUnanswered = errors.New("the reference gave no answer text")
 
 // Comparison is the in-memory result of one candidate against its reference.
 // It holds scores and digests only; answers are discarded.
@@ -57,10 +66,19 @@ func Compare(ctx context.Context, completer Completer, set EvalSet, reference, c
 	scores := make([]float64, 0, len(set.Prompts))
 	referenceAnswers := make([]string, 0, len(set.Prompts))
 	candidateAnswers := make([]string, 0, len(set.Prompts))
+	var unanswered []string
 	for _, prompt := range set.Prompts {
 		referenceAnswer, err := completer.Complete(ctx, reference, set, prompt)
 		if err != nil {
 			return Comparison{}, fmt.Errorf("reference revision: %w", err)
+		}
+		if !Answered(referenceAnswer) {
+			// Scoring this prompt would compare nothing with nothing.
+			unanswered = append(unanswered, prompt.ID)
+		}
+		if len(unanswered) > 0 {
+			// The check cannot pass any more; only count what is left.
+			continue
 		}
 		candidateAnswer := referenceAnswer
 		if !self {
@@ -71,6 +89,9 @@ func Compare(ctx context.Context, completer Completer, set EvalSet, reference, c
 		scores = append(scores, Agreement(referenceAnswer, candidateAnswer))
 		referenceAnswers = append(referenceAnswers, answerDigest(referenceAnswer))
 		candidateAnswers = append(candidateAnswers, answerDigest(candidateAnswer))
+	}
+	if len(unanswered) > 0 {
+		return Comparison{}, fmt.Errorf("%w to %d of %d prompts within %d tokens (%s)", ErrReferenceUnanswered, len(unanswered), len(set.Prompts), set.MaxTokens, promptList(unanswered))
 	}
 	score := round(mean(scores))
 	bundle, _ := json.Marshal(map[string]any{
@@ -139,6 +160,15 @@ func (c Comparison) Payload(deployment string, reference bool) qualityevidence.P
 		Score: score, Passed: passed, SampleCount: len(c.Scores), ArtifactDigest: c.ResultDigest, EvaluatedAt: c.EvaluatedAt,
 		Distribution: &qualityevidence.Distribution{Schema: qualityevidence.DistributionSchema, Kind: "paired_scores", PairingDigest: c.Set.PairingDigest(), Scores: scores},
 	}
+}
+
+// promptList names up to five prompts and counts the rest.
+func promptList(ids []string) string {
+	const shown = 5
+	if len(ids) <= shown {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(ids[:shown], ", "), len(ids)-shown)
 }
 
 func answerDigest(answer string) string {

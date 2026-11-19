@@ -206,6 +206,10 @@ func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candi
 		// Missing reference answers never pass. The candidate ends
 		// inconclusive instead of waiting for the approval to expire.
 		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityReferenceUnavailable}, nil
+	case errors.Is(err, ErrQualityReferenceUnanswered):
+		// Greedy answers repeat, so retrying cannot help. Answers the
+		// reference never gave never pass.
+		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityReferenceUnanswered}, nil
 	case err != nil:
 		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, err)
 	}
