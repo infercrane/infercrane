@@ -407,6 +407,32 @@
       "share": 0.0017
     }
   ],
+  "operators": [
+    {
+      "operator": "attention",
+      "kernel_ms": 8.16,
+      "share": 0.0861,
+      "covered_share": 0,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "Shapes cover 0% of this operator's kernel time, under 50%; kernels replayed from a CUDA graph have no host operator, so its efficiency is unknown."
+    },
+    {
+      "operator": "norm",
+      "kernel_ms": 2.68,
+      "share": 0.0283,
+      "covered_share": 0,
+      "intensity": null,
+      "achieved_tflops": null,
+      "achieved_tbps": null,
+      "bound": null,
+      "efficiency": null,
+      "reason": "Shapes cover 0% of this operator's kernel time, under 50%; kernels replayed from a CUDA graph have no host operator, so its efficiency is unknown."
+    }
+  ],
   "overlap": {
     "communication_ms": 0,
     "overlapped_share": null,

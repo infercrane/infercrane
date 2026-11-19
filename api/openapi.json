@@ -3921,6 +3921,95 @@
             ],
             "type": "object"
           },
+          "operators": {
+            "description": "Kernel time per operator class and, when host operators recorded shapes for at least half of it, efficiency: achieved throughput over the roofline's attainable throughput at the operator's intensity.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "achieved_tbps": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "achieved_tflops": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "bound": {
+                  "enum": [
+                    "memory",
+                    "compute",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "covered_share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "efficiency": {
+                  "description": "Above 1 only when the byte or FLOP count is a bound, for example causal attention.",
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "intensity": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "kernel_ms": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "operator": {
+                  "enum": [
+                    "attention",
+                    "moe-experts",
+                    "moe-routing",
+                    "norm"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "share": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "achieved_tbps",
+                "achieved_tflops",
+                "bound",
+                "covered_share",
+                "efficiency",
+                "intensity",
+                "kernel_ms",
+                "operator",
+                "reason",
+                "share"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "type": "array"
+          },
           "overlap": {
             "additionalProperties": false,
             "properties": {

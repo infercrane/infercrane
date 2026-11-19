@@ -189,6 +189,18 @@ func gpuAnalysisSchemas() map[string]any {
 		})}},
 		"findings": list(closed(map[string]any{"rule": text, "observed": map[string]any{"type": "number"}, "comparison": map[string]any{"type": "string", "enum": []string{">=", "<=", ">", "<"}}, "threshold": map[string]any{"type": "number"}, "unit": text, "sentence": text}), gpuprofile.MaxFindings),
 	})
+	// operators is optional: an analysis written before it was measured has none.
+	analysis["properties"].(map[string]any)["operators"] = map[string]any{
+		"type": "array", "maxItems": len(gpuprofile.Operators),
+		"description": "Kernel time per operator class and, when host operators recorded shapes for at least half of it, efficiency: achieved throughput over the roofline's attainable throughput at the operator's intensity.",
+		"items": closed(map[string]any{
+			"operator": map[string]any{"type": "string", "enum": gpuprofile.Operators}, "kernel_ms": number, "share": share, "covered_share": share,
+			"intensity": nullableNumber, "achieved_tflops": nullableNumber, "achieved_tbps": nullableNumber,
+			"bound":      map[string]any{"type": []string{"string", "null"}, "enum": []any{"memory", "compute", nil}},
+			"efficiency": map[string]any{"type": []string{"number", "null"}, "minimum": 0, "description": "Above 1 only when the byte or FLOP count is a bound, for example causal attention."},
+			"reason":     text,
+		}),
+	}
 	analysis["description"] = "gpu-trace-analysis-v1: where GPU time goes in one capture. Shares are 0..1; null is unknown and the section's reason says why."
 	excerpt := closed(map[string]any{
 		"start_ms": number, "duration_ms": map[string]any{"type": "number", "minimum": 0, "maximum": gpuprofile.MaxExcerptMS},

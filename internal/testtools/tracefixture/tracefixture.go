@@ -201,6 +201,78 @@ func VLLMSingleGPU(base time.Time) []byte {
 	return kinetoFile(base, "NVIDIA H100 80GB HBM3", []int{0}, w.events, true)
 }
 
+// VLLMMoE is a vLLM-shaped torch-profiler trace of one H200 serving a
+// mixture-of-experts model with DeepSeek-V3's layer shapes: hidden size 7168,
+// 256 experts with a 2048 intermediate size, eight routed per token, FP8
+// expert weights. Two eager prefill steps record operator shapes for the
+// fused residual norm, the router's top-k softmax, and the fused experts; a
+// few decode steps replay from a CUDA graph, so their kernels have no host
+// operator. Attention runs through vLLM's paged attention, whose shapes do
+// not carry its cost. Every time is made up.
+func VLLMMoE(base time.Time) []byte {
+	w := &writer{pid: 5151}
+	const tid, device, stream = 5151, 0, 7
+	const tokens, hidden, experts, intermediate, topK = 2048, 7168, 256, 2048, 8
+	bf16 := "c10::BFloat16"
+	normArgs := map[string]any{"Input Dims": [][]int{{tokens, hidden}, {tokens, hidden}, {hidden}, {}}, "Input type": []string{bf16, bf16, bf16, "double"}}
+	routerArgs := map[string]any{"Input Dims": [][]int{{tokens, topK}, {tokens, topK}, {tokens, topK}, {tokens, experts}}, "Input type": []string{"float", "int", "int", "float"}}
+	expertArgs := map[string]any{
+		"Input Dims": [][]int{{tokens, hidden}, {experts, 2 * intermediate, hidden}, {experts, hidden, intermediate}, {tokens, topK}, {tokens, topK}},
+		"Input type": []string{bf16, "c10::Float8_e4m3fn", "c10::Float8_e4m3fn", "float", "int"},
+	}
+	norm := "void vllm::fused_add_rms_norm_kernel<c10::BFloat16, 8>(c10::BFloat16*, c10::BFloat16*, c10::BFloat16 const*, float, int, int)"
+	router := "void vllm::moe::topkGatingSoftmax<8, 256, 4, 16, 32, int, float>(float const*, bool const*, float*, int, int*, int*, int, int, int)"
+	align := "void vllm::moe::moe_align_block_size_kernel<int>(int const*, int*, int*, int*, int, int, int, int, unsigned long, int*)"
+	expertsKernel := "fused_moe_kernel"
+	attention := "void flashinfer::BatchPrefillWithPagedKVCacheKernel<128u, 4u, 1u>(flashinfer::BatchPrefillPagedParams)"
+	host, gpuFree, step := 100.0, 0.0, 0
+	for ; step < 2; step++ {
+		stepStart := host
+		layers := []struct {
+			op      string
+			args    map[string]any
+			kernels []kernel
+		}{
+			{"_C::fused_add_rms_norm", normArgs, []kernel{{norm, 50, 0, false}}},
+			{"vllm::unified_attention_with_output", nil, []kernel{{attention, 400, 0, false}}},
+			{"_moe_C::topk_softmax", routerArgs, []kernel{{router, 20, 0, false}}},
+			{"_moe_C::moe_align_block_size", nil, []kernel{{align, 30, 0, false}}},
+			{"vllm::outplace_fused_experts", expertArgs, []kernel{{expertsKernel, 3200, 0, false}, {expertsKernel, 3300, 0, false}}},
+		}
+		var stepEnd float64
+		for layer := 0; layer < 3; layer++ {
+			for _, current := range layers {
+				w.op("cpu_op", current.op, tid, host, 9, current.args)
+				gpuStart := maxFloat(gpuFree, host+3)
+				gpuFree = w.launch("cudaLaunchKernel", tid, host+1, 5, device, stream, gpuStart, current.kernels)
+				host += 10
+				stepEnd = gpuFree
+			}
+		}
+		w.op("user_annotation", fmt.Sprintf("ProfilerStep#%d", step), tid, stepStart, host-stepStart, nil)
+		host = maxFloat(host, stepEnd) + 600
+	}
+	decodeLayer := []kernel{
+		{norm, 6, 1, false},
+		{"void flashinfer::BatchDecodeWithPagedKVCacheKernel<128u, 4u, 8u, 16u, 1u>(flashinfer::BatchDecodeParams)", 60, 1, false},
+		{router, 8, 1, false},
+		{align, 10, 1, false},
+		{expertsKernel, 900, 1, false},
+	}
+	for ; step < 6; step++ {
+		stepStart := host
+		var graph []kernel
+		for layer := 0; layer < 3; layer++ {
+			graph = append(graph, decodeLayer...)
+		}
+		w.op("cpu_op", "vllm::cuda_graph_replay", tid, host, 16, nil)
+		gpuFree = w.launch("cudaGraphLaunch", tid, host+2, 12, device, stream, maxFloat(gpuFree, host+10), graph)
+		w.op("user_annotation", fmt.Sprintf("ProfilerStep#%d", step), tid, stepStart, maxFloat(host+20, gpuFree)-stepStart, nil)
+		host = maxFloat(host+20, gpuFree) + 40
+	}
+	return kinetoFile(base, "NVIDIA H200", []int{device}, w.events, true)
+}
+
 // SGLangTP2 is an SGLang-shaped trace pair of a tensor-parallel decode on two
 // H100s: one file per rank, CUDA graph replays, no step annotations, and an
 // NCCL all-reduce on its own stream that overlaps compute only at its edge.

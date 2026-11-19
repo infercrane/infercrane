@@ -78,6 +78,7 @@ func analyzePrepared(p *prepared, options Options) gpuprofile.Analysis {
 	analysis.Steps = steps
 	analysis.Phases = p.phases(steps, stepOf)
 	analysis.Roofline = p.roofline(options)
+	analysis.Operators = p.operators(analysis.Roofline)
 	analysis.Findings, analysis.Verdict = judge(analysis, hostWaitNS, capacity)
 	return analysis
 }

@@ -27,7 +27,7 @@ import (
 
 // Stable JSON schemas of `infercrane profile --output json`.
 const (
-	profileResultSchema     = "infercrane.profile-result/v1"
+	profileResultSchema     = "infercrane.profile-result/v2"
 	profileListSchema       = "infercrane.profile-list/v1"
 	profileComparisonSchema = "infercrane.profile-comparison/v1"
 )
