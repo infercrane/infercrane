@@ -63,7 +63,7 @@ func TestConvergeDeliversCredentialFilesAndAdapterToTheReplica(t *testing.T) {
 	store := &importingCloudStore{
 		fakeCloudStore: &fakeCloudStore{deployment: domain.Deployment{ID: "deployment-1", Name: "support", Model: "s3://acme-models/run-42", RoutingStrategy: "round-robin", MinReplicas: 1, MaxReplicas: 1}},
 		imports: map[string]domain.ModelImport{
-			"acme|s3://acme-models/run-42|" + testDigest: {Kind: "weights", Source: "s3", URI: "s3://acme-models/run-42", ManifestDigest: testDigest, Files: []domain.ModelFile{{Path: "config.json", Size: 2, SHA256: strings.Repeat("c", 64)}}, Checks: domain.ModelImportCheck{TotalBytes: 2}},
+			"acme|s3://acme-models/run-42|" + testDigest:    {Kind: "weights", Source: "s3", URI: "s3://acme-models/run-42", ManifestDigest: testDigest, Files: []domain.ModelFile{{Path: "config.json", Size: 2, SHA256: strings.Repeat("c", 64)}}, Checks: domain.ModelImportCheck{TotalBytes: 2}},
 			"acme|s3://acme-adapters/support|" + testDigest: adapterImport("s3://acme-adapters/support", 64),
 		},
 	}

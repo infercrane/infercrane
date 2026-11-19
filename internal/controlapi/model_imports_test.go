@@ -78,7 +78,7 @@ func TestModelImportRecordsManifestAndRefusesFilesThatCannotServe(t *testing.T) 
 		t.Fatalf("import refused: %d %s", response.Code, response.Body.String())
 	}
 	var created struct {
-		Import domain.ModelImport  `json:"import"`
+		Import domain.ModelImport `json:"import"`
 		Check  *modelcheck.Report `json:"check"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil || !strings.HasPrefix(created.Import.ManifestDigest, "sha256:") || created.Check == nil || created.Check.Architecture.State != "supported" {

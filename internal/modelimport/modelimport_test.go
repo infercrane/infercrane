@@ -170,9 +170,15 @@ func TestValidateDeployment(t *testing.T) {
 		}
 	}
 	invalid := []func() error{
-		func() error { return ValidateDeployment("s3://acme-models/run-42", "main", "vllm", "elastic", nil, nil) },
-		func() error { return ValidateDeployment("s3://acme-models/run-42/", digest, "vllm", "elastic", nil, nil) },
-		func() error { return ValidateDeployment("s3://acme-models/run-42", digest, "vllm", "serverless", nil, nil) },
+		func() error {
+			return ValidateDeployment("s3://acme-models/run-42", "main", "vllm", "elastic", nil, nil)
+		},
+		func() error {
+			return ValidateDeployment("s3://acme-models/run-42/", digest, "vllm", "elastic", nil, nil)
+		},
+		func() error {
+			return ValidateDeployment("s3://acme-models/run-42", digest, "vllm", "serverless", nil, nil)
+		},
 		func() error {
 			return ValidateDeployment("m/m", "", "vllm", "elastic", []domain.ModelAdapter{hub, hub}, nil)
 		},
