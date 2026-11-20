@@ -91,7 +91,7 @@ type answerCompleter struct {
 	calls   map[string]int
 }
 
-func (c *answerCompleter) Complete(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, prompt qualitycheck.Prompt) (string, error) {
+func (c *answerCompleter) Complete(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, prompt qualitycheck.Prompt) (qualitycheck.Answer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.calls == nil {
@@ -99,9 +99,9 @@ func (c *answerCompleter) Complete(_ context.Context, target qualitycheck.Target
 	}
 	c.calls[target.Endpoint]++
 	if answer, ok := c.answers[target.Endpoint][prompt.ID]; ok {
-		return answer, nil
+		return qualitycheck.Answer{Content: answer}, nil
 	}
-	return "answer to " + prompt.ID, nil
+	return qualitycheck.Answer{Content: "answer to " + prompt.ID}, nil
 }
 
 func (c *answerCompleter) total() int {

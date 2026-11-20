@@ -63,13 +63,13 @@ func TestReportComparesTheWinnerWithTheCurrentAPI(t *testing.T) {
 			t.Fatalf("complete current API reported unknown %s", field)
 		}
 	}
-	text := Text(report)
+	text := Text(Document{Report: report})
 	for _, want := range []string{"Your current API", "a month at your traffic", "list price", "different window", "PASS · current API 0.950, chosen setup 0.940", "against a 5.0% margin"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text lacks %q:\n%s", want, text)
 		}
 	}
-	if html, err := HTML(report); err != nil || !strings.Contains(string(html), "Your current API") {
+	if html, err := HTML(Document{Report: report}); err != nil || !strings.Contains(string(html), "Your current API") {
 		t.Fatalf("html err=%v", err)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,15 +16,23 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
+	"github.com/infercrane/infercrane/internal/passport"
 )
 
 // optimize report prints the outcome of one run: the current setup
 // against the winning setup on cost, speed, and answer quality, then the
-// measurement that proves it. It only reads the control API.
+// measurement that proves it, and who signed it. It only reads the control
+// API. optimize report verify checks a saved report offline.
 
-const optimizeReportUsage = "usage: infercrane optimize report RUN [--output text|json] [--html FILE]"
+const (
+	optimizeReportUsage       = "usage: infercrane optimize report RUN [--output text|json] [--html FILE] | optimize report verify FILE [--public-key KEY]"
+	optimizeReportVerifyUsage = "usage: infercrane optimize report verify FILE [--public-key KEY]"
+)
 
 func optimizeReportCommand(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "verify" {
+		return optimizeReportVerifyCommand(os.Stdout, args[1:])
+	}
 	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
 		return errors.New(optimizeReportUsage)
 	}
@@ -38,11 +47,11 @@ func optimizeReportCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	raw, report, err := loadOptimizationReport(ctx, cfg, id)
+	raw, document, err := loadOptimizationReport(ctx, cfg, id)
 	if err != nil {
 		return err
 	}
-	if err = writeOptimizationReport(os.Stdout, os.Stderr, raw, report, *output, *htmlPath, outputTheme(*output)); err != nil {
+	if err = writeOptimizationReport(os.Stdout, os.Stderr, raw, document, *output, *htmlPath, outputTheme(*output)); err != nil {
 		return err
 	}
 	if *output == "text" {
@@ -51,25 +60,24 @@ func optimizeReportCommand(ctx context.Context, args []string) error {
 	return nil
 }
 
-// loadOptimizationReport returns the report exactly as the control plane sent
-// it, plus its decoded form for rendering.
-func loadOptimizationReport(ctx context.Context, cfg config.Config, id string) (json.RawMessage, optimizationreport.Report, error) {
-	var response struct {
-		Report json.RawMessage `json:"report"`
+// loadOptimizationReport returns the response exactly as the control plane
+// sent it, so a saved report keeps the bytes its signature covers, plus its
+// decoded form for rendering.
+func loadOptimizationReport(ctx context.Context, cfg config.Config, id string) (json.RawMessage, optimizationreport.Document, error) {
+	var raw json.RawMessage
+	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/optimization/campaigns/"+url.PathEscape(id)+"/report", "", nil, &raw); err != nil {
+		return nil, optimizationreport.Document{}, err
 	}
-	if err := controlJSON(ctx, cfg, http.MethodGet, "/api/v1/optimization/campaigns/"+url.PathEscape(id)+"/report", "", nil, &response); err != nil {
-		return nil, optimizationreport.Report{}, err
+	var document optimizationreport.Document
+	if json.Unmarshal(raw, &document) != nil || document.Report.SchemaVersion != optimizationreport.SchemaVersion {
+		return nil, optimizationreport.Document{}, errors.New("the control plane returned an unsupported optimization report")
 	}
-	var report optimizationreport.Report
-	if len(response.Report) == 0 || json.Unmarshal(response.Report, &report) != nil || report.SchemaVersion != optimizationreport.SchemaVersion {
-		return nil, optimizationreport.Report{}, errors.New("the control plane returned an unsupported optimization report")
-	}
-	return response.Report, report, nil
+	return raw, document, nil
 }
 
-func writeOptimizationReport(stdout, stderr io.Writer, raw json.RawMessage, report optimizationreport.Report, output, htmlPath string, t theme) error {
+func writeOptimizationReport(stdout, stderr io.Writer, raw json.RawMessage, document optimizationreport.Document, output, htmlPath string, t theme) error {
 	if htmlPath != "" {
-		page, err := optimizationreport.HTML(report)
+		page, err := optimizationreport.HTML(document)
 		if err != nil {
 			return fmt.Errorf("render HTML report: %w", err)
 		}
@@ -79,6 +87,7 @@ func writeOptimizationReport(stdout, stderr io.Writer, raw json.RawMessage, repo
 		fmt.Fprintf(stderr, "HTML report written to %s\n", htmlPath)
 	}
 	if output == "json" {
+		// Indenting changes only whitespace, which verification ignores.
 		var indented bytes.Buffer
 		if err := json.Indent(&indented, raw, "", "  "); err != nil {
 			return fmt.Errorf("format report JSON: %w", err)
@@ -88,10 +97,47 @@ func writeOptimizationReport(stdout, stderr io.Writer, raw json.RawMessage, repo
 		return err
 	}
 	if !t.styled {
-		_, err := io.WriteString(stdout, optimizationreport.Text(report))
+		_, err := io.WriteString(stdout, optimizationreport.Text(document))
 		return err
 	}
-	_, err := io.WriteString(stdout, renderStyledReport(optimizationreport.NewView(report), t))
+	_, err := io.WriteString(stdout, renderStyledReport(optimizationreport.NewView(document), t))
+	return err
+}
+
+// optimizeReportVerifyCommand checks a report saved with --output json
+// without the control plane: schema version, digest, and Ed25519 signature.
+// Any mismatch is an error, so the command exits non-zero.
+func optimizeReportVerifyCommand(stdout io.Writer, args []string) error {
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		return errors.New(optimizeReportVerifyUsage)
+	}
+	path := args[0]
+	fs := newFlagSet("optimize report verify")
+	publicKey := fs.String("public-key", "", "base64 Ed25519 public key the report must be signed by")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return errors.New(optimizeReportVerifyUsage)
+	}
+	var trusted ed25519.PublicKey
+	if *publicKey != "" {
+		key, err := passport.DecodePublicKey(*publicKey)
+		if err != nil {
+			return fmt.Errorf("--public-key: %w", err)
+		}
+		trusted = key
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	verified, err := optimizationreport.Verify(saved, trusted)
+	if err != nil {
+		return fmt.Errorf("report verification failed: %w", err)
+	}
+	trust := "matches --public-key"
+	if !verified.Pinned {
+		trust = "compare it with your operator's key, or pass --public-key"
+	}
+	_, err = fmt.Fprintf(stdout, "VERIFIED  %s\nRun       %s\nKey       %s (%s)\n", verified.Digest, verified.CampaignID, verified.KeyID, trust)
 	return err
 }
 
@@ -188,6 +234,10 @@ func renderStyledReport(v optimizationreport.View, t theme) string {
 				b.WriteString(prefix + t.muted(line) + "\n")
 			}
 		}
+	}
+	b.WriteString("\n")
+	for _, line := range wrapWords(v.Signature, t.width) {
+		b.WriteString(t.muted(line) + "\n")
 	}
 	return b.String()
 }

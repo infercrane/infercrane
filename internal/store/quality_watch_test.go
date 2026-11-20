@@ -136,7 +136,7 @@ func TestReleaseGuardQualityWatchAcceptsAndRecordsFollowUp(t *testing.T) {
 
 func qualityWatchAudits(t *testing.T, s *Store, ctx context.Context, evaluationID string) int {
 	t.Helper()
-	events, err := s.AuditEventsForTenant(ctx, "global", time.Time{}, 500)
+	events, err := s.AuditEventsForTenant(ctx, "global", domain.AuditCursor{}, 500)
 	if err != nil {
 		t.Fatal(err)
 	}

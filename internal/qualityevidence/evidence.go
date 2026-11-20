@@ -52,6 +52,70 @@ type Distribution struct {
 	Kind          string    `json:"kind"`
 	PairingDigest string    `json:"pairing_digest"`
 	Scores        []float64 `json:"scores"`
+	// ToolCalls is set only by InferCrane's built-in answer check, for eval
+	// sets with cases that declare function tools.
+	ToolCalls *ToolCallScores `json:"tool_calls,omitempty"`
+}
+
+// ToolCallScores is the built-in check's score over the cases that declare
+// function tools. Those cases' scores are also in Scores.
+type ToolCallScores struct {
+	// Cases counts the cases that declare tools.
+	Cases int `json:"cases"`
+	// Score is the mean of those cases' scores: 1 for a case when the
+	// candidate called the same functions with the same arguments as the
+	// reference.
+	Score float64 `json:"score"`
+	// Broken counts cases where the reference's calls validated against the
+	// declared schemas and the candidate's did not. One blocks the candidate.
+	Broken int `json:"broken"`
+	// ReferenceInvalid counts cases where the reference's own calls did not
+	// validate; those cases measure agreement only.
+	ReferenceInvalid int `json:"reference_invalid"`
+	// Candidate counts, per kind, the cases where the candidate's calls
+	// failed against the reference's. A case can count under several kinds.
+	Candidate ToolCallFailures `json:"candidate"`
+	// Reference counts the cases where the reference's own calls failed.
+	// Missing, extra, and unexpected calls are relative to the reference, so
+	// they stay 0 here.
+	Reference ToolCallFailures `json:"reference"`
+}
+
+// ToolCallFailures counts tool cases by how their calls failed. Each count is
+// a number of cases, never call content.
+type ToolCallFailures struct {
+	// MissingCall: the reference called a function this side did not call.
+	MissingCall int `json:"missing_call"`
+	// MalformedArguments: arguments that are not JSON.
+	MalformedArguments int `json:"malformed_arguments"`
+	// WrongFunction: an undeclared function, or another function in place of
+	// the reference's.
+	WrongFunction int `json:"wrong_function"`
+	// SchemaInvalid: arguments that do not validate against the declared
+	// parameters.
+	SchemaInvalid int `json:"schema_invalid"`
+	// ExtraCalls: more calls than the reference made.
+	ExtraCalls int `json:"extra_calls"`
+	// UnexpectedCall: a call where the reference answered without one.
+	UnexpectedCall int `json:"unexpected_call"`
+}
+
+// Add returns the sum of two counts.
+func (f ToolCallFailures) Add(other ToolCallFailures) ToolCallFailures {
+	return ToolCallFailures{
+		MissingCall: f.MissingCall + other.MissingCall, MalformedArguments: f.MalformedArguments + other.MalformedArguments,
+		WrongFunction: f.WrongFunction + other.WrongFunction, SchemaInvalid: f.SchemaInvalid + other.SchemaInvalid,
+		ExtraCalls: f.ExtraCalls + other.ExtraCalls, UnexpectedCall: f.UnexpectedCall + other.UnexpectedCall,
+	}
+}
+
+func (f ToolCallFailures) within(cases int) bool {
+	for _, count := range []int{f.MissingCall, f.MalformedArguments, f.WrongFunction, f.SchemaInvalid, f.ExtraCalls, f.UnexpectedCall} {
+		if count < 0 || count > cases {
+			return false
+		}
+	}
+	return true
 }
 
 const DistributionSchema = "infercrane.dev/quality-distribution/v1"
@@ -100,6 +164,9 @@ func DecodeResult(body []byte) (Result, error) {
 func (r Result) Validate() error {
 	if r.Schema != ResultSchema {
 		return fmt.Errorf("evaluator result schema must be %q", ResultSchema)
+	}
+	if r.Distribution != nil && r.Distribution.ToolCalls != nil {
+		return errors.New("distribution.tool_calls is recorded only by InferCrane's built-in answer check")
 	}
 	payload := Payload{
 		Schema: Schema, Deployment: "binding-validated-by-cli", RevisionID: "binding-validated-by-cli",
@@ -167,6 +234,11 @@ func (p Payload) Validate() error {
 		for _, score := range p.Distribution.Scores {
 			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 				return errors.New("quality distribution scores must be finite values between 0 and 1")
+			}
+		}
+		if calls := p.Distribution.ToolCalls; calls != nil {
+			if calls.Cases < 1 || calls.Cases > p.SampleCount || math.IsNaN(calls.Score) || calls.Score < 0 || calls.Score > 1 || calls.Broken < 0 || calls.Broken > calls.Cases || calls.ReferenceInvalid < 0 || calls.ReferenceInvalid > calls.Cases || !calls.Candidate.within(calls.Cases) || !calls.Reference.within(calls.Cases) || calls.Reference.MissingCall+calls.Reference.ExtraCalls+calls.Reference.UnexpectedCall > 0 {
+				return errors.New("quality distribution tool_calls must count 1 to sample_count cases, at most that many of each kind, with a score between 0 and 1; the reference has no missing, extra, or unexpected calls")
 			}
 		}
 	}

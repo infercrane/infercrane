@@ -165,6 +165,7 @@ func (s *Store) CreateEndpoint(ctx context.Context, tenant string, endpoint doma
 	endpoint.TenantID = tenant
 	endpoint.DesiredState = "serving"
 	endpoint.ObservedState = "pending"
+	endpoint.Residency = "any"
 	endpoint.CreatedAt, endpoint.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	return endpoint, nil
 }
@@ -221,6 +222,9 @@ func (s *Store) CreateBackendBinding(ctx context.Context, tenant string, binding
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.BackendBinding{}, fmt.Errorf("%w: binding already exists", ErrConflict)
+		}
+		if isResidencyViolation(err) {
+			return domain.BackendBinding{}, ErrResidency
 		}
 		return domain.BackendBinding{}, err
 	}
@@ -635,7 +639,7 @@ func (s *Store) DeleteEndpointForTenant(ctx context.Context, tenant, name string
 }
 
 func (s *Store) EndpointsForTenant(ctx context.Context, tenant string) ([]domain.Endpoint, error) {
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,''),created_at,updated_at FROM endpoints WHERE tenant_id=? AND desired_state<>'deleted' ORDER BY name`, tenant)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,logical_model_id,environment_id,name,desired_state,observed_state,COALESCE(active_serving_plan_id,''),COALESCE(candidate_serving_plan_id,''),residency,created_at,updated_at FROM endpoints WHERE tenant_id=? AND desired_state<>'deleted' ORDER BY name`, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +664,7 @@ func (s *Store) EndpointsForTenant(ctx context.Context, tenant string) ([]domain
 // or, while it is still provisioning, by the "-opt-<candidate>" name the
 // campaign driver gives it. Routing still uses EndpointsForTenant.
 func (s *Store) CustomerEndpointsForTenant(ctx context.Context, tenant string) ([]domain.Endpoint, error) {
-	rows, err := s.QueryContext(ctx, `SELECT e.id,e.tenant_id,e.logical_model_id,e.environment_id,e.name,e.desired_state,e.observed_state,COALESCE(e.active_serving_plan_id,''),COALESCE(e.candidate_serving_plan_id,''),e.created_at,e.updated_at FROM endpoints e WHERE e.tenant_id=? AND e.desired_state<>'deleted' AND NOT EXISTS (SELECT 1 FROM deployments d JOIN optimization_candidate_runs c ON c.tenant_id=d.tenant_id AND (c.deployment_name=d.name OR d.name LIKE ('%-opt-' || left(c.id,8))) AND d.created_at>=c.created_at JOIN optimization_campaigns campaign ON campaign.tenant_id=c.tenant_id AND campaign.id=c.campaign_id AND campaign.intent='new_endpoint' WHERE d.tenant_id=e.tenant_id AND e.id=d.id || '-endpoint') ORDER BY e.name`, tenant)
+	rows, err := s.QueryContext(ctx, `SELECT e.id,e.tenant_id,e.logical_model_id,e.environment_id,e.name,e.desired_state,e.observed_state,COALESCE(e.active_serving_plan_id,''),COALESCE(e.candidate_serving_plan_id,''),e.residency,e.created_at,e.updated_at FROM endpoints e WHERE e.tenant_id=? AND e.desired_state<>'deleted' AND NOT EXISTS (SELECT 1 FROM deployments d JOIN optimization_candidate_runs c ON c.tenant_id=d.tenant_id AND (c.deployment_name=d.name OR d.name LIKE ('%-opt-' || left(c.id,8))) AND d.created_at>=c.created_at JOIN optimization_campaigns campaign ON campaign.tenant_id=c.tenant_id AND campaign.id=c.campaign_id AND campaign.intent='new_endpoint' WHERE d.tenant_id=e.tenant_id AND e.id=d.id || '-endpoint') ORDER BY e.name`, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -698,7 +702,7 @@ type rowScanner interface{ Scan(...any) error }
 func scanEndpoint(row rowScanner) (domain.Endpoint, error) {
 	var item domain.Endpoint
 	var created, updated string
-	err := row.Scan(&item.ID, &item.TenantID, &item.LogicalModelID, &item.EnvironmentID, &item.Name, &item.DesiredState, &item.ObservedState, &item.ActiveServingPlanID, &item.CandidateServingPlanID, &created, &updated)
+	err := row.Scan(&item.ID, &item.TenantID, &item.LogicalModelID, &item.EnvironmentID, &item.Name, &item.DesiredState, &item.ObservedState, &item.ActiveServingPlanID, &item.CandidateServingPlanID, &item.Residency, &created, &updated)
 	item.CreatedAt, item.UpdatedAt = parseTime(created), parseTime(updated)
 	return item, err
 }
@@ -706,7 +710,7 @@ func scanEndpoint(row rowScanner) (domain.Endpoint, error) {
 func (s *Store) ResolveEndpointForTenant(ctx context.Context, tenant, name string) (domain.ResolvedEndpoint, error) {
 	var out domain.ResolvedEndpoint
 	var created, updated string
-	err := s.QueryRowContext(ctx, `SELECT e.id,e.tenant_id,e.logical_model_id,e.environment_id,e.name,e.desired_state,e.observed_state,COALESCE(e.active_serving_plan_id,''),COALESCE(e.candidate_serving_plan_id,''),e.created_at,e.updated_at,m.id,m.tenant_id,m.name,m.description,m.created_at,m.updated_at,v.id,v.tenant_id,v.name,v.policy_json::text,v.created_at,v.updated_at FROM endpoints e JOIN logical_models m ON m.id=e.logical_model_id JOIN environments v ON v.id=e.environment_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted'`, tenant, name).Scan(&out.Endpoint.ID, &out.Endpoint.TenantID, &out.Endpoint.LogicalModelID, &out.Endpoint.EnvironmentID, &out.Endpoint.Name, &out.Endpoint.DesiredState, &out.Endpoint.ObservedState, &out.Endpoint.ActiveServingPlanID, &out.Endpoint.CandidateServingPlanID, &created, &updated, &out.LogicalModel.ID, &out.LogicalModel.TenantID, &out.LogicalModel.Name, &out.LogicalModel.Description, &out.LogicalModel.CreatedAt, &out.LogicalModel.UpdatedAt, &out.Environment.ID, &out.Environment.TenantID, &out.Environment.Name, &out.Environment.PolicyJSON, &out.Environment.CreatedAt, &out.Environment.UpdatedAt)
+	err := s.QueryRowContext(ctx, `SELECT e.id,e.tenant_id,e.logical_model_id,e.environment_id,e.name,e.desired_state,e.observed_state,COALESCE(e.active_serving_plan_id,''),COALESCE(e.candidate_serving_plan_id,''),e.residency,e.created_at,e.updated_at,m.id,m.tenant_id,m.name,m.description,m.created_at,m.updated_at,v.id,v.tenant_id,v.name,v.policy_json::text,v.created_at,v.updated_at FROM endpoints e JOIN logical_models m ON m.id=e.logical_model_id JOIN environments v ON v.id=e.environment_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted'`, tenant, name).Scan(&out.Endpoint.ID, &out.Endpoint.TenantID, &out.Endpoint.LogicalModelID, &out.Endpoint.EnvironmentID, &out.Endpoint.Name, &out.Endpoint.DesiredState, &out.Endpoint.ObservedState, &out.Endpoint.ActiveServingPlanID, &out.Endpoint.CandidateServingPlanID, &out.Endpoint.Residency, &created, &updated, &out.LogicalModel.ID, &out.LogicalModel.TenantID, &out.LogicalModel.Name, &out.LogicalModel.Description, &out.LogicalModel.CreatedAt, &out.LogicalModel.UpdatedAt, &out.Environment.ID, &out.Environment.TenantID, &out.Environment.Name, &out.Environment.PolicyJSON, &out.Environment.CreatedAt, &out.Environment.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, ErrNotFound
 	}

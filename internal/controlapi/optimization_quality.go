@@ -2,6 +2,7 @@ package controlapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
 
@@ -58,8 +60,10 @@ type candidateQualityView struct {
 	BlockLimitPercent   *float64 `json:"block_limit_percent,omitempty"`
 	ReferenceRevisionID string   `json:"reference_revision_id,omitempty"`
 	EvidenceID          string   `json:"evidence_id,omitempty"`
-	Reason              string   `json:"reason"`
-	Command             string   `json:"command,omitempty"`
+	// ToolCalls is the built-in check's score over cases that declare tools.
+	ToolCalls *qualityevidence.ToolCallScores `json:"tool_calls,omitempty"`
+	Reason    string                          `json:"reason"`
+	Command   string                          `json:"command,omitempty"`
 }
 
 // campaignQualityInputs is what candidateQuality needs beyond the campaign.
@@ -186,6 +190,10 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 		return view
 	}
 	view.ReferenceRevisionID = row.ReferenceRevisionID
+	var distribution qualityevidence.Distribution
+	if json.Unmarshal([]byte(row.DistributionJSON), &distribution) == nil {
+		view.ToolCalls = distribution.ToolCalls
+	}
 	watch, block := qualitycheck.WatchRegressionPercent, qualitycheck.BlockRegressionPercent
 	view.WatchLimitPercent, view.BlockLimitPercent = &watch, &block
 	if row.ReferenceRevisionID != "" && row.ReferenceRevisionID == candidate.RevisionID {
@@ -200,7 +208,13 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 		view.RegressionPercent = &drop
 	}
 	matched := fmt.Sprintf("Answers matched the reference %.0f%% across %d prompts", row.Score*100, row.SampleCount)
+	if calls := view.ToolCalls; calls != nil {
+		matched += fmt.Sprintf("; tool calls matched %.0f%% across %d", calls.Score*100, calls.Cases)
+	}
 	switch {
+	case view.ToolCalls != nil && view.ToolCalls.Broken > 0:
+		view.State = qualityStateBlocked
+		view.Reason = fmt.Sprintf("%s. This setup broke %d of %d tool calls the reference made correctly (%s). A broken tool call blocks a setup.", matched, view.ToolCalls.Broken, view.ToolCalls.Cases, toolCallFailureWords(view.ToolCalls.Candidate))
 	case !row.Passed || eval.Verdict == releaseguard.QualityBlock:
 		view.State, view.Reason = qualityStateBlocked, fmt.Sprintf("%s. More than %.0f%% different blocks a setup.", matched, block)
 	case eval.Verdict == releaseguard.QualityWatch:
@@ -209,6 +223,25 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 		view.State, view.Reason = qualityStatePassed, matched+"."
 	}
 	return view
+}
+
+// toolCallFailureWords names the kinds of failed calls with their case
+// counts, for example "missing call 1, arguments that break the schema 2".
+func toolCallFailureWords(failures qualityevidence.ToolCallFailures) string {
+	var parts []string
+	for _, kind := range []struct {
+		count int
+		words string
+	}{
+		{failures.MissingCall, "missing call"}, {failures.WrongFunction, "wrong or undeclared function"},
+		{failures.MalformedArguments, "arguments that are not JSON"}, {failures.SchemaInvalid, "arguments that break the schema"},
+		{failures.ExtraCalls, "extra call"}, {failures.UnexpectedCall, "call where the reference made none"},
+	} {
+		if kind.count > 0 {
+			parts = append(parts, fmt.Sprintf("%s %d", kind.words, kind.count))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func qualityStepAhead(state string) bool {

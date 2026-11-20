@@ -105,14 +105,16 @@ type Report struct {
 	Monthly              Monthly  `json:"monthly"`
 	// CurrentAPI is set for a migration campaign: the closed API the setups
 	// would replace.
-	CurrentAPI   *CurrentAPI       `json:"current_api,omitempty"`
-	Workload     Workload          `json:"workload"`
-	Candidates   []CandidateResult `json:"candidates"`
-	Warnings     []string          `json:"warnings"`
-	Bottleneck   Bottleneck        `json:"bottleneck"`
-	Appendix     Appendix          `json:"appendix"`
-	Unknown      []string          `json:"unknown"`
-	ReportDigest string            `json:"report_digest"`
+	CurrentAPI *CurrentAPI       `json:"current_api,omitempty"`
+	Workload   Workload          `json:"workload"`
+	Candidates []CandidateResult `json:"candidates"`
+	Warnings   []string          `json:"warnings"`
+	Bottleneck Bottleneck        `json:"bottleneck"`
+	Appendix   Appendix          `json:"appendix"`
+	Unknown    []string          `json:"unknown"`
+	// ReportDigest must stay the last field: Verify recomputes it from the
+	// report's JSON bytes, where it is the last member.
+	ReportDigest string `json:"report_digest"`
 }
 
 // Outcome is the decision in plain words.

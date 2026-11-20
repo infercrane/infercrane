@@ -1,6 +1,6 @@
 ---
 title: InferCrane agent
-description: How the outbound-only agent observes model servers on a customer's own machines, what it may do, what never leaves the machine, and how candidate runs will use it.
+description: How the outbound-only agent observes model servers in a customer's own cloud, serves their traffic there as the data plane, runs candidate setups in the customer's cluster, and exactly what leaves.
 ---
 
 # InferCrane agent
@@ -8,8 +8,11 @@ description: How the outbound-only agent observes model servers on a customer's 
 The InferCrane agent is one process that runs beside a customer's model server: on a laptop, a
 workstation, an on-prem rack, any Kubernetes cluster, or any cloud. It only dials out, over HTTPS,
 so the control plane can observe a server it cannot reach: a server behind NAT, on loopback, or in
-a private network. This page is the authoritative design. The quickstart is
-[Run on this machine](/run-on-this-machine).
+a private network. It can also serve that server's traffic itself, as the data plane inside the
+customer's cloud, and run candidate setups in the customer's cluster. Prompts and completions then
+never reach InferCrane. This page is the authoritative design. The quickstart is
+[Run on this machine](/run-on-this-machine); the [list of every field that leaves your
+cloud](#what-leaves-your-cloud) is below.
 
 The agent is part of the open-source core (Apache-2.0). It ships in the `infercrane` CLI binary as
 `infercrane agent`, and any control plane, hosted or self-hosted, accepts agents.
@@ -26,7 +29,7 @@ customer machine                                    InferCrane control plane
        nothing listens for the control plane            never dials the agent's servers
 ```
 
-## What slice 1 does
+## What the agent does
 
 | Capability | State |
 |---|---|
@@ -37,7 +40,10 @@ customer machine                                    InferCrane control plane
 | Relay engine metrics so Observe, readiness, and bottleneck diagnosis work | Implemented for vLLM, SGLang, llama.cpp |
 | Record content-free request shapes through the optional local gateway | Implemented |
 | Report NVIDIA GPUs (`nvidia-smi`, which reads NVML), Apple Silicon, and AMD GPUs with unknowns named | Implemented; Apple and AMD telemetry is not collected |
-| Run candidate setups on the same hardware | Designed below; not implemented |
+| Serve an agent-managed endpoint inside the customer's cloud with InferCrane API keys, routes, admission, and request quota ([data plane](#the-agent-as-the-data-plane)) | Implemented |
+| Run a candidate setup in the customer's Kubernetes namespace, measure it against the current setup with AIPerf, and run the answer check there ([candidate runs](#candidate-runs)) | Implemented for Kubernetes |
+| Install in Kubernetes with a Helm chart (`deploy/helm/infercrane-agent`) | Implemented |
+| Run candidates by restarting an engine the agent launched on one machine (`--launch`) | Designed below; not implemented |
 
 Ollama and LM Studio expose no engine metrics. Their queue, cache, and per-token internals stay
 unknown, and the agent says so instead of estimating them.
@@ -52,8 +58,9 @@ target as unreachable from itself:
 - The reconciler's adopted-target probe skips it. Health comes only from the agent's reports.
 - Endpoint compilation never publishes a route to it, whatever its ownership says.
 - `deploy --targets` and the apply path cannot bind it.
-- Promotion to `traffic-managed` is refused. Traffic for such a server goes through the agent's
-  local gateway, on the customer's machine.
+- Promotion to `traffic-managed` is refused. Its traffic is served by the agent instead: the
+  endpoint becomes `agent-managed` (see [the agent as the data plane](#the-agent-as-the-data-plane)),
+  or stays observe-only with the optional local gateway recording request shapes.
 - `infercrane connect` reuses a target by URL only when no agent owns it, so two machines that both
   serve `http://127.0.0.1:8000` stay two targets.
 
@@ -80,23 +87,27 @@ stored, as for every credential. Agent keys do not expire; revoke and replace th
 
 An agent key may:
 
-- call `POST /api/v1/agent/sync` and `POST /api/v1/agent/servers`, and nothing else;
+- call the agent API (`/api/v1/agent/*`: sync, servers, data-plane, quota-leases, commands), and
+  nothing else;
 - register up to 32 servers as observe-only endpoints in its own workspace, each with its own
   logical model (it cannot attach to a model another endpoint uses);
-- report health, hardware, filtered engine metrics, and request shapes for its own servers.
+- report health, hardware, filtered engine metrics, and request shapes for its own servers;
+- pull the data plane of its own agent-managed endpoints, lease request quota, and take the
+  candidate runs queued for it.
 
 An agent key may not call any other control-plane route (HTTP 403), invoke inference on the
-gateway (HTTP 403), read other agents' servers, deploy, promote, delete, or read workspace data.
-Relayed evidence for a server key that this agent did not register is rejected.
+gateway (HTTP 403), read other agents' servers, deploy, promote, delete, queue work for itself, or
+read workspace data. Relayed evidence for a server key that this agent did not register is
+rejected, and a data-plane request shape must name the agent-managed binding of that server.
+Making an endpoint agent-managed, queuing a candidate run, and changing residency need a person or
+service key with the `deploy` action; an agent key cannot do any of them.
 
 ### What leaves the machine
 
-| Sent to the control plane | Never sent |
-|---|---|
-| OS, architecture, accelerator vendor, name, count, memory, driver, and the fields that could not be read | Prompts, completions, tool calls, and message content |
-| Server address as the agent reaches it, engine, version, model names, loaded model, health | Request and response headers, and the API key of any server it reads |
-| Engine metrics, filtered on the machine to the families InferCrane parses | Any other metric family or label the server exposes |
-| With the local gateway only: per-request start time, latency, time to first byte, status, streaming flag, token counts, model name, and keyed hashes of the system prompt and session ID | The hashing key |
+The complete list, field by field, is [What leaves your cloud](#what-leaves-your-cloud). In short:
+hardware inventory, server addresses and health, filtered engine metrics, content-free request
+shapes, quota lease counts, and candidate-run numbers. Never prompts, completions, tool calls,
+message content, request or response headers, API keys, eval prompts, answers, or engine logs.
 
 The agent filters a scrape with the same family list the control plane's parser reads, so an
 unrelated metric (and any label it carries) is dropped before the request is built. Request hashes
@@ -120,6 +131,10 @@ no long-lived connection that a proxy or load balancer has to keep open.
 |---|---|---|
 | `POST /api/v1/agent/sync` | At start, then every poll interval (default 15 s; the control plane may advise 5–60 s) | Protocol version, agent version, hardware, servers and health, metric relays, request shapes |
 | `POST /api/v1/agent/servers` | When a new healthy server appears | Server key, endpoint name, model, engine, address |
+| `GET /api/v1/agent/data-plane?generation=` | With `--serve`: at start and every poll interval | The generation the agent holds; the answer is the snapshot, or `unchanged` with a new validity window |
+| `POST /api/v1/agent/quota-leases` | With `--serve`, when the workspace has a request quota and the agent's lease runs low | The current minute and a request count (at most 1,000) |
+| `GET /api/v1/agent/commands?wait=25s` | With `--executor`: a long poll, held at most 25 s | Nothing |
+| `POST /api/v1/agent/commands/{id}` | Progress every phase and every 2 minutes, then the result | State, phase, failure code, and the [candidate-run result](#what-leaves-your-cloud) |
 
 - Bodies are gzip-compressed JSON, at most 8 MiB after decompression. Unknown fields are ignored
   so a newer agent can add fields within one protocol version (`infercrane.agent/v1`).
@@ -140,7 +155,9 @@ no long-lived connection that a proxy or load balancer has to keep open.
 
 Polling was chosen over a stream because it works through every corporate proxy, needs no sticky
 sessions across control-plane replicas, and survives restarts on either side. Each sync is
-stateless on the control plane (see the next section), so any replica can answer it.
+stateless on the control plane (see the next section), so any replica can answer it. The command
+long poll holds one outbound request open for at most 25 seconds; a replica checks for new commands
+every 2 seconds and answers at once when a command is queued through it.
 
 ### Relayed metrics are treated like scraped metrics
 
@@ -184,33 +201,199 @@ to the network.
   one poll. The endpoints remain, so their history stays readable.
 - **Rotation.** Create a new agent key, restart the agent with it, then revoke the old agent.
 
-## Candidate runs (next slice)
+## The agent as the data plane
 
-Optimizing on the customer's own GPUs means running candidate setups where the server runs. The
-agent will do this only for an engine it launched itself, never for a process it merely observes:
+An endpoint whose server only an agent reaches can be served by that agent, inside the customer's
+cloud. The application calls the agent with an InferCrane API key; the agent authenticates the key,
+applies the endpoint's admission policy and the workspace's request quota, routes to the server,
+streams the answer back, and records a content-free request shape. Prompts and completions stay in
+the customer's network. The hosted control plane sees none of them.
+
+```text
+customer cloud                                                    InferCrane control plane
+┌──────────────────────────────────────────────────────┐          ┌────────────────────────────┐
+│ app ── InferCrane API key ──► agent  --serve :8080   │          │ GET  /agent/data-plane      │
+│                               │ authenticate (digests)│ outbound │   routes by server key      │
+│                               │ admission, quota lease│  HTTPS   │   API key digests           │
+│                               │ route ─► vLLM / SGLang│ ───────► │   admission, request quota  │
+│                               ▼                       │   only   │ POST /agent/quota-leases    │
+│                   content-free request shapes ────────┼────────► │ POST /agent/sync            │
+└──────────────────────────────────────────────────────┘          └────────────────────────────┘
+        prompts and completions stay here                    never routes to, dials, or proxies it
+```
+
+### Ownership and residency
+
+| Ownership of an agent's server | Who serves its traffic | How it gets there |
+|---|---|---|
+| `observe-only` | The application, straight to the server (or through the optional pass-through `--gateway`) | `infercrane agent run` registers it |
+| `agent-managed` | The agent's data plane (`--serve`), with InferCrane keys, admission, and quota | `PUT /api/v1/adoptions/endpoints/{name}/ownership` with `{"ownership_mode":"agent-managed"}`, by a key with `deploy` |
+| `traffic-managed` | Refused for an agent's server: the control plane cannot reach it | |
+
+Making an endpoint agent-managed also sets its **residency** to `customer-cloud`, in the same
+transaction. Residency is a property of the endpoint (`GET /api/v1/endpoints/{name}` shows it,
+`PUT /api/v1/endpoints/{name}/residency` sets `any` or `customer-cloud`):
+
+- A `customer-cloud` endpoint accepts only bindings to servers an InferCrane agent owns. A
+  database trigger refuses any other binding, whichever code path adds it: a hosted or
+  InferCrane-operated deployment, an external fallback, or a Model API supplier. Setting
+  `customer-cloud` on an endpoint that already has such a binding is refused (HTTP 409,
+  `residency_conflict`) until the binding is removed.
+- The hosted gateway answers a request for a `customer-cloud` endpoint with HTTP 403
+  (`residency_error`) and never forwards it, not even to another supply such as a hosted Model API
+  of the same name. The playground uses the same gateway path. Asynchronous inference refuses the
+  endpoint before storing anything (HTTP 403, `residency_customer_cloud`).
+- Returning to `any` is an explicit, audited change by a key with `deploy`. Returning the server to
+  `observe-only` stops the agent serving it; the endpoint stays `customer-cloud`.
+
+The endpoint's state reads `serving` while its agent reports a healthy agent-managed server, and
+`degraded` when it does not. Hosted routes for it are never published.
+
+### What the agent pulls
+
+`GET /api/v1/agent/data-plane` returns a snapshot of exactly what this agent needs, and nothing
+about other agents or other endpoints:
+
+| Field | Content |
+|---|---|
+| `routes` | Each agent-managed endpoint of this agent's servers: endpoint, logical model, environment, and serving plan identities, the routing policy, and per binding the binding and target IDs, the agent's own **server key**, upstream model, engine, weight, and protocol capabilities |
+| `credentials` | SHA-256 digests of the workspace's live, non-agent API keys that may call at least one of those endpoints, with role, scopes, endpoint restrictions, and expiry. Keys restricted to other endpoints, agent keys, disabled and expired keys are left out. No key itself is ever sent; digests are what the control plane stores |
+| `admission` | The admission policy of each of those endpoints (concurrency, queue depth and timeout, request timeout, request and output limits, priorities, retry budget) |
+| `request_quota` | The workspace's hard request rate, when it has one |
+| `generation`, `valid_until` | A digest of the content, and how long the agent may serve on it (15 minutes) |
+
+A route names a server by the agent's server key, never by address. The agent resolves the key to
+an address it detected itself, and routes only to servers it registered and currently sees as
+healthy; a key it does not know is never routed to, whatever the snapshot says. The agent
+validates every snapshot before using it.
+
+### How the agent serves
+
+The agent runs the same gateway code as the hosted control plane (`internal/gateway`):
+authentication against the digests, endpoint restrictions, admission, request quota, weighted or
+primary-fallback routing, streaming, cancellation, and retries. The application's API key is not
+forwarded to the model server; the agent sends the server's own key (`--token-env`), which never
+leaves the machine.
+
+- **Request quota.** The workspace limit is shared with every other agent and the hosted gateway
+  through the same durable minute-window allocator. The agent leases at most 1,000 requests at a
+  time (`POST /api/v1/agent/quota-leases`). If it cannot get a lease, requests get HTTP 429; they
+  are never let through unmetered.
+- **Staleness.** The agent refreshes the snapshot every poll interval. If it cannot refresh for 15
+  minutes it stops serving (HTTP 503, `data_plane_stale`), because a revoked key could otherwise
+  keep working. Revoking the agent stops it at its next poll.
+- **Records.** Each request becomes a request shape with `source: data-plane` and the binding it
+  was routed to; the control plane stores it as a request record with compute mode
+  `agent-data-plane`. Monitoring, readiness, replay capture, and optimization read these records as
+  they read the hosted gateway's.
+
+## Candidate runs
+
+The control plane can ask an agent to try a candidate setup in the agent's own cluster. A person or
+service key with `deploy` queues the run; the agent takes it over its outbound long poll and runs
+it; only numbers come back.
+
+```bash
+curl -X POST "$INFERCRANE_URL/api/v1/agents/kind-cluster/candidate-runs" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY" -d @candidate.json
+```
+
+A candidate run names the endpoint whose server is the current setup, the candidate's model,
+image (pinned by digest), argv and extra engine arguments, accelerator and count, the AIPerf load
+(requests, concurrency, input and output tokens, streaming), the eval set for the answer check, and
+a timeout. It can never carry a shell: an entry point that is a shell or an interpreter is refused,
+and arguments with substitutions are refused.
+
+The agent then, in its own namespace:
+
+1. checks the image against its operator's allowlist (`--allow-image`, Helm
+   `executor.allowedImages`) and the accelerator against `--allow-accelerator`, before applying
+   anything;
+2. starts the candidate with the same namespaced Kubernetes provider the control plane uses
+   (`provision.Kubernetes`: one Deployment and one Service, server-side apply, no cluster-scoped
+   permission) and waits for it to be ready;
+3. measures the current setup, the candidate, and the current setup again with AIPerf, so the
+   result carries a same-setup noise figure;
+4. runs the answer check on both: the built-in public suite (`default`), or an eval set the
+   operator keeps beside the agent (`local:NAME`, Helm `executor.evalSets`). Eval prompts and every
+   answer stay in the cluster; only per-prompt agreement scores and digests are sent;
+5. deletes the candidate, also when the run fails or is cancelled.
+
+Runs on one agent go one at a time, so two candidates never compete for the same accelerators.
+`GET /api/v1/agents/{id}/candidate-runs/{run}` shows the state, the current phase, and the result;
+`DELETE` cancels it, and the agent removes the candidate on its next report. A run whose agent
+stops reporting is handed out again (at most three times), and a run past its deadline expires.
+
+Candidate runs are separate from optimization runs today: their results are stored with the run,
+not ranked against other candidates or promoted. Feeding them into ranking, Release Guard, and
+promotion is the next step.
+
+### Taking turns on one machine (designed, not implemented)
+
+On a single machine the agent will run candidates only for an engine it launched itself, never for
+a process it merely observes:
 
 ```bash
 infercrane agent run --launch -- vllm serve Qwen/Qwen3-8B --port 8000
 ```
 
-1. **Commands.** The control plane queues bounded commands for one agent (`run_candidate`,
-   `restore`, `stop`). The agent fetches them with a long poll
-   (`GET /api/v1/agent/commands?wait=25s`, still outbound) and acknowledges each with its result.
-   A command names the engine version and a bounded argument list checked against a local allowlist
-   of flags; it can never carry a shell command or an image the customer did not approve.
-2. **Taking turns on one GPU.** The agent drains the local gateway (new requests wait, bounded),
-   stops the engine, starts it with the candidate flags, warms it up, measures it, and restores the
-   original setup. The control (current setup) is measured before and after each candidate, with
-   the same-setup noise check from the optimization engine. Each turn costs a restart, so turns run
-   only in a window the customer approves.
-3. **Side by side on two or more GPUs.** The agent starts the candidate on a free GPU
-   (`CUDA_VISIBLE_DEVICES`, another port) next to the current setup, and the local gateway mirrors or
-   splits traffic between them. Mirrored responses are compared on the machine and discarded.
-4. **Workload and quality.** Load is generated on the machine from the recorded traffic shape or
-   from an eval set the customer keeps there. The answer check also runs on the machine; only
-   scores, timings, and token counts go up.
-5. **Rollout.** A winning setup is applied only after approval, by restarting the launched engine
-   with the new flags; rollback restarts it with the previous flags.
+It will drain the data plane (new requests wait, bounded), stop the engine, start it with the
+candidate flags, measure it, and restore the original setup, in a window the customer approves.
+
+## Kubernetes
+
+The Helm chart in `deploy/helm/infercrane-agent` installs the agent as one Deployment:
+
+```bash
+kubectl -n models create secret generic infercrane-agent-key --from-literal=key=$AGENT_KEY
+helm install agent deploy/helm/infercrane-agent -n models \
+  --set controlPlane.url=https://control.example.com \
+  --set 'agent.servers[0]=http://vllm.models.svc:8000' --set agent.endpointName=support-bot \
+  --set executor.enabled=true --set 'executor.allowedImages[0]=vllm/vllm-openai'
+```
+
+| Object | Purpose |
+|---|---|
+| Deployment `<release>-infercrane-agent` | The agent: no inbound port for InferCrane, a read-only root filesystem, no privilege escalation, all capabilities dropped |
+| Service `<release>-infercrane-agent` | The data plane for applications in the cluster (`http://<release>-infercrane-agent.<namespace>.svc:8080/v1`) |
+| Secret `<release>-infercrane-agent-hash-key` | The request-hashing key, random, kept when the release is removed so hashes stay comparable |
+| Role and RoleBinding (with `executor.enabled`) | Exactly the provider grant of `deploy/kubernetes/base/provider-rbac.yaml`: Deployments and Services, read-only PVCs, in one namespace. No Secrets, no Pods/exec, nothing cluster-scoped |
+| Secret `<release>-infercrane-agent-worker`, ServiceAccount `infercrane-runtime` | The candidate pods' API key and identity (no API token mounted) |
+| ConfigMaps | The control plane's private CA, and local eval sets, when set |
+
+`scripts/test-agent-data-plane-kind.sh` installs the chart on a kind cluster and proves the data
+path end to end (see [Proof](#proof)).
+
+## What leaves your cloud
+
+Every field the agent sends to the control plane, by call. Nothing else is sent: no prompt,
+completion, tool call, message content, request or response header, caller request ID, API key,
+local server key, hashing key, eval prompt, answer, engine log, or Kubernetes object.
+
+| Call | Fields |
+|---|---|
+| `POST /agent/sync` (envelope) | protocol, agent version, OS, architecture, sent-at time; hardware state, and per accelerator kind: vendor, name, count, memory, driver, source, and the fields it could not read; limitations; the pass-through gateway's listen address and server key, when used |
+| `POST /agent/sync` (servers) | per server: server key, engine, engine version, address as the agent reaches it, model names, loaded model, health and its detail, whether metrics and authentication are configured |
+| `POST /agent/sync` (metrics) | per server: the current and a baseline engine scrape, filtered on the machine to the families InferCrane parses, with their ages |
+| `POST /agent/sync` (request shapes) | per request: a random shape ID, server key, start time, operation (chat, completion, embeddings, responses, other), requested model name, response model name, status code, latency, time to first byte, queue time, retry count, streaming flag, input and output token counts, error type, and HMAC-SHA256 hashes (keyed with a secret that never leaves) of the system prompt, session ID, and parent session ID, tool pause time; with the data plane also the binding ID |
+| `POST /agent/servers` | server key, endpoint name, model, engine, address |
+| `GET /agent/data-plane` | the generation the agent holds |
+| `POST /agent/quota-leases` | a minute and a request count |
+| `GET /agent/commands` | nothing |
+| `POST /agent/commands/{id}` | state, phase, failure code and a bounded failure detail written by the agent; for a finished candidate run: per measurement (current setup, candidate, current setup again) the tool and version, request, success, and failure counts, duration, request and output-token throughput, and p50/p95 time to first token, time per output token, and latency; the noise figure; the eval-set name, its digest, the prompt count, one agreement score per prompt, the mean, the verdict, and a digest committing to the answers; seconds until ready, the candidate image reference, and whether it was cleaned up |
+
+## Proof
+
+`internal/testtools/agentintegration` holds the hermetic proof: an application calls the agent's
+data plane with an InferCrane key, a candidate run goes through the command channel, and a
+recorder on the control plane's side asserts that no prompt, answer, eval prompt, key, caller
+request ID, or session ID was sent. `scripts/test-agent-data-plane-kind.sh` repeats it on a kind
+cluster with the Helm chart: the control plane, its PostgreSQL, and a TLS proxy that keeps a copy
+of every byte the agent sends run in one namespace; the model server and the agent in another.
+The test then checks the bytes on the wire, a dump of PostgreSQL, and the control plane's logs for
+the prompt, the answers, the eval prompts, and the key. Its model servers are the development fake
+engine (no GPU, no weights): the run proves the data path and the command channel, not engine
+performance.
 
 ## Limits
 
@@ -219,5 +402,11 @@ infercrane agent run --launch -- vllm serve Qwen/Qwen3-8B --port 8000
   needs `--model`.
 - Apple Silicon and AMD GPUs are reported as detected, with GPU telemetry unknown. Intel GPUs are not
   reported.
-- Kubernetes installs (a Helm chart with the agent as a sidecar or DaemonSet) and AWS self-serve
-  connections are the next slice of this plan.
+- The data plane forwards a local server's key only as a bearer token (`--token-env`); a server
+  that needs another header scheme can be observed but not served.
+- One agent serves one replica's worth of traffic; run more replicas of the Helm Deployment for
+  more. Each replica leases quota on its own.
+- Candidate runs need Kubernetes; the single-machine `--launch` mode is designed, not implemented.
+  Their results are not yet ranked or promoted by optimization runs.
+- AWS self-serve connections are the next slice of this plan: they reach private-network workers
+  through this agent.

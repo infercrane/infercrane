@@ -142,7 +142,22 @@ type TrafficShape struct {
 	ErrorType        string    `json:"error_type,omitempty"`
 	SharedPrefixHash string    `json:"shared_prefix_hash,omitempty"`
 	SessionIDHash    string    `json:"session_id_hash,omitempty"`
+	// The fields below are set only by the agent's data plane
+	// (Source "data-plane"); the pass-through gateway leaves them empty.
+	Source              string   `json:"source,omitempty"`
+	BindingID           string   `json:"binding_id,omitempty"`
+	ResponseModel       string   `json:"response_model,omitempty"`
+	QueueMS             *float64 `json:"queue_ms,omitempty"`
+	RetryCount          int      `json:"retry_count,omitempty"`
+	ParentSessionIDHash string   `json:"parent_session_id_hash,omitempty"`
+	ToolPauseMS         *float64 `json:"tool_pause_ms,omitempty"`
 }
+
+// Traffic shape sources.
+const (
+	ShapeSourceGateway   = "gateway"
+	ShapeSourceDataPlane = "data-plane"
+)
 
 // Gateway says whether requests reach a server through the agent.
 type Gateway struct {
@@ -197,14 +212,6 @@ type Upgrade struct {
 	Recommended string `json:"recommended,omitempty"`
 	Required    bool   `json:"required"`
 	Detail      string `json:"detail,omitempty"`
-}
-
-// Command is reserved for work the control plane asks of the agent. Protocol
-// v1 never sends one; see the agent architecture page for the candidate-run
-// commands that will use it.
-type Command struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
 }
 
 // SyncResponse is the control plane's answer to one sync.
@@ -421,15 +428,35 @@ func (s TrafficShape) Validate() error {
 	if math.IsNaN(s.LatencyMS) || math.IsInf(s.LatencyMS, 0) || s.LatencyMS < 0 || s.LatencyMS > maxMS {
 		return errors.New("latency_ms must be finite and between 0 and 86400000")
 	}
-	if s.TTFTMS != nil && (math.IsNaN(*s.TTFTMS) || math.IsInf(*s.TTFTMS, 0) || *s.TTFTMS < 0 || *s.TTFTMS > maxMS) {
-		return errors.New("ttft_ms must be finite and between 0 and 86400000")
+	for name, value := range map[string]*float64{"ttft_ms": s.TTFTMS, "queue_ms": s.QueueMS, "tool_pause_ms": s.ToolPauseMS} {
+		if value != nil && (math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 || *value > maxMS) {
+			return fmt.Errorf("%s must be finite and between 0 and 86400000", name)
+		}
+	}
+	switch s.Source {
+	case "", ShapeSourceGateway:
+		if s.BindingID != "" || s.QueueMS != nil || s.RetryCount != 0 || s.ParentSessionIDHash != "" || s.ToolPauseMS != nil || s.ResponseModel != "" {
+			return errors.New("data-plane fields need source data-plane")
+		}
+	case ShapeSourceDataPlane:
+		if !identifierPattern.MatchString(s.BindingID) {
+			return errors.New("a data-plane shape needs binding_id")
+		}
+		if s.RetryCount < 0 || s.RetryCount > 3 {
+			return errors.New("retry_count must be between 0 and 3")
+		}
+	default:
+		return errors.New("source must be gateway or data-plane")
+	}
+	if err := boundedText("response_model", s.ResponseModel, false); err != nil {
+		return err
 	}
 	for name, tokens := range map[string]*int{"input_tokens": s.InputTokens, "output_tokens": s.OutputTokens} {
 		if tokens != nil && (*tokens < 0 || *tokens > 10_000_000) {
 			return fmt.Errorf("%s must be between 0 and 10000000", name)
 		}
 	}
-	for name, hash := range map[string]string{"shared_prefix_hash": s.SharedPrefixHash, "session_id_hash": s.SessionIDHash} {
+	for name, hash := range map[string]string{"shared_prefix_hash": s.SharedPrefixHash, "session_id_hash": s.SessionIDHash, "parent_session_id_hash": s.ParentSessionIDHash} {
 		if hash != "" && !hashPattern.MatchString(hash) {
 			return fmt.Errorf("%s must be a lowercase SHA-256 hex digest", name)
 		}

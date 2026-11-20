@@ -193,7 +193,7 @@ infercrane inbox --output json \
   > /secure/path/infercrane-upgrade-evidence/inbox.json
 infercrane orphans --output json \
   > /secure/path/infercrane-upgrade-evidence/orphans.json
-curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=1000" \
+curl -fsS "$INFERCRANE_URL/api/v1/audit-events?limit=500" \
   -H "Authorization: Bearer $INFERCRANE_API_KEY" \
   > /secure/path/infercrane-upgrade-evidence/audit-events.json
 ```

@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -11,6 +12,10 @@ import (
 
 var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
+
+// ErrResidency refuses a binding, route, or request that would let request
+// content leave a customer-cloud endpoint. It is a conflict.
+var ErrResidency = fmt.Errorf("%w: endpoint residency customer-cloud allows only servers an InferCrane agent owns", ErrConflict)
 var ErrInsufficientCredits = errors.New("insufficient prepaid credits")
 
 type Target struct {
@@ -250,7 +255,11 @@ type Endpoint struct {
 	ID, TenantID, LogicalModelID, EnvironmentID string
 	Name, DesiredState, ObservedState           string
 	ActiveServingPlanID, CandidateServingPlanID string
-	CreatedAt, UpdatedAt                        time.Time
+	// Residency is "any" or "customer-cloud". A customer-cloud endpoint is
+	// served only by servers an InferCrane agent owns, so request content
+	// never reaches the control plane.
+	Residency            string
+	CreatedAt, UpdatedAt time.Time
 }
 
 type BackendBinding struct {
@@ -833,13 +842,16 @@ type ReleaseGuardPolicy struct {
 }
 
 type RevisionMetrics struct {
-	EvidenceSource        string    `json:"evidence_source,omitempty"`
-	EvidenceID            string    `json:"evidence_id,omitempty"`
-	Requests              int       `json:"requests"`
-	ReadyReplicas         int       `json:"ready_replicas"`
-	ErrorRate             float64   `json:"error_rate"`
-	P95TTFTMS             *float64  `json:"p95_ttft_ms"`
-	P95LatencyMS          *float64  `json:"p95_latency_ms"`
+	EvidenceSource string   `json:"evidence_source,omitempty"`
+	EvidenceID     string   `json:"evidence_id,omitempty"`
+	Requests       int      `json:"requests"`
+	ReadyReplicas  int      `json:"ready_replicas"`
+	ErrorRate      float64  `json:"error_rate"`
+	P95TTFTMS      *float64 `json:"p95_ttft_ms"`
+	P95LatencyMS   *float64 `json:"p95_latency_ms"`
+	// OutputTokensPerSecond is, for request telemetry, the median successful
+	// request's output tokens per second of request time, so revisions that
+	// serve different shares of traffic compare on speed, not demand.
 	OutputTokensPerSecond *float64  `json:"output_tokens_per_second"`
 	SourcedHourlyCost     *float64  `json:"sourced_hourly_cost,omitempty"`
 	Compatible            *bool     `json:"compatible,omitempty"`
@@ -1136,6 +1148,16 @@ type AuditEvent struct {
 	ID, TenantID, Actor, Action, ResourceType, ResourceName string
 	Outcome, RequestID, Payload                             string
 	CreatedAt                                               time.Time
+}
+
+// AuditCursor is a position in a tenant's audit log, which pages newest
+// first: a page holds the events older than the cursor. Events can share a
+// timestamp, so the position is the last event read, (CreatedAt, ID); with an
+// empty ID a page holds only events older than CreatedAt. The zero cursor
+// starts at the newest event.
+type AuditCursor struct {
+	CreatedAt time.Time
+	ID        string
 }
 
 type Principal struct {

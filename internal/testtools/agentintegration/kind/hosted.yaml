@@ -1,0 +1,129 @@
+# Development fixture for scripts/test-agent-data-plane-kind.sh. The "hosted"
+# namespace stands in for the InferCrane hosted control plane. The agent
+# reaches it only through capture-proxy, which keeps a copy of every request
+# body the agent sends so the test can prove what left the customer's side.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hosted
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: control-plane
+  namespace: hosted
+stringData:
+  api-key: "@@API_KEY@@"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: hosted
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: @@POSTGRES_IMAGE@@
+          env:
+            - {name: POSTGRES_DB, value: infercrane}
+            - {name: POSTGRES_USER, value: infercrane}
+            - {name: POSTGRES_PASSWORD, value: infercrane-kind}
+          ports: [{containerPort: 5432}]
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "infercrane"]}
+            periodSeconds: 2
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 512Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: hosted
+spec:
+  selector: {app: postgres}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infercrane
+  namespace: hosted
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: infercrane}
+  template:
+    metadata:
+      labels: {app: infercrane}
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      containers:
+        - name: infercrane
+          image: @@IMAGE@@
+          imagePullPolicy: Never
+          command: ["infercrane", "serve"]
+          ports: [{containerPort: 8080}]
+          env:
+            - {name: INFERCRANE_DATABASE_URL, value: "postgres://infercrane:infercrane-kind@postgres:5432/infercrane?sslmode=disable"}
+            - name: INFERCRANE_API_KEY
+              valueFrom: {secretKeyRef: {name: control-plane, key: api-key}}
+            - {name: INFERCRANE_HOST, value: "0.0.0.0"}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 8080}
+            periodSeconds: 3
+          resources: {requests: {cpu: 200m, memory: 256Mi}, limits: {memory: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infercrane
+  namespace: hosted
+spec:
+  selector: {app: infercrane}
+  ports: [{port: 8080, targetPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capture
+  namespace: hosted
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: capture}
+  template:
+    metadata:
+      labels: {app: capture}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: capture
+          image: @@IMAGE@@
+          imagePullPolicy: Never
+          command: ["capture-proxy", "-listen", ":8443", "-report", ":9090", "-upstream", "http://infercrane:8080", "-cert", "/tls/tls.crt", "-key", "/tls/tls.key"]
+          ports: [{containerPort: 8443}, {containerPort: 9090}]
+          volumeMounts:
+            - {name: tls, mountPath: /tls, readOnly: true}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {memory: 512Mi}}
+      volumes:
+        - name: tls
+          secret: {secretName: capture-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: capture
+  namespace: hosted
+spec:
+  selector: {app: capture}
+  ports:
+    - {name: https, port: 8443, targetPort: 8443}
+    - {name: report, port: 9090, targetPort: 9090}

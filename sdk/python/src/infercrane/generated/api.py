@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope, QualityEvidenceList
+from .models import AuditEventList, DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope, QualityEvidenceList
 
 
 class Transport(Protocol):
@@ -262,6 +262,42 @@ class ControlAPI:
     def register_agent_server(self, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         request_path = "/agent/servers"
         return cast(dict[str, Any], self._transport.request("POST", request_path, body=body, idempotency_key=idempotency_key))
+
+    def agent_data_plane(self) -> dict[str, Any]:
+        request_path = "/agent/data-plane"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def lease_agent_quota(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/agent/quota-leases"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def agent_commands(self) -> dict[str, Any]:
+        request_path = "/agent/commands"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def update_agent_command(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/agent/commands/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def create_candidate_run(self, id: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}/candidate-runs"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def list_candidate_runs(self, id: str) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}/candidate-runs"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_candidate_run(self, id: str, run: str) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}/candidate-runs/{quote(run, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def cancel_candidate_run(self, id: str, run: str, idempotency_key: str) -> dict[str, Any]:
+        request_path = f"/agents/{quote(id, safe='')}/candidate-runs/{quote(run, safe='')}"
+        return cast(dict[str, Any], self._transport.request("DELETE", request_path, idempotency_key=idempotency_key))
+
+    def set_endpoint_residency(self, name: str, *, body: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/residency"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body, idempotency_key=idempotency_key))
 
     def adopt_endpoint(self, *, body: dict[str, Any]) -> dict[str, Any]:
         request_path = "/adoptions/endpoints"
@@ -911,9 +947,9 @@ class ControlAPI:
         request_path = "/orphans"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
-    def list_audit_events(self) -> ObjectList:
+    def list_audit_events(self) -> AuditEventList:
         request_path = "/audit-events"
-        return cast(ObjectList, self._transport.request("GET", request_path))
+        return cast(AuditEventList, self._transport.request("GET", request_path))
 
     def set_tenant_quota(self, *, body: dict[str, Any]) -> None:
         request_path = "/tenant/quota"

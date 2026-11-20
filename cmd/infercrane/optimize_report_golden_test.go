@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,22 +19,38 @@ var updateGolden = flag.Bool("update", false, "rewrite the CLI golden files from
 
 // The fixtures are reports of a real RTX 4090 campaign (83ccd598). The first is
 // how it read before cleanup kept its decision (no setup qualified); its plain
-// rendering is byte for byte the text that run printed. The second, "-kept",
-// is the same run as the control plane reports it now: the current setup kept,
-// with InferCrane's built-in answer check.
+// rendering is byte for byte the text that run printed, plus the line saying it
+// is not signed. The second, "-kept", is the same run as the control plane
+// reports it now: the current setup kept, with InferCrane's built-in answer
+// check, and signed by a fixed test key.
 var reportFixtures = []string{"optimize-report-rtx4090", "optimize-report-rtx4090-kept"}
 
-func loadReportFixture(t *testing.T, name string) (json.RawMessage, optimizationreport.Report) {
+// fixtureSigningKey is a fixed test key, so the golden files name a stable key ID.
+var fixtureSigningKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+
+func loadReportFixture(t *testing.T, name string) (json.RawMessage, optimizationreport.Document) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name+".json"))
+	body, err := os.ReadFile(filepath.Join("testdata", name+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var report optimizationreport.Report
-	if err = json.Unmarshal(raw, &report); err != nil {
+	if err = json.Unmarshal(body, &report); err != nil {
 		t.Fatal(err)
 	}
-	return raw, report
+	var key ed25519.PrivateKey
+	if strings.HasSuffix(name, "-kept") {
+		key = fixtureSigningKey
+	}
+	document, err := optimizationreport.Sign(report, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, document
 }
 
 func checkGolden(t *testing.T, name string, got []byte) {
@@ -104,7 +121,7 @@ func TestOptimizeReportStyledGolden(t *testing.T) {
 // widen the plain table's first column to over 100 characters.
 func TestOptimizeReportNamesAnswerQualityShortlyAndKeepsTheSuiteInEvidence(t *testing.T) {
 	_, report := loadReportFixture(t, "optimize-report-rtx4090-kept")
-	suite := report.Quality.Eval
+	suite := report.Report.Quality.Eval
 	plain := optimizationreport.Text(report)
 	if !strings.Contains(plain, "\nAnswer quality · InferCrane answer check  ") {
 		t.Fatalf("plain report lacks the short answer-quality label:\n%s", plain)
@@ -144,12 +161,12 @@ func TestOptimizeReportStyledKeepsEveryValue(t *testing.T) {
 	}
 }
 
-func assertStyledReportKeepsEveryValue(t *testing.T, report optimizationreport.Report) {
+func assertStyledReportKeepsEveryValue(t *testing.T, report optimizationreport.Document) {
 	t.Helper()
 	view := optimizationreport.NewView(report)
 	for _, width := range []int{60, 80, 120} {
 		text := collapseSpace(cardsInReadingOrder(ansi.Strip(renderStyledReport(view, styledTheme(width, "light")))))
-		want := []string{view.Title, view.Subtitle, view.Headline}
+		want := []string{view.Title, view.Subtitle, view.Headline, view.Signature}
 		for _, row := range view.Rows {
 			// A card may break a long label at its " · " seam.
 			head, tail, _ := strings.Cut(row.Label, " · ")

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: infercrane-agent
+description: >-
+  The InferCrane agent inside your cluster. It dials out to the InferCrane control plane,
+  serves agent-managed endpoints with InferCrane API keys so prompts and completions stay in
+  your cloud, and runs candidate setups, AIPerf, and the answer check in one namespace.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/infercrane/infercrane
+sources:
+  - https://github.com/infercrane/infercrane
+license: Apache-2.0
+keywords:
+  - inference
+  - llm
+  - data-plane
