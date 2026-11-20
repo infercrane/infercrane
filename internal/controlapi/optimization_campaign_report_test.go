@@ -2,6 +2,7 @@ package controlapi
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/passport"
 )
 
 // fakeReportStore owns one finished campaign for tenant-a and records every
@@ -171,5 +173,63 @@ func TestOptimizationCampaignReportIsTenantScopedAndDocumented(t *testing.T) {
 	unconfigured.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNotImplemented {
 		t.Fatalf("unconfigured status=%d", recorder.Code)
+	}
+}
+
+// A finished run's report is signed with the passport signing key, and the
+// response body as served verifies byte for byte. Without the key, or before
+// the run finishes, the signature is an explicit null with its reason.
+func TestOptimizationCampaignReportIsSignedOnlyWhenFinishedWithAKey(t *testing.T) {
+	_, key, err := passport.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(state string, key ed25519.PrivateKey) []byte {
+		t.Helper()
+		campaign, benchmarks := reportCampaign()
+		campaign.State = state
+		store := &fakeReportStore{fakeStore: &fakeStore{principal: domain.Principal{ID: "viewer-a", TenantID: "tenant-a", Role: string(authz.Viewer), Kind: "api_key", Scopes: authz.DefaultScopeNames(authz.Viewer)}}, campaign: campaign, bench: benchmarks}
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/optimization/campaigns/campaign-1/report", nil)
+		request.Header.Set("Authorization", "Bearer viewer-token")
+		response := httptest.NewRecorder()
+		(API{Store: store, Authenticator: store, PassportPrivateKey: key}).Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		assertMatchesDocumentedSchema(t, "OptimizationCampaignReportEnvelope", envelope)
+		if signature, ok := envelope["signature"].(map[string]any); ok {
+			assertMatchesDocumentedSchema(t, "OptimizationCampaignReportSignature", signature)
+		}
+		return response.Body.Bytes()
+	}
+
+	body := read(optimizationcampaign.CampaignQualified, key)
+	verified, err := optimizationreport.Verify(body, key.Public().(ed25519.PublicKey))
+	if err != nil || !verified.Pinned || verified.CampaignID != "campaign-1" || verified.KeyID != passport.KeyID(key.Public().(ed25519.PublicKey)) {
+		t.Fatalf("served report does not verify: %+v err=%v", verified, err)
+	}
+	if again := read(optimizationcampaign.CampaignQualified, key); string(again) != string(body) {
+		t.Fatal("the same finished run was signed differently on a second read")
+	}
+
+	for name, test := range map[string]struct {
+		state  string
+		key    ed25519.PrivateKey
+		reason string
+	}{
+		"no signing key": {optimizationcampaign.CampaignQualified, nil, optimizationreport.UnsignedNoSigningKey},
+		"unfinished run": {optimizationcampaign.CampaignRunning, key, optimizationreport.UnsignedRunNotFinished},
+	} {
+		body := read(test.state, test.key)
+		if !strings.Contains(string(body), `"signature":null,"unsigned_reason":"`+test.reason+`"`) {
+			t.Fatalf("%s: signature is not an explicit null with its reason: %s", name, body[max(0, len(body)-160):])
+		}
+		if _, err := optimizationreport.Verify(body, nil); err == nil {
+			t.Fatalf("%s: an unsigned report verified", name)
+		}
 	}
 }

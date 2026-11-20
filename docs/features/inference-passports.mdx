@@ -18,7 +18,10 @@ infercrane passport keygen
 export INFERCRANE_PASSPORT_SIGNING_KEY_FILE="$HOME/.config/infercrane/passport-signing-key"
 ```
 
-The command creates the private key with mode `0600` and refuses to overwrite an existing key.
+The command creates the private key with mode `0600`, refuses to overwrite an existing key, and
+prints the key ID and the public key. Publish the public key: anyone can then check what this key
+signs, such as the [signed report](/features/optimization#read-the-outcome-of-a-run) of an
+optimization run.
 Mount the key into the control-plane process. On platforms that inject secrets as environment
 variables, set `INFERCRANE_PASSPORT_SIGNING_KEY` to the file's contents instead; the container
 entrypoint writes it to an owner-only file before the server starts. InferCrane persists only the

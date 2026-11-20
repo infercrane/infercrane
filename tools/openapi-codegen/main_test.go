@@ -54,4 +54,7 @@ func TestResponseTypeMappings(t *testing.T) {
 	if got := pythonResponseType("QualityEvidenceList"); got != "QualityEvidenceList" {
 		t.Fatalf("Python quality evidence response type = %q", got)
 	}
+	if python, typeScript := pythonResponseType("AuditEventList"), typeScriptResponseType("AuditEventList"); python != "AuditEventList" || typeScript != "AuditEventList" {
+		t.Fatalf("audit event page response types = %q, %q", python, typeScript)
+	}
 }
