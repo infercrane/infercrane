@@ -6162,7 +6162,7 @@ func (a API) auditEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
 	query := r.URL.Query()
 	requested, _ := strconv.Atoi(query.Get("limit"))
-	limit := domain.AuditPageSize(requested)
+	limit := store.AuditPageSize(requested)
 	var before domain.AuditCursor
 	if raw := query.Get("before"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, raw)

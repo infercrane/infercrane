@@ -1148,20 +1148,6 @@ type AuditCursor struct {
 	ID        string
 }
 
-const (
-	DefaultAuditPageSize = 100
-	MaxAuditPageSize     = 500
-)
-
-// AuditPageSize is the page size served for a requested limit: the default
-// when none is given, and at most MaxAuditPageSize.
-func AuditPageSize(requested int) int {
-	if requested < 1 {
-		return DefaultAuditPageSize
-	}
-	return min(requested, MaxAuditPageSize)
-}
-
 type Principal struct {
 	ID, TenantID, Name, Role, Kind string
 	Scopes                         []string

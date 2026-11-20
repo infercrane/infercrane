@@ -157,6 +157,20 @@ func (s *Store) Audit(ctx context.Context, event domain.AuditEvent) error {
 	return err
 }
 
+const (
+	DefaultAuditPageSize = 100
+	MaxAuditPageSize     = 500
+)
+
+// AuditPageSize is the page size served for a requested limit: the default
+// when none is given, and at most MaxAuditPageSize.
+func AuditPageSize(requested int) int {
+	if requested < 1 {
+		return DefaultAuditPageSize
+	}
+	return min(requested, MaxAuditPageSize)
+}
+
 // AuditEventsForTenant pages a tenant's audit log newest first, ordered by
 // (created_at, id), with the events strictly before the cursor. Ordering and
 // filtering on the same key keeps events that share a timestamp from being
@@ -169,7 +183,7 @@ func (s *Store) AuditEventsForTenant(ctx context.Context, tenant string, before 
 		args = append(args, before.CreatedAt.UTC(), before.CreatedAt.UTC(), before.ID)
 	}
 	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
-	args = append(args, domain.AuditPageSize(limit))
+	args = append(args, AuditPageSize(limit))
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

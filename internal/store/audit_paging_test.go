@@ -76,10 +76,10 @@ func TestAuditEventsClampTheLimitToTheMaximum(t *testing.T) {
 	if err := s.CreateTenant(ctx, tenant, tenant); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ExecContext(ctx, `INSERT INTO audit_events(id,tenant_id,actor,action,resource_type,resource_name,outcome,payload_json,created_at) SELECT 'event-'||n,?,'tester','test.event','test','x','succeeded','{}'::jsonb,NOW()-n*INTERVAL '1 millisecond' FROM generate_series(1,?) AS n`, tenant, domain.MaxAuditPageSize+20); err != nil {
+	if _, err := s.ExecContext(ctx, `INSERT INTO audit_events(id,tenant_id,actor,action,resource_type,resource_name,outcome,payload_json,created_at) SELECT 'event-'||n,?,'tester','test.event','test','x','succeeded','{}'::jsonb,NOW()-n*INTERVAL '1 millisecond' FROM generate_series(1,?) AS n`, tenant, MaxAuditPageSize+20); err != nil {
 		t.Fatal(err)
 	}
-	for limit, want := range map[int]int{1000: domain.MaxAuditPageSize, 0: domain.DefaultAuditPageSize, -3: domain.DefaultAuditPageSize, 7: 7} {
+	for limit, want := range map[int]int{1000: MaxAuditPageSize, 0: DefaultAuditPageSize, -3: DefaultAuditPageSize, 7: 7} {
 		events, err := s.AuditEventsForTenant(ctx, tenant, domain.AuditCursor{}, limit)
 		if err != nil || len(events) != want {
 			t.Fatalf("limit %d returned %d events, want %d (err=%v)", limit, len(events), want, err)
