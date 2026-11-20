@@ -464,18 +464,28 @@ func TestAdmissionRetryBudgetRetriesOnlyBufferedInternalRequest(t *testing.T) {
 }
 
 func TestEndpointDeadlineBoundsQueueRetriesAndUpstreamTogether(t *testing.T) {
-	attempts := 0
+	// The first attempt fails at once and is retried; a later attempt works
+	// until its context ends. Each attempt reports the deadline its request
+	// carried, so the test checks the shared deadline itself rather than a
+	// wall-clock bound that a loaded host stretches.
+	const requestTimeout = 35 * time.Millisecond
+	var deadlines []time.Time
+	var firstAttemptAt time.Time
 	client := &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
-		attempts++
-		select {
-		case <-request.Context().Done():
-			return nil, request.Context().Err()
-		case <-time.After(5 * time.Millisecond):
+		deadline, ok := request.Context().Deadline()
+		if !ok {
+			return nil, errors.New("upstream request carries no deadline")
+		}
+		deadlines = append(deadlines, deadline)
+		if len(deadlines) == 1 {
+			firstAttemptAt = time.Now()
 			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"starting"}`))}, nil
 		}
+		<-request.Context().Done()
+		return nil, request.Context().Err()
 	})}
 	pool := admission.New()
-	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: time.Second, RequestTimeout: 35 * time.Millisecond, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 3, Enabled: true}})
+	pool.Replace([]admission.Policy{{Key: "global\x00alias", MaxConcurrency: 1, MaxQueueDepth: 1, QueueTimeout: time.Second, RequestTimeout: requestTimeout, MaxRequestBytes: 4096, MaxOutputTokens: 4096, AllowedPriorities: map[string]struct{}{"normal": {}}, RetryBudget: 3, Enabled: true}})
 	directory := routes.New()
 	directory.Put(routes.Snapshot{TenantID: "global", Alias: "alias", UpstreamModel: "model", RouterURL: "http://runtime", ProtocolCapabilities: runtimecontract.ProtocolCapabilities{ChatCompletions: true}})
 	captured := &captureRecorder{}
@@ -485,13 +495,23 @@ func TestEndpointDeadlineBoundsQueueRetriesAndUpstreamTogether(t *testing.T) {
 	response := httptest.NewRecorder()
 	started := time.Now()
 	handler.ServeHTTP(response, request)
-	elapsed := time.Since(started)
-	// The end-to-end deadline may expire either during the retry backoff or
-	// immediately after it, depending on how the host scheduler services the
-	// 5ms transport timer. Both outcomes preserve the invariant under test:
-	// queueing, retries, and upstream work share one absolute deadline.
-	if response.Code != http.StatusGatewayTimeout || attempts < 1 || attempts > 2 || elapsed > 150*time.Millisecond {
-		t.Fatalf("status=%d attempts=%d elapsed=%s body=%s", response.Code, attempts, elapsed, response.Body.String())
+	attempts := len(deadlines)
+	// Without one deadline the retry budget of 3 would buy four attempts. The
+	// deadline ends either the first retry backoff or the second attempt,
+	// depending on how the host scheduler services the 25ms backoff timer.
+	// Both outcomes preserve the invariant under test.
+	if response.Code != http.StatusGatewayTimeout || attempts < 1 || attempts > 2 {
+		t.Fatalf("status=%d attempts=%d body=%s", response.Code, attempts, response.Body.String())
+	}
+	for _, deadline := range deadlines {
+		if !deadline.Equal(deadlines[0]) {
+			t.Fatalf("attempt deadlines = %v, want every attempt to share one deadline", deadlines)
+		}
+	}
+	// The deadline is counted from when the request arrived, before admission
+	// and the first attempt, not from when an attempt started.
+	if arrived := deadlines[0].Add(-requestTimeout); arrived.Before(started) || arrived.After(firstAttemptAt) {
+		t.Fatalf("deadline %s minus the endpoint timeout falls outside the request's arrival window [%s, %s]", deadlines[0], started, firstAttemptAt)
 	}
 	if captured.record.ErrorType != "request_deadline_exceeded" || captured.record.RetryCount != attempts-1 || captured.record.LatencyMS < 30 || captured.contextErr != nil {
 		t.Fatalf("record=%#v", captured.record)
