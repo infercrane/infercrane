@@ -76,6 +76,18 @@ modal billing report --for today --show-resources
 The control plane's own approval amount is its ceiling at the stated GPU rate over the
 approval window, not money spent.
 
+## One driver per run
+
+The setups of a run are compared across separate machines, and a different NVIDIA driver
+alone can change speed: on 2026-11-20 the current setup ran on driver 610.57.04 and both
+candidates on 620.70.06. So every container reads its GPU model, memory, NVIDIA driver, and
+CUDA version before it starts vLLM and publishes them on its lease. The broker pins the
+driver of the first host that reports one (the baseline, which runs alone first), or the one
+given with `--driver`. A container on another driver stops within seconds, before loading the
+model, and the broker starts the lease again on another host, at most 3 times. The refused
+container's time stays in the estimate. Each lease's `gpu_facts` and `refused_hosts` are in
+the broker's ledger.
+
 ## What the numbers mean
 
 - Throughput and cost per token are H100 numbers. Cost per 1M output tokens uses Modal's H100

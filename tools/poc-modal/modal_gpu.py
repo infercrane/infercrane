@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -153,9 +154,32 @@ def _tail(path: Path, lines: int = 40) -> str:
         return ""
 
 
-def _gpu_name() -> str:
+def _gpu_facts() -> dict:
+    """The host facts that can make one H100 serve faster than another: GPU model and
+    memory, NVIDIA driver, and the CUDA version the driver supports."""
+    facts = {"name": "unknown", "memory": "unknown", "driver": "unknown", "cuda": "unknown"}
     probe = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"], capture_output=True, text=True)
-    return probe.stdout.strip() if probe.returncode == 0 else "unknown"
+    if probe.returncode == 0 and probe.stdout.strip():
+        parts = [part.strip() for part in probe.stdout.strip().splitlines()[0].split(",")]
+        if len(parts) == 3:
+            facts["name"], facts["memory"], facts["driver"] = parts
+    header = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+    match = re.search(r"CUDA Version:\s*([0-9.]+)", header.stdout or "")
+    if match:
+        facts["cuda"] = match.group(1)
+    return facts
+
+
+def driver_mismatch(facts: dict, control: dict) -> str:
+    """Why this host must not serve the lease, or "" when it may. A run compares setups
+    across separate machines; a different NVIDIA driver alone can change speed, so every
+    setup of a run is held to the driver the broker pinned."""
+    required = control.get("required_driver")
+    if not required:
+        return ""
+    if facts.get("driver") != required:
+        return f"NVIDIA driver {facts.get('driver')} differs from the run's pinned driver {required}"
+    return ""
 
 
 def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) -> dict:
@@ -166,6 +190,14 @@ def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) 
         check_args(args, model)
     except ValueError as error:
         return _publish(lease_id, {"state": "failed", "error": str(error), "stopped_at": time.time()})
+    if not dry:
+        facts = _gpu_facts()
+        _publish(lease_id, {"gpu": f"{facts['name']}, {facts['memory']}, driver {facts['driver']}, CUDA {facts['cuda']}", "gpu_facts": facts,
+                            "vllm_version": VLLM_VERSION})
+        mismatch = driver_mismatch(facts, leases.get(f"ctl:{lease_id}", {}) or {})
+        if mismatch:
+            # Checked before vLLM starts, so a wrong host costs seconds, not a model load.
+            return _publish(lease_id, {"state": "failed", "reason": "driver_mismatch", "error": mismatch, "stopped_at": time.time()})
     log_path = Path("/tmp/server.log")
     env = dict(os.environ, **SERVER_ENV, VLLM_API_KEY=api_key)
     command = ["python3", "-c", FAKE_SERVER, str(PORT), api_key, model] if dry else server_command(args)
@@ -173,8 +205,6 @@ def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) 
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
     reason, error = "", ""
     try:
-        if not dry:
-            _publish(lease_id, {"gpu": _gpu_name(), "vllm_version": VLLM_VERSION})
         deadline = time.monotonic() + STARTUP_SECONDS
         while True:
             if process.poll() is not None:
