@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -591,7 +592,7 @@ func TestDiagnosisPlansAITERKernelsOnlyOnReviewedAMDAccelerators(t *testing.T) {
 			t.Fatalf("%s env control=%v aiter=%v", gpu, control.Deployment.Runtime.Env, aiter.Deployment.Runtime.Env)
 		}
 		// Only the kernels change: same flags, model, image, and GPU.
-		if strings.Join(aiter.Deployment.Runtime.Args, " ") != strings.Join(control.Deployment.Runtime.Args, " ") || aiter.Deployment.Model != control.Deployment.Model || aiter.Deployment.Resources != control.Deployment.Resources {
+		if strings.Join(aiter.Deployment.Runtime.Args, " ") != strings.Join(control.Deployment.Runtime.Args, " ") || !reflect.DeepEqual(aiter.Deployment.Model, control.Deployment.Model) || aiter.Deployment.Resources != control.Deployment.Resources {
 			t.Fatalf("%s AITER setup changed more than the kernels: %+v", gpu, aiter.Deployment)
 		}
 		if !contains(aiter.RequiredEvidence, "answer quality check against the starting setup because this setup swaps the GPU kernels that compute each layer") {

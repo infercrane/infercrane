@@ -49,6 +49,12 @@ type ReplicaSpec struct {
 	Port       int
 	Workload   runtimecontract.Workload
 	Serving    servingcontract.Topology
+	// ModelCredential, ModelObjects, and Adapters are what a worker needs
+	// beyond a public Hugging Face model. They are omitted when empty so
+	// intent hashes of existing replicas hold.
+	ModelCredential *ModelCredential `json:",omitempty"`
+	ModelObjects    *ObjectSource    `json:",omitempty"`
+	Adapters        []Adapter        `json:",omitempty"`
 }
 type ProviderHandle struct{ RequestID, ResourceID, ExternalKey string }
 type Observation struct {
@@ -150,6 +156,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		return ProviderHandle{}, errors.New("GPU count must be between 1 and 1024")
 	}
 	if err := refuseEngineEnvironment("SkyPilot", spec); err != nil {
+		return ProviderHandle{}, err
+	}
+	if err := refuseModelInputs("SkyPilot", spec, ModelInputs{}); err != nil {
 		return ProviderHandle{}, err
 	}
 	// SkyPilot reaches its node over SSH, and InferCrane builds SSH-capable

@@ -113,10 +113,14 @@ When the control plane has Hugging Face metadata access on, you can leave out th
 `infercrane optimize propose|create ORG/MODEL` and `POST /api/v1/optimization/proposals` then run the
 [automatic check](/features/model-catalog#check-any-model-automatically): it pins the commit it read,
 sets `max_model_len` to the context the GPU was sized for (8192 tokens by default), and refuses a
-model it found unsupported with `model_unsupported` and the reason. For a gated model, name the saved
-Hugging Face token with `model_secret_reference_id`. A request that already names a commit proceeds
-as before when the check cannot run. This is how a run started from the dashboard works for any
-model it deployed.
+model it found unsupported with `model_unsupported` and the reason. For a gated or private model,
+name the saved Hugging Face token with `model_secret_reference_id`: it checks the model and reaches
+every candidate's worker through the provider's own secret store, while the token never enters the
+proposal. `model_adapters` serves the same pinned LoRA adapter on every candidate (checkpoint swaps
+are skipped), and imported `s3://` or `gs://` weights are pinned by their manifest digest as
+`model_revision`; see [model artifacts](/features/model-artifacts). A request that already names a
+commit proceeds as before when the check cannot run. This is how a run started from the dashboard
+works for any model it deployed.
 
 ### Find the best setup for a pinned model
 

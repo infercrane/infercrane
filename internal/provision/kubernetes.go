@@ -16,6 +16,7 @@ import (
 	"github.com/infercrane/infercrane/internal/artifactcache"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/secrets"
 )
 
 const kubernetesFieldManager = "infercrane-provider-v1"
@@ -30,8 +31,24 @@ type Kubernetes struct {
 	ImageCachePolicy                                  string
 	ArtifactCachePolicy                               string
 	ArtifactPVCs                                      map[string]string
-	Runner                                            CommandRunner
+	// ObjectStoreSecretName optionally names a Secret in the namespace whose
+	// keys become the environment of the object store fetch container, for
+	// example AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_ENDPOINT_URL
+	// for an S3-compatible store. Without it the fetch uses the service
+	// account's workload identity. The serving container never sees it.
+	ObjectStoreSecretName string
+	// S3FetchImage and GCSFetchImage override the pinned fetch images.
+	S3FetchImage, GCSFetchImage string
+	Runner                      CommandRunner
 }
+
+// Pinned object store fetch images (multi-architecture indexes): the AWS CLI
+// on Amazon Linux 2023 and the slim Google Cloud CLI, both with sh and
+// sha256sum.
+const (
+	defaultS3FetchImage  = "amazon/aws-cli@sha256:4ba70977d0261c1d5bf7c094df11d1c6b1c7c3e9cfaf84269bbb1676b8cac3a2"
+	defaultGCSFetchImage = "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:85fc44a30608becd185e86547eb8879187766fbdf30a01bd9b69c5334916bdaa"
+)
 
 type kubernetesObject struct {
 	APIVersion string `json:"apiVersion"`
@@ -319,6 +336,11 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	if !spec.Workload.Empty() {
 		image, command, readinessPath, shutdown = spec.Workload.Image, expandWorkloadArgs(spec.Workload, spec), spec.Workload.ReadinessPath, spec.Workload.ShutdownGraceSeconds
 	}
+	inputs := modelInputs(spec)
+	fetchHub := hubFetchNeeded(spec)
+	if fetchHub {
+		command = wrapWithFetch(command, fetchScript(spec, false, true))
+	}
 	labels := map[string]any{"app.kubernetes.io/name": "infercrane-runtime", "app.kubernetes.io/instance": name, "app.kubernetes.io/managed-by": "infercrane", "infercrane.dev/external-key-hash": k.externalKeyHash(spec.ExternalKey)}
 	intentHash, err := k.intentHash(spec)
 	if err != nil {
@@ -334,6 +356,12 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	for _, variable := range engineVariables {
 		environment = append(environment, map[string]any{"name": variable, "value": spec.RuntimeEnv[variable]})
 	}
+	if spec.ModelCredential != nil {
+		// The token stays in the cluster's own Secret; the control plane only
+		// names it.
+		secretName, secretKey, _ := secrets.KubernetesSecretKey(spec.ModelCredential.Reference)
+		environment = append(environment, map[string]any{"name": "HF_TOKEN", "valueFrom": map[string]any{"secretKeyRef": map[string]any{"name": secretName, "key": secretKey}}})
+	}
 	gpuCount := spec.GPUCount
 	if gpuCount == 0 {
 		gpuCount = 1
@@ -348,19 +376,35 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 		container["args"] = command[1:]
 	}
 	podSpec := map[string]any{"serviceAccountName": k.ServiceAccount, "terminationGracePeriodSeconds": shutdown, "containers": []any{container}, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}}
+	var volumes, mounts []any
 	if artifactClaim != "" {
-		container["volumeMounts"] = []any{map[string]any{"name": "model-cache", "mountPath": "/models", "readOnly": true}}
+		mounts = append(mounts, map[string]any{"name": "model-cache", "mountPath": "/models", "readOnly": true})
 		container["env"] = append(environment,
 			map[string]any{"name": "HF_HOME", "value": "/models/huggingface"},
 			map[string]any{"name": "HUGGINGFACE_HUB_CACHE", "value": "/models/huggingface/hub"},
 		)
-		podSpec["volumes"] = []any{map[string]any{"name": "model-cache", "persistentVolumeClaim": map[string]any{"claimName": artifactClaim, "readOnly": true}}}
+		volumes = append(volumes, map[string]any{"name": "model-cache", "persistentVolumeClaim": map[string]any{"claimName": artifactClaim, "readOnly": true}})
+	}
+	if inputs.Objects || fetchHub {
+		// Fetched weights and adapters live on the Pod's own volume.
+		volumes = append(volumes, map[string]any{"name": "infercrane-fetch", "emptyDir": map[string]any{}})
+		mounts = append(mounts, map[string]any{"name": "infercrane-fetch", "mountPath": fetchRoot})
+	}
+	if inputs.Objects {
+		podSpec["initContainers"] = []any{k.objectFetchContainer(spec)}
+	}
+	if len(mounts) > 0 {
+		container["volumeMounts"] = mounts
+		podSpec["volumes"] = volumes
 	}
 	if k.WorkloadAPI == "kserve" {
 		metadata["annotations"].(map[string]any)["serving.kserve.io/deploymentMode"] = "Standard"
 		predictor := map[string]any{"minReplicas": 1, "maxReplicas": 1, "serviceAccountName": k.ServiceAccount, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}, "containers": []any{container}}
-		if artifactClaim != "" {
-			predictor["volumes"] = podSpec["volumes"]
+		if volumes, ok := podSpec["volumes"]; ok {
+			predictor["volumes"] = volumes
+		}
+		if initContainers, ok := podSpec["initContainers"]; ok {
+			predictor["initContainers"] = initContainers
 		}
 		return json.Marshal(map[string]any{"apiVersion": "serving.kserve.io/v1beta1", "kind": "InferenceService", "metadata": metadata, "spec": map[string]any{"predictor": predictor}})
 	}
@@ -369,8 +413,69 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	return json.Marshal(map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{deployment, service}})
 }
 
+// objectFetchContainer downloads object store weights and adapters with the
+// Pod's own identity before the server starts and checks every file's sha256.
+func (k Kubernetes) objectFetchContainer(spec ReplicaSpec) map[string]any {
+	image := defaultString(k.S3FetchImage, defaultS3FetchImage)
+	if objectScheme(spec) == "gs" {
+		image = defaultString(k.GCSFetchImage, defaultGCSFetchImage)
+	}
+	container := map[string]any{
+		"name": "fetch-model", "image": image, "imagePullPolicy": "IfNotPresent",
+		"command":         []string{"/bin/sh", "-c", fetchScript(spec, true, false)},
+		"volumeMounts":    []any{map[string]any{"name": "infercrane-fetch", "mountPath": fetchRoot}},
+		"securityContext": map[string]any{"allowPrivilegeEscalation": false},
+	}
+	if k.ObjectStoreSecretName != "" {
+		container["envFrom"] = []any{map[string]any{"secretRef": map[string]any{"name": k.ObjectStoreSecretName}}}
+	}
+	return container
+}
+
+// objectScheme is the one object store a replica reads, s3 or gs.
+func objectScheme(spec ReplicaSpec) string {
+	sources := make([]ObjectSource, 0, 2)
+	if spec.ModelObjects != nil {
+		sources = append(sources, *spec.ModelObjects)
+	}
+	for _, adapter := range spec.Adapters {
+		if adapter.Objects != nil {
+			sources = append(sources, *adapter.Objects)
+		}
+	}
+	for _, source := range sources {
+		scheme, _, _, _ := SplitObjectURI(source.URI)
+		return scheme
+	}
+	return ""
+}
+
+// singleObjectScheme refuses a replica that reads both S3 and GCS: one fetch
+// container carries one cloud's tools and identity.
+func singleObjectScheme(spec ReplicaSpec) error {
+	want := objectScheme(spec)
+	check := func(source *ObjectSource) error {
+		if source == nil {
+			return nil
+		}
+		if scheme, _, _, _ := SplitObjectURI(source.URI); scheme != want {
+			return fmt.Errorf("%w: one replica reads one object store; weights and adapters must all be on s3 or all on gs", ErrInvalidReplicaSpec)
+		}
+		return nil
+	}
+	if err := check(spec.ModelObjects); err != nil {
+		return err
+	}
+	for _, adapter := range spec.Adapters {
+		if err := check(adapter.Objects); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func expandWorkloadArgs(workload runtimecontract.Workload, spec ReplicaSpec) []string {
-	args := append(append([]string(nil), workload.Command...), spec.RuntimeArgs...)
+	args := append(servedCommand(workload.Command, spec), spec.RuntimeArgs...)
 	for i := range args {
 		args[i] = strings.ReplaceAll(args[i], "${MODEL}", spec.Model)
 		args[i] = strings.ReplaceAll(args[i], "${MODEL_REVISION}", spec.ModelRevision)
@@ -406,6 +511,25 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 		}
 	} else if runtimecontract.ValidateImage(k.ImageDigest) != nil {
 		return errors.New("Kubernetes workload image must be pinned by sha256 digest")
+	}
+	if inputs := modelInputs(spec); inputs != (ModelInputs{}) {
+		if spec.Workload.Empty() {
+			return errors.New("a private model credential, object store weights, or LoRA adapters need the pinned runtime workload")
+		}
+		if err := refuseModelInputs("kubernetes", spec, ModelInputs{Credential: true, Objects: true, Adapters: true}, secrets.ResolverKubernetes); err != nil {
+			return err
+		}
+		if err := singleObjectScheme(spec); err != nil {
+			return err
+		}
+		for _, image := range []string{k.S3FetchImage, k.GCSFetchImage} {
+			if image != "" && runtimecontract.ValidateImage(image) != nil {
+				return errors.New("Kubernetes object store fetch images must be pinned by sha256 digest")
+			}
+		}
+		if k.ObjectStoreSecretName != "" && !validKubernetesDNSLabel(k.ObjectStoreSecretName) {
+			return fmt.Errorf("invalid Kubernetes object store Secret name %q", k.ObjectStoreSecretName)
+		}
 	}
 	_, err := engineEnvironment(spec)
 	return err
@@ -607,7 +731,15 @@ func (k Kubernetes) intentHash(spec ReplicaSpec) (string, error) {
 		GPUResource    string
 		GPULabel       string
 		ImagePolicy    string
-	}{spec, k.Namespace, k.WorkloadAPI, k.ServiceAccount, k.WorkerSecretName, k.WorkerSecretKey, k.ImageDigest, k.GPUResource, k.GPUProductLabel, k.imagePolicy()}
+		// Object store fetch settings count only for a replica that fetches,
+		// so intent hashes of existing replicas hold.
+		ObjectStoreSecret string `json:",omitempty"`
+		FetchImage        string `json:",omitempty"`
+	}{Spec: spec, Namespace: k.Namespace, WorkloadAPI: k.WorkloadAPI, ServiceAccount: k.ServiceAccount, WorkerSecret: k.WorkerSecretName, WorkerKey: k.WorkerSecretKey, ImageDigest: k.ImageDigest, GPUResource: k.GPUResource, GPULabel: k.GPUProductLabel, ImagePolicy: k.imagePolicy()}
+	if modelInputs(spec).Objects {
+		value.ObjectStoreSecret = k.ObjectStoreSecretName
+		value.FetchImage = k.objectFetchContainer(spec)["image"].(string)
+	}
 	body, err := json.Marshal(value)
 	if err != nil {
 		return "", err

@@ -11,6 +11,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
@@ -84,6 +85,7 @@ type CloudRequest struct {
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	ModelRevision          string                   `json:"model_revision,omitempty"`
 	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
+	ModelAdapters          []domain.ModelAdapter    `json:"model_adapters,omitempty"`
 	ImmutableModelRevision string                   `json:"immutable_model_revision,omitempty"`
 	RevisionID             string                   `json:"revision_id,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
@@ -107,6 +109,8 @@ type CloudRequest struct {
 	// list leaves candidates out on read (store.CustomerEndpointsForTenant).
 	// The public deployment API rejects it.
 	NoEndpoint bool `json:"no_endpoint,omitempty"`
+	// modelInputs is resolved once per operation and never serialized.
+	modelInputs replicaModelInputs
 }
 
 // PublishedEndpointName is the stable endpoint a converge publishes for this
@@ -222,6 +226,9 @@ func (r *CloudRequest) Validate() error {
 		}
 	}
 	if err := support.ValidateRuntimeEnv(r.Runtime, r.RuntimeVersion, r.GPU, r.Workload, r.RuntimeEnv); err != nil {
+		return err
+	}
+	if err := modelimport.ValidateDeployment(r.Model, r.ModelRevision, r.Runtime, r.ComputeMode, r.ModelAdapters, r.RuntimeArgs); err != nil {
 		return err
 	}
 	// An operator-declared SkyPilot cloud is admitted only by its exact adapter identity.
@@ -421,7 +428,10 @@ type AuthenticatedArtifactResolver interface {
 	ResolveAuthenticated(context.Context, string, string, string, string) (domain.ModelArtifact, error)
 }
 
-func resolveRequestedArtifact(ctx context.Context, resolver ArtifactResolver, request CloudRequest) (domain.ModelArtifact, error) {
+func resolveRequestedArtifact(ctx context.Context, store CloudStore, resolver ArtifactResolver, request CloudRequest) (domain.ModelArtifact, error) {
+	if modelimport.IsObjectModel(request.Model) {
+		return resolveObjectArtifact(ctx, store, request)
+	}
 	if request.ModelSecretReferenceID == "" {
 		return resolver.Resolve(ctx, request.Model, request.ModelRevision)
 	}
@@ -512,10 +522,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
 		if errors.Is(artifactErr, domain.ErrNotFound) {
-			if artifactResolver == nil {
+			if artifactResolver == nil && !modelimport.IsObjectModel(request.Model) {
 				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
 			}
-			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, artifactResolver, request)
+			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, store, artifactResolver, request)
 			if artifactErr == nil {
 				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
 			}
@@ -524,6 +534,9 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Retryable("artifact_resolution_failed", artifactErr)
 		}
 		request.ImmutableModelRevision = modelArtifact.ImmutableRevision
+		if err := request.attachModelInputs(ctx, store, artifactResolver); err != nil {
+			return "", err
+		}
 		_ = checkpoint(ctx, store, operation, "model.artifact", "succeeded", map[string]any{"identity": modelArtifact.ModelIdentity, "approximate_size_bytes": modelArtifact.ApproximateSizeBytes, "cache_state": modelArtifact.CacheState}, 10, "Immutable model artifact resolved")
 		desired := request.DesiredReplicas
 		if desired == 0 {
@@ -744,7 +757,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, ModelAdapters: spec.ModelAdapters, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -770,10 +783,10 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		}
 		modelArtifact, artifactErr := store.ModelArtifactForRevision(ctx, request.TenantID, request.RevisionID)
 		if errors.Is(artifactErr, domain.ErrNotFound) {
-			if artifactResolver == nil {
+			if artifactResolver == nil && !modelimport.IsObjectModel(request.Model) {
 				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
 			}
-			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, artifactResolver, request)
+			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, store, artifactResolver, request)
 			if artifactErr == nil {
 				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
 			}
@@ -782,6 +795,9 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Retryable("artifact_resolution_failed", artifactErr)
 		}
 		request.ImmutableModelRevision = modelArtifact.ImmutableRevision
+		if err := request.attachModelInputs(ctx, store, artifactResolver); err != nil {
+			return "", err
+		}
 		var endpoints []string
 		var resourceIDs []string
 		for ordinal := 0; ordinal < request.DesiredReplicas; ordinal++ {
@@ -1237,7 +1253,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, RuntimeEnv: request.RuntimeEnv, Port: request.Port, Workload: request.Workload, Serving: request.Serving})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, RuntimeEnv: request.RuntimeEnv, Port: request.Port, Workload: request.Workload, Serving: request.Serving, ModelCredential: request.modelInputs.credential, ModelObjects: request.modelInputs.objects, Adapters: request.modelInputs.adapters})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)
@@ -1289,7 +1305,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", operations.Retryable("replica_starting", errors.New("provider is allocating capacity or bootstrapping the worker"))
 	}
 	ready, models := inspectRuntime(ctx, runtime, observation.Endpoint, workerAPIKey)
-	_, present := models[request.Model]
+	_, present := models[request.ServedModel()]
 	if ready && !present {
 		_ = store.ObserveReplica(ctx, replica.ID, "failed", observation.Endpoint, "unhealthy", observation.Details, time.Now())
 		return "", "", "", operations.Permanent("runtime_model_mismatch", fmt.Errorf("healthy %s runtime does not serve candidate model", backend.Runtime))
@@ -1306,7 +1322,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		return "", "", "", classify("observation_failed", err)
 	}
 	targetName = replicaTargetName(request.Name, request.RevisionID, request.Candidate, ordinal)
-	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: backend.Name, Runtime: backend.Runtime, UpstreamModel: request.Model})
+	target, err := store.AddTargetForTenant(ctx, request.TenantID, domain.Target{Name: targetName, URL: observation.Endpoint, Provider: backend.Name, Runtime: backend.Runtime, UpstreamModel: request.ServedModel()})
 	if err != nil {
 		return "", "", "", classify("target_registration_failed", err)
 	}

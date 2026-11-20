@@ -21,6 +21,27 @@ flowchart LR
   QUALIFY --> GUARD[Release Guard]
 ```
 
+## Serve the model you trained
+
+InferCrane serves what your training system produced, pinned to immutable identity, on GPUs in your
+own account. Pick the path that matches where the checkpoint lives; the
+[model artifacts](/features/model-artifacts) page has the provider details.
+
+| Where it comes from | What InferCrane needs | How to serve it |
+|---|---|---|
+| Prime Intellect prime-rl, or any trainer that exports a Hugging Face model folder | `config.json`, tokenizer files, and safetensors weights | Push the folder to a private Hugging Face repository, save a read token with `infercrane secret create hf-token --sealed-from-env HF_TOKEN`, and deploy the repository with `--model-secret` |
+| Tinker or another LoRA trainer | `adapter_config.json` and `adapter_model.safetensors` | Push the adapter to Hugging Face (private with a sealed token) or your bucket, check it with `infercrane models adapter-check` or import it with `--kind adapter`, and deploy the base model with `--adapter` |
+| MLflow model registry | The registered model's files | Download them with `mlflow artifacts download`, and either push them to a private Hugging Face repository or, when the artifact store is S3 or GCS, run `infercrane models import` on the same files |
+| Your own S3 or GCS bucket | The files and a local copy to hash | `infercrane models import s3://BUCKET/PREFIX --from DIR`, then deploy the location with `--model-revision` set to the digest it prints |
+
+Weights in a bucket are read by your workers with their own cloud identity; InferCrane never reads
+the bucket. A private Hugging Face token is delivered to the worker by the provider: a RunPod secret
+in your own account, a Kubernetes `secretKeyRef`, or a Secrets Manager ARN. The same pinned model and
+adapter reach every candidate of an [optimization run](/features/optimization).
+
+The signed handoff below is separate: it records where an artifact came from. Serving does not need
+it, and attaching it never promotes a revision.
+
 ## Create a signing key
 
 Keep this key in the training system's secret manager:

@@ -465,6 +465,9 @@ func (a API) planStayOptimized(ctx context.Context, tenant string, evidence stay
 		Provider: spec.Cloud, ComputeConnectionID: firstNonEmpty(spec.ComputeConnectionID, evidence.resolved.Deployment.ComputeConnectionID),
 		Region: spec.Region, GPU: spec.GPU, GPUCount: spec.GPUCount, Objective: evidence.memory.objective,
 		MaxCandidates: min(policy.MaximumCandidatesPerCampaign+1, 10),
+		// Every candidate serves what the endpoint serves: the same private
+		// model credential and LoRA adapter.
+		ModelSecretReferenceID: spec.ModelSecretReferenceID, ModelAdapters: spec.ModelAdapters,
 	}
 	if trace, found := a.workloadForRun(ctx, tenant, evidence); found {
 		request.WorkloadSource, request.WorkloadFingerprint = optimizer.WorkloadSourceCustomerObserved, "sha256:"+strings.TrimPrefix(trace.ShapeDigest, "sha256:")

@@ -379,6 +379,7 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 	draft.Name = safeName(model + "-" + arm.id + "-" + compatible.Adapter)
 	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = model, revision
+	applyModelInputs(&draft, request)
 	draft.Runtime.Engine, draft.Runtime.Version = recipeRuntime, template.version
 	draft.Runtime.Args = []string{}
 	draft.Runtime.Workload = workload

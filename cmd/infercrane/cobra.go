@@ -82,7 +82,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "open [endpoint|deployment|run|model|operation NAME] [flags]", short: "Open a dashboard page in the browser", group: "operate"},
 	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
 	{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
-	{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
+	{use: "secret ACTION [arguments]", short: "Manage workspace secrets: sealed values or references", group: "admin"},
 	{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
 	{use: "serve", short: "Run the control plane and gateway", group: "admin"},
 }
@@ -511,6 +511,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 			stringFlag("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
 			boolFlag("infercrane-cloud", "deploy on InferCrane Cloud, paid from prepaid credits")
 			stringFlag("stop-after", "1h", "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
+			stringFlag("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model")
+			stringFlag("model-revision", "", "model commit, or the sha256 manifest digest of imported s3:// or gs:// weights")
+			stringFlag("adapter", "", "serve a LoRA adapter: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 		}
 	case "agent":
 		stringFlag("output", "human", "output format: human or json (json needs --once)")
@@ -591,6 +594,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
 		stringFlag("workload-digest", "", "optional exact benchmark workload SHA-256")
 	case "optimize":
+		stringFlag("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model")
+		stringFlag("adapter", "", "serve a LoRA adapter on every setup: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 		stringFlag("provider", "", "provider cloud or exact adapter")
 		stringFlag("region", "", "exact provider region")
 		stringFlag("gpu", "", "exact accelerator identity")
@@ -702,7 +707,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"workload":    {"--model", "--recipe", "--profile", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
 		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
-		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--model-secret", "--model-revision", "--adapter", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"apply":       {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"plan":        {"--name", "--targets", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
 		"request":     {"--message", "--stream", "--output"},
@@ -713,9 +718,9 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--profile", "--revision", "--streaming", "--ttft-slo-ms", "--tpot-slo-ms", "--latency-slo-ms", "--output"},
 		"recipe":      {"--name", "--version", "--benchmark", "--output"},
 		"recipes":     {"--limit", "--output"},
-		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--output"},
+		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--from", "--kind", "--base-model", "--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
+		"optimize":    {"--model-secret", "--adapter", "--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

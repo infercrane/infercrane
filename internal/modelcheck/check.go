@@ -587,6 +587,14 @@ func checks(model Model, report Report, registries RegistrySnapshot) []Check {
 	if report.Weights.Quantization != nil {
 		out = append(out, quantizationCheck(*report.Weights.Quantization, report, registries))
 	}
+	out = append(out, configCheck(model))
+	if model.Files.Listed {
+		tokenizer := Check{Name: "tokenizer", State: Pass, Label: "Tokenizer files present", Detail: "The runtime loads the tokenizer from these files."}
+		if !model.Files.Tokenizer {
+			tokenizer = Check{Name: "tokenizer", State: Unknown, Label: "No tokenizer file found", Detail: "No tokenizer.json, tokenizer.model, tokenizer_config.json, vocab.json, or tiktoken file is listed; the runtime may not start."}
+		}
+		out = append(out, tokenizer)
+	}
 	memory := Check{Name: "memory", State: Unknown, Label: "GPU fit unknown", Detail: report.Memory.Reason}
 	switch report.Memory.State {
 	case Fits:
@@ -622,6 +630,19 @@ func checks(model Model, report Report, registries RegistrySnapshot) []Check {
 		out = append(out, Check{Name: "custom_code", State: Info, Label: "Ships its own model code", Detail: "InferCrane never runs repository code; it uses the runtime's own implementation."})
 	}
 	return out
+}
+
+// configCheck says whether config.json was read at the pinned revision.
+func configCheck(model Model) Check {
+	switch model.ConfigState {
+	case ConfigRead:
+		return Check{Name: "config", State: Pass, Label: "config.json read", Detail: "Read at the pinned revision."}
+	case ConfigTokenRequired:
+		return Check{Name: "config", State: Unknown, Label: "config.json needs a token", Detail: "The repository did not return config.json without a token."}
+	case ConfigInvalid:
+		return Check{Name: "config", State: Fail, Label: "config.json is not valid", Detail: "config.json could not be parsed."}
+	}
+	return Check{Name: "config", State: Fail, Label: "No config.json", Detail: "The runtimes need config.json at the model's root."}
 }
 
 func quantizationCheck(method string, report Report, registries RegistrySnapshot) Check {

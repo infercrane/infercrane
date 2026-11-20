@@ -13,8 +13,8 @@ func (s *Store) AttachModelArtifact(ctx context.Context, tenant, revisionID stri
 	if tenant == "" {
 		tenant = "global"
 	}
-	if artifact.Source != "huggingface" || artifact.Repository == "" || artifact.ImmutableRevision == "" || artifact.ModelIdentity == "" {
-		return domain.ModelArtifact{}, errors.New("complete Hugging Face artifact identity is required")
+	if (artifact.Source != "huggingface" && artifact.Source != "s3" && artifact.Source != "gs") || artifact.Repository == "" || artifact.ImmutableRevision == "" || artifact.ModelIdentity == "" {
+		return domain.ModelArtifact{}, errors.New("complete Hugging Face or object store artifact identity is required")
 	}
 	if !json.Valid([]byte(artifact.RuntimeCompatibilityJSON)) {
 		artifact.RuntimeCompatibilityJSON = "{}"

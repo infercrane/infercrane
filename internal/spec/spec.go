@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
@@ -19,6 +21,12 @@ type Deployment struct {
 	Model      struct {
 		ID       string `yaml:"id"`
 		Revision string `yaml:"revision"`
+		// SecretReferenceID names the workspace secret with the Hugging Face
+		// token for a private or gated model; the provider delivers it.
+		SecretReferenceID string `yaml:"secret_reference_id,omitempty"`
+		// Adapters lists the LoRA adapter served on the model, pinned by commit
+		// or imported manifest digest.
+		Adapters []domain.ModelAdapter `yaml:"adapters,omitempty"`
 	} `yaml:"model"`
 	Runtime struct {
 		Engine  string   `yaml:"engine"`
@@ -126,6 +134,9 @@ func Load(path string) (Deployment, error) {
 	}
 	if err := support.ValidateRuntimeEnv(out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU, out.Runtime.Workload, out.Runtime.Env); err != nil {
 		return out, fmt.Errorf("runtime.env: %w", err)
+	}
+	if err := modelimport.ValidateDeployment(out.Model.ID, out.Model.Revision, out.Runtime.Engine, out.Compute.Mode, out.Model.Adapters, out.Runtime.Args); err != nil {
+		return out, fmt.Errorf("model: %w", err)
 	}
 	if out.Scaling.MaxReplicas < out.Scaling.MinReplicas {
 		return out, fmt.Errorf("scaling.max_replicas must be >= scaling.min_replicas")
