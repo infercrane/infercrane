@@ -20,10 +20,10 @@ const (
 )
 
 // ControlAssessment is the objective-metric verdict for one candidate against
-// the campaign control. It is persisted beside each Lab row.
+// the campaign control. It is persisted beside each Lab row, whose
+// objective_metric names the metric compared.
 type ControlAssessment struct {
 	Control    bool              `json:"control"`
-	Metric     string            `json:"objective_metric,omitempty"`
 	Decision   string            `json:"control_decision"`
 	Basis      string            `json:"control_basis,omitempty"`
 	Comparison *MetricComparison `json:"objective_comparison,omitempty"`
@@ -61,9 +61,12 @@ type rankingCost struct {
 // a candidate that failed more requests or answered shorter is never selected
 // (see CheckGuards): such a gain may come from the failures or the shorter
 // answers themselves.
-func applyControlGate(campaign domain.OptimizationCampaign, objective string, rows []lab.Candidate, evidenceToCandidate map[string]string, benchmarks map[string]domain.BenchmarkResult, labSelected string) controlGate {
+func applyControlGate(campaign domain.OptimizationCampaign, objective, workloadProfile string, rows []lab.Candidate, evidenceToCandidate map[string]string, benchmarks map[string]domain.BenchmarkResult, labSelected string) controlGate {
 	gate := controlGate{selected: labSelected, reasons: map[string]string{}, codes: map[string]string{}, assessments: map[string]ControlAssessment{}, guards: map[string]GuardCheck{}, held: map[string]bool{}}
-	metric, higherBetter, costScaled := objectiveMetric(objective)
+	// The gate compares the metric Lab ranked on, so the two cannot disagree
+	// about what the objective measures.
+	objectiveMetric, _ := lab.ObjectiveMetric(objective, workloadProfile)
+	metric, higherBetter, costScaled := objectiveMetric.Name, objectiveMetric.HigherIsBetter, objectiveMetric.CostScaled
 	control, hasControl := CampaignControl(campaign)
 	byCandidate := map[string]lab.Candidate{}
 	for _, row := range rows {
@@ -205,7 +208,7 @@ func eligible(row lab.Candidate) bool {
 // 95% intervals, which is weaker because the arms ran at different times;
 // overlap is no measurable difference.
 func assessAgainstControl(candidateID string, row lab.Candidate, controlID string, controlRow lab.Candidate, controlMeasured bool, metric string, higherBetter, costScaled bool, benchmarks map[string]domain.BenchmarkResult) ControlAssessment {
-	assessment := ControlAssessment{Metric: metric, Decision: controlDecisionUnknown}
+	assessment := ControlAssessment{Decision: controlDecisionUnknown}
 	if candidateID == controlID && controlID != "" {
 		assessment.Control, assessment.Decision = true, controlDecisionControl
 		return assessment
@@ -291,22 +294,6 @@ func assessAgainstControl(candidateID string, row lab.Candidate, controlID strin
 	return assessment
 }
 
-// objectiveMetric mirrors Lab's objective value: TTFT p95 for latency and
-// interactive objectives, output throughput for throughput, and output
-// throughput per sourced hourly cost for cost efficiency.
-func objectiveMetric(objective string) (string, bool, bool) {
-	switch objective {
-	case lab.ObjectiveLatency, lab.ObjectiveInteractive:
-		return "ttft_p95_ms", false, false
-	case lab.ObjectiveThroughput:
-		return "output_token_throughput", true, false
-	case lab.ObjectiveCostEfficiency:
-		return "output_token_throughput", true, true
-	default:
-		return "", false, false
-	}
-}
-
 func objectiveLabel(metric string, costScaled bool) string {
 	if costScaled {
 		return metric + " per sourced hourly cost"
@@ -389,4 +376,22 @@ func RankingDecisions(evaluation domain.LabEvaluation) (map[string]string, error
 		}
 	}
 	return decisions, nil
+}
+
+// RankedMetric reads the objective metric a persisted ranking compared, or ""
+// when it recorded none. Rankings before Lab inference-lab-v5 recorded it in
+// the control assessment, under the same key.
+func RankedMetric(evaluation domain.LabEvaluation) string {
+	var rows []struct {
+		ObjectiveMetric string `json:"objective_metric"`
+	}
+	if json.Unmarshal([]byte(evaluation.ResultsJSON), &rows) != nil {
+		return ""
+	}
+	for _, row := range rows {
+		if row.ObjectiveMetric != "" {
+			return row.ObjectiveMetric
+		}
+	}
+	return ""
 }

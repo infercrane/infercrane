@@ -150,7 +150,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			reasons[candidateID] = row.ConstraintReasons[0]
 		}
 	}
-	gate := applyControlGate(campaign, proposal.Input.Objective, rows, evidenceToCandidate, byBenchmark, selectedCandidate)
+	gate := applyControlGate(campaign, proposal.Input.Objective, proposal.Input.WorkloadProfile, rows, evidenceToCandidate, byBenchmark, selectedCandidate)
 	selectedCandidate = gate.selected
 	for candidateID, reason := range gate.reasons {
 		reasons[candidateID] = reason

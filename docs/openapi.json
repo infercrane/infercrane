@@ -10123,6 +10123,19 @@
           "objective": {
             "type": "string"
           },
+          "objective_metric": {
+            "description": "Measured metric the objective ranked on: p95 time to first token for interactive and latency, p95 request latency for those two on a non-streaming (buffered) profile, and output throughput for throughput and cost-efficiency, which divides it by the sourced hourly cost.",
+            "enum": [
+              "ttft_p95_ms",
+              "latency_p95_ms",
+              "output_token_throughput"
+            ],
+            "type": "string"
+          },
+          "objective_note": {
+            "description": "Why the objective ranked on another metric than its usual one; absent when it did not.",
+            "type": "string"
+          },
           "outcome": {
             "additionalProperties": false,
             "properties": {

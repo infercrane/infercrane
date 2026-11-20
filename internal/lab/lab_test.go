@@ -197,3 +197,78 @@ func TestEvaluateComparesOnlyDerivedArtifactsTheCallerAdmits(t *testing.T) {
 		t.Fatalf("an evaluation without derived artifacts changed shape: input=%s results=%s", plain.InputJSON, plain.ResultsJSON)
 	}
 }
+
+func TestObjectiveMetricFollowsTheWorkloadProfile(t *testing.T) {
+	for _, test := range []struct {
+		objective, profile, metric string
+		higher, costScaled, note   bool
+	}{
+		{objective: ObjectiveInteractive, profile: "interactive", metric: MetricTTFTP95},
+		{objective: ObjectiveLatency, profile: "", metric: MetricTTFTP95},
+		{objective: ObjectiveLatency, profile: "public-interactive", metric: MetricTTFTP95},
+		{objective: ObjectiveInteractive, profile: "buffered", metric: MetricLatencyP95, note: true},
+		{objective: ObjectiveLatency, profile: "buffered", metric: MetricLatencyP95, note: true},
+		{objective: ObjectiveThroughput, profile: "buffered", metric: MetricOutputThroughput, higher: true},
+		{objective: ObjectiveCostEfficiency, profile: "buffered", metric: MetricOutputThroughput, higher: true, costScaled: true},
+		{objective: ObjectiveCostEfficiency, profile: "throughput", metric: MetricOutputThroughput, higher: true, costScaled: true},
+	} {
+		metric, ok := ObjectiveMetric(test.objective, test.profile)
+		if !ok || metric.Name != test.metric || metric.HigherIsBetter != test.higher || metric.CostScaled != test.costScaled || (metric.Note != "") != test.note || metric.Label == "" {
+			t.Fatalf("%s on %q: %+v ok=%v", test.objective, test.profile, metric, ok)
+		}
+	}
+	if _, ok := ObjectiveMetric("balanced", "buffered"); ok {
+		t.Fatal("an unknown objective has no metric")
+	}
+}
+
+// Buffered runs record request latency and no time to first token. A latency
+// objective on them ranks on p95 request latency and says so on every row.
+func TestEvaluateRanksBufferedLatencyObjectiveOnRequestLatency(t *testing.T) {
+	workload := `{"profile":"buffered","concurrency":8}`
+	rows := []domain.BenchmarkResult{
+		{ID: "slow", ModelIdentity: "model@commit", RequestCount: 10, LatencyP95MS: number(1200), OutputTokenThroughput: number(90), WorkloadJSON: workload, CostMetadataJSON: `{"available":false}`},
+		{ID: "fast", ModelIdentity: "model@commit", RequestCount: 10, LatencyP95MS: number(800), OutputTokenThroughput: number(60), WorkloadJSON: workload, CostMetadataJSON: `{"available":false}`},
+	}
+	for _, objective := range []string{ObjectiveInteractive, ObjectiveLatency} {
+		result, err := Evaluate(Input{ModelIdentity: "model@commit", Objective: objective, WorkloadProfile: "buffered"}, rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var candidates []Candidate
+		if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil || len(candidates) != 2 {
+			t.Fatalf("candidates=%#v err=%v", candidates, err)
+		}
+		if candidates[0].EvidenceID != "fast" || !candidates[0].Selected || *candidates[0].ObjectiveValue != 800 || !strings.Contains(candidates[0].SelectionReason, "(p95 request latency)") {
+			t.Fatalf("%s: %#v", objective, candidates[0])
+		}
+		for _, candidate := range candidates {
+			if candidate.ObjectiveMetric != MetricLatencyP95 || candidate.LatencyP95MS == nil {
+				t.Fatalf("%s: row does not name the ranked metric: %#v", objective, candidate)
+			}
+		}
+	}
+}
+
+// Request latency is the metric only for a non-streaming profile. On any
+// other profile a missing time to first token stays unknown.
+func TestEvaluateNeverRanksStreamingLatencyOnRequestLatency(t *testing.T) {
+	for _, profile := range []string{"", "interactive"} {
+		workload := `{"profile":"interactive","concurrency":1}`
+		rows := []domain.BenchmarkResult{
+			{ID: "no-ttft", ModelIdentity: "model@commit", RequestCount: 10, LatencyP95MS: number(100), WorkloadJSON: workload, CostMetadataJSON: `{"available":false}`},
+			{ID: "ttft", ModelIdentity: "model@commit", RequestCount: 10, TTFTP95MS: number(300), LatencyP95MS: number(900), WorkloadJSON: workload, CostMetadataJSON: `{"available":false}`},
+		}
+		result, err := Evaluate(Input{ModelIdentity: "model@commit", Objective: ObjectiveInteractive, WorkloadProfile: profile}, rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var candidates []Candidate
+		if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil || len(candidates) != 2 {
+			t.Fatalf("candidates=%#v err=%v", candidates, err)
+		}
+		if candidates[0].EvidenceID != "ttft" || !candidates[0].Selected || candidates[0].ObjectiveMetric != MetricTTFTP95 || candidates[1].ObjectiveValue != nil || candidates[1].Selected {
+			t.Fatalf("profile %q: %#v", profile, candidates)
+		}
+	}
+}

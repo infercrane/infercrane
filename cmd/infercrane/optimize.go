@@ -70,7 +70,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	gpuCount := fs.Int("gpu-count", 1, "GPUs per baseline replica")
 	runtimes := fs.String("runtimes", "", "optional comma-separated runtime allowlist")
 	objective := fs.String("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
-	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective")
+	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective. buffered (non-streaming) ranks interactive and latency on p95 request latency and rejects TTFT and TPOT limits")
 	maxTTFT := fs.String("max-ttft-p95-ms", "", "required measured p95 TTFT")
 	maxTPOT := fs.String("max-tpot-p95-ms", "", "required measured p95 TPOT")
 	maxErrorRate := fs.String("max-error-rate", "", "maximum measured failed-request ratio")

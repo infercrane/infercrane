@@ -608,7 +608,10 @@ def capture_replay() -> str:
 
 
 def proposal(digest: str) -> dict:
-    base = json.loads(cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", ACCELERATOR, "--objective", "interactive", "--profile", "buffered", "--workload-fingerprint", f"sha256:{digest}", "--include-simulated", "--max-candidates", str(len(CANDIDATES)), "--source", "catalog", "--output", "json"))
+    # Rank on what the result card reports: output throughput per the stated laptop rate.
+    # Throughput is also what the control-drift check watches, so it is the steadiest
+    # metric on a shared CPU. The buffered profile keeps 8 concurrent requests.
+    base = json.loads(cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", ACCELERATOR, "--objective", "cost-efficiency", "--profile", "buffered", "--workload-fingerprint", f"sha256:{digest}", "--include-simulated", "--max-candidates", str(len(CANDIDATES)), "--source", "catalog", "--output", "json"))
     template = next((c for c in base.get("candidates", []) if c["deployment"]["provider"]["adapter"] == "kubernetes"), None)
     if template is None:
         fail("the planner returned no Kubernetes template candidate")

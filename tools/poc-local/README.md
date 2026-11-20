@@ -25,6 +25,13 @@ pointed at the local control plane.
 Campaigns are approved for 24 hours. A CPU campaign runs every candidate in turns and can take
 hours, and an approval that expires mid-run stops the campaign.
 
+The campaign ranks on `cost-efficiency`: output tokens per second per the stated rate card, which is
+what the result card reports. It replays the capture on the `buffered` profile, 8 requests at a time
+without streaming. Throughput is also the metric the control-drift check watches, so it is the
+steadiest one on a shared CPU. Earlier versions of the harness asked for `interactive` on
+`buffered`, which then ranked on p95 time to first token. Buffered runs never measure it, so those
+campaigns ended `measured_ranking_inconclusive` whatever they measured.
+
 A loaded laptop restarts model servers and drops the `kubectl port-forward` to the control plane.
 The harness then restarts the port-forward and repeats the call for up to 10 minutes, but only a
 call that cannot apply twice: a read, a write with an idempotency key, or a request the control

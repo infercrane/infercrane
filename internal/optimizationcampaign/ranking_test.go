@@ -16,7 +16,13 @@ import (
 
 func rankingFixture(t *testing.T, objective string, maxCost *float64) (domain.OptimizationCampaign, []domain.BenchmarkResult) {
 	t.Helper()
-	request := optimizer.Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtimes: []string{"vllm"}, Objective: objective, WorkloadProfile: "interactive", MaxHourlyCost: maxCost, MaxCandidates: 2}
+	return rankingFixtureOn(t, objective, "interactive", maxCost)
+}
+
+// rankingFixtureOn is rankingFixture on a named workload profile.
+func rankingFixtureOn(t *testing.T, objective, profile string, maxCost *float64) (domain.OptimizationCampaign, []domain.BenchmarkResult) {
+	t.Helper()
+	request := optimizer.Request{ModelIdentity: "qwen3-8b", Provider: "aws", Region: "eu-central-1", GPU: "L40S", Runtimes: []string{"vllm"}, Objective: objective, WorkloadProfile: profile, MaxHourlyCost: maxCost, MaxCandidates: 2}
 	registry, err := integration.V1Catalog()
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +51,7 @@ func rankingFixture(t *testing.T, objective string, maxCost *float64) (domain.Op
 	artifactIdentity := proposal.Candidates[0].Deployment.Model.ID + "@" + proposal.Candidates[0].Deployment.Model.Revision
 	ttftA, ttftB, throughputA, throughputB := 220.0, 140.0, 60.0, 80.0
 	costA, costB := 2.0, 3.0
-	workload := `{"profile":"interactive","request_count":100,"random_seed":17}`
+	workload := `{"profile":"` + profile + `","request_count":100,"random_seed":17}`
 	// Candidate A is the proposal's starting point and therefore the control.
 	// Candidate B was measured interleaved with it and beat it clearly.
 	controlWorkload := measuredWorkload(t, workload, MeasuredEvidence{Method: MeasurementMethod, Control: ControlEvidence{Role: ControlRoleCandidate, CandidateID: "candidate-a"}}, nil)
@@ -565,5 +571,83 @@ func TestRankMeasuredCampaignNamesAHeadlineRegressionOutsideTheObjective(t *test
 	}
 	if result.Decisions["candidate-a"] != RankSelect || result.FailureCodes["candidate-b"] != FailureRegressed || !strings.Contains(result.Reasons["candidate-b"], "output_token_throughput changed -25.0% against a 1.7% noise floor") {
 		t.Fatalf("decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
+	}
+}
+
+// bufferedFixture is the interactive fixture measured on the buffered
+// profile: AIPerf recorded p95 request latency and no first token.
+func bufferedFixture(t *testing.T, comparison MetricComparison) (domain.OptimizationCampaign, []domain.BenchmarkResult) {
+	t.Helper()
+	campaign, benchmarks := rankingFixtureOn(t, "interactive", "buffered", nil)
+	latencyA, latencyB := 1200.0, comparison.CandidateMean
+	benchmarks[0].TTFTP95MS, benchmarks[0].LatencyP95MS = nil, &latencyA
+	benchmarks[1].TTFTP95MS, benchmarks[1].LatencyP95MS = nil, &latencyB
+	benchmarks[0].WorkloadJSON = measuredWorkload(t, `{"profile":"buffered","request_count":100,"random_seed":17}`, MeasuredEvidence{Method: MeasurementMethod, Control: ControlEvidence{Role: ControlRoleCandidate, CandidateID: "candidate-a"}}, nil)
+	benchmarks[1].WorkloadJSON = measuredWorkload(t, `{"profile":"buffered","request_count":100,"random_seed":17}`, MeasuredEvidence{Method: MeasurementMethod, Control: ControlEvidence{Role: ControlRoleBracketed, CandidateID: "candidate-a", Runs: 4}, Comparison: map[string]MetricComparison{lab.MetricLatencyP95: comparison}}, nil)
+	return campaign, benchmarks
+}
+
+// A buffered run never measures time to first token. Ranked on it, an
+// interactive campaign on the buffered profile could select nothing and
+// ended inconclusive after its whole measurement time.
+func TestRankMeasuredCampaignRanksBufferedInteractiveOnRequestLatency(t *testing.T) {
+	for name, test := range map[string]struct {
+		comparison MetricComparison
+		selected   string
+		superseded string
+		reason     string
+	}{
+		"candidate-beats-control":    {comparison: MetricComparison{ControlMean: 1200, CandidateMean: 800, Delta: -400.0 / 1200, NoiseFloor: 0.05, Decision: DecisionImproved}, selected: "candidate-b", superseded: "candidate-a", reason: "latency_p95_ms changed -33.3%"},
+		"inside-noise-keeps-control": {comparison: MetricComparison{ControlMean: 1200, CandidateMean: 1180, Delta: -20.0 / 1200, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}, selected: "candidate-a", superseded: "candidate-b", reason: "control kept"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			campaign, benchmarks := bufferedFixture(t, test.comparison)
+			result, err := RankMeasuredCampaign(campaign, benchmarks)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Decisions[test.selected] != RankSelect || result.Decisions[test.superseded] != RankSupersede {
+				t.Fatalf("decisions=%v reasons=%v", result.Decisions, result.Reasons)
+			}
+			if !strings.Contains(result.Reasons[test.selected], test.reason) {
+				t.Fatalf("reasons=%v", result.Reasons)
+			}
+			var rows []struct {
+				CandidateID     string   `json:"candidate_id"`
+				ObjectiveMetric string   `json:"objective_metric"`
+				ObjectiveValue  *float64 `json:"objective_value"`
+			}
+			if err = json.Unmarshal([]byte(result.Evaluation.ResultsJSON), &rows); err != nil || len(rows) != 2 {
+				t.Fatalf("rows=%+v err=%v", rows, err)
+			}
+			for _, row := range rows {
+				if row.ObjectiveMetric != lab.MetricLatencyP95 || row.ObjectiveValue == nil {
+					t.Fatalf("the persisted ranking does not name the ranked metric: %+v", row)
+				}
+			}
+			if RankedMetric(result.Evaluation) != lab.MetricLatencyP95 {
+				t.Fatalf("ranked metric=%q", RankedMetric(result.Evaluation))
+			}
+		})
+	}
+}
+
+// The control gate compares the metric Lab ranked on. On a streaming profile
+// a missing time to first token stays unknown: request latency never stands
+// in for it.
+func TestRankMeasuredCampaignNeverRanksStreamingInteractiveOnRequestLatency(t *testing.T) {
+	campaign, benchmarks := rankingFixture(t, "interactive", nil)
+	latencyA, latencyB := 1200.0, 800.0
+	benchmarks[0].TTFTP95MS, benchmarks[0].LatencyP95MS = nil, &latencyA
+	benchmarks[1].TTFTP95MS, benchmarks[1].LatencyP95MS = nil, &latencyB
+	benchmarks[1].WorkloadJSON = interleaved(t, map[string]MetricComparison{lab.MetricLatencyP95: {ControlMean: 1200, CandidateMean: 800, Delta: -400.0 / 1200, NoiseFloor: 0.05, Decision: DecisionImproved}})
+	result, err := RankMeasuredCampaign(campaign, benchmarks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"candidate-a", "candidate-b"} {
+		if result.Decisions[id] != RankInconclusive {
+			t.Fatalf("missing time to first token was ranked: decisions=%v reasons=%v", result.Decisions, result.Reasons)
+		}
 	}
 }

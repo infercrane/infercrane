@@ -43,7 +43,9 @@ throughput, tail latency, and goodput when at least two runs contain the metric.
 Profiles define load shape, not runtime tuning claims. `interactive`, `balanced`, `throughput`,
 `buffered`, `long-context`, `long-generation`, and `overload` record their immutable
 `benchmark-profile-v1` identity inside the workload evidence. Explicit token or concurrency flags
-override profile defaults and remain visible in the result.
+override profile defaults and remain visible in the result. `buffered` is the only profile that does
+not stream, so its runs record p95 request latency but no time to first token or time per output
+token.
 
 For a bounded qualification sweep across concurrency 1, 8, 32, and 128 plus long prompt,
 long-generation, streaming, buffered, and overload shapes:

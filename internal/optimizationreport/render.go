@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
@@ -45,7 +46,7 @@ var decisionWords = map[string]string{
 }
 
 var metricWords = map[string]string{
-	sourceOutputTPS: "output throughput", sourceTTFTP95: "p95 time to first token",
+	sourceOutputTPS: "output throughput", sourceTTFTP95: "p95 time to first token", lab.MetricLatencyP95: "p95 request latency",
 }
 
 // View is the formatted report shared by the text and HTML renderers and the
@@ -185,7 +186,12 @@ func subtitle(r Report) string {
 		parts = append(parts, r.ModelIdentity)
 	}
 	if r.Objective != "" {
-		parts = append(parts, "goal: "+r.Objective)
+		goal := "goal: " + r.Objective
+		if r.ObjectiveNote != "" {
+			// The objective ranked on another metric than its usual one.
+			goal += ", ranked on " + metricName(r.ObjectiveMetric)
+		}
+		parts = append(parts, goal)
 	}
 	parts = append(parts, "run "+r.CampaignID)
 	return strings.Join(parts, " · ")

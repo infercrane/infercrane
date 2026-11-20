@@ -1353,6 +1353,12 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
 		return
 	}
+	// A run that cannot measure its own limits would spend its whole
+	// measurement time before rejecting every setup.
+	if err := optimizer.ValidateMeasurable(request.Proposal.Input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
+		return
+	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	if request.Proposal.Input.ComputeConnectionID != "" && actor.ID != "bootstrap" {
 		if a.ComputeConnections == nil {
