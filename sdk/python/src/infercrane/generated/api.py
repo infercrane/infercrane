@@ -875,9 +875,9 @@ class ControlAPI:
         request_path = "/orphans"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
-    def list_audit_events(self) -> ObjectList:
+    def list_audit_events(self) -> dict[str, Any]:
         request_path = "/audit-events"
-        return cast(ObjectList, self._transport.request("GET", request_path))
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def set_tenant_quota(self, *, body: dict[str, Any]) -> None:
         request_path = "/tenant/quota"

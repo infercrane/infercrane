@@ -1083,9 +1083,9 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
-  listAuditEvents(): Promise<ObjectList> {
+  listAuditEvents(): Promise<Record<string, JsonValue>> {
     const requestPath = '/audit-events';
-    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   setTenantQuota(body: JsonValue): Promise<void> {

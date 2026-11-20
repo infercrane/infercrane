@@ -101,7 +101,9 @@ type Report struct {
 	Bottleneck           Bottleneck        `json:"bottleneck"`
 	Appendix             Appendix          `json:"appendix"`
 	Unknown              []string          `json:"unknown"`
-	ReportDigest         string            `json:"report_digest"`
+	// ReportDigest must stay the last field: Verify recomputes it from the
+	// report's JSON bytes, where it is the last member.
+	ReportDigest string `json:"report_digest"`
 }
 
 // Outcome is the decision in plain words.

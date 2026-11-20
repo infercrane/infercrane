@@ -523,6 +523,18 @@ sign and attach instead. `inspect` prints each setup's answer-check result and, 
 waits on you, the exact command that unblocks it. `--output json` returns the control API's
 `quality` object for every setup, under `candidates`.
 
+`optimize report RUN_ID` shows what a finished run changed in cost, speed, and answer quality, and
+who signed the report. `--output json` prints the control API response: the report and its
+signature, or `"signature": null` with `unsigned_reason`. `optimize report verify FILE` checks a
+saved report offline and exits non-zero on any mismatch; `--public-key KEY` also requires the
+report to be signed by that base64 Ed25519 key. See
+[Read the outcome of a run](/features/optimization#read-the-outcome-of-a-run).
+
+```bash
+infercrane optimize report RUN_ID --output json > report.json
+infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+```
+
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
 the run's proposal recorded warnings, such as skipped speculative-decoding setups.
 `--output json` keeps `warnings` as the control API returned it: an empty list means none were

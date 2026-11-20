@@ -7,10 +7,11 @@ import (
 
 // HTML renders the report as one self-contained page: no scripts, fonts, or
 // network requests. Outcome cards come first, then the measurement detail,
-// the bottleneck signals when the engine reported any, and the evidence.
-func HTML(r Report) ([]byte, error) {
+// the bottleneck signals when the engine reported any, and the evidence. The
+// footer says who signed the report and how to verify it.
+func HTML(d Document) ([]byte, error) {
 	var out bytes.Buffer
-	if err := pageTemplate.Execute(&out, NewView(r)); err != nil {
+	if err := pageTemplate.Execute(&out, NewView(d)); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
@@ -53,6 +54,7 @@ dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;overflow-wrap:anywhere}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 footer{color:var(--muted);font-size:12.5px;margin-top:32px}
+footer p{margin:0 0 6px}
 .warning{color:var(--watch);background:var(--watch-bg);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:-12px 0 16px}
 </style>
 </head>
@@ -110,7 +112,8 @@ footer{color:var(--muted);font-size:12.5px;margin-top:32px}
 <div class="panel">
 {{range .Unknown}}<p>{{.Value}}</p>
 {{end}}</div>{{end}}
-<footer>Report digest <span class="mono">{{.Digest}}</span>. Every number comes from persisted measurements; anything missing is shown as unknown.</footer>
+<footer><p>Report digest <span class="mono">{{.Digest}}</span>. Every number comes from persisted measurements; anything missing is shown as unknown.</p>
+<p class="signature">{{.Signature}}</p></footer>
 </main>
 </body>
 </html>

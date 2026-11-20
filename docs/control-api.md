@@ -43,6 +43,7 @@ Errors are stable JSON objects:
 | `POST /agent/sync` | agent key | Report hardware, servers, health, filtered engine metrics, and content-free request shapes; gzip allowed, 8 MiB at most. Any other key gets `401`. See [InferCrane agent](/architecture/agent). |
 | `POST /agent/servers` | agent key | Observe one local server as an observe-only endpoint. |
 | `POST /playground/chat/completions` | viewer | Send one OpenAI chat completion to an endpoint as the authenticated principal. The body, routing, admission, quota, billing, request recording, `X-Request-ID`, and OpenAI-shaped inference errors are those of `POST /v1/chat/completions`; only authentication differs, so a signed-in dashboard member can test an endpoint without an API key. See [Gateway](/features/gateway#prompts-from-the-dashboard). |
+| `GET /optimization/campaigns/{id}/report` | viewer | The run's outcome report. A finished run's report carries `signature` when the control plane has a signing key; otherwise `signature` is `null` and `unsigned_reason` says why. See [Read the outcome of a run](/features/optimization#read-the-outcome-of-a-run). |
 | `POST /optimization/campaigns/{id}/candidates/{candidate_id}/chat/completions` | viewer | Send one chat completion to the exact revision of a decided candidate. Refused with `409` while the run is still measuring it. See [Prompt a decided setup yourself](/features/optimization#prompt-a-decided-setup-yourself). |
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `GET /compute/providers` | viewer | Return execution readiness per provider. `workspace_owned` is computed for the caller and is true only when it may deploy and optimize there without a compute connection. |
@@ -74,7 +75,7 @@ Errors are stable JSON objects:
 | `GET /targets` | viewer | List registered tenant targets. |
 | `POST /targets` | operator | Register an existing HTTP(S) inference target. |
 | `GET /orphans` | viewer | List unowned provisioned resources. |
-| `GET /audit-events` | admin | List up to 500 events; `before` accepts RFC3339. |
+| `GET /audit-events` | admin | List events newest first. `limit` defaults to 100; values above 500 return 500. A full page returns `next` with `before` and `before_id`: pass both to read the next page, including events that share a timestamp. `before` alone (RFC3339) returns events older than that time. |
 | `PUT /tenant/quota` | admin | Set deployment, replica, and distributed per-minute request limits; zero blocks that resource. |
 | `POST /tenants` | bootstrap admin | Create a tenant. |
 | `POST /principals` | admin | Create a credential; secret is returned once. |

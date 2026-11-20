@@ -111,7 +111,7 @@ func TestLoadReadsOnlyTheTenantsReferencedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := Assemble(expected); report.ReportDigest != want.ReportDigest {
-		t.Fatalf("loaded report differs from the assembled evidence:\n%s\n%s", Text(report), Text(want))
+		t.Fatalf("loaded report differs from the assembled evidence:\n%s\n%s", Text(Document{Report: report}), Text(Document{Report: want}))
 	}
 	for _, tenant := range store.tenants {
 		if tenant != "tenant-a" {
@@ -143,7 +143,7 @@ func TestLoadReadsEvidenceByTheRecordedIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := Assemble(expected); report.ReportDigest != want.ReportDigest {
-		t.Fatalf("loaded report differs from the assembled evidence:\n%s\n%s", Text(report), Text(want))
+		t.Fatalf("loaded report differs from the assembled evidence:\n%s\n%s", Text(Document{Report: report}), Text(Document{Report: want}))
 	}
 	want := map[string][]string{}
 	for _, run := range expected.Campaign.Candidates {

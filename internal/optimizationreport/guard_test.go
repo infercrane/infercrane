@@ -75,12 +75,12 @@ func TestReportShowsFailedRequestsAndAnswerLengthAndWarnsWhenAGuardFired(t *test
 		t.Fatalf("warnings = %q", report.Warnings)
 	}
 
-	text := Text(report)
+	text := Text(Document{Report: report})
 	orderedIn(t, text, report.Outcome.Headline, "Warning: “", want, "Cost per 1M output tokens", "Every setup measured", "server removed · failed 4.0% of requests; the current setup failed 0.0%", "4.0% of requests failed · 150 output tokens per request")
 	if !strings.Contains(text, "0.0% of requests failed · 198 output tokens per request") {
 		t.Fatalf("text lacks the winner's answers:\n%s", text)
 	}
-	page, err := HTML(report)
+	page, err := HTML(Document{Report: report})
 	if err != nil || !strings.Contains(string(page), `<p class="warning" role="note">`) {
 		t.Fatalf("html lacks the warning: err=%v", err)
 	}
@@ -112,7 +112,7 @@ func TestReportKeepsUnrecordedFailuresAndAnswerLengthUnknown(t *testing.T) {
 	if err != nil || !strings.Contains(string(encoded), `"error_rate_percent":null`) || !strings.Contains(string(encoded), `"output_tokens_per_request":null`) || !strings.Contains(string(encoded), `"warnings":[]`) {
 		t.Fatalf("unknown values were not null: %s err=%v", encoded, err)
 	}
-	if strings.Contains(Text(report), "of requests failed") {
+	if strings.Contains(Text(Document{Report: report}), "of requests failed") {
 		t.Fatal("text stated a failure rate that was not recorded")
 	}
 
@@ -164,7 +164,7 @@ func TestReportProjectsACutOffCaptureOverItsKeptRequests(t *testing.T) {
 		if strings.Contains(strings.Join(report.Unknown, ","), "monthly") {
 			t.Fatalf("unknown = %v", report.Unknown)
 		}
-		if text := Text(report); !strings.Contains(text, "Capture: it reached its request limit and kept only the newest requests, so the projection uses the 10m 0s from the first to the last kept request, not the whole 1h 0m window.") {
+		if text := Text(Document{Report: report}); !strings.Contains(text, "Capture: it reached its request limit and kept only the newest requests, so the projection uses the 10m 0s from the first to the last kept request, not the whole 1h 0m window.") {
 			t.Fatalf("text does not say the capture was cut off:\n%s", text)
 		}
 	})
@@ -193,7 +193,7 @@ func TestReportProjectsACutOffCaptureOverItsKeptRequests(t *testing.T) {
 			t.Fatalf("monthly = %+v", report.Monthly)
 		}
 		assertUnknown(t, report, "monthly.capture_cut_off")
-		if text := Text(report); !strings.Contains(text, "Monthly cost: the capture did not record whether it reached its request limit; if it did, the projection is too low") {
+		if text := Text(Document{Report: report}); !strings.Contains(text, "Monthly cost: the capture did not record whether it reached its request limit; if it did, the projection is too low") {
 			t.Fatalf("text does not explain the unknown cut-off:\n%s", text)
 		}
 	})

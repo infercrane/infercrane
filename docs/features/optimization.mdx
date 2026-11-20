@@ -560,7 +560,7 @@ labelled per simulated accelerator.
 
 ```bash
 infercrane optimize report RUN_ID                       # cards in a terminal, plain text when piped
-infercrane optimize report RUN_ID --output json         # the API report, unchanged
+infercrane optimize report RUN_ID --output json         # the API response: the report and its signature
 infercrane optimize report RUN_ID --html result.html    # one self-contained page to share
 ```
 
@@ -623,6 +623,38 @@ check failed it, and, for an evolution, Release Guard accepted it. A kept curren
 not rolled out, with whether its server was removed because the approval ended or because the run
 was cancelled; the report never says it went live. When nothing qualified, the outcome cards lead with
 your current setup's measured values.
+
+When a run has finished and the control plane has a signing key, its report is signed. The key is
+the one that signs [Inference Passports](/features/inference-passports)
+(`INFERCRANE_PASSPORT_SIGNING_KEY_FILE`). The API response then carries `signature`: the algorithm
+(`Ed25519-SHA256`), the key ID, the public key, the digest, and the Ed25519 signature over that
+digest. The digest is the report's own `report_digest`, the SHA-256 of the compact report JSON with
+`report_digest` emptied, so the signature covers every value in the report. The report has no
+timestamps, so the same evidence always gives the same signature, and nothing is stored. A report
+is never given a made-up signature: until the run finishes, `signature` is `null` and
+`unsigned_reason` is `run_not_finished`, and on a control plane without a signing key it is
+`signing_key_not_configured`. Every text, terminal, and HTML rendering ends with
+`Signed by key sha256:… — verify with infercrane optimize report verify FILE`, or says why the
+report is not signed.
+
+Save the report as JSON and check it anywhere, without the control plane or any credential:
+
+```bash
+infercrane optimize report RUN_ID --output json > report.json
+infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+```
+
+`verify` checks the schema version, recomputes the digest from the report's JSON, and verifies the
+signature and that the key ID names its public key. It exits non-zero on any mismatch: a changed
+value or key, an added field, another report's signature, an unsigned report, or, with
+`--public-key`, a different key. Whitespace does not matter, so an indented file still verifies;
+re-encoding the file with another tool can change escapes or numbers, and then it fails.
+
+Without `--public-key`, `verify` proves the report is unchanged since the key it names signed it,
+and prints that key ID. To prove the key is your control plane's, pass its public key or compare the
+key ID. Operators get both from `infercrane passport keygen` when they create the key, and from the
+`public_key` and `key_id` of any signed report or Inference Passport their control plane returns.
+Publish the public key where the people who check your reports can fetch it.
 
 That default creates a `new_endpoint` run. To improve an endpoint that already serves production,
 bind the run to its stable deployment identity:

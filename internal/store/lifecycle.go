@@ -157,18 +157,19 @@ func (s *Store) Audit(ctx context.Context, event domain.AuditEvent) error {
 	return err
 }
 
-func (s *Store) AuditEventsForTenant(ctx context.Context, tenant string, before time.Time, limit int) ([]domain.AuditEvent, error) {
-	if limit < 1 || limit > 500 {
-		limit = 100
-	}
+// AuditEventsForTenant pages a tenant's audit log newest first, ordered by
+// (created_at, id), with the events strictly before the cursor. Ordering and
+// filtering on the same key keeps events that share a timestamp from being
+// skipped at a page boundary.
+func (s *Store) AuditEventsForTenant(ctx context.Context, tenant string, before domain.AuditCursor, limit int) ([]domain.AuditEvent, error) {
 	query := `SELECT id,tenant_id,actor,action,resource_type,resource_name,outcome,COALESCE(request_id,''),payload_json::text,created_at FROM audit_events WHERE tenant_id=?`
 	args := []any{tenant}
-	if !before.IsZero() {
-		query += ` AND created_at<?`
-		args = append(args, before.UTC())
+	if !before.CreatedAt.IsZero() {
+		query += ` AND (created_at<? OR (created_at=? AND id<?))`
+		args = append(args, before.CreatedAt.UTC(), before.CreatedAt.UTC(), before.ID)
 	}
 	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
-	args = append(args, limit)
+	args = append(args, domain.AuditPageSize(limit))
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
