@@ -26,6 +26,9 @@ type fakeBroker struct {
 	heartbeats atomic.Int64
 	released   atomic.Int64
 	refuse     atomic.Int64 // refuse this many creates first
+	// renewed, when set, is closed after the first heartbeat is counted.
+	renewed   chan struct{}
+	renewOnce sync.Once
 }
 
 func (b *fakeBroker) handler(t *testing.T) http.Handler {
@@ -63,6 +66,9 @@ func (b *fakeBroker) handler(t *testing.T) http.Handler {
 	mux.HandleFunc("GET /v1/leases/{id}", auth(func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(lease()) }))
 	mux.HandleFunc("POST /v1/leases/{id}/heartbeat", auth(func(w http.ResponseWriter, _ *http.Request) {
 		b.heartbeats.Add(1)
+		if b.renewed != nil {
+			b.renewOnce.Do(func() { close(b.renewed) })
+		}
 		_ = json.NewEncoder(w).Encode(lease())
 	}))
 	mux.HandleFunc("DELETE /v1/leases/{id}", auth(func(w http.ResponseWriter, _ *http.Request) {
@@ -253,12 +259,18 @@ func TestAcquireStopsOnAFailedServer(t *testing.T) {
 }
 
 func TestAcquireReleasesWhenThePodStopsWhileStarting(t *testing.T) {
-	fake := &fakeBroker{state: LeaseStarting}
+	fake := &fakeBroker{state: LeaseStarting, renewed: make(chan struct{})}
 	server := httptest.NewServer(fake.handler(t))
 	defer server.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		// Stop the pod once the broker has counted a renewal. A fixed sleep
+		// can end before the first heartbeat on a loaded machine.
+		select {
+		case <-fake.renewed:
+		case <-ctx.Done():
+		}
 		cancel()
 	}()
 	if _, err := acquire(ctx, Broker{BaseURL: server.URL, Token: workerKey}, "pod-a", "m", nil, time.Millisecond); err == nil {
