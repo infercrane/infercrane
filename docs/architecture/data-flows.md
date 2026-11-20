@@ -155,3 +155,45 @@ Both return a target that follows the same runtime and reconciliation path as an
 6. Revocation disables the agent's principal; the next sync is refused with HTTP 401
    (`agent_revoked`, or `agent_unauthenticated` once the credential snapshot has dropped the key),
    and the agent stops.
+
+## Agent data plane
+
+1. A key with `deploy` makes an agent's endpoint agent-managed
+   (`PUT /api/v1/adoptions/endpoints/{name}/ownership`). In one transaction the adoption and its
+   binding become `agent-managed` and the endpoint's residency `customer-cloud`. The reconciler
+   removes any hosted route for the endpoint, marks it resident in the route directory, and sets
+   its state from the agent's health reports.
+2. Every poll interval the agent (`infercrane agent run --serve`) calls
+   `GET /api/v1/agent/data-plane?generation=`. The relay reads the agent's agent-managed active-plan
+   bindings, the tenant's live non-agent credential digests narrowed to keys that may call those
+   endpoints, their admission policies, and the request quota, digests the content, and answers
+   with the snapshot, or `unchanged` and a new `valid_until`.
+3. The agent validates the snapshot, maps each binding's server key to a server it detected and
+   sees healthy, and publishes the routes in its own in-memory directory. Its quota pool leases
+   requests with `POST /api/v1/agent/quota-leases`, which uses the same minute-window allocator as
+   the hosted gateway.
+4. An application calls the agent with an InferCrane API key. The agent's gateway (the code of
+   `internal/gateway`) authenticates against the digests, applies endpoint restrictions,
+   admission, and quota, routes, streams, and records the request in memory. No database is read.
+5. The next sync carries each request as a shape with `source: data-plane` and its binding. The
+   relay checks the binding belongs to an agent-managed server of this agent and stores a request
+   record with compute mode `agent-data-plane`.
+6. The hosted gateway answers a request for the endpoint with `403 residency_error` and forwards
+   nothing; asynchronous inference refuses it before storing anything.
+
+## Agent candidate run
+
+1. A key with `deploy` calls `POST /api/v1/agents/{id}/candidate-runs`. The relay validates the
+   spec, resolves the endpoint to the agent's server key, and stores a queued `agent_commands` row
+   (at most 16 open per agent).
+2. The agent's long poll (`GET /api/v1/agent/commands?wait=25s`) leases it with
+   `FOR UPDATE SKIP LOCKED`; a replica checks every 2 seconds and answers at once when the command
+   was queued through it. Commands past their deadline expire; a lease that lapses three times
+   fails the command.
+3. The agent checks the image and accelerator against its allowlists, applies one Deployment and
+   one Service with `provision.Kubernetes` in its namespace, waits for readiness, runs AIPerf
+   against the current setup, the candidate, and the current setup again, and runs the answer check
+   on both, all inside the cluster. It reports each phase with `POST /api/v1/agent/commands/{id}`,
+   which extends the lease and tells it when the run was cancelled.
+4. The agent deletes the candidate and posts the result: AIPerf summaries, the noise figure,
+   per-prompt agreement scores and digests, readiness time, and cleanup. Nothing else is sent.

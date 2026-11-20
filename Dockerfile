@@ -17,7 +17,8 @@ RUN --mount=type=cache,target=/go/pkg/mod version="${INFERCRANE_VERSION#v}" \
 	&& CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/infercrane-model-api-renewer ./tools/model-api-renewer \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/runpod-fault-proxy ./internal/testtools/runpod-fault-proxy \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-vllm ./internal/testtools/fake-vllm \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-router ./internal/testtools/fake-router
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fake-router ./internal/testtools/fake-router \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/capture-proxy ./internal/testtools/capture-proxy
 RUN --mount=type=cache,target=/go/pkg/mod ./scripts/generate-go-license-bundle.sh /out/licenses/go
 
 FROM scratch AS openrouter-edge
@@ -110,6 +111,7 @@ FROM runtime AS development
 USER root
 COPY --from=builder /out/fake-vllm /usr/local/bin/fake-vllm
 COPY --from=builder /out/fake-router /usr/local/bin/fake-router
+COPY --from=builder /out/capture-proxy /usr/local/bin/capture-proxy
 COPY scripts/dev-start.sh /usr/local/bin/infercrane-dev-start
 RUN chmod 755 /usr/local/bin/infercrane-dev-start
 USER app

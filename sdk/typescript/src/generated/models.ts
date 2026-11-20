@@ -59,6 +59,12 @@ export interface ObjectList {
   data: Array<Record<string, JsonValue>>;
 }
 
+export interface AuditEventList {
+  data: Array<Record<string, JsonValue>>;
+  limit: number;
+  next: { before: string; before_id: string } | null;
+}
+
 export interface QualityEvidenceList {
   data: Array<Record<string, JsonValue>>;
   verdicts: Record<string, JsonValue>;

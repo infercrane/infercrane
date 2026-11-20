@@ -1,5 +1,5 @@
 {
-  "schema": "infercrane.dev/evaluator-result/v1",
+  "schema": "infercrane.dev/evaluator-result/v2",
   "suite": "support-answers",
   "suite_version": "git:8a91d7c",
   "evaluator": "customer-eval-ci",

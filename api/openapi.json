@@ -1037,8 +1037,11 @@
         "additionalProperties": false,
         "properties": {
           "ownership_mode": {
+            "description": "agent-managed needs a server an InferCrane agent owns and sets the endpoint's residency to customer-cloud; observe-only is allowed only from agent-managed.",
             "enum": [
-              "traffic-managed"
+              "traffic-managed",
+              "agent-managed",
+              "observe-only"
             ],
             "type": "string"
           }
@@ -1157,6 +1160,118 @@
         ],
         "type": "object"
       },
+      "AgentCommandUpdate": {
+        "additionalProperties": true,
+        "properties": {
+          "failure_code": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "failure_detail": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "phase": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/CandidateRunResult"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "AgentCommandUpdateResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "cancelled": {
+            "description": "Stop and remove the candidate.",
+            "type": "boolean"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "cancelled"
+        ],
+        "type": "object"
+      },
+      "AgentCommands": {
+        "additionalProperties": true,
+        "properties": {
+          "commands": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "attempt": {
+                  "type": "integer"
+                },
+                "control": {
+                  "description": "The current setup, by the agent's own server key.",
+                  "properties": {
+                    "endpoint": {
+                      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "server_key": {
+                      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "deadline_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "run_candidate"
+                  ],
+                  "type": "string"
+                },
+                "run_candidate": {
+                  "$ref": "#/components/schemas/CandidateRunCreate"
+                }
+              },
+              "required": [
+                "id",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "type": "array"
+          }
+        },
+        "required": [
+          "commands"
+        ],
+        "type": "object"
+      },
       "AgentCreate": {
         "additionalProperties": false,
         "properties": {
@@ -1194,6 +1309,161 @@
           "key",
           "run_command",
           "credential_cache_synchronized"
+        ],
+        "type": "object"
+      },
+      "AgentDataPlaneSnapshot": {
+        "additionalProperties": true,
+        "description": "What one agent needs to serve its agent-managed endpoints. No request content and no secret: API keys appear only as the SHA-256 digests the control plane stores, and only keys that may call one of these endpoints.",
+        "properties": {
+          "admission": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "credentials": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "endpoint_names": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "expires_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "hash": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                },
+                "principal_id": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "scopes": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 10000,
+            "type": "array"
+          },
+          "generation": {
+            "description": "sha256 digest of the content; send it back as ?generation= to receive unchanged: true",
+            "type": "string"
+          },
+          "request_quota": {
+            "properties": {
+              "max_requests_per_minute": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "routes": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "bindings": {
+                  "items": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "binding_id": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "runtime": {
+                        "type": "string"
+                      },
+                      "server_key": {
+                        "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$",
+                        "type": "string"
+                      },
+                      "target_id": {
+                        "type": "string"
+                      },
+                      "upstream_model": {
+                        "type": "string"
+                      },
+                      "weight": {
+                        "maximum": 100,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "maxItems": 16,
+                  "type": "array"
+                },
+                "endpoint": {
+                  "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+                  "type": "string"
+                },
+                "endpoint_id": {
+                  "type": "string"
+                },
+                "environment_id": {
+                  "type": "string"
+                },
+                "logical_model_id": {
+                  "type": "string"
+                },
+                "routing_policy": {
+                  "enum": [
+                    "manual",
+                    "weighted",
+                    "primary-fallback"
+                  ],
+                  "type": "string"
+                },
+                "serving_plan_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "tenant_id": {
+            "type": "string"
+          },
+          "unchanged": {
+            "type": "boolean"
+          },
+          "valid_until": {
+            "description": "The agent refuses requests (503 data_plane_stale) if it cannot refresh before this time.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "valid_until",
+          "tenant_id"
         ],
         "type": "object"
       },
@@ -1269,7 +1539,8 @@
           },
           "ownership": {
             "enum": [
-              "observe-only"
+              "observe-only",
+              "agent-managed"
             ],
             "type": "string"
           },
@@ -1289,7 +1560,8 @@
           "traffic_source": {
             "enum": [
               "none",
-              "agent-gateway"
+              "agent-gateway",
+              "agent-data-plane"
             ],
             "type": "string"
           }
@@ -1306,6 +1578,47 @@
           "ownership",
           "traffic_source",
           "traffic_detail"
+        ],
+        "type": "object"
+      },
+      "AgentQuotaLease": {
+        "additionalProperties": true,
+        "properties": {
+          "granted": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unlimited": {
+            "type": "boolean"
+          },
+          "window": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "granted"
+        ],
+        "type": "object"
+      },
+      "AgentQuotaLeaseRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "requested": {
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window": {
+            "description": "The current UTC minute.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "requested"
         ],
         "type": "object"
       },
@@ -1338,7 +1651,8 @@
           "traffic_source": {
             "enum": [
               "none",
-              "agent-gateway"
+              "agent-gateway",
+              "agent-data-plane"
             ],
             "type": "string"
           }
@@ -1525,7 +1839,7 @@
             "type": "array"
           },
           "traffic": {
-            "description": "Content-free request shapes from the agent's local gateway.",
+            "description": "Content-free request shapes from the agent's local gateway or data plane (source data-plane, with the binding it routed to).",
             "items": {
               "additionalProperties": true,
               "type": "object"
@@ -1570,7 +1884,7 @@
             "type": "string"
           },
           "commands": {
-            "description": "Reserved for candidate runs; protocol v1 sends none.",
+            "description": "Always empty: commands are delivered by GET /agent/commands.",
             "items": {
               "additionalProperties": true,
               "type": "object"
@@ -1770,6 +2084,53 @@
           "input",
           "idempotency_key",
           "store_encrypted_content"
+        ],
+        "type": "object"
+      },
+      "AuditEventList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Page size served, after clamping the requested limit to 1 through 500.",
+            "type": "integer"
+          },
+          "next": {
+            "description": "Query values for the next page when this page is full; null otherwise.",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "before": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "before_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "before",
+                  "before_id"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "limit",
+          "next"
         ],
         "type": "object"
       },
@@ -2242,6 +2603,285 @@
         "required": [
           "data"
         ],
+        "type": "object"
+      },
+      "CandidateRun": {
+        "additionalProperties": true,
+        "properties": {
+          "agent": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "control": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "failure_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure_detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CandidateRunResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runs_in": {
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/CandidateRunCreate"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled",
+              "expired"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "agent_id",
+          "state",
+          "spec",
+          "control",
+          "result",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CandidateRunCreate": {
+        "additionalProperties": false,
+        "description": "A candidate setup to try in the agent's own cluster. The image must be pinned by digest and allowed by the agent's operator; the entry point cannot be a shell.",
+        "properties": {
+          "accelerator": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "endpoint": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "gpu_count": {
+            "maximum": 16,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "label": {
+            "maxLength": 128,
+            "type": "string"
+          },
+          "load": {
+            "additionalProperties": false,
+            "properties": {
+              "concurrency": {
+                "maximum": 256,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "input_tokens": {
+                "maximum": 32768,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "output_tokens": {
+                "maximum": 32768,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "requests": {
+                "maximum": 5000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "streaming": {
+                "type": "boolean"
+              },
+              "tokenizer": {
+                "maxLength": 256,
+                "type": "string"
+              }
+            },
+            "required": [
+              "requests",
+              "concurrency",
+              "input_tokens",
+              "output_tokens"
+            ],
+            "type": "object"
+          },
+          "model": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "model_revision": {
+            "maxLength": 256,
+            "type": "string"
+          },
+          "quality": {
+            "additionalProperties": false,
+            "properties": {
+              "eval_set": {
+                "description": "default is the built-in public suite; local:NAME is an eval set kept beside the agent, whose prompts never leave the cluster.",
+                "pattern": "^(default|local:[a-z0-9][a-z0-9._-]{0,62})$",
+                "type": "string"
+              },
+              "skip": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "runtime_args": {
+            "items": {
+              "maxLength": 512,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "maximum": 21600,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "workload": {
+            "$ref": "#/components/schemas/RuntimeWorkload"
+          }
+        },
+        "required": [
+          "endpoint",
+          "label",
+          "model",
+          "workload",
+          "accelerator",
+          "gpu_count",
+          "load"
+        ],
+        "type": "object"
+      },
+      "CandidateRunEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_run": {
+            "$ref": "#/components/schemas/CandidateRun"
+          }
+        },
+        "required": [
+          "candidate_run"
+        ],
+        "type": "object"
+      },
+      "CandidateRunList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CandidateRunResult": {
+        "additionalProperties": true,
+        "description": "Numbers only: no prompt, answer, header, log line, or address.",
+        "properties": {
+          "candidate": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "cleaned_up": {
+            "type": "boolean"
+          },
+          "control": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "control_after": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "noise": {
+            "type": "number"
+          },
+          "quality": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "ready_seconds": {
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "CatalogLaunchQuote": {
@@ -3289,6 +3929,22 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "EndpointResidency": {
+        "additionalProperties": false,
+        "properties": {
+          "residency": {
+            "enum": [
+              "any",
+              "customer-cloud"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "residency"
+        ],
         "type": "object"
       },
       "EnvironmentCreate": {
@@ -10806,10 +11462,67 @@
         "properties": {
           "report": {
             "$ref": "#/components/schemas/OptimizationCampaignReport"
+          },
+          "signature": {
+            "description": "Ed25519 signature of a finished run's report by the control plane's passport signing key; null before the run finishes or without a key, never made up. Verify a saved response with `infercrane optimize report verify FILE`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationCampaignReportSignature"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unsigned_reason": {
+            "description": "Why signature is null; absent when the report is signed.",
+            "enum": [
+              "run_not_finished",
+              "signing_key_not_configured"
+            ],
+            "type": "string"
           }
         },
         "required": [
-          "report"
+          "report",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignReportSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm": {
+            "enum": [
+              "Ed25519-SHA256"
+            ],
+            "type": "string"
+          },
+          "digest": {
+            "description": "The report's report_digest: SHA-256 of the compact report JSON with report_digest emptied.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "key_id": {
+            "description": "sha256: and the first 8 bytes of the SHA-256 of the public key; the same key ID Inference Passports carry.",
+            "pattern": "^sha256:[0-9a-f]{16}$",
+            "type": "string"
+          },
+          "public_key": {
+            "description": "Base64 Ed25519 public key. Compare it, or its key ID, with the key the control plane's operator publishes.",
+            "type": "string"
+          },
+          "signature": {
+            "description": "Base64 Ed25519 signature over the 32 digest bytes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "algorithm",
+          "key_id",
+          "public_key",
+          "digest",
+          "signature"
         ],
         "type": "object"
       },
@@ -11069,6 +11782,124 @@
           },
           "suite_version": {
             "type": "string"
+          },
+          "tool_calls": {
+            "additionalProperties": false,
+            "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.",
+            "properties": {
+              "broken": {
+                "description": "Cases where the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "candidate": {
+                "additionalProperties": false,
+                "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                "properties": {
+                  "extra_calls": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "malformed_arguments": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "missing_call": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "schema_invalid": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "unexpected_call": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "wrong_function": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "missing_call",
+                  "malformed_arguments",
+                  "wrong_function",
+                  "schema_invalid",
+                  "extra_calls",
+                  "unexpected_call"
+                ],
+                "type": "object"
+              },
+              "cases": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "reference": {
+                "allOf": [
+                  {
+                    "additionalProperties": false,
+                    "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                    "properties": {
+                      "extra_calls": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "malformed_arguments": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "missing_call": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "schema_invalid": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "unexpected_call": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "wrong_function": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "missing_call",
+                      "malformed_arguments",
+                      "wrong_function",
+                      "schema_invalid",
+                      "extra_calls",
+                      "unexpected_call"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "description": "The reference's own failures; missing, extra, and unexpected calls stay 0."
+              },
+              "reference_invalid": {
+                "description": "Cases where the reference's own calls did not validate; they measure agreement only.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "score": {
+                "description": "Mean over tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference.",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "cases",
+              "score",
+              "broken",
+              "reference_invalid",
+              "candidate",
+              "reference"
+            ],
+            "type": "object"
           },
           "watch_limit_percent": {
             "type": "number"
@@ -11918,8 +12749,16 @@
       },
       "QualityEvalSetUpload": {
         "additionalProperties": false,
-        "description": "At most 512 KiB. Unknown fields are rejected, so expected answers are not accepted.",
+        "description": "At most 512 KiB. Unknown fields are rejected. Expected answers are accepted only in a graded set, which names its grading. Schema v2 adds conversations and function tools to a case; a case that declares tools is scored on its tool calls, and a graded set may not declare tools.",
         "properties": {
+          "grading": {
+            "description": "Makes the set graded: every prompt is scored against its expected answers.",
+            "enum": [
+              "exact_match",
+              "token_f1"
+            ],
+            "type": "string"
+          },
           "max_tokens": {
             "default": 64,
             "maximum": 512,
@@ -11934,10 +12773,95 @@
           "prompts": {
             "items": {
               "additionalProperties": false,
+              "description": "Either prompt (with an optional system) or, in v2, messages.",
               "properties": {
+                "expected": {
+                  "description": "Accepted answers; only in a graded set, where every prompt needs them.",
+                  "items": {
+                    "maxLength": 8192,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "id": {
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
                   "type": "string"
+                },
+                "messages": {
+                  "description": "v2: a conversation that ends with a user or tool turn.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "content": {
+                        "maxLength": 8192,
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "system",
+                          "user",
+                          "assistant",
+                          "tool"
+                        ],
+                        "type": "string"
+                      },
+                      "tool_call_id": {
+                        "description": "The earlier call a tool turn answers.",
+                        "type": "string"
+                      },
+                      "tool_calls": {
+                        "description": "Earlier calls of an assistant turn, to declared functions.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "function": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "arguments": {
+                                  "description": "JSON text.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "arguments"
+                              ],
+                              "type": "object"
+                            },
+                            "id": {
+                              "maxLength": 64,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": {
+                              "const": "function",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "function"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 64,
+                  "minItems": 1,
+                  "type": "array"
                 },
                 "prompt": {
                   "maxLength": 8192,
@@ -11947,11 +12871,93 @@
                 "system": {
                   "maxLength": 8192,
                   "type": "string"
+                },
+                "tool_choice": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "auto",
+                        "none",
+                        "required"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "function": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        "type": {
+                          "const": "function",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "function"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "tools": {
+                  "description": "v2: OpenAI function tools the model may call.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "function": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "description": {
+                            "maxLength": 8192,
+                            "type": "string"
+                          },
+                          "name": {
+                            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                            "type": "string"
+                          },
+                          "parameters": {
+                            "additionalProperties": true,
+                            "description": "JSON Schema (draft-07 or 2020-12) the call's arguments must validate against. Remote $ref is refused.",
+                            "type": "object"
+                          },
+                          "strict": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": {
+                        "const": "function",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "function"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 64,
+                  "minItems": 1,
+                  "type": "array"
                 }
               },
               "required": [
-                "id",
-                "prompt"
+                "id"
               ],
               "type": "object"
             },
@@ -11960,7 +12966,10 @@
             "type": "array"
           },
           "schema": {
-            "const": "infercrane.dev/quality-eval-set/v1",
+            "enum": [
+              "infercrane.dev/quality-eval-set/v1",
+              "infercrane.dev/quality-eval-set/v2"
+            ],
             "type": "string"
           },
           "version": {
@@ -13856,9 +14865,184 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Explicitly promote an adopted endpoint to traffic-managed ownership",
+        "summary": "Change who serves an adopted endpoint: traffic-managed (the control plane), agent-managed (its InferCrane agent, inside your cloud), or back to observe-only from agent-managed",
         "tags": [
           "Adoption"
+        ]
+      }
+    },
+    "/api/v1/agent/commands": {
+      "get": {
+        "operationId": "agentCommands",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCommands"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: long-poll (at most 25 s) for candidate runs queued for this agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agent/commands/{id}": {
+      "post": {
+        "operationId": "updateAgentCommand",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCommandUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentCommandUpdateResponse"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: report progress or the content-free result of one command",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agent/data-plane": {
+      "get": {
+        "operationId": "agentDataPlane",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDataPlaneSnapshot"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: routes, API key digests, admission policies, and request quota for this agent's agent-managed endpoints",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agent/quota-leases": {
+      "post": {
+        "operationId": "leaseAgentQuota",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentQuotaLeaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentQuotaLease"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Agent key only: lease part of the current minute's workspace request quota",
+        "tags": [
+          "Agents"
         ]
       }
     },
@@ -14148,6 +15332,228 @@
         ]
       }
     },
+    "/api/v1/agents/{id}/candidate-runs": {
+      "get": {
+        "operationId": "listCandidateRuns",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateRunList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List an agent's candidate runs, newest first",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "post": {
+        "operationId": "createCandidateRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateRunCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateRunEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Queue a candidate run in the agent's own cluster: start the candidate, measure it against the current setup with AIPerf, run the answer check, and remove it",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/api/v1/agents/{id}/candidate-runs/{run}": {
+      "delete": {
+        "operationId": "cancelCandidateRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateRunEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cancel a queued or running candidate run; the agent removes the candidate",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "get": {
+        "operationId": "getCandidateRun",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateRunEnvelope"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect one candidate run: state, phase, and content-free result",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
     "/api/v1/artifacts/{id}/cache": {
       "get": {
         "operationId": "inspectArtifactCache",
@@ -14407,12 +15813,43 @@
     "/api/v1/audit-events": {
       "get": {
         "operationId": "listAuditEvents",
+        "parameters": [
+          {
+            "description": "Events per page. Missing or below 1 returns 100; above 500 returns 500.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "RFC3339 time; returns events older than it. With before_id, the position of the last event already read: pass next.before and next.before_id from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last event already read. Requires before; together they also return the remaining events that share before's timestamp.",
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObjectList"
+                  "$ref": "#/components/schemas/AuditEventList"
                 }
               }
             },
@@ -14434,7 +15871,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List tenant audit events",
+        "summary": "List tenant audit events, newest first",
         "tags": [
           "Audit"
         ]
@@ -20395,6 +21832,73 @@
         "summary": "Capture a privacy-preserving workload shape from an endpoint's requests, or from one of its bindings such as a closed API",
         "tags": [
           "Replay"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/residency": {
+      "put": {
+        "operationId": "setEndpointResidency",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable key used to adopt the original durable operation after retries or disconnects.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointResidency"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Set where an endpoint's request content may go: any, or customer-cloud (only servers an InferCrane agent owns; the hosted gateway refuses it)",
+        "tags": [
+          "Endpoints"
         ]
       }
     },

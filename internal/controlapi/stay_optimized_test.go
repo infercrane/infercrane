@@ -305,6 +305,21 @@ func TestStayOptimizedEngineReleaseProposesARunThatWaitsForApproval(t *testing.T
 	}
 }
 
+// A policy that names an eval set hands it to every run it proposes, so the
+// run's answer check asks the customer's own cases.
+func TestStayOptimizedRunsUseThePolicyEvalSet(t *testing.T) {
+	policy := continualoptimizer.DefaultPolicy()
+	policy.QualityEvalSet = "sha256:" + strings.Repeat("d", 64)
+	store := newStayOptimizedFake(t, policy)
+	loop := StayOptimized{API: stayOptimizedAPI(t, store), Owner: "instance-a"}
+	if ran, err := loop.RunOnce(context.Background()); err != nil || ran != 1 || store.campaign.ID == "" {
+		t.Fatalf("ran=%d err=%v campaign=%+v", ran, err, store.campaign)
+	}
+	if got := optimizationcampaign.QualityEvalSetDigest(store.campaign); got != policy.QualityEvalSet {
+		t.Fatalf("proposed run eval set = %q, want %q", got, policy.QualityEvalSet)
+	}
+}
+
 // The weekly check runs on its own: with nothing else changed, an endpoint
 // already on the pinned release is checked once the week has passed, and
 // not before.

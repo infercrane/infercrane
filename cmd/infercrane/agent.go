@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -17,10 +18,12 @@ import (
 	"github.com/infercrane/infercrane/internal/agent"
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 )
 
 const agentUsage = `usage:
-  infercrane agent run [--server URL]... [--token-env VAR] [--model MODEL] [--as NAME] [--gateway ADDR] [--name NAME] [--once] [--output human|json]
+  infercrane agent run [--server URL]... [--token-env VAR] [--model MODEL] [--as NAME] [--gateway ADDR] [--serve ADDR] [--executor kubernetes ...] [--name NAME] [--once] [--output human|json]
   infercrane agent detect [--server URL]... [--token-env VAR] [--output human|json]
   infercrane agent create NAME [--output human|json]
   infercrane agent list [--output human|json]
@@ -89,6 +92,15 @@ type agentFlags struct {
 	gateway, gatewayFor   string
 	keyEnv                string
 	once                  bool
+	serve, executor       string
+	kubeContext, kubeNS   string
+	runtimeSA             string
+	workerSecret          string
+	workerKeyEnv          string
+	gpuResource, gpuLabel string
+	allowImages           stringList
+	allowAccelerators     stringList
+	evalSets              stringList
 }
 
 func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
@@ -107,6 +119,18 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 		fs.StringVar(&flags.gatewayFor, "gateway-server", "", "server URL the gateway forwards to when several are observed")
 		fs.StringVar(&flags.keyEnv, "key-env", "INFERCRANE_AGENT_KEY", "environment variable holding the agent key")
 		fs.BoolVar(&flags.once, "once", false, "detect, register, sync once, and exit")
+		fs.StringVar(&flags.serve, "serve", "", "serve this agent's agent-managed endpoints on this address, for example 0.0.0.0:8080")
+		fs.StringVar(&flags.executor, "executor", "", "test setups the control plane queues, in this cluster: kubernetes")
+		fs.StringVar(&flags.kubeContext, "kubernetes-context", "", "kubectl context for setup tests (default: this pod's service account)")
+		fs.StringVar(&flags.kubeNS, "kubernetes-namespace", "", "namespace test setups are started in")
+		fs.StringVar(&flags.runtimeSA, "runtime-service-account", "infercrane-runtime", "service account of test setup pods")
+		fs.StringVar(&flags.workerSecret, "worker-secret", "", "Secret NAME/KEY mounted into test setup pods as their API key")
+		fs.StringVar(&flags.workerKeyEnv, "worker-key-env", "INFERCRANE_WORKER_KEY", "environment variable holding that Secret's value")
+		fs.StringVar(&flags.gpuResource, "gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
+		fs.StringVar(&flags.gpuLabel, "gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
+		fs.Var(&flags.allowImages, "allow-image", "image repository test setups may use (repeatable); nothing else runs")
+		fs.Var(&flags.allowAccelerators, "allow-accelerator", "accelerator test setups may request (repeatable); default any")
+		fs.Var(&flags.evalSets, "eval-set", "a local eval set NAME=PATH for the answer check (repeatable)")
 	}
 	if err := fs.Parse(args); err != nil {
 		return agentFlags{}, err
@@ -120,7 +144,81 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 	if flags.noDetect && len(flags.servers) == 0 {
 		return agentFlags{}, errors.New("--no-detect needs at least one --server")
 	}
+	if flags.executor != "" && flags.executor != "kubernetes" {
+		return agentFlags{}, errors.New("--executor must be kubernetes")
+	}
+	if flags.executor != "" && flags.once {
+		return agentFlags{}, errors.New("--executor runs until stopped; it cannot be combined with --once")
+	}
+	if flags.serve != "" && flags.once {
+		return agentFlags{}, errors.New("--serve runs until stopped; it cannot be combined with --once")
+	}
 	return flags, nil
+}
+
+// candidateExecutor builds the in-cluster executor from flags. It refuses to
+// start without an image allowlist, so a command can only run images the
+// cluster's operator chose.
+func (f agentFlags) candidateExecutor(ctx context.Context) (agent.CandidateExecutor, error) {
+	if f.executor == "" {
+		return nil, nil
+	}
+	if f.kubeNS == "" {
+		return nil, errors.New("--executor kubernetes needs --kubernetes-namespace")
+	}
+	secretName, secretKey, ok := strings.Cut(f.workerSecret, "/")
+	if !ok || secretName == "" || secretKey == "" {
+		return nil, errors.New("--executor kubernetes needs --worker-secret NAME/KEY")
+	}
+	workerKey := strings.TrimSpace(os.Getenv(f.workerKeyEnv))
+	if workerKey == "" {
+		return nil, fmt.Errorf("environment variable %s (the worker Secret's value) is empty or unset", f.workerKeyEnv)
+	}
+	contextName := f.kubeContext
+	if contextName == "" {
+		dir, err := os.MkdirTemp("", "infercrane-agent-kube-")
+		if err != nil {
+			return nil, err
+		}
+		path, err := agent.WriteInClusterKubeconfig(dir)
+		if err != nil {
+			return nil, fmt.Errorf("--executor kubernetes without --kubernetes-context must run in a pod: %w", err)
+		}
+		if err = os.Setenv("KUBECONFIG", path); err != nil {
+			return nil, err
+		}
+		contextName = "in-cluster"
+	}
+	evalSets := map[string]qualitycheck.EvalSet{}
+	for _, entry := range f.evalSets {
+		name, path, ok := strings.Cut(entry, "=")
+		if !ok || !agentprotocol.ValidEndpointName(name) {
+			return nil, fmt.Errorf("--eval-set %q must be NAME=PATH with a lowercase name", entry)
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("--eval-set %s: %w", name, err)
+		}
+		set, err := qualitycheck.DecodeEvalSet(body)
+		if err != nil {
+			return nil, fmt.Errorf("--eval-set %s: %w", name, err)
+		}
+		evalSets[name] = set
+	}
+	executor := agent.KubernetesExecutor{
+		Provider: provision.Kubernetes{
+			Context: contextName, Namespace: f.kubeNS, WorkloadAPI: "deployment", ServiceAccount: f.runtimeSA,
+			WorkerSecretName: secretName, WorkerSecretKey: secretKey, GPUResource: f.gpuResource, GPUProductLabel: f.gpuLabel,
+			ArtifactCachePolicy: "disabled",
+		},
+		WorkerKey: workerKey, AllowedImages: f.allowImages, AllowedAccelerators: f.allowAccelerators, EvalSets: evalSets,
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := executor.Check(checkCtx); err != nil {
+		return nil, fmt.Errorf("test setups cannot start in namespace %s: %w", f.kubeNS, err)
+	}
+	return executor, nil
 }
 
 func (f agentFlags) serverConfigs(auth string) ([]agent.ServerConfig, error) {
@@ -325,22 +423,27 @@ func agentRunCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	hashKey, err := config.LoadOrCreateAgentHashKey(cfg.ClientContextName, cfg.ControlURL)
+	hashKey, err := agentHashKey(cfg)
 	if err != nil {
 		return fmt.Errorf("prepare the local hashing key: %w", err)
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	executor, err := flags.candidateExecutor(ctx)
+	if err != nil {
+		return err
+	}
 	runner := agent.New(agent.Config{
 		Client:  agent.Client{ControlURL: cfg.ControlURL, Key: key, HTTP: client, UserAgent: "infercrane-agent/" + version},
 		Version: version, Servers: explicit, AutoDetect: !flags.noDetect, HashKey: hashKey,
 		Model: flags.model, EndpointName: flags.endpoint, Gateway: flags.gateway, GatewayServer: flags.gatewayFor,
+		Serve: flags.serve, Executor: executor,
 		Once: flags.once, Hardware: agentHardware, Events: agentEventPrinter(human),
 	})
 	if human {
 		fmt.Fprintf(agentOutput, "InferCrane agent %s → %s (outbound HTTPS only; no port is opened for InferCrane)\n", version, cfg.ControlURL)
 		fmt.Fprintln(agentOutput, "Prompts and completions never leave this machine. Sent:")
-		for _, item := range agent.Sent(flags.gateway != "") {
+		for _, item := range agent.SentWith(flags.gateway != "", flags.serve != "", executor != nil) {
 			fmt.Fprintf(agentOutput, "  - %s\n", item)
 		}
 		fmt.Fprintln(agentOutput)
@@ -365,6 +468,21 @@ func agentRunCommand(ctx context.Context, args []string) error {
 		printAgentSummary(agentOutput, status)
 	}
 	return runErr
+}
+
+// agentHashKey reads the request-hashing key from INFERCRANE_AGENT_HASH_KEY
+// (64 hex characters, for example from a Kubernetes Secret so hashes stay
+// comparable across pod restarts), or keeps one beside the saved agent key.
+// Either way it stays where the agent runs and is never sent.
+func agentHashKey(cfg config.Config) ([]byte, error) {
+	if value := strings.TrimSpace(os.Getenv("INFERCRANE_AGENT_HASH_KEY")); value != "" {
+		key, err := hex.DecodeString(value)
+		if err != nil || len(key) != 32 {
+			return nil, errors.New("INFERCRANE_AGENT_HASH_KEY must be 64 hexadecimal characters (32 random bytes)")
+		}
+		return key, nil
+	}
+	return config.LoadOrCreateAgentHashKey(cfg.ClientContextName, cfg.ControlURL)
 }
 
 func agentEventPrinter(human bool) func(agent.Event) {
@@ -392,6 +510,10 @@ func agentEventPrinter(human bool) func(agent.Event) {
 			fmt.Fprintf(agentOutput, "%s skipped   %s: %s\n", stamp, event.Server.Address, event.Message)
 		case "gateway_listening":
 			fmt.Fprintf(agentOutput, "%s gateway   %s (forwards unchanged; records timings and token counts only)\n", stamp, event.Message)
+		case "data_plane_listening":
+			fmt.Fprintf(agentOutput, "%s serving   %s (agent-managed endpoints, InferCrane API keys; prompts stay here)\n", stamp, event.Message)
+		case "candidate_started", "candidate_phase", "candidate_done", "candidate_failed":
+			fmt.Fprintf(agentOutput, "%s setup     %s\n", stamp, event.Message)
 		case "rejected":
 			fmt.Fprintf(agentOutput, "%s rejected  %s\n", stamp, event.Message)
 		case "retrying":

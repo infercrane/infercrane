@@ -560,7 +560,7 @@ labelled per simulated accelerator.
 
 ```bash
 infercrane optimize report RUN_ID                       # cards in a terminal, plain text when piped
-infercrane optimize report RUN_ID --output json         # the API report, unchanged
+infercrane optimize report RUN_ID --output json         # the API response: the report and its signature
 infercrane optimize report RUN_ID --html result.html    # one self-contained page to share
 ```
 
@@ -623,6 +623,38 @@ check failed it, and, for an evolution, Release Guard accepted it. A kept curren
 not rolled out, with whether its server was removed because the approval ended or because the run
 was cancelled; the report never says it went live. When nothing qualified, the outcome cards lead with
 your current setup's measured values.
+
+When a run has finished and the control plane has a signing key, its report is signed. The key is
+the one that signs [Inference Passports](/features/inference-passports)
+(`INFERCRANE_PASSPORT_SIGNING_KEY_FILE`). The API response then carries `signature`: the algorithm
+(`Ed25519-SHA256`), the key ID, the public key, the digest, and the Ed25519 signature over that
+digest. The digest is the report's own `report_digest`, the SHA-256 of the compact report JSON with
+`report_digest` emptied, so the signature covers every value in the report. The report has no
+timestamps, so the same evidence always gives the same signature, and nothing is stored. A report
+is never given a made-up signature: until the run finishes, `signature` is `null` and
+`unsigned_reason` is `run_not_finished`, and on a control plane without a signing key it is
+`signing_key_not_configured`. Every text, terminal, and HTML rendering ends with
+`Signed by key sha256:… — verify with infercrane optimize report verify FILE`, or says why the
+report is not signed.
+
+Save the report as JSON and check it anywhere, without the control plane or any credential:
+
+```bash
+infercrane optimize report RUN_ID --output json > report.json
+infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+```
+
+`verify` checks the schema version, recomputes the digest from the report's JSON, and verifies the
+signature and that the key ID names its public key. It exits non-zero on any mismatch: a changed
+value or key, an added field, another report's signature, an unsigned report, or, with
+`--public-key`, a different key. Whitespace does not matter, so an indented file still verifies;
+re-encoding the file with another tool can change escapes or numbers, and then it fails.
+
+Without `--public-key`, `verify` proves the report is unchanged since the key it names signed it,
+and prints that key ID. To prove the key is your control plane's, pass its public key or compare the
+key ID. Operators get both from `infercrane passport keygen` when they create the key, and from the
+`public_key` and `key_id` of any signed report or Inference Passport their control plane returns.
+Publish the public key where the people who check your reports can fetch it.
 
 That default creates a `new_endpoint` run. To improve an endpoint that already serves production,
 bind the run to its stable deployment identity:
@@ -777,9 +809,11 @@ decision without you signing anything:
    uploaded and named with `--eval-set`.
 3. **Answers are scored, then discarded.** Each answer is scored by how closely it matches the
    reference's answer to the same prompt (token overlap, ignoring case, punctuation, and reasoning
-   blocks). A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10%
-   is `BLOCK`, which rejects the candidate with `quality_gate_rejected`. These are the same
-   PASS/WATCH/BLOCK rules Release Guard applies.
+   blocks). A case of your eval set that declares function tools is scored on its tool calls instead.
+   A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10% is `BLOCK`,
+   which rejects the candidate with `quality_gate_rejected`. These are the same PASS/WATCH/BLOCK
+   rules Release Guard applies. A candidate that breaks a tool call the reference made correctly is
+   `BLOCK` whatever its score ([Tool calls](/features/semantic-quality#tool-calls)).
 4. **The result is signed evidence.** It is stored as quality evidence signed with the control plane's
    own key and labelled `source: infercrane`, separate from evidence you sign (`source: customer`).
    The reference gets its own row with score 1: its answers are the reference.
@@ -790,9 +824,9 @@ answers on the same prompts.
 
 The check never passes on missing evidence. When no serving reference exists, for example because
 the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
-When the reference gives no answer text to a prompt within the token limit, for example a reasoning
-model cut off mid-reasoning, the candidate ends `inconclusive` with `quality_reference_unanswered`:
-two answers with no text are not a match.
+When the reference gives no answer text and makes no tool call to a prompt within the token limit,
+for example a reasoning model cut off mid-reasoning, the candidate ends `inconclusive` with
+`quality_reference_unanswered`: two answers with no text are not a match.
 When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
 every candidate wait for your own signed evaluation instead, create the campaign with
 `--quality-check customer_evidence`. Each candidate's `quality` object in the campaign API, the run
@@ -802,7 +836,8 @@ covers the evidence format, eval sets, and the signing key.
 
 Agreement with the control is not task accuracy: it shows the candidate answers like your current
 setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
-your prompts, or attach your own evaluator's signed results.
+your own cases, including conversations and tool calls, or attach your own evaluator's signed
+results.
 
 A **migration** run (`--migrate-from ENDPOINT/BINDING`) replaces a closed API instead of improving an
 owned setup. Its baseline is the closed API: candidates are measured in turns with the run's control
@@ -1093,6 +1128,10 @@ creates a run proposal. Each proposal records:
   for their winner, or `unknown` when there are none. The run measures its own;
 - **run cost:** the spend cap that covers every setup for one hour at today's sourced prices
   (approval splits the cap evenly across setups), or `unknown` when a setup has no current price.
+
+The run's answer check asks the eval set the policy names in `quality_eval_set`, or the built-in
+prompts when it names none (`infercrane evaluation set stay-optimized DEPLOYMENT sha256:DIGEST`; see
+[Use your own test set](/features/semantic-quality#use-your-own-test-set)).
 
 The run's approval-needed [notification](#get-told-when-a-run-needs-you) carries the reason and the
 estimated cost in its `proposal` field and summary. Dismissing a proposal cancels the run; its setups

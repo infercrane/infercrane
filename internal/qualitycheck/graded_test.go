@@ -21,7 +21,7 @@ func gradedSet(t *testing.T, n int, grading string) EvalSet {
 	for i := range n {
 		prompts = append(prompts, map[string]any{"id": fmt.Sprintf("p%d", i), "prompt": fmt.Sprintf("Say %d", i), "expected": []string{fmt.Sprint(i)}})
 	}
-	body, _ := json.Marshal(map[string]any{"schema": EvalSetSchema, "name": "support-graded", "version": "1", "grading": grading, "prompts": prompts})
+	body, _ := json.Marshal(map[string]any{"schema": EvalSetSchemaV1, "name": "support-graded", "version": "1", "grading": grading, "prompts": prompts})
 	set, err := DecodeEvalSet(body)
 	if err != nil {
 		t.Fatal(err)

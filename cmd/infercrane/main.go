@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1572,7 +1573,8 @@ func passportCommand(ctx context.Context, cfg config.Config, args []string) erro
 		if err = file.Close(); err != nil {
 			return err
 		}
-		fmt.Printf("Passport signing key created\nFile  %s\nMode  0600\n\nSet INFERCRANE_PASSPORT_SIGNING_KEY_FILE to this path on the control plane. Back up the key securely; losing it prevents issuing evidence under the same key identity.\n", *path)
+		publicKey := privateKey.Public().(ed25519.PublicKey)
+		fmt.Printf("Passport signing key created\nFile        %s\nMode        0600\nKey ID      %s\nPublic key  %s\n\nSet INFERCRANE_PASSPORT_SIGNING_KEY_FILE to this path on the control plane. Back up the key securely; losing it prevents issuing evidence under the same key identity. Publish the public key so others can check what this key signs, for example with infercrane optimize report verify FILE --public-key KEY.\n", *path, passport.KeyID(publicKey), base64.StdEncoding.EncodeToString(publicKey))
 		return nil
 	}
 	if action == "verify" {
@@ -4830,7 +4832,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	bindUpstreamCredentials(&controlAPI, rec, upstreamCredentials)
 	// The agent protocol is part of the open-source core: any control plane
 	// can accept agents. Agents only ever dial in; nothing here dials them.
-	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints}
+	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
+		backend, err := runtimeBackends.ForRuntime(runtime)
+		if err != nil {
+			return runtimecontract.ProtocolCapabilities{}
+		}
+		return backend.Profile.ProtocolCapabilities()
+	}}
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {

@@ -97,7 +97,7 @@ type Store interface {
 	DeploymentsForTenant(context.Context, string) ([]domain.Deployment, error)
 	OrphanedTargetsForTenant(context.Context, string) ([]domain.Orphan, error)
 	Audit(context.Context, domain.AuditEvent) error
-	AuditEventsForTenant(context.Context, string, time.Time, int) ([]domain.AuditEvent, error)
+	AuditEventsForTenant(context.Context, string, domain.AuditCursor, int) ([]domain.AuditEvent, error)
 	SetTenantQuota(context.Context, string, int, int, int) error
 	CreatePrincipalScoped(context.Context, string, string, authz.Role, []authz.Action) (domain.Principal, string, error)
 	RotatePrincipalForTenant(context.Context, string, string) (string, error)
@@ -639,6 +639,15 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/agents/{id}", a.auth(authz.Deploy, a.revokeAgent))
 	mux.HandleFunc("POST /api/v1/agent/sync", a.agentAuth(a.agentSync))
 	mux.HandleFunc("POST /api/v1/agent/servers", a.agentAuth(a.agentRegisterServer))
+	mux.HandleFunc("GET /api/v1/agent/data-plane", a.agentAuth(a.agentDataPlane))
+	mux.HandleFunc("POST /api/v1/agent/quota-leases", a.agentAuth(a.agentQuotaLease))
+	mux.HandleFunc("GET /api/v1/agent/commands", a.agentAuth(a.agentCommands))
+	mux.HandleFunc("POST /api/v1/agent/commands/{id}", a.agentAuth(a.agentCommandUpdate))
+	mux.HandleFunc("POST /api/v1/agents/{id}/candidate-runs", a.auth(authz.Deploy, a.createCandidateRun))
+	mux.HandleFunc("GET /api/v1/agents/{id}/candidate-runs", a.auth(authz.Read, a.listCandidateRuns))
+	mux.HandleFunc("GET /api/v1/agents/{id}/candidate-runs/{run}", a.auth(authz.Read, a.getCandidateRun))
+	mux.HandleFunc("DELETE /api/v1/agents/{id}/candidate-runs/{run}", a.auth(authz.Deploy, a.cancelCandidateRun))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/residency", a.auth(authz.Deploy, a.setEndpointResidency))
 	mux.HandleFunc("POST /api/v1/adoptions/endpoints", a.auth(authz.Deploy, a.adoptEndpoint))
 	mux.HandleFunc("PUT /api/v1/adoptions/endpoints/{name}/ownership", a.auth(authz.Deploy, a.promoteAdoptionOwnership))
 	mux.HandleFunc("GET /api/v1/requests/{id}", a.auth(authz.Read, a.requestInspection))
@@ -1512,7 +1521,10 @@ func (a API) campaignSpend(ctx context.Context, tenant string, campaign domain.O
 
 // optimizationCampaignReport serves the customer outcome of one campaign: the
 // baseline against the winning setup on cost, speed, and quality. It only
-// reads tenant-scoped persisted evidence; missing inputs stay unknown.
+// reads tenant-scoped persisted evidence; missing inputs stay unknown. A
+// finished run's report is signed with the passport signing key; without the
+// key, or before the run finishes, the signature is null and the response
+// says why.
 func (a API) optimizationCampaignReport(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(optimizationreport.Store)
 	if !ok {
@@ -1529,7 +1541,12 @@ func (a API) optimizationCampaignReport(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal", "optimization run report could not be assembled")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"report": report})
+	document, err := optimizationreport.Sign(report, a.PassportPrivateKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "report_signing_failed", "optimization run report could not be signed")
+		return
+	}
+	writeJSON(w, http.StatusOK, document)
 }
 
 func (a API) acceleratorLabCapabilities(w http.ResponseWriter, _ *http.Request) {
@@ -2688,6 +2705,9 @@ func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if a.refuseCustomerCloudContent(w, r, actor.TenantID, r.PathValue("name")) {
+		return
+	}
 	now := time.Now().UTC()
 	job, created, err := a.AsyncInference.Submit(r.Context(), asyncinference.SubmitRequest{Tenant: actor.TenantID, Endpoint: r.PathValue("name"), Protocol: request.Protocol, IdempotencyKey: request.IdempotencyKey, Payload: request.Input, Priority: request.Priority, ExecutionDeadline: now.Add(time.Duration(request.ExecutionDeadlineSeconds) * time.Second), ExpiresAt: now.Add(time.Duration(request.RetentionSeconds) * time.Second), WebhookURL: request.WebhookURL, WebhookSecretReferenceID: request.WebhookSecretReferenceID})
 	if writeEndpointMutationError(w, err) {
@@ -3558,7 +3578,11 @@ func logicalModelResponse(item domain.LogicalModel) map[string]any {
 }
 
 func endpointResponse(item domain.Endpoint) map[string]any {
-	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "logical_model_id": item.LogicalModelID, "environment_id": item.EnvironmentID, "name": item.Name, "desired_state": item.DesiredState, "observed_state": item.ObservedState, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+	residency := item.Residency
+	if residency == "" {
+		residency = "any"
+	}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "logical_model_id": item.LogicalModelID, "environment_id": item.EnvironmentID, "name": item.Name, "desired_state": item.DesiredState, "observed_state": item.ObservedState, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "residency": residency, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
 }
 
 func bindingResponse(item domain.BackendBinding) map[string]any {
@@ -6147,17 +6171,26 @@ func (a API) gpuPrices(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// auditEvents pages the tenant's audit log newest first. A full page carries
+// next, the before and before_id of the following page; before alone still
+// returns the events older than that time.
 func (a API) auditEvents(w http.ResponseWriter, r *http.Request) {
 	principal := r.Context().Value(identityKey{}).(domain.Principal)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	var before time.Time
-	if raw := r.URL.Query().Get("before"); raw != "" {
+	query := r.URL.Query()
+	requested, _ := strconv.Atoi(query.Get("limit"))
+	limit := store.AuditPageSize(requested)
+	var before domain.AuditCursor
+	if raw := query.Get("before"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339Nano, raw)
 		if err != nil {
 			writeError(w, 400, "invalid_cursor", "before must be RFC3339")
 			return
 		}
-		before = parsed
+		before.CreatedAt = parsed
+	}
+	if before.ID = query.Get("before_id"); before.ID != "" && before.CreatedAt.IsZero() {
+		writeError(w, 400, "invalid_cursor", "before_id needs before")
+		return
 	}
 	rows, err := a.Store.AuditEventsForTenant(r.Context(), principal.TenantID, before, limit)
 	if err != nil {
@@ -6168,7 +6201,12 @@ func (a API) auditEvents(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		data = append(data, map[string]any{"id": row.ID, "actor": row.Actor, "action": row.Action, "resource_type": row.ResourceType, "resource_name": row.ResourceName, "outcome": row.Outcome, "request_id": row.RequestID, "payload": json.RawMessage(row.Payload), "created_at": row.CreatedAt})
 	}
-	writeJSON(w, 200, map[string]any{"data": data})
+	var next any
+	if len(rows) == limit {
+		last := rows[len(rows)-1]
+		next = map[string]string{"before": last.CreatedAt.UTC().Format(time.RFC3339Nano), "before_id": last.ID}
+	}
+	writeJSON(w, 200, map[string]any{"data": data, "limit": limit, "next": next})
 }
 
 func (a API) setQuota(w http.ResponseWriter, r *http.Request) {

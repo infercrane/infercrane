@@ -518,6 +518,10 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 		active := make(map[string]struct{}, len(endpoints))
 		for _, endpoint := range endpoints {
 			active[endpoint.Name] = struct{}{}
+			// A customer-cloud endpoint is served only by its agent. The
+			// gateway refuses it rather than trying any other supply.
+			customerCloud := endpoint.Residency == "customer-cloud"
+			r.Routes.SetResidentForTenant(tenant, endpoint.Name, customerCloud)
 			if endpoint.DesiredState != "serving" || endpoint.ActiveServingPlanID == "" {
 				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
 				continue
@@ -532,7 +536,7 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 			}
 			compiled := make([]routes.Snapshot, 0, len(resolved.ActivePlan.Bindings))
 			plannedBindingIDs := make([]string, 0, len(resolved.ActivePlan.Bindings))
-			observeOnly := 0
+			observeOnly, agentManaged, agentHealthy := 0, 0, 0
 			for _, planned := range resolved.ActivePlan.Bindings {
 				plannedBindingIDs = append(plannedBindingIDs, planned.BindingID)
 				binding, found := bindings[planned.BindingID]
@@ -541,6 +545,18 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				}
 				if binding.OwnershipMode == "observe-only" {
 					observeOnly++
+					continue
+				}
+				if binding.OwnershipMode == "agent-managed" {
+					// The agent pulls this route and serves it in the
+					// customer's cloud; it is never published here.
+					agentManaged++
+					if target, targetErr := store.TargetForTenantByID(ctx, tenant, binding.TargetID); targetErr == nil && target.AgentID != "" && target.Health == "healthy" {
+						agentHealthy++
+					}
+					continue
+				}
+				if customerCloud {
 					continue
 				}
 				if binding.Kind == "external" {
@@ -609,7 +625,18 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 				compiled = append(compiled, base)
 			}
 			state := "serving"
-			if len(plannedBindingIDs) > 0 && observeOnly == len(plannedBindingIDs) {
+			if customerCloud || agentManaged > 0 {
+				// Served by the agent or only observed: never a route here.
+				r.Routes.RemoveEndpointForTenant(tenant, endpoint.Name)
+				switch {
+				case agentHealthy > 0:
+					state = "serving"
+				case agentManaged > 0:
+					state = "degraded"
+				default:
+					state = "observing"
+				}
+			} else if len(plannedBindingIDs) > 0 && observeOnly == len(plannedBindingIDs) {
 				// Observe-only bindings never publish a route by design, so a
 				// plan made only of them is being watched, not failing.
 				state = "observing"
@@ -630,6 +657,11 @@ func (r *Reconciler) compileEndpoints(ctx context.Context, deployments []domain.
 		for _, alias := range r.Routes.EndpointAliasesForTenant(tenant) {
 			if _, found := active[alias]; !found {
 				r.Routes.RemoveEndpointForTenant(tenant, alias)
+			}
+		}
+		for _, alias := range r.Routes.ResidentAliasesForTenant(tenant) {
+			if _, found := active[alias]; !found {
+				r.Routes.SetResidentForTenant(tenant, alias, false)
 			}
 		}
 	}

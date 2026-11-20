@@ -49,6 +49,25 @@ created on the machine and never sent, independent of the agent key. Revoking an
 its principal and is checked on every agent request, so the agent stops at its next sync. Agent keys do not expire; rotate them by creating a new agent and revoking the
 old one.
 
+An agent that serves an [agent-managed endpoint](/architecture/agent#the-agent-as-the-data-plane)
+receives the SHA-256 digests of the workspace's live, non-agent API keys that may call that
+endpoint, the same digests the control plane stores, so it can authenticate requests inside the
+customer's cloud. No key itself leaves the control plane, keys restricted to other endpoints are
+not sent, and an agent with no agent-managed endpoint receives none. A leaked agent key therefore
+also exposes those digests, which cannot be turned back into keys or used against the control
+plane, which never accepts a digest. The agent stops accepting keys when it cannot refresh the
+digests for 15 minutes, so a revoked key stops working on the agent within that window, and at
+once when the agent itself is revoked. Request quota is leased from the shared allocator; an agent
+without a lease returns `429` rather than serving unmetered. An endpoint with residency
+`customer-cloud` accepts only agent-owned bindings (enforced by a database trigger), and the hosted
+gateway refuses it instead of forwarding its prompts to any supply.
+
+Candidate runs the control plane queues for an agent are bounded specs, never shell commands: the
+image must be pinned by digest and on the agent operator's allowlist, the entry point cannot be a
+shell or interpreter, and arguments cannot carry substitutions. The agent runs them with a
+namespaced Role (Deployments, Services, read-only PVCs) and returns only numbers; eval prompts,
+answers, and logs stay in the cluster.
+
 `infercrane connect --token-env VAR` sends a server's API key to the control plane once. It is
 stored only as AES-256-GCM ciphertext bound to the workspace and endpoint, sealed with
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only toward that server: for
@@ -168,7 +187,11 @@ reference revisions and compares the answers in memory; answers are never stored
 set is the one place InferCrane keeps prompts you choose to give it: `infercrane evaluation set
 upload` stores the uploaded file in plaintext, bounded to 512 KiB and 200 prompts, scoped to your
 organization, and readable only by the worker. The API returns its metadata, never its prompts, and
-`evaluation set delete` removes it. Do not upload prompts containing personal data or secrets.
+`evaluation set delete` removes it. Do not upload prompts containing personal data or secrets. An
+eval set's conversations, tool definitions, and earlier tool results are stored the same way. Tool
+calls the models make during the check are compared in memory and never executed: the worker
+validates their arguments against the JSON Schema the eval set declares, with no loader, so a
+schema's remote `$ref` is refused at upload and validation fetches nothing.
 
 Durable async inference is the explicit exception. It remains disabled until an operator injects
 `INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.

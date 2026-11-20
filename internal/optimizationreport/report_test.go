@@ -477,14 +477,14 @@ func TestAssembleFlagsSimulatedAcceleratorRuns(t *testing.T) {
 	if report.Appendix.Winner.AcceleratorClass != AcceleratorSimulated {
 		t.Fatalf("winning setup class = %s", report.Appendix.Winner.AcceleratorClass)
 	}
-	text := Text(report)
+	text := Text(Document{Report: report})
 	if !strings.Contains(text, "!! "+CPUBanner+" !!") || strings.Index(text, CPUBanner) > strings.Index(text, report.Outcome.Headline) {
 		t.Fatalf("text output lacks the fixed banner above the outcome:\n%s", text)
 	}
 	if strings.Contains(text, "per GPU") {
 		t.Fatalf("text output presents CPU numbers as GPU results:\n%s", text)
 	}
-	page, err := HTML(report)
+	page, err := HTML(Document{Report: report})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestAssembleFlagsSimulatedAcceleratorRuns(t *testing.T) {
 		t.Fatal("a campaign with one CPU setup was not flagged")
 	}
 	gpu := Assemble(winnerFixture().evidence())
-	if strings.Contains(Text(gpu), CPUBanner) {
+	if strings.Contains(Text(Document{Report: gpu}), CPUBanner) {
 		t.Fatal("a GPU campaign carried the CPU banner")
 	}
 }
@@ -536,8 +536,8 @@ func TestAssembleBaselineKept(t *testing.T) {
 	if report.Noise.Basis != BasisInterleaved || report.Noise.CandidateID != "winner" || report.Noise.ObjectiveDecision != DecisionImproved {
 		t.Fatalf("noise = %+v", report.Noise)
 	}
-	if !strings.Contains(Text(report), "Closest challenger: output throughput +30.0% against your current setup, better.") {
-		t.Fatalf("closest challenger line is missing or claims the wrong decision:\n%s", Text(report))
+	if !strings.Contains(Text(Document{Report: report}), "Closest challenger: output throughput +30.0% against your current setup, better.") {
+		t.Fatalf("closest challenger line is missing or claims the wrong decision:\n%s", Text(Document{Report: report}))
 	}
 	if report.Monthly.Decision != DecisionUnchanged || report.Monthly.BaselineUSD == nil || report.Monthly.ChangeUSD != nil {
 		t.Fatalf("monthly = %+v", report.Monthly)
@@ -563,7 +563,7 @@ func TestAssembleUsesReleaseGuardQualityVerdict(t *testing.T) {
 	if got.Verdict != releaseguard.QualityWatch || got.Basis != BasisReleaseGuard || got.Eval != "gsm8k@1" || !near(got.Delta, -0.02) || !near(got.RegressionPercent, 2.38) || !near(got.WatchThresholdPercent, 1) || got.ReleaseGuardEvaluationID != "guard-1" || len(got.Evals) != 2 || got.Evals[1].FollowUp == "" {
 		t.Fatalf("quality = %+v", got)
 	}
-	if !strings.Contains(Text(report), "WATCH") {
+	if !strings.Contains(Text(Document{Report: report}), "WATCH") {
 		t.Fatal("text output lacks the WATCH verdict")
 	}
 }
@@ -652,7 +652,7 @@ func TestReportNamesTheMetricASetupLostOnAndKeepsTheControlInactive(t *testing.T
 	if report.Outcome.Kind != OutcomeBaselineKept {
 		t.Fatalf("outcome = %+v", report.Outcome)
 	}
-	text := Text(report)
+	text := Text(Document{Report: report})
 	for _, want := range []string{
 		"vLLM defaults [current setup, kept] · kept · nothing to roll out",
 		"· rejected · throughput got worse by 24% (noise ±7.3%), latency got worse by 55% (noise ±6.9%)",
@@ -711,7 +711,7 @@ func cleanedFixture(selected string) fixture {
 // cardValues returns the large value of every outcome card on the HTML page.
 func cardValues(t *testing.T, report Report) []string {
 	t.Helper()
-	page, err := HTML(report)
+	page, err := HTML(Document{Report: report})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,7 +772,7 @@ func TestCleanedCampaignReportsAWinnerThatWasNeverRolledOut(t *testing.T) {
 				t.Fatalf("outcome = %+v", report.Outcome)
 			}
 			want := "“Up to 256 concurrent requests” was the best setup found but was not rolled out: it measured better than your current setup on the same traffic; "
-			if !strings.HasPrefix(report.Outcome.Headline, want) || strings.Contains(Text(report), "Roll out") {
+			if !strings.HasPrefix(report.Outcome.Headline, want) || strings.Contains(Text(Document{Report: report}), "Roll out") {
 				t.Fatalf("headline = %q", report.Outcome.Headline)
 			}
 			why := map[string]string{"approval ended": "its server was removed because the approval ended.", "cancelled before cleanup": "its server is being removed because the run was cancelled.", "evolution guard accepted": "its server was removed."}[name]
@@ -817,7 +817,7 @@ func TestCleanedCampaignWithoutAProvenWinnerStaysWithoutOne(t *testing.T) {
 				t.Fatalf("p95 TTFT = %+v", ttft)
 			}
 			// The cards lead with what the current setup measured.
-			if values := cardValues(t, report); values[1] != "410 ms" || !strings.Contains(Text(report), "410 ms") {
+			if values := cardValues(t, report); values[1] != "410 ms" || !strings.Contains(Text(Document{Report: report}), "410 ms") {
 				t.Fatalf("outcome cards = %v", values)
 			}
 		})

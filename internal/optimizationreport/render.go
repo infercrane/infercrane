@@ -70,6 +70,9 @@ type View struct {
 	Evidence   []ViewField
 	Unknown    []ViewField
 	Digest     string
+	// Signature says who signed the report and how to verify it, or why it
+	// is not signed.
+	Signature string
 }
 
 // ViewRow is one outcome: the current setup against the winner. Tone is good,
@@ -113,9 +116,11 @@ type ViewField struct {
 	Name, Value string
 }
 
-// NewView formats a report for display without adding or dropping a value.
-func NewView(r Report) View {
-	v := View{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Warnings: r.Warnings, Digest: r.ReportDigest}
+// NewView formats a report and its signature for display without adding or
+// dropping a value.
+func NewView(d Document) View {
+	r := d.Report
+	v := View{Title: "Optimization result", Subtitle: subtitle(r), Banner: r.Banner, Headline: r.Outcome.Headline, Kind: r.Outcome.Kind, Warnings: r.Warnings, Digest: r.ReportDigest, Signature: signatureLine(d)}
 	for _, metric := range r.Metrics {
 		v.Rows = append(v.Rows, metricRow(metric))
 	}
@@ -674,8 +679,8 @@ func emptyAs(value, fallback string) string {
 }
 
 // Text renders the report as plain text for terminals and logs.
-func Text(r Report) string {
-	v := NewView(r)
+func Text(d Document) string {
+	v := NewView(d)
 	var b strings.Builder
 	b.WriteString(v.Title + "\n" + v.Subtitle + "\n\n")
 	if v.Banner != "" {
@@ -755,6 +760,7 @@ func Text(r Report) string {
 			b.WriteString("  " + field.Value + "\n")
 		}
 	}
+	b.WriteString("\n" + v.Signature + "\n")
 	return b.String()
 }
 

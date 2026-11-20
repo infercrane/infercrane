@@ -94,6 +94,22 @@ client = OpenAI(base_url="http://127.0.0.1:4000/v1", api_key="your-server-key-or
 The gateway forwards every request unchanged. If you stop the agent, point your application back at
 the server.
 
+## Serve with InferCrane keys, inside your network
+
+To use InferCrane API keys, admission, and request quota while prompts and completions stay on this
+machine, make the endpoint agent-managed (a key with `deploy` calls
+`PUT /api/v1/adoptions/endpoints/{name}/ownership` with `{"ownership_mode":"agent-managed"}`) and
+start the agent's data plane:
+
+```bash
+infercrane agent run --serve 127.0.0.1:4000
+```
+
+Your application then calls `http://127.0.0.1:4000/v1` with an InferCrane API key. The endpoint's
+residency becomes `customer-cloud`, so the hosted gateway refuses it. See
+[the agent as the data plane](/architecture/agent#the-agent-as-the-data-plane) and
+[what leaves your cloud](/architecture/agent#what-leaves-your-cloud).
+
 ## A machine where nobody signs in
 
 Create an agent key once from a signed-in machine (or the API), then pass it to the agent:
@@ -121,8 +137,9 @@ A revoked agent stops at its next sync, within one poll. Its endpoints stay, mar
 
 ## What it does not do yet
 
-- It does not start, restart, or tune your server. Running candidate setups on your own GPUs is
-  the next step; see [candidate runs](/architecture/agent#candidate-runs-next-slice).
+- It does not start, restart, or tune your server on a single machine. Candidate setups run
+  through the agent in a Kubernetes cluster today; on one machine they will run only for an engine
+  the agent launched itself. See [candidate runs](/architecture/agent#candidate-runs).
 - Apple Silicon and AMD GPUs are reported as detected; their GPU telemetry is not collected.
 - Requests through the InferCrane gateway cannot reach a server that only the agent sees. Use the
   agent's local gateway instead.

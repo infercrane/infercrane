@@ -21,6 +21,7 @@ import (
 
 var ErrNotFound = domain.ErrNotFound
 var ErrConflict = domain.ErrConflict
+var ErrResidency = domain.ErrResidency
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
@@ -322,6 +323,13 @@ func nullJSON(value string) any {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// isResidencyViolation reports the endpoint residency trigger refusing a
+// binding that no InferCrane agent owns.
+func isResidencyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "endpoint_residency_customer_cloud"
 }
 func isForeignKeyViolation(err error) bool {
 	var pgErr *pgconn.PgError

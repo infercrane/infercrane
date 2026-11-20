@@ -45,6 +45,9 @@ import (
 )
 
 type fakeStore struct {
+	auditBefore                domain.AuditCursor
+	auditLimit                 int
+	auditEvents                func(domain.AuditCursor, int) []domain.AuditEvent
 	sealedSecret               *domain.SecretReference
 	operation                  domain.Operation
 	deployment                 domain.Deployment
@@ -2895,7 +2898,11 @@ func (f *fakeStore) OrphanedTargetsForTenant(context.Context, string) ([]domain.
 	return nil, f.err
 }
 func (f *fakeStore) Audit(context.Context, domain.AuditEvent) error { return nil }
-func (f *fakeStore) AuditEventsForTenant(context.Context, string, time.Time, int) ([]domain.AuditEvent, error) {
+func (f *fakeStore) AuditEventsForTenant(_ context.Context, _ string, before domain.AuditCursor, limit int) ([]domain.AuditEvent, error) {
+	f.auditBefore, f.auditLimit = before, limit
+	if f.auditEvents != nil {
+		return f.auditEvents(before, limit), f.err
+	}
 	return nil, f.err
 }
 func (f *fakeStore) SetTenantQuota(context.Context, string, int, int, int) error { return f.err }

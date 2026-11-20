@@ -107,3 +107,6 @@
   [38;2;161;161;170m○[m [38;2;161;161;170mAnswer quality: your current setup is kept, so answer quality is unchanged[m
   [38;2;161;161;170m○[m [38;2;161;161;170mBottleneck signals: the serving engine's metrics were not scraped while it[m
     [38;2;161;161;170mwas measured[m
+
+[38;2;161;161;170mSigned by key sha256:fe812c12f3ab4ce6 — verify with infercrane optimize report[m
+[38;2;161;161;170mverify FILE, where FILE is this report saved with --output json.[m

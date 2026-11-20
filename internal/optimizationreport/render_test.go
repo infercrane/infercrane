@@ -25,7 +25,7 @@ func orderedIn(t *testing.T, text string, parts ...string) {
 }
 
 func TestTextLeadsWithOutcomesThenEvidence(t *testing.T) {
-	text := Text(Assemble(winnerFixture().evidence()))
+	text := Text(Document{Report: Assemble(winnerFixture().evidence())})
 	orderedIn(t, text,
 		"Roll out “Up to 256 concurrent requests”",
 		"Cost per 1M output tokens", "p95 time to first token", "Output tokens/s per user", "Output tokens/s per GPU", "Requests/s", "Answer quality · gsm8k", "Monthly cost at your traffic",
@@ -44,14 +44,14 @@ func TestTextLeadsWithOutcomesThenEvidence(t *testing.T) {
 func TestTextExplainsEveryUnknown(t *testing.T) {
 	f := winnerFixture()
 	f.arms[1].hourly = nil
-	text := Text(Assemble(f.evidence()))
+	text := Text(Document{Report: Assemble(f.evidence())})
 	orderedIn(t, text, "Cost per 1M output tokens", "└ winner: no sourced hourly price", "Unknown, never estimated", "Cost per 1M output tokens: winner: no sourced hourly price", "Monthly cost: cost per output token is unknown")
 }
 
 func TestHTMLIsSelfContainedAndOrdered(t *testing.T) {
 	f := winnerFixture()
 	f.arms[1].args = []string{"--served-model-name", "<script>alert(1)</script>"}
-	page, err := HTML(Assemble(f.evidence()))
+	page, err := HTML(Document{Report: Assemble(f.evidence())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestHTMLIsSelfContainedAndOrdered(t *testing.T) {
 		measured.Runs[index].ServerMetrics = nil
 	}
 	f.arms[1].measured = measured
-	page, err = HTML(Assemble(f.evidence()))
+	page, err = HTML(Document{Report: Assemble(f.evidence())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,11 +92,11 @@ func TestNoOutputNamesInternalSearchMechanics(t *testing.T) {
 	for name, f := range map[string]fixture{"winner": winnerFixture(), "kept": kept, "simulated": simulated} {
 		report := Assemble(f.evidence())
 		encoded, _ := json.Marshal(report)
-		page, err := HTML(report)
+		page, err := HTML(Document{Report: report})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for format, output := range map[string]string{"json": string(encoded), "text": Text(report), "html": string(page)} {
+		for format, output := range map[string]string{"json": string(encoded), "text": Text(Document{Report: report}), "html": string(page)} {
 			if strings.Contains(strings.ToLower(output), "recipe search") {
 				t.Fatalf("%s %s output names an internal mechanic", name, format)
 			}
@@ -139,11 +139,11 @@ func TestAnswerQualityLabelIsShortAndTheSuiteStaysInEvidence(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			test.quality.Evals = []QualityEval{}
 			report := Report{SchemaVersion: SchemaVersion, CampaignID: "c1", Quality: test.quality, Appendix: Appendix{Evidence: test.evidence}, ReportDigest: "sha256:cc"}
-			view := NewView(report)
+			view := NewView(Document{Report: report})
 			if got := view.Rows[len(view.Rows)-2].Label; got != test.label {
 				t.Fatalf("label = %q, want %q", got, test.label)
 			}
-			text := Text(report)
+			text := Text(Document{Report: report})
 			table, evidence, _ := strings.Cut(text, "\nEvidence\n")
 			if eval := test.quality.Eval; eval != "" {
 				if strings.Contains(table, eval) {
@@ -156,7 +156,7 @@ func TestAnswerQualityLabelIsShortAndTheSuiteStaysInEvidence(t *testing.T) {
 					t.Fatalf("evidence names the suite %d times:\n%s", strings.Count(evidence, eval), text)
 				}
 			}
-			page, err := HTML(report)
+			page, err := HTML(Document{Report: report})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,11 +174,11 @@ func TestRenderersSayRunBaselineAndRollOut(t *testing.T) {
 	f := winnerFixture()
 	f.arms[0].state = optimizationcampaign.CandidateRejected
 	report := Assemble(f.evidence())
-	page, err := HTML(report)
+	page, err := HTML(Document{Report: report})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for format, output := range map[string]string{"text": Text(report), "html": html.UnescapeString(string(page))} {
+	for format, output := range map[string]string{"text": Text(Document{Report: report}), "html": html.UnescapeString(string(page))} {
 		for _, want := range []string{"· run " + report.CampaignID, "run input", "baseline · another setup measured better", "winner, ready to roll out"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("%s lacks %q:\n%s", format, want, output)
@@ -192,7 +192,7 @@ func TestRenderersSayRunBaselineAndRollOut(t *testing.T) {
 	}
 	// A setup that is not the current one keeps its verdict.
 	f.arms[2].state = optimizationcampaign.CandidateRejected
-	if text := Text(Assemble(f.evidence())); !strings.Contains(text, "· rejected · ") {
+	if text := Text(Document{Report: Assemble(f.evidence())}); !strings.Contains(text, "· rejected · ") {
 		t.Fatalf("a rejected setup lost its verdict:\n%s", text)
 	}
 }

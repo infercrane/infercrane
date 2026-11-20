@@ -26,12 +26,12 @@ steps.
 | Property | Built-in answer check |
 |---|---|
 | Prompts | `infercrane-default` version 1: 24 short prompts with short answers (arithmetic, facts, extraction, code, translation, summaries), pinned by SHA-256 digest in the product. Print it with `infercrane evaluation set default`. |
-| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Each request also sends `chat_template_kwargs: {"enable_thinking": false}`, so hybrid reasoning models such as Qwen3 and GLM answer directly; chat templates without that switch ignore it. Sent directly to one ready replica of each exact revision. |
-| Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and reasoning: `<think>` blocks, and any text before a `</think>` that the chat template opened in the prompt. |
-| Answers with no text | If the reference gives no answer text to any prompt within the token limit, for example because a reasoning model was cut off mid-reasoning or its server returned only reasoning, the check stops without a score. The candidate ends `inconclusive` with `quality_reference_unanswered`. Use an eval set with a larger `max_tokens`. |
+| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Each request also sends `chat_template_kwargs: {"enable_thinking": false}`, so hybrid reasoning models such as Qwen3 and GLM answer directly; chat templates without that switch ignore it. A case from your eval set also sends its conversation, `tools`, and `tool_choice`. Sent directly to one ready replica of each exact revision. |
+| Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and reasoning: `<think>` blocks, and any text before a `</think>` that the chat template opened in the prompt. A case that declares tools is scored on its tool calls; see [Tool calls](#tool-calls). |
+| Answers with no text | If the reference gives no answer text and makes no tool call to any prompt within the token limit, for example because a reasoning model was cut off mid-reasoning or its server returned only reasoning, the check stops without a score. The candidate ends `inconclusive` with `quality_reference_unanswered`. Use an eval set with a larger `max_tokens`. |
 | Score | The mean over prompts. The reference's own row records 1. |
-| Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. `BLOCK` records `passed: false`. |
-| Evidence | Evaluator `infercrane-builtin` version 2, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, and an artifact digest that commits to a hash of every answer. Signed with the control plane's key. |
+| Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. A candidate that breaks a tool call the reference made correctly is `BLOCK` whatever its score. `BLOCK` records `passed: false`. |
+| Evidence | Evaluator `infercrane-builtin` version 3, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, the tool-call score in `distribution.tool_calls` when the eval set has tool cases, and an artifact digest that commits to a hash of every answer and call. Signed with the control plane's key. Evidence from version 2 is not compared with version 3. |
 | Provenance | `source: infercrane` and the reference's revision ID. Only the worker writes these rows; the attach API always records `source: customer` and refuses the evaluator name `infercrane-builtin`. |
 
 Answers are compared in memory and discarded. Prompts of the built-in suite live in the product;
@@ -45,9 +45,10 @@ command for each waiting candidate.
 The answer check measures agreement with your current setup on general prompts. It is not a task
 accuracy benchmark. Use an eval set of your own prompts, or your own evaluator, for that.
 
-### Use your own prompts
+### Use your own test set
 
-An eval set replaces the built-in prompts. It has the same format as the built-in suite:
+An eval set replaces the built-in prompts with your own cases. Schema v1 has the same format as the
+built-in suite: single prompts.
 
 ```json eval-set.json
 {
@@ -62,15 +63,106 @@ An eval set replaces the built-in prompts. It has the same format as the built-i
 }
 ```
 
-Up to 200 prompts and 512 KiB. Prompt IDs are 1 to 64 letters, digits, dots, dashes, or underscores
-and must be unique. Unknown fields are rejected. Expected answers are accepted only in a **graded**
-set, which names its `grading` (`exact_match` or `token_f1`) and gives every prompt 1 to 8
-`expected` answers; an ungraded set with expected answers is refused, because the ordinary check
-scores agreement with the reference's answers, not stored answers. A graded set is what a
-[migration Proof](/features/migration) scores both the closed API and each setup against
+Schema v2 accepts everything v1 does. A case may also hold a conversation in `messages` instead of
+`prompt`, and declare OpenAI function `tools` with an optional `tool_choice`:
+
+```json eval-set.json
+{
+  "schema": "infercrane.dev/quality-eval-set/v2",
+  "name": "support-agent",
+  "version": "1",
+  "max_tokens": 128,
+  "prompts": [
+    {"id": "refund-window", "prompt": "How many days do customers have to request a refund?"},
+    {
+      "id": "order-status",
+      "messages": [
+        {"role": "system", "content": "Use the tools to look up orders."},
+        {"role": "user", "content": "Where is my order A-10442?"}
+      ],
+      "tools": [{
+        "type": "function",
+        "function": {
+          "name": "get_order",
+          "parameters": {
+            "type": "object",
+            "properties": {"order_id": {"type": "string", "pattern": "^A-[0-9]{5}$"}},
+            "required": ["order_id"],
+            "additionalProperties": false
+          }
+        }
+      }],
+      "tool_choice": "auto"
+    }
+  ]
+}
+```
+
+`examples/evaluation/eval-set-tools.json` has a fuller example, with a conversation that carries an
+earlier call and its result.
+
+Up to 200 cases and 512 KiB. Case IDs are 1 to 64 letters, digits, dots, dashes, or underscores and
+must be unique. A case sets either `prompt` (with an optional `system`) or `messages`. A conversation
+holds 1 to 64 turns with roles `system`, `user`, `assistant`, and `tool`, and ends with a user or tool
+turn. An assistant turn may carry earlier `tool_calls` to declared functions, and each tool turn
+answers one of them by `tool_call_id`. Each case declares 1 to 64 functions; a function's
+`parameters` must be a JSON Schema (draft-07 or 2020-12) without remote `$ref`, and `tool_choice` is
+`auto`, `none`, `required`, or a declared function. Unknown fields are rejected.
+
+Expected answers are accepted only in a **graded** set, which names its `grading` (`exact_match` or
+`token_f1`) and gives every prompt 1 to 8 `expected` answers; an ungraded set with expected answers is
+refused, because the ordinary check scores agreement with the reference's answers, not stored answers.
+A graded set scores answer text, so its cases may hold conversations but not tools. A graded set is
+what a [migration Proof](/features/migration) scores both the closed API and each setup against
 (evaluator `infercrane-graded`), compared with a paired bootstrap into a signed PASS, BLOCK, or
 UNKNOWN verdict. The evaluator names `infercrane-builtin` and `infercrane-graded` are reserved: your
 own evidence cannot claim them.
+
+#### Tool calls
+
+A case that declares `tools` is a tool case. When the reference calls functions, the candidate scores
+1 on that case only if it calls the same functions with arguments that are JSON and equal the
+reference's as canonical JSON (key order and spacing do not count, nor does the order of parallel
+calls); otherwise 0.
+
+A candidate **breaks** a tool call when the reference's calls name declared functions and their
+arguments validate against those functions' `parameters`, and the candidate's do not: it calls a
+different or undeclared function, drops or adds a call, answers in text instead, or sends arguments
+that are not JSON or do not fit the schema. One broken call blocks the candidate, whatever its mean
+score: its evidence records `passed: false`, so Release Guard blocks it too. A valid call with other
+arguments, such as another city, is not broken; it scores 0 and counts in the mean like any other
+different answer.
+
+When the reference's own call does not validate, the case measures agreement only, and the evidence
+counts it in `reference_invalid`. When neither side calls a function, the text answers are compared as
+in any other case.
+
+The tool-call score is reported apart from the mean, in the evidence's `distribution.tool_calls` and
+in the candidate's `quality.tool_calls`:
+
+| Field | Meaning |
+|---|---|
+| `cases` | Cases that declare tools. |
+| `score` | Mean over those cases. Their scores also count in the overall mean. |
+| `broken` | Cases where the candidate broke a call the reference made correctly. |
+| `reference_invalid` | Cases where the reference's own call did not validate. |
+| `candidate` | Cases by how the candidate's calls failed against the reference's, below. |
+| `reference` | Cases by how the reference's own calls failed. Missing, extra, and unexpected calls are relative to the reference, so they stay 0 here. |
+
+Each failure kind counts cases, never call content, and one case can count under several kinds:
+
+| Kind | The calls in that case |
+|---|---|
+| `missing_call` | The reference called a function this side did not call, including an answer in text instead of a call. |
+| `malformed_arguments` | Arguments that are not JSON. |
+| `wrong_function` | An undeclared function, or another function in place of the reference's. |
+| `schema_invalid` | Arguments that do not validate against the declared `parameters`. |
+| `extra_calls` | More calls than the reference made. |
+| `unexpected_call` | A call where the reference answered without one. It scores 0 but is not a broken call. |
+
+Calls are compared in memory and never executed. A tool case needs a server that accepts `tools`: vLLM
+must run with `--enable-auto-tool-choice` and a `--tool-call-parser` for the model. A server that
+refuses a request with tools fails the check with an error that says so; it is never scored.
 
 ```bash
 infercrane evaluation set upload eval-set.json
@@ -82,6 +174,17 @@ so the eval set cannot change under a running campaign. A campaign that names an
 not uploaded waits for it, and the run page shows the upload command. `evaluation set inspect` shows
 an uploaded eval set without its prompts, and `evaluation set delete` removes it. Uploaded eval sets
 belong to your organization and are deleted with it.
+
+Runs that [Stay optimized](/features/optimization#stay-optimized) proposes for an endpoint use the
+eval set its policy names in `quality_eval_set`, or the built-in prompts when it names none:
+
+```bash
+infercrane evaluation set stay-optimized chat sha256:DIGEST
+infercrane evaluation set stay-optimized chat default
+```
+
+The command checks that the eval set is uploaded and changes only that field of the endpoint's saved
+policy. A run already proposed keeps the eval set it was proposed with.
 
 ### Signing key
 

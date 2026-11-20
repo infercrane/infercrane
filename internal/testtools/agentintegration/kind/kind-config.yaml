@@ -1,0 +1,8 @@
+# containerd reads registry hosts from certs.d, so the node pulls the
+# digest-pinned fake engine from the run's local registry.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

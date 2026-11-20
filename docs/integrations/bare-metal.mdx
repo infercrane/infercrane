@@ -61,6 +61,7 @@ delete the external service. Explicitly move to `traffic-managed` only after rev
 credential boundary.
 
 Use a lifecycle provider adapter only when you want InferCrane to create and delete capacity.
-Running candidate setups on your own GPUs will go through the agent, only for an engine the agent
-launched itself; see [candidate runs](/architecture/agent#candidate-runs-next-slice). Read-only
-discovery does not imply that capability.
+Candidate setups on your own GPUs run through the agent: in a Kubernetes cluster today, and on a
+single host only for an engine the agent launched itself (designed, not implemented); see
+[candidate runs](/architecture/agent#candidate-runs). Read-only discovery does not imply that
+capability.

@@ -54,7 +54,11 @@ type Directory struct {
 	inflight  map[string]int
 	retired   map[string]Snapshot
 	health    map[string]overflow.State
-	now       func() time.Time
+	// resident marks endpoints whose traffic is served inside a customer's
+	// cloud by an InferCrane agent. They never have a route here, and the
+	// gateway must refuse them instead of trying any other supply.
+	resident map[string]bool
+	now      func() time.Time
 }
 
 // smoothState is where a weighted endpoint is in its smooth weighted
@@ -67,7 +71,43 @@ type smoothState struct {
 }
 
 func New() *Directory {
-	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), smooth: make(map[string]*smoothState), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot), health: make(map[string]overflow.State), now: time.Now}
+	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), smooth: make(map[string]*smoothState), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot), health: make(map[string]overflow.State), resident: make(map[string]bool), now: time.Now}
+}
+
+// SetResidentForTenant marks or clears an endpoint whose request content
+// must stay in the customer's cloud.
+func (d *Directory) SetResidentForTenant(tenant, alias string, resident bool) {
+	key := tenant + "\x00" + alias
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if resident {
+		d.resident[key] = true
+		return
+	}
+	delete(d.resident, key)
+}
+
+// ResidentForTenant reports whether an endpoint is served only inside the
+// customer's cloud. It performs no I/O.
+func (d *Directory) ResidentForTenant(tenant, alias string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.resident[tenant+"\x00"+alias]
+}
+
+// ResidentAliasesForTenant lists a tenant's customer-cloud endpoints.
+func (d *Directory) ResidentAliasesForTenant(tenant string) []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	prefix := tenant + "\x00"
+	aliases := make([]string, 0)
+	for key := range d.resident {
+		if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+			aliases = append(aliases, key[len(prefix):])
+		}
+	}
+	slices.Sort(aliases)
+	return aliases
 }
 
 func routeID(route Snapshot) string {

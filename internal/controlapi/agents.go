@@ -89,6 +89,9 @@ func agentServerResponse(item domain.AgentServer, gatewayKey string) map[string]
 	if gatewayKey != "" && gatewayKey == item.Key {
 		trafficSource, trafficDetail = "agent-gateway", "Requests sent through the agent's local gateway are recorded as content-free shapes."
 	}
+	if item.OwnershipMode == agentprotocol.OwnershipAgentManaged {
+		trafficSource, trafficDetail = agentprotocol.ComputeModeDataPlane, "The agent serves this endpoint's traffic inside your cloud. Prompts and completions stay there; only content-free request shapes are sent."
+	}
 	return map[string]any{
 		"key": item.Key, "endpoint": item.EndpointName, "target_id": item.TargetID, "address": item.Address,
 		"engine": item.Runtime, "model": item.UpstreamModel, "health": item.Health, "reported_at": item.ReportedAt,

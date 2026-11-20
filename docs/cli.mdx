@@ -433,17 +433,22 @@ infercrane evaluation set digest eval-set.json
 infercrane evaluation set upload eval-set.json
 infercrane evaluation set inspect sha256:DIGEST
 infercrane evaluation set delete sha256:DIGEST
+infercrane evaluation set stay-optimized DEPLOYMENT sha256:DIGEST|default
 ```
 
-`ingest` accepts the strict evaluator-result v1 interchange contract, rejects unknown content fields,
+`ingest` accepts the strict evaluator-result v2 interchange contract, rejects unknown content fields,
 binds it to one immutable revision, signs it, and optionally attaches it. Evidence is
 signature-verified and contains aggregate values only. The evaluator name `infercrane-builtin` is
 reserved for InferCrane's own answer check and is refused.
 
-`evaluation set` manages the prompt sets that replace the built-in prompts of an optimization run's
-answer check. `default` prints the built-in suite to copy and adapt, `digest` validates a file
-without uploading it, and `upload` prints the digest a run names with `--eval-set`. See
-[Semantic quality evidence](/features/semantic-quality#built-in-answer-check).
+`evaluation set` manages the test sets that replace the built-in prompts of an optimization run's
+answer check: single prompts, or (schema v2) conversations and cases that declare function tools,
+which are scored on their tool calls. `default` prints the built-in suite to copy and adapt, `digest`
+validates a file without uploading it, and `upload` prints the digest a run names with `--eval-set`.
+`stay-optimized` sets the eval set of the runs Stay optimized proposes for a deployment, or `default`
+for the built-in prompts; it checks that the eval set is uploaded and changes only that field of the
+saved policy. See
+[Semantic quality evidence](/features/semantic-quality#use-your-own-test-set).
 
 ### `mcp`
 
@@ -572,6 +577,18 @@ set of at least 30 prompts. `--dialect openai` sends `max_completion_tokens` to 
 largest graded-quality drop, at the upper bound of the paired-bootstrap interval, a setup may show
 and still pass. `optimize activate` on a migration run starts a 5% canary on the closed API's
 endpoint.
+
+`optimize report RUN_ID` shows what a finished run changed in cost, speed, and answer quality, and
+who signed the report. `--output json` prints the control API response: the report and its
+signature, or `"signature": null` with `unsigned_reason`. `optimize report verify FILE` checks a
+saved report offline and exits non-zero on any mismatch; `--public-key KEY` also requires the
+report to be signed by that base64 Ed25519 key. See
+[Read the outcome of a run](/features/optimization#read-the-outcome-of-a-run).
+
+```bash
+infercrane optimize report RUN_ID --output json > report.json
+infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+```
 
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
 the run's proposal recorded warnings, such as skipped speculative-decoding setups.
