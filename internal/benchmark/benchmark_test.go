@@ -205,7 +205,7 @@ func TestReproductionCommandRedactsCredential(t *testing.T) {
 
 func TestRunUsesIndependentServingModelAndTokenizer(t *testing.T) {
 	runner := &capturingRunner{}
-	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "logical-deployment", Tokenizer: "Qwen/Qwen3-8B", Requests: 1, Concurrency: 1}, runner)
+	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "logical-deployment", Tokenizer: "Qwen/Qwen3-8B", Requests: 1, Concurrency: 1}, runner, nil)
 	command := strings.Join(runner.profileArgs, " ")
 	if !strings.Contains(command, "--model logical-deployment") || !strings.Contains(command, "--tokenizer Qwen/Qwen3-8B") || !strings.Contains(command, "--synthetic-input-tokens-mean 128") || !strings.Contains(command, "--output-tokens-mean 32") {
 		t.Fatalf("args=%v", runner.profileArgs)
@@ -224,7 +224,7 @@ func TestRunSelectsStreamingAndBufferedAIPerfModes(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := &capturingRunner{}
-			_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, Streaming: test.mode}, runner)
+			_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, Streaming: test.mode}, runner, nil)
 			hasStreaming := false
 			for _, arg := range runner.profileArgs {
 				if arg == "--streaming" {
@@ -291,7 +291,7 @@ func (exportingRunner) Run(_ context.Context, _ string, args ...string) ([]byte,
 }
 
 func TestRunConsumesAIPerfMultiRunRecordLayout(t *testing.T) {
-	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ProfileRuns: 3}, exportingRunner{})
+	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ProfileRuns: 3}, exportingRunner{}, nil)
 	if err != nil || result.ProfileRuns != 3 || result.Requests != 3 || result.OutputTokenThroughput == nil || *result.OutputTokenThroughput != 20 || result.Confidence["ttft_p95_ms"].Samples != 3 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -307,7 +307,7 @@ func TestReproductionCommandDoesNotPersistDeletedTemporaryPath(t *testing.T) {
 
 func TestRunBuildsRepeatableArrivalPatternCampaign(t *testing.T) {
 	runner := &capturingRunner{}
-	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 50, Concurrency: 4, ProfileRuns: 5, WarmupRequests: 8, ProfileRunCooldown: 3 * time.Second, ArrivalPattern: "poisson", RequestRate: 7.5}, runner)
+	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 50, Concurrency: 4, ProfileRuns: 5, WarmupRequests: 8, ProfileRunCooldown: 3 * time.Second, ArrivalPattern: "poisson", RequestRate: 7.5}, runner, nil)
 	command := strings.Join(runner.profileArgs, " ")
 	for _, expected := range []string{"--num-profile-runs 5", "--warmup-request-count 8", "--profile-run-cooldown-seconds 3", "--arrival-pattern poisson", "--request-rate 7.5"} {
 		if !strings.Contains(command, expected) {
@@ -322,7 +322,7 @@ func TestRunUsesAIPerfCustomTraceWithoutSyntheticPromptFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &capturingRunner{}
-	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, InputFile: trace, DatasetType: "single_turn"}, runner)
+	_, _ = run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, InputFile: trace, DatasetType: "single_turn"}, runner, nil)
 	command := strings.Join(runner.profileArgs, " ")
 	if !strings.Contains(command, "--input-file "+trace+" --custom-dataset-type single_turn") || strings.Contains(command, "--synthetic-input-tokens-mean") {
 		t.Fatalf("trace boundary was not preserved: args=%v", runner.profileArgs)
@@ -363,7 +363,7 @@ func (missingRunner) Run(context.Context, string, ...string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 func TestRunReportsMissingAIPerf(t *testing.T) {
-	_, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1}, missingRunner{})
+	_, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1}, missingRunner{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "pipx install aiperf") {
 		t.Fatalf("err=%v", err)
 	}

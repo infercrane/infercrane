@@ -108,7 +108,10 @@ type loadPlan struct {
 // OutputTokensPerRequest feed the guards (see CheckGuards): latency
 // percentiles leave failed requests out, and shorter answers finish sooner.
 // OutputTokensPerRequest is absent when a successful request reported no
-// server count, and on runs measured before it was recorded.
+// server count, and on runs measured before it was recorded. CancelRelease
+// is the run's cancel-release probe (see benchmark.CancelRelease); like
+// ServerMetrics it is present only when the arm's runtime contract declares
+// a metrics path, and absent on runs measured before it was recorded.
 type RunSummary struct {
 	Arm                    string                   `json:"arm"`
 	Requests               int                      `json:"requests"`
@@ -122,6 +125,7 @@ type RunSummary struct {
 	Goodput                *float64                 `json:"goodput,omitempty"`
 	OutputTokensPerRequest *float64                 `json:"output_tokens_per_request,omitempty"`
 	ServerMetrics          *benchmark.ServerMetrics `json:"server_metrics,omitempty"`
+	CancelRelease          *benchmark.CancelRelease `json:"cancel_release,omitempty"`
 }
 
 // ControlEvidence says whether the campaign control was measured alongside
@@ -518,7 +522,7 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 }
 
 func summarizeRun(arm string, result benchmark.Result) RunSummary {
-	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
+	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics, CancelRelease: result.CancelRelease}
 }
 
 func warmupRequests(concurrency int) int {

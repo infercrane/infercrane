@@ -68,6 +68,9 @@ type Result struct {
 	Confidence             map[string]ConfidenceInterval
 	// ServerMetrics is nil unless Config.ServerMetrics was set.
 	ServerMetrics *ServerMetrics
+	// CancelRelease is nil unless Config.ServerMetrics was set: its probes
+	// read the same engine metrics endpoint.
+	CancelRelease *CancelRelease
 }
 
 // ServerMetrics is a bounded summary of AIPerf's server-metrics export: the
@@ -92,13 +95,17 @@ type commandRunner interface {
 	Run(context.Context, string, ...string) ([]byte, error)
 }
 
-func Run(ctx context.Context, cfg Config) (Result, error) { return run(ctx, cfg, executable{}) }
+func Run(ctx context.Context, cfg Config) (Result, error) {
+	return run(ctx, cfg, executable{}, defaultCancelReleaseProbe())
+}
 
 type Runner struct{}
 
 func (Runner) Run(ctx context.Context, cfg Config) (Result, error) { return Run(ctx, cfg) }
 
-func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error) {
+// run probes cancel release after AIPerf when probe is set and the caller
+// enabled server metrics.
+func run(ctx context.Context, cfg Config, commands commandRunner, probe *cancelReleaseProbe) (Result, error) {
 	if cfg.Binary == "" {
 		cfg.Binary = "aiperf"
 	}
@@ -226,6 +233,9 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	result.Confidence = profileConfidence(records, cfg)
 	if cfg.ServerMetrics {
 		result.ServerMetrics = readServerMetrics(dir)
+		if probe != nil {
+			result.CancelRelease = probe.run(ctx, cfg)
+		}
 	}
 	result.Tool, result.ToolVersion, result.Command = "aiperf", version, command
 	return result, nil
