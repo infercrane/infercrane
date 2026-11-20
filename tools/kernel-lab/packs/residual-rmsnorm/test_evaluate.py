@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import unittest
 from pathlib import Path
@@ -27,6 +28,49 @@ class FakeTriton:
         self.testing = testing
 
 
+class Recorder:
+    """Stands in for torch.cuda and triton.testing.do_bench, recording the order of events."""
+
+    def __init__(self, fail_capture=False):
+        self.events, self.fail_capture, self.benched = [], fail_capture, None
+        self.cuda = self
+
+    def Stream(self):
+        return self
+
+    def current_stream(self):
+        return self
+
+    def wait_stream(self, other):
+        pass
+
+    def stream(self, stream):
+        return contextlib.nullcontext()
+
+    def CUDAGraph(self):
+        return FakeGraph()
+
+    @contextlib.contextmanager
+    def graph(self, graph):
+        self.events.append("capture")
+        yield
+        if self.fail_capture:
+            raise RuntimeError("operation not permitted when stream is capturing")
+        self.events.append("captured")
+
+    def synchronize(self):
+        self.events.append("synchronize")
+
+    def do_bench(self, function):
+        self.benched = function
+        return 0.025
+
+
+class FakeGraph:
+    def replay(self):
+        pass
+
+
 class RooflineTest(unittest.TestCase):
     def test_minimum_bytes_counts_three_reads_and_two_writes(self) -> None:
         # x, residual, output and residual_out are rows*hidden each; weight is hidden.
@@ -49,6 +93,23 @@ class RooflineTest(unittest.TestCase):
         self.assertEqual(evaluate.peak_dram_gbps(FakeTriton(FakeTesting(gbps=3352.0))), 3352.0)
         self.assertEqual(evaluate.peak_dram_gbps(FakeTriton(FakeTesting(error=RuntimeError("no device")))), 0.0)
         self.assertEqual(evaluate.peak_dram_gbps(FakeTriton(object())), 0.0)
+
+
+class GraphTimingTest(unittest.TestCase):
+    def timed(self, recorder):
+        return evaluate.median_microseconds(recorder, FakeTriton(recorder), lambda: recorder.events.append("call"))
+
+    def test_times_the_replay_of_one_captured_call_after_warm_up(self) -> None:
+        recorder = Recorder()
+        self.assertAlmostEqual(self.timed(recorder), 25.0)
+        warm_up = ["call"] * evaluate.GRAPH_WARMUP_CALLS
+        self.assertEqual(recorder.events, warm_up + ["capture", "call", "captured", "synchronize"])
+        self.assertEqual(recorder.benched.__name__, "replay")
+        self.assertIsInstance(recorder.benched.__self__, FakeGraph)
+
+    def test_a_call_that_cannot_be_captured_fails_timing(self) -> None:
+        with self.assertRaises(RuntimeError):
+            self.timed(Recorder(fail_capture=True))
 
 
 if __name__ == "__main__":

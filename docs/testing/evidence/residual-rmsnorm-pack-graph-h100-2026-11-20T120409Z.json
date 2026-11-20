@@ -1,0 +1,152 @@
+{
+  "app_id": "ap-ZrwwnsaWEU4j10ezwqZax4",
+  "billed_usd": {
+    "cpu": 0.00168181,
+    "h100": 0.03511173,
+    "memory": 0.0011378,
+    "source": "modal billing report --for today --show-resources, 2026-11-20 13:10 CET",
+    "total": 0.03793134
+  },
+  "comparison": {
+    "baseline": "vLLM 0.22.1 _custom_ops.fused_add_rms_norm, in place on copies made outside the timed call, at 128 rows of hidden 1024, BF16",
+    "note": "At 128 rows the operator moves about 1 MB, 0.3 us at the H100's DRAM bandwidth; both kernels took 6.5-6.8 us, so fixed per-replay cost dominates at this size and small differences are diluted."
+  },
+  "evaluations": [
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": null,
+      "kernel": "correct",
+      "kernel_sha256": "sha256:a8a3f92f1a9898588cb061089c6d274530a48ec20ed106317435b332ebbb33bc",
+      "result": {
+        "baseline_median_us": 6.576573835756583,
+        "candidate_median_us": 6.823104460039106,
+        "correctness": {
+          "determinism": true,
+          "edge_cases": true,
+          "numerical_stability": true,
+          "sanitizer": true,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "roofline_utilization": 0.04593247306869956
+      },
+      "seconds": 11.4,
+      "speedup_vs_engine_kernel": 0.9639,
+      "verification_suite": false
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": null,
+      "kernel": "correct",
+      "kernel_sha256": "sha256:a8a3f92f1a9898588cb061089c6d274530a48ec20ed106317435b332ebbb33bc",
+      "result": {
+        "baseline_median_us": 6.477420397425945,
+        "candidate_median_us": 6.520692659160929,
+        "correctness": {
+          "determinism": true,
+          "edge_cases": true,
+          "numerical_stability": true,
+          "sanitizer": true,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "roofline_utilization": 0.04806269490640249
+      },
+      "seconds": 7.8,
+      "speedup_vs_engine_kernel": 0.9934,
+      "verification_suite": true
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": "correctness",
+      "kernel": "wrong_epsilon",
+      "kernel_sha256": "sha256:0819c8f9610d3b6d1847d60b4bdd9d13ad5d7e1161eb11abcdc64752179bcac0",
+      "result": {
+        "baseline_median_us": 0.0,
+        "candidate_median_us": 0.0,
+        "correctness": {
+          "determinism": false,
+          "edge_cases": false,
+          "numerical_stability": false,
+          "sanitizer": false,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "failed_stage": "numerical_stability",
+        "roofline_utilization": 0.0
+      },
+      "seconds": 3.6,
+      "verification_suite": false
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": "correctness",
+      "kernel": "wrong_batch_dependent",
+      "kernel_sha256": "sha256:2217a84b29b3a9e8dacf885f821a1a9a7cd23264dbe6da7211c081396d89e1e0",
+      "result": {
+        "baseline_median_us": 0.0,
+        "candidate_median_us": 0.0,
+        "correctness": {
+          "determinism": false,
+          "edge_cases": false,
+          "numerical_stability": true,
+          "sanitizer": false,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "failed_stage": "determinism",
+        "roofline_utilization": 0.0
+      },
+      "seconds": 3.2,
+      "verification_suite": false
+    }
+  ],
+  "evidence_class": "real-gpu-evaluator-check",
+  "gpu_seconds": 31.6,
+  "hardware": {
+    "compute_sanitizer": "Copyright (c) 2020-2025 NVIDIA Corporation\nVersion 2025.3.1.0 (build 36400806) (public-release)",
+    "gpu_request": "H100!",
+    "nvidia_smi": "NVIDIA H100 80GB HBM3, 610.57.04, 81559",
+    "software": {
+      "compute_capability": "sm90",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "python": "3.12.13",
+      "torch": "2.11.0+cu130",
+      "torch_cuda": "13.0",
+      "triton": "3.6.0",
+      "vllm": "0.22.1"
+    }
+  },
+  "image_additions": [
+    "cuda-sanitizer-13-0 (apt, test tool only)"
+  ],
+  "pack": "residual-rmsnorm",
+  "pack_files": {
+    "evaluate.py": "sha256:96d4415f261714f52abd791aba53d2f8368e0aa0bbb6d833eb52e608247bb508",
+    "pack.json": "sha256:3d84f936575b79f19ee2569a9e1c9d198c3c58d21f023665994637f69967667a"
+  },
+  "qualification_boundary": "evaluator check with the pack's own reference kernel; no generated kernel, no serving, no end-to-end change",
+  "recorded_at": "2026-11-20T12:04:09Z",
+  "runner": "tools/modal-kernel-poc/kernel_pack_modal.py",
+  "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+  "sanitizer_self_test": {
+    "exit_code": 0,
+    "output_tail": "========= COMPUTE-SANITIZER\n8192.0\n========= ERROR SUMMARY: 0 errors",
+    "passed": true,
+    "seconds": 2.9
+  },
+  "schema_version": "infercrane.kernel-pack-gpu-check/v1",
+  "timing": "median of one call replayed from a CUDA graph after warm-up, for both the engine's kernel and the candidate",
+  "verdict": {
+    "evaluator_behaves": true,
+    "sanitizer": "passed"
+  }
+}

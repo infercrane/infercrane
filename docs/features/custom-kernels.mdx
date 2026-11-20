@@ -61,9 +61,11 @@ never wait for the kernel. In parallel, the kernel lane:
 2. **Checks correctness.** Against the engine's own kernel on a hidden suite: shape sweeps, edge-case
    and unusual shapes, value distributions that defeat shortcuts, determinism, and a memory and race
    sanitizer.
-3. **Measures.** A microbenchmark against the engine's own kernel, then your traffic replayed as
-   control, candidate, control on the same GPU, with the answer check. The kernel must be at least
-   ×1.01 faster on its own and reach a 2% end-to-end gain.
+3. **Measures.** A microbenchmark against the engine's own kernel, both replayed from a CUDA graph the
+   way the engine replays decode steps, so launch overhead counts for neither. A kernel that cannot be
+   captured in a graph fails here. Then your traffic is replayed as control, candidate, control on the
+   same GPU, with the answer check. The kernel must be at least ×1.01 faster on its own and reach a 2%
+   end-to-end gain.
 
 In the run, the kernel setup reads as provisioning while it builds and checks, and measuring while it
 is measured. Each kernel is pinned to the exact engine version and image it was measured with. A
@@ -122,15 +124,15 @@ planned with a kernel cannot be created or approved on a control plane that has 
 
 ## Evidence so far
 
-The mixture-of-experts pack on an NVIDIA H100, inside the pinned vLLM 0.22.1 image (Triton 3.6.0, with
+The two reviewed packs on an NVIDIA H100, inside the pinned vLLM 0.22.1 image (Triton 3.6.0, with
 `compute-sanitizer` added as a test tool):
 
 - **The hidden suite catches wrong kernels.** The pack's own correct kernel passed all six stages on both
   the visible and the hidden verification shapes, with the memory sanitizer reporting no errors. A
   kernel that ignores the router weights and one that swaps gate and up both failed at the first stage.
-- **The microbenchmark favored the kernel; serving did not.** At four tokens on Qwen3-30B-A3B's expert
-  shape (128 experts, hidden 2048, intermediate 768, top-8, BF16), the evaluator timed vLLM's
-  `fused_experts` at 234 µs and the pack's reference kernel at 171–172 µs, ×1.36.
+- **Timed call by call, the microbenchmark favored the kernel.** At four tokens on Qwen3-30B-A3B's
+  expert shape (128 experts, hidden 2048, intermediate 768, top-8, BF16), the first evaluator timed
+  vLLM's `fused_experts` at 234 µs and the pack's reference kernel at 171–172 µs, ×1.36.
   [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-pack-h100-2026-11-20T043718Z.json).
 - **End to end, the same kernel was correct but slower.** Qwen3-30B-A3B-Instruct-2507 in BF16 on one
   H100, 512 tokens in and 128 out, three runs per arm at 1, 4, and 16 concurrent requests, with the
@@ -147,11 +149,23 @@ The mixture-of-experts pack on an NVIDIA H100, inside the pinned vLLM 0.22.1 ima
   brought time to first token at one request back from 90 ms to 29 ms, but each decode step still took
   8.9 ms against 5.2 ms. The lane would mark this kernel not qualified.
   [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-e2e-h100-2026-11-20T115713Z.json).
-- **Why they disagree, most likely.** The evaluator timed each call on its own, launch by launch, while
-  vLLM replays decode steps from CUDA graphs. With 48 expert layers, 234 µs each would be 11.2 ms per
-  token, more than the 8.1 ms a whole decode step took on vLLM's Triton experts at four requests, so the
-  microbenchmark measured launch overhead rather than the GPU time serving pays. A kernel speedup counts
-  only when it is timed the way the engine runs it, and only the end-to-end change is a result.
+- **Replayed from CUDA graphs, the microbenchmark agrees with serving.** vLLM replays decode steps from
+  CUDA graphs, so it pays no launch overhead per call; the first evaluator counted it. With 48 expert
+  layers, 234 µs each would be 11.2 ms per token, more than the 8.1 ms a whole decode step took on
+  vLLM's Triton experts at four requests. The evaluator now replays both kernels from a CUDA graph.
+  Timed that way, vLLM's `fused_experts` took 129 µs, about 68% of what the H100's memory bandwidth
+  allows, and the pack's kernel 169–171 µs, about 51%: ×0.75–0.76, below the ×1.01 the lane requires. At
+  this shape on an H100, vLLM's Triton experts are not the weak kernel the published batch-1 H200
+  figures describe, and the plan's 50% condition would not plan a kernel.
+  [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-pack-graph-h100-2026-11-20T120436Z.json).
+- **The normalization pack, checked the same way.** Its reference kernel passed every stage on both
+  suites with the memory sanitizer clean, and its two wrong kernels failed (numerical stability and
+  determinism). Replayed from CUDA graphs at 128 rows of 1,024, it took 6.5–6.8 µs against vLLM's
+  `fused_add_rms_norm` at 6.5–6.6 µs, ×0.96–0.99: not faster.
+  [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/residual-rmsnorm-pack-graph-h100-2026-11-20T120409Z.json).
+
+A kernel speedup counts only when it is timed the way the engine runs it, and only the end-to-end change
+is a result.
 
 Two kernel screens of Qwen3.8 on an NVIDIA H200 (compute capability 9.0, SGLang source, Triton 3.7.1):
 

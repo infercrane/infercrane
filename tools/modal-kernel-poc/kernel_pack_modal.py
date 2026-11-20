@@ -1,12 +1,15 @@
-"""Budget-bounded Modal check of the mixture-of-experts experts pack.
+"""Budget-bounded Modal check of a reviewed kernel pack's evaluator.
 
-Runs the pack's hidden evaluator inside the pinned vLLM 0.22.1 image on one
-H100. The reference kernel must pass every stage; both wrong kernels must fail
-at smoke. It checks the evaluator and the timing against vLLM's own experts. It
-generates no kernel, loads no model, and serves no traffic.
+Runs one pack's hidden evaluator inside the pinned vLLM 0.22.1 image on one
+H100. The pack's reference kernel must pass every stage; its wrong kernels must
+fail at a correctness stage. It checks the evaluator and its timing against
+vLLM's own kernel, which the evaluator replays from CUDA graphs the way vLLM
+replays decode. It generates no kernel, loads no model, and serves no traffic.
 
-The hard cap is the function timeout: one H100 for at most 30 minutes, with no
-retries and one container.
+The function stops after 30 minutes, with no retries and one container. The
+local entrypoint cancels the call after 35 minutes of wall clock, because a
+container that fails while starting is retried without limit and never reaches
+the function timeout.
 """
 
 from __future__ import annotations
@@ -21,19 +24,32 @@ from pathlib import Path
 
 import modal
 
-APP_NAME = "infercrane-moe-pack-check"
+APP_NAME = "infercrane-kernel-pack-check"
 # The vLLM 0.22.1 CUDA runtime pinned in internal/support/matrix.go.
 VLLM_IMAGE = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
-PACK = Path(__file__).resolve().parents[1] / "kernel-lab" / "packs" / "moe-experts"
-REMOTE_PACK = "/opt/infercrane/pack"
-# Kernel, verification suite, and the stage it must fail at (None: must pass).
-CASES = (
-    ("correct", False, None),
-    ("correct", True, None),
-    ("wrong_router_weight", False, "smoke"),
-    ("wrong_gate_up_swapped", False, "smoke"),
-)
+# Local path, read only when the image is built. In the container this file
+# sits at /root, so the walk up must not index past the filesystem root.
+PACKS = Path(__file__).resolve().parent.parent / "kernel-lab" / "packs"
+REMOTE_PACKS = "/opt/infercrane/packs"
+CORRECTNESS = ("smoke", "shape_sweep", "numerical_stability", "determinism", "edge_cases")
+# Per pack: kernel, verification suite, and the stage it must fail at (None:
+# must pass; "correctness": any correctness stage before the sanitizer).
+CASES = {
+    "moe-experts": (
+        ("correct", False, None),
+        ("correct", True, None),
+        ("wrong_router_weight", False, "smoke"),
+        ("wrong_gate_up_swapped", False, "smoke"),
+    ),
+    "residual-rmsnorm": (
+        ("correct", False, None),
+        ("correct", True, None),
+        ("wrong_epsilon", False, "correctness"),
+        ("wrong_batch_dependent", False, "correctness"),
+    ),
+}
 TIMEOUT_SECONDS = 1800
+STARTUP_GRACE_SECONDS = 300
 EVALUATION_TIMEOUT_SECONDS = 600
 
 app = modal.App(APP_NAME)
@@ -44,7 +60,7 @@ image = (
     # The memory and race sanitizer is a test tool the serving image leaves
     # out. It is added on top of the pinned image and changes nothing vLLM loads.
     .apt_install("cuda-sanitizer-13-0")
-    .add_local_dir(str(PACK), REMOTE_PACK, ignore=["__pycache__", "*.pyc"])
+    .add_local_dir(str(PACKS), REMOTE_PACKS, ignore=["__pycache__", "*.pyc"])
 )
 
 
@@ -98,19 +114,18 @@ def _sanitizer_self_test() -> dict[str, object]:
     }
 
 
-def _evaluate(kernel: str, verification: bool, expected_failure: str | None) -> dict[str, object]:
-    source_path = Path(REMOTE_PACK) / "testdata" / f"{kernel}.py"
+def _evaluate(pack: Path, kernel: str, verification: bool, expected_failure: str | None) -> dict[str, object]:
+    source_path = pack / "testdata" / f"{kernel}.py"
     request = json.dumps({"source": source_path.read_text(encoding="utf-8"), "verification": verification}).encode()
     started = time.monotonic()
-    completed = _run(["python3", f"{REMOTE_PACK}/evaluate.py"], stdin=request, timeout=EVALUATION_TIMEOUT_SECONDS)
-    seconds = round(time.monotonic() - started, 1)
+    completed = _run(["python3", str(pack / "evaluate.py")], stdin=request, timeout=EVALUATION_TIMEOUT_SECONDS)
     entry: dict[str, object] = {
         "kernel": kernel,
         "kernel_sha256": _sha256(source_path),
         "verification_suite": verification,
         "expected_failed_stage": expected_failure,
         "exit_code": completed.returncode,
-        "seconds": seconds,
+        "seconds": round(time.monotonic() - started, 1),
     }
     try:
         result = json.loads(completed.stdout.decode().strip().splitlines()[-1])
@@ -122,27 +137,31 @@ def _evaluate(kernel: str, verification: bool, expected_failure: str | None) -> 
     failed = result.get("failed_stage")
     if expected_failure is None:
         entry["as_expected"] = failed in (None, "sanitizer") and all(passed for stage, passed in result["correctness"].items() if stage != "sanitizer")
+    elif expected_failure == "correctness":
+        entry["as_expected"] = failed in CORRECTNESS
     else:
         entry["as_expected"] = failed == expected_failure
     if result.get("candidate_median_us"):
-        entry["speedup_vs_vllm_fused_experts"] = round(result["baseline_median_us"] / result["candidate_median_us"], 4)
+        entry["speedup_vs_engine_kernel"] = round(result["baseline_median_us"] / result["candidate_median_us"], 4)
     return entry
 
 
 @app.function(image=image, gpu="H100!", cpu=4, memory=16384, timeout=TIMEOUT_SECONDS, retries=0, max_containers=1, scaledown_window=2)
-def check_pack() -> dict[str, object]:
+def check_pack(name: str) -> dict[str, object]:
     started = time.monotonic()
+    pack = Path(REMOTE_PACKS) / name
     environment = _environment()
     self_test = _sanitizer_self_test() if environment["compute_sanitizer"] else {"passed": False, "reason": "compute-sanitizer not found"}
-    evaluations = [_evaluate(kernel, verification, expected) for kernel, verification, expected in CASES]
+    evaluations = [_evaluate(pack, kernel, verification, expected) for kernel, verification, expected in CASES[name]]
     correct_runs = [entry for entry in evaluations if entry["expected_failed_stage"] is None]
     sanitizer_passed = all(entry.get("result", {}).get("correctness", {}).get("sanitizer") for entry in correct_runs)
     return {
         "schema_version": "infercrane.kernel-pack-gpu-check/v1",
         "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "evidence_class": "real-gpu-evaluator-check",
-        "pack": "moe-experts",
-        "pack_files": {name: _sha256(Path(REMOTE_PACK) / name) for name in ("pack.json", "evaluate.py")},
+        "pack": name,
+        "pack_files": {file: _sha256(pack / file) for file in ("pack.json", "evaluate.py")},
+        "timing": "median of one call replayed from a CUDA graph after warm-up, for both the engine's kernel and the candidate",
         "runtime_image": VLLM_IMAGE,
         "image_additions": ["cuda-sanitizer-13-0 (apt, test tool only)"],
         "hardware": {"gpu_request": "H100!", **environment},
@@ -159,8 +178,15 @@ def check_pack() -> dict[str, object]:
 
 
 @app.local_entrypoint()
-def main(out: str = "") -> None:
-    result = check_pack.remote()
+def main(pack: str = "moe-experts", out: str = "") -> None:
+    if pack not in CASES:
+        raise SystemExit(f"pack must be one of {', '.join(CASES)}")
+    call = check_pack.spawn(pack)
+    try:
+        result = call.get(timeout=TIMEOUT_SECONDS + STARTUP_GRACE_SECONDS)
+    except (TimeoutError, modal.exception.TimeoutError):
+        call.cancel(terminate_containers=True)
+        raise SystemExit(f"no result after {TIMEOUT_SECONDS + STARTUP_GRACE_SECONDS} s of wall clock; cancelled")
     text = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if out:
         Path(out).write_text(text, encoding="utf-8")

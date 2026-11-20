@@ -188,8 +188,28 @@ def load_baseline():
     return fused_experts
 
 
-def median_microseconds(triton, function):
-    return triton.testing.do_bench(function) * 1000
+GRAPH_WARMUP_CALLS = 3
+
+
+def median_microseconds(torch, triton, function):
+    """Median time of one call replayed from a CUDA graph.
+
+    vLLM replays decode steps from CUDA graphs, so serving pays no launch or
+    Python overhead per call. Timing calls one by one would count it, and favor
+    whichever side launches fewer kernels. Warm-up calls compile and autotune
+    before the capture. A call that cannot be captured raises and fails the
+    timing stage: the engine could not replay it either."""
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        for _ in range(GRAPH_WARMUP_CALLS):
+            function()
+    torch.cuda.current_stream().wait_stream(side)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        function()
+    torch.cuda.synchronize()
+    return triton.testing.do_bench(graph.replay) * 1000
 
 
 def minimum_bytes(tokens, hidden, intermediate, experts_used, element_bytes, top_k):
@@ -278,8 +298,8 @@ def main() -> int:
             stage = "timing"
             case = inputs(torch, TIMING, seed)
             baseline = load_baseline()
-            result["baseline_median_us"] = median_microseconds(triton, lambda: baseline(*case))
-            result["candidate_median_us"] = median_microseconds(triton, lambda: kernel(*case))
+            result["baseline_median_us"] = median_microseconds(torch, triton, lambda: baseline(*case))
+            result["candidate_median_us"] = median_microseconds(torch, triton, lambda: kernel(*case))
             tokens, _, hidden, intermediate, top_k = TIMING
             experts_used = int(torch.unique(case[4]).numel())
             result["roofline_utilization"] = roofline_utilization(

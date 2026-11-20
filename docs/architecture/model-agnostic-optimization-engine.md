@@ -286,7 +286,7 @@ reference parity
   → interpreter/simulator + memory safety
   → compile for exact SM
   → target-GPU randomized correctness
-  → CUDA-event microbenchmark + DRAM roofline fraction
+  → microbenchmark replayed from a CUDA graph, as the engine replays decode, + DRAM roofline fraction
   → runtime integration
   → paired AIPerf + quality + cost
 ```

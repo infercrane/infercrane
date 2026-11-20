@@ -145,13 +145,34 @@ def load_baseline(torch):
         raise StageFailure("baseline runtime kernel unavailable") from error
 
     def baseline(x, residual, weight):
-        ops.fused_add_rms_norm(x.clone(), residual.clone(), weight, EPSILON)
+        # In place, like the engine. The caller passes copies, so no copy is timed.
+        ops.fused_add_rms_norm(x, residual, weight, EPSILON)
 
     return baseline
 
 
-def median_microseconds(triton, function):
-    return triton.testing.do_bench(function) * 1000
+GRAPH_WARMUP_CALLS = 3
+
+
+def median_microseconds(torch, triton, function):
+    """Median time of one call replayed from a CUDA graph.
+
+    vLLM replays decode steps from CUDA graphs, so serving pays no launch or
+    Python overhead per call. Timing calls one by one would count it, and favor
+    whichever side launches fewer kernels. Warm-up calls compile and autotune
+    before the capture. A call that cannot be captured raises and fails the
+    timing stage: the engine could not replay it either."""
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        for _ in range(GRAPH_WARMUP_CALLS):
+            function()
+    torch.cuda.current_stream().wait_stream(side)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        function()
+    torch.cuda.synchronize()
+    return triton.testing.do_bench(graph.replay) * 1000
 
 
 def minimum_bytes(rows, hidden, element_bytes):
@@ -242,8 +263,9 @@ def main() -> int:
             rows, hidden = 128, 1024
             x, residual, weight = inputs(torch, rows, hidden, seed)
             baseline = load_baseline(torch)
-            result["baseline_median_us"] = median_microseconds(triton, lambda: baseline(x, residual, weight))
-            result["candidate_median_us"] = median_microseconds(triton, lambda: kernel(x, residual, weight, EPSILON))
+            baseline_x, baseline_residual = x.clone(), residual.clone()
+            result["baseline_median_us"] = median_microseconds(torch, triton, lambda: baseline(baseline_x, baseline_residual, weight))
+            result["candidate_median_us"] = median_microseconds(torch, triton, lambda: kernel(x, residual, weight, EPSILON))
             result["roofline_utilization"] = roofline_utilization(
                 minimum_bytes(rows, hidden, x.element_size()), result["candidate_median_us"], peak_dram_gbps(triton)
             )
