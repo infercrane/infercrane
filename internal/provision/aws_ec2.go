@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
+	"github.com/infercrane/infercrane/internal/secrets"
 )
 
 // AWSEC2 is a narrow BYOC adapter. It delegates AWS authentication and API
@@ -322,6 +323,20 @@ func (a AWSEC2) validate(spec ReplicaSpec) error {
 	}
 	if _, err := engineEnvironment(spec); err != nil {
 		return err
+	}
+	if inputs := modelInputs(spec); inputs != (ModelInputs{}) {
+		if spec.Workload.Empty() {
+			return fmt.Errorf("%w: a private model credential, object store weights, or LoRA adapters need the pinned runtime workload", ErrInvalidReplicaSpec)
+		}
+		if err := refuseModelInputs("aws-ec2", spec, ModelInputs{Credential: true, Objects: true, Adapters: true}, secrets.ResolverAWSSecretsManager); err != nil {
+			return err
+		}
+		if inputs.Objects && objectScheme(spec) != "s3" {
+			return fmt.Errorf("%w: AWS workers read S3 with their instance profile; GCS files need kubernetes", ErrInvalidReplicaSpec)
+		}
+		if err := singleObjectScheme(spec); err != nil {
+			return err
+		}
 	}
 	configuredGPUCount := a.GPUCount
 	if configuredGPUCount == 0 {
@@ -840,7 +855,10 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 	}
 	gpuIdentity := "infercrane_stage accelerator_check\nactual_gpu_count=$(nvidia-smi --list-gpus | wc -l | tr -d ' ')\n[ \"$actual_gpu_count\" -eq " + fmt.Sprint(gpuCount) + " ] || { echo 'allocated GPU count does not match immutable revision intent' >&2; exit 1; }\ninfercrane_stage accelerator_ready\n"
 	if !spec.Workload.Empty() {
-		args := append(append([]string(nil), spec.Workload.Command...), spec.RuntimeArgs...)
+		args := append(servedCommand(spec.Workload.Command, spec), spec.RuntimeArgs...)
+		if hubFetchNeeded(spec) {
+			args = wrapWithFetch(args, fetchScript(spec, false, true))
+		}
 		quoted := make([]string, len(args))
 		for i, arg := range args {
 			switch arg {
@@ -855,7 +873,8 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 		}
 		image := spec.Workload.Image
 		engineArgs := containerEngineEnvironment(spec)
-		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" " + engineArgs + "-p " + fmt.Sprintf("%d:%d", port, port) + " --entrypoint " + quoted[0] + " " + shellQuote(image) + " " + strings.Join(quoted[1:], " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+		modelBootstrap, modelContainerArgs := awsModelInputsBootstrap(spec)
+		return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(image, a.imageCachePolicy()) + artifactBootstrap + modelBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + modelContainerArgs + "-e INFERCRANE_WORKER_API_KEY=\"$worker_key\" -e VLLM_API_KEY=\"$worker_key\" " + engineArgs + "-p " + fmt.Sprintf("%d:%d", port, port) + " --entrypoint " + quoted[0] + " " + shellQuote(image) + " " + strings.Join(quoted[1:], " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
 	}
 	// The vLLM OpenAI image entrypoint is `vllm serve`. Since v0.22 the model
 	// is a positional argument; keep generated startup compatible with the
@@ -870,6 +889,29 @@ func (a AWSEC2) userData(spec ReplicaSpec, port int, artifactSnapshotID string) 
 		quoted[i] = shellQuote(arg)
 	}
 	return "#!/bin/sh\nset -eu\ninfercrane_stage() { printf 'infercrane_startup stage=%s at=%s\\n' \"$1\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >/dev/console; }\ninfercrane_stage identity_start\nworker_key=$(aws secretsmanager get-secret-value --region " + shellQuote(a.Region) + " --secret-id " + shellQuote(a.WorkerSecretARN) + " --query SecretString --output text)\ninfercrane_stage identity_ready\n" + gpuIdentity + cachedImageBootstrapWithPolicy(a.ImageDigest, a.imageCachePolicy()) + artifactBootstrap + "infercrane_stage runtime_start\ncontainer_id=$(docker run -d --restart=unless-stopped --gpus all " + artifactContainerArgs + "-e VLLM_API_KEY=\"$worker_key\" -p " + fmt.Sprintf("%d:%d", port, port) + " " + shellQuote(a.ImageDigest) + " " + strings.Join(quoted, " ") + ")\ninfercrane_stage runtime_container_started\ndocker logs --follow \"$container_id\" >/dev/console 2>&1 &\n"
+}
+
+// awsModelInputsBootstrap prepares a replica's model inputs on the instance
+// before the runtime starts. The instance profile reads the Hugging Face token
+// from its Secrets Manager ARN and S3 files from the customer's bucket; every
+// file's sha256 is checked. The token reaches the container through the
+// inherited environment, never the docker command line.
+func awsModelInputsBootstrap(spec ReplicaSpec) (string, string) {
+	inputs := modelInputs(spec)
+	var script, containerArgs strings.Builder
+	if credential := spec.ModelCredential; credential != nil {
+		region := strings.Split(credential.Reference, ":")[3]
+		script.WriteString("infercrane_stage model_credential_start\nHF_TOKEN=$(aws secretsmanager get-secret-value --region " + shellQuote(region) + " --secret-id " + shellQuote(credential.Reference) + " --query SecretString --output text)\nexport HF_TOKEN\ninfercrane_stage model_credential_ready\n")
+		containerArgs.WriteString("-e HF_TOKEN ")
+	}
+	if inputs.Objects || hubFetchNeeded(spec) {
+		script.WriteString("mkdir -p " + fetchRoot + "\n")
+		containerArgs.WriteString("-v " + fetchRoot + ":" + fetchRoot + " ")
+	}
+	if inputs.Objects {
+		script.WriteString("infercrane_stage model_files_start\n" + fetchScript(spec, true, false) + "infercrane_stage model_files_verified\n")
+	}
+	return script.String(), containerArgs.String()
 }
 
 func awsArtifactCacheBootstrap(snapshotID string) (string, string) {

@@ -104,6 +104,7 @@ type Store interface {
 	RevokePrincipalForTenant(context.Context, string, string) error
 	CreateTenant(context.Context, string, string) error
 	CreateSecretReference(context.Context, string, string, string, string) (domain.SecretReference, error)
+	CreateSealedSecretReference(context.Context, string, string, domain.SealedCredential, string) (domain.SecretReference, error)
 	SecretReferencesForTenant(context.Context, string) ([]domain.SecretReference, error)
 	DeleteSecretReferenceForTenant(context.Context, string, string) error
 	SetExternalTargetPolicyForTenant(context.Context, domain.ExternalTargetPolicy) (domain.ExternalTargetPolicy, error)
@@ -413,7 +414,10 @@ type API struct {
 	// connection. Empty keeps that process-wide inventory bootstrap-only, which
 	// is what a hosted multi-customer control plane needs.
 	OperatorComputeTenants []string
-	ComputeConnections     interface {
+	// SealedSecrets seals a workspace's own secret values with the tenant
+	// credential key. Without that key, sealed secrets are unavailable.
+	SealedSecrets      secrets.Sealed
+	ComputeConnections interface {
 		Create(context.Context, string, computeconnection.CreateRequest) (domain.ComputeConnection, error)
 		Get(context.Context, string, string) (domain.ComputeConnection, error)
 		Resolve(context.Context, string, string, string) (domain.ComputeConnection, string, error)
@@ -521,6 +525,9 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/models", a.auth(authz.Read, a.huggingFaceCatalogModels))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/search", a.auth(authz.Read, a.huggingFaceSearch))
 	mux.HandleFunc("GET /api/v1/catalog/hugging-face/check", a.auth(authz.Read, a.checkHuggingFaceModel))
+	mux.HandleFunc("GET /api/v1/catalog/hugging-face/adapter-check", a.auth(authz.Read, a.checkHuggingFaceAdapter))
+	mux.HandleFunc("GET /api/v1/model-imports", a.auth(authz.Read, a.modelImports))
+	mux.HandleFunc("POST /api/v1/model-imports", a.auth(authz.Deploy, a.createModelImport))
 	mux.HandleFunc("POST /api/v1/planning/intents", a.auth(authz.Read, a.planIntent))
 	mux.HandleFunc("GET /api/v1/model-api-catalog", a.auth(authz.Read, a.modelAPIModels))
 	mux.HandleFunc("GET /api/v1/model-api-catalog/{id}", a.auth(authz.Read, a.modelAPIModel))
@@ -1063,9 +1070,6 @@ func customerQualificationNote(qualification string) string {
 type optimizationProposalBody struct {
 	optimizer.Request
 	DiagnosisEndpoint string `json:"diagnosis_endpoint,omitempty"`
-	// ModelSecretReferenceID names the tenant's saved Hugging Face token so
-	// a gated model outside the reviewed catalog can be checked.
-	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty"`
 }
 
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
@@ -1124,7 +1128,21 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 		}
 		request.ProviderAdapter = connection.Adapter
 	}
-	if failure := a.checkUncatalogedProposal(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, &request, strings.TrimSpace(body.ModelSecretReferenceID)); failure != nil {
+	// The credential reference checks a gated model outside the reviewed
+	// catalog and reaches every candidate's worker; the token never enters
+	// the proposal.
+	request.ModelSecretReferenceID = strings.TrimSpace(request.ModelSecretReferenceID)
+	if request.ModelSecretReferenceID != "" {
+		if _, failure := a.workspaceSecretReference(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, request.ModelSecretReferenceID); failure != nil {
+			writeError(w, failure.Status, failure.Code, failure.Message)
+			return
+		}
+	}
+	if failure := a.validateModelImports(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, request.ModelIdentity, request.ModelRevision, request.ModelAdapters); failure != nil {
+		writeError(w, failure.Status, failure.Code, failure.Message)
+		return
+	}
+	if failure := a.checkUncatalogedProposal(r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID, &request, request.ModelSecretReferenceID); failure != nil {
 		writeError(w, failure.Status, failure.Code, failure.Message)
 		return
 	}
@@ -5456,6 +5474,10 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if failure := a.validateModelImports(r.Context(), principal.TenantID, request.Model, request.ModelRevision, request.ModelAdapters); failure != nil {
+		writeError(w, failure.Status, failure.Code, failure.Message)
+		return
+	}
 	if request.ModelSecretReferenceID != "" {
 		references, secretErr := a.Store.SecretReferencesForTenant(r.Context(), principal.TenantID)
 		if secretErr != nil {
@@ -6304,6 +6326,8 @@ func (a API) createSecretReference(w http.ResponseWriter, r *http.Request) {
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	var request struct {
 		Name, Resolver, Reference string
+		// Value is write-only: sealed at once and never returned or logged.
+		Value string
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -6315,10 +6339,30 @@ func (a API) createSecretReference(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON object")
 		return
 	}
+	request.Name = strings.TrimSpace(request.Name)
+	if !secretReferenceName.MatchString(request.Name) {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "name must be 1 to 128 letters, numbers, dots, underscores, or dashes, starting with a letter or number")
+		return
+	}
+	if request.Resolver == secrets.ResolverSealed {
+		a.createSealedSecret(w, r, actor, request.Name, request.Reference, request.Value)
+		return
+	}
+	if request.Value != "" {
+		writeError(w, http.StatusUnprocessableEntity, "validation_failed", "value is accepted only for a sealed secret; this resolver takes a reference")
+		return
+	}
 	// The control plane's environment holds the operator's keys. A workspace the
 	// resolver would refuse may not name it at all.
 	if checker, ok := a.Secrets.(interface{ AllowsTenant(string) bool }); ok && request.Resolver == "env" && !checker.AllowsTenant(actor.TenantID) {
 		writeError(w, http.StatusForbidden, "env_secret_reference_not_allowed", secrets.ErrTenantNotAllowed.Error())
+		return
+	}
+	// A kubernetes or aws-secrets-manager reference names a secret in the
+	// operator's own cluster namespace or AWS account. Only a workspace the
+	// operator lets deploy there may point a worker at one.
+	if secrets.WorkerHeld(request.Resolver) && !a.operatorComputeGranted(actor) {
+		writeError(w, http.StatusForbidden, "worker_secret_reference_not_allowed", "kubernetes and aws-secrets-manager references are for workspaces that deploy on the operator's own cluster or AWS account; save a sealed secret instead")
 		return
 	}
 	item, err := a.Store.CreateSecretReference(r.Context(), actor.TenantID, request.Name, request.Resolver, request.Reference)

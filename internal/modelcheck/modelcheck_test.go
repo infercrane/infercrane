@@ -188,7 +188,7 @@ func TestPublicModelIsSupportedAndSized(t *testing.T) {
 	if report.Reviewed || report.PerformanceClaims {
 		t.Fatal("an automatic check must not claim review or performance")
 	}
-	if names := checkNames(report); names != "architecture,weights,memory,license,access" {
+	if names := checkNames(report); names != "architecture,weights,config,tokenizer,memory,license,access" {
 		t.Fatalf("unexpected checks: %s", names)
 	}
 	// A longer context needs more memory and moves to a larger GPU.
@@ -272,7 +272,7 @@ func TestEmbeddingQuantizedAndLatentAttentionModels(t *testing.T) {
 	if awq.Verdict != Supported || *awq.Weights.Quantization != "awq" || *awq.Weights.StoredBytes != 4*6525288448+2*1090328064 {
 		t.Fatalf("unexpected quantized check: %+v", awq.Weights)
 	}
-	if names := checkNames(awq); names != "architecture,weights,quantization,memory,license,access" {
+	if names := checkNames(awq); names != "architecture,weights,quantization,config,tokenizer,memory,license,access" {
 		t.Fatalf("unexpected quantized checks: %s", names)
 	}
 	latent := check(t, resolver, Request{Repository: "deepseek-ai/DeepSeek-V2-Lite-Chat"}, testGPUs)
