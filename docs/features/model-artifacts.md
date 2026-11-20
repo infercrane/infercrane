@@ -143,6 +143,7 @@ rank rounded up to a rank vLLM accepts; SGLang 0.5.12 gets `--enable-lora --max-
 ## Optimization runs
 
 A proposal's `model_secret_reference_id` and `model_adapters` reach every candidate, so each setup
-serves the same private model or adapter; the token never enters the proposal. Imported weights are
+serves the same private model or adapter; the token never enters the proposal. Runs that Stay
+optimized proposes for an endpoint carry its running revision's credential and adapter the same way. Imported weights are
 pinned by their manifest digest as `model_revision`. Candidates that swap in another checkpoint are
 skipped when an adapter is served, because the adapter was trained on this one.
