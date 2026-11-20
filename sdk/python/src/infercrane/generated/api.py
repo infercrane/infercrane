@@ -587,6 +587,10 @@ class ControlAPI:
         request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/decisions"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def list_continual_optimization_suggestions(self, name: str) -> ObjectList:
+        request_path = f"/deployments/{quote(name, safe='')}/continual-optimization/suggestions"
+        return cast(ObjectList, self._transport.request("GET", request_path))
+
     def list_optimized_artifacts(self) -> ObjectList:
         request_path = "/optimized-artifacts"
         return cast(ObjectList, self._transport.request("GET", request_path))

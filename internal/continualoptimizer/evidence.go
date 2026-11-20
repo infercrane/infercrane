@@ -1,9 +1,12 @@
 package continualoptimizer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -97,17 +100,54 @@ func FromReplayTrace(trace domain.ReplayTrace) (Workload, error) {
 	}, nil
 }
 
-// FromMonitoring builds the serving half of an evaluation from the normalized
-// endpoint read model and externally reconciled economics. Availability and
-// contribution are required from a real observation window; zero explicitly
-// means unavailable and therefore cannot satisfy promotion policy.
-func FromMonitoring(snapshot domain.EndpointMonitoringSnapshot, availability, productiveUtilization, costPerMillionOutputUSD, contributionMargin float64) ServiceEvidence {
-	result := ServiceEvidence{
-		RequestCount: snapshot.Summary.Requests, ErrorRate: value(snapshot.Summary.ErrorRate), Availability: availability,
-		TTFTP95MS: value(snapshot.Summary.P95TTFTMS), ProductiveUtilization: productiveUtilization,
-		CostPerMillionOutputUSD: costPerMillionOutputUSD, ContributionMargin: contributionMargin,
-		OutputTokensPerSecond: value(snapshot.Summary.OutputTokensPerSecond),
+// WorkloadFromMonitoring builds customer-observed workload evidence from the
+// gateway's own content-free request records for one window. Token means
+// come from the requests that reported usage; peak concurrency and reuse
+// ratios are not in these records and stay unknown (zero).
+func WorkloadFromMonitoring(snapshot domain.EndpointMonitoringSnapshot) (Workload, error) {
+	summary := snapshot.Summary
+	if summary.Requests < 1 || snapshot.WindowStart.IsZero() || !snapshot.WindowEnd.After(snapshot.WindowStart) {
+		return Workload{}, errors.New("monitoring window has no requests")
 	}
+	identity, err := json.Marshal(map[string]any{
+		"schema": "infercrane.monitoring-workload/v1", "endpoint": snapshot.Endpoint,
+		"window_start": snapshot.WindowStart.UTC(), "window_end": snapshot.WindowEnd.UTC(),
+		"requests": summary.Requests, "streaming": summary.Streaming,
+		"input_tokens": summary.InputTokens, "input_token_samples": summary.InputTokenSamples,
+		"output_tokens": summary.OutputTokens, "output_token_samples": summary.OutputTokenSamples,
+	})
+	if err != nil {
+		return Workload{}, err
+	}
+	sum := sha256.Sum256(identity)
+	return Workload{
+		Source: SourceCustomerObserved, Digest: "sha256:" + hex.EncodeToString(sum[:]), RequestCount: summary.Requests,
+		WindowStart: snapshot.WindowStart.UTC(), WindowEnd: snapshot.WindowEnd.UTC(),
+		RequestsPerSecond: float64(summary.Requests) / snapshot.WindowEnd.Sub(snapshot.WindowStart).Seconds(),
+		InputTokensMean:   mean(summary.InputTokens, summary.InputTokenSamples), OutputTokensMean: mean(summary.OutputTokens, summary.OutputTokenSamples),
+		StreamingRequestRatio: float64(summary.Streaming) / float64(summary.Requests),
+	}, nil
+}
+
+// CostEvidence is the price side of a check: the sourced hourly price of one
+// replica of the running setup, and the average replicas that ran in the
+// window. Zero means unknown.
+type CostEvidence struct {
+	HourlyUSDPerReplica float64 `json:"hourly_usd_per_replica,omitempty"`
+	AverageReplicas     float64 `json:"average_replicas,omitempty"`
+	PriceSource         string  `json:"price_source,omitempty"`
+}
+
+// ServiceFromMonitoring builds the serving half of a check from the same
+// window. Availability and contribution margin are not in the control
+// plane's records, so they stay unknown. Cost per million output tokens is
+// set only when the price, the replicas, and the output tokens are all known.
+func ServiceFromMonitoring(snapshot domain.EndpointMonitoringSnapshot, cost CostEvidence) ServiceEvidence {
+	result := ServiceEvidence{
+		RequestCount: snapshot.Summary.Requests, ErrorRate: value(snapshot.Summary.ErrorRate),
+		TTFTP95MS: value(snapshot.Summary.P95TTFTMS), OutputTokensPerSecond: value(snapshot.Summary.OutputTokensPerSecond),
+	}
+	result.CostPerMillionOutputUSD = CostPerMillionOutput(snapshot, cost)
 	// Goodput and runtime-internal TPOT are available only when a qualified
 	// collector reports them. Missing values remain missing rather than being
 	// inferred from gateway latency.
@@ -125,6 +165,56 @@ func FromMonitoring(snapshot domain.EndpointMonitoringSnapshot, availability, pr
 		}
 	}
 	return result
+}
+
+// CostPerMillionOutput is what one million output tokens cost in the window:
+// the hourly price of the replicas that ran, over the output tokens served
+// per hour. Output tokens are the per-request mean of the requests that
+// reported usage, times every request. Zero means unknown.
+func CostPerMillionOutput(snapshot domain.EndpointMonitoringSnapshot, cost CostEvidence) float64 {
+	summary := snapshot.Summary
+	hours := snapshot.WindowEnd.Sub(snapshot.WindowStart).Hours()
+	if cost.HourlyUSDPerReplica <= 0 || cost.AverageReplicas <= 0 || hours <= 0 || summary.OutputTokenSamples < 1 || summary.OutputTokens < 1 || summary.Requests < 1 {
+		return 0
+	}
+	tokensPerHour := mean(summary.OutputTokens, summary.OutputTokenSamples) * float64(summary.Requests) / hours
+	result := cost.HourlyUSDPerReplica * cost.AverageReplicas / (tokensPerHour / 1e6)
+	if math.IsNaN(result) || math.IsInf(result, 0) || result <= 0 {
+		return 0
+	}
+	return result
+}
+
+// AverageReplicas is the time-weighted number of replicas alive in the
+// window, from replica creation and deletion times.
+func AverageReplicas(spans []domain.ReplicaSpan, start, end time.Time) float64 {
+	if !end.After(start) {
+		return 0
+	}
+	alive := 0.0
+	for _, span := range spans {
+		from, to := span.CreatedAt, end
+		if span.DeletedAt != nil {
+			to = *span.DeletedAt
+		}
+		if from.Before(start) {
+			from = start
+		}
+		if to.After(end) {
+			to = end
+		}
+		if to.After(from) {
+			alive += to.Sub(from).Seconds()
+		}
+	}
+	return alive / end.Sub(start).Seconds()
+}
+
+func mean(total int64, samples int) float64 {
+	if samples < 1 || total < 0 {
+		return 0
+	}
+	return float64(total) / float64(samples)
 }
 
 func repeatedRatio(values map[string]int, requests int) float64 {

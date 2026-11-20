@@ -42,11 +42,42 @@ func TestReplayAdapterRejectsContentOrCountMismatch(t *testing.T) {
 	}
 }
 
-func TestMonitoringAdapterDoesNotInventMissingMeasurements(t *testing.T) {
+func TestMonitoringAdaptersDoNotInventMissingMeasurements(t *testing.T) {
+	start := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
 	errorRate, ttft, output := .01, 100.0, 50.0
-	snapshot := domain.EndpointMonitoringSnapshot{Summary: domain.MonitoringSummary{Requests: 100, ErrorRate: &errorRate, P95TTFTMS: &ttft, OutputTokensPerSecond: &output}}
-	service := FromMonitoring(snapshot, .999, .5, 1.2, .3)
-	if service.RequestCount != 100 || service.TTFTP95MS != 100 || service.OutputTokensPerSecond != 50 || service.TPOTP95MS != 0 || service.QualifiedOutputTokensPerSecond != 0 {
+	snapshot := domain.EndpointMonitoringSnapshot{Endpoint: "chat", WindowStart: start, WindowEnd: start.Add(7 * 24 * time.Hour), Summary: domain.MonitoringSummary{
+		Requests: 1000, Streaming: 250, InputTokens: 400_000, InputTokenSamples: 800, OutputTokens: 160_000, OutputTokenSamples: 800,
+		ErrorRate: &errorRate, P95TTFTMS: &ttft, OutputTokensPerSecond: &output,
+	}}
+	workload, err := WorkloadFromMonitoring(snapshot)
+	if err != nil || workload.Source != SourceCustomerObserved || workload.InputTokensMean != 500 || workload.OutputTokensMean != 200 || workload.StreamingRequestRatio != .25 || workload.PeakConcurrency != 0 || !strings.HasPrefix(workload.Digest, "sha256:") {
+		t.Fatalf("workload=%+v err=%v", workload, err)
+	}
+	service := ServiceFromMonitoring(snapshot, CostEvidence{})
+	if service.RequestCount != 1000 || service.TTFTP95MS != 100 || service.OutputTokensPerSecond != 50 || service.TPOTP95MS != 0 || service.QualifiedOutputTokensPerSecond != 0 || service.Availability != 0 || service.ContributionMargin != nil || service.CostPerMillionOutputUSD != 0 {
 		t.Fatalf("service=%+v", service)
+	}
+	// 1000 requests x 200 output tokens over 168 hours, 2 replicas at $2/h.
+	service = ServiceFromMonitoring(snapshot, CostEvidence{HourlyUSDPerReplica: 2, AverageReplicas: 2})
+	want := 4 / (200_000.0 / 168 / 1e6)
+	if diff := service.CostPerMillionOutputUSD - want; diff > 1e-6 || diff < -1e-6 {
+		t.Fatalf("cost=%f want=%f", service.CostPerMillionOutputUSD, want)
+	}
+	if _, err = WorkloadFromMonitoring(domain.EndpointMonitoringSnapshot{WindowStart: start, WindowEnd: start.Add(time.Hour)}); err == nil {
+		t.Fatal("a window without requests is not workload evidence")
+	}
+}
+
+func TestAverageReplicasWeighsLifetimesInsideTheWindow(t *testing.T) {
+	start := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	end := start.Add(10 * time.Hour)
+	deleted := start.Add(5 * time.Hour)
+	spans := []domain.ReplicaSpan{
+		{ReplicaID: "a", CreatedAt: start.Add(-time.Hour)},                      // whole window
+		{ReplicaID: "b", CreatedAt: start.Add(-time.Hour), DeletedAt: &deleted}, // half
+		{ReplicaID: "c", CreatedAt: end.Add(time.Hour)},                         // after
+	}
+	if got := AverageReplicas(spans, start, end); got != 1.5 {
+		t.Fatalf("average=%f", got)
 	}
 }

@@ -47,21 +47,18 @@ func (s *Store) ContinualOptimizationPolicy(ctx context.Context, tenant, deploym
 
 func (s *Store) ContinualOptimizationState(ctx context.Context, tenant, deployment string) (domain.ContinualOptimizationState, error) {
 	var row domain.ContinualOptimizationState
-	var baseline, digest, latest sql.NullString
-	var last sql.NullTime
+	var baseline, digest, latest, checkError sql.NullString
+	var last, nextCheck, lastCheck sql.NullTime
 	var created, updated time.Time
-	err := s.QueryRowContext(ctx, `SELECT st.tenant_id,st.deployment_id,d.name,st.baseline_json::text,st.baseline_digest,st.last_experiment_at,st.latest_decision_id,st.generation,st.created_at,st.updated_at FROM continual_optimization_states st JOIN deployments d ON d.id=st.deployment_id AND d.tenant_id=st.tenant_id WHERE st.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &baseline, &digest, &last, &latest, &row.Generation, &created, &updated)
+	err := s.QueryRowContext(ctx, `SELECT st.tenant_id,st.deployment_id,d.name,st.baseline_json::text,st.baseline_digest,st.last_experiment_at,st.latest_decision_id,st.next_check_at,st.last_check_at,st.last_check_error,st.observed_json::text,st.generation,st.created_at,st.updated_at FROM continual_optimization_states st JOIN deployments d ON d.id=st.deployment_id AND d.tenant_id=st.tenant_id WHERE st.tenant_id=? AND d.name=? AND `+liveDeploymentD+``, tenant, deployment).Scan(&row.TenantID, &row.DeploymentID, &row.DeploymentName, &baseline, &digest, &last, &latest, &nextCheck, &lastCheck, &checkError, &row.ObservedJSON, &row.Generation, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
 	if err != nil {
 		return row, err
 	}
-	row.BaselineJSON, row.BaselineDigest, row.LatestDecisionID = baseline.String, digest.String, latest.String
-	if last.Valid {
-		value := last.Time.UTC()
-		row.LastExperimentAt = &value
-	}
+	row.BaselineJSON, row.BaselineDigest, row.LatestDecisionID, row.LastCheckError = baseline.String, digest.String, latest.String, checkError.String
+	row.LastExperimentAt, row.NextCheckAt, row.LastCheckAt = optionalTime(last), optionalTime(nextCheck), optionalTime(lastCheck)
 	row.CreatedAt, row.UpdatedAt = created.UTC(), updated.UTC()
 	return row, nil
 }
