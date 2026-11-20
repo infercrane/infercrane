@@ -11,7 +11,7 @@ deferred until the provider has an independent repository and release path.
 ## Build from source
 
 ```bash
-git clone --branch v1.0.0-rc.1 https://github.com/infercrane/infercrane.git
+git clone --branch v1.0.0-rc.3 https://github.com/infercrane/infercrane.git
 cd infercrane/integrations/terraform
 mkdir -p "$HOME/.local/share/infercrane/providers"
 go build -o "$HOME/.local/share/infercrane/providers/terraform-provider-infercrane"
@@ -48,7 +48,7 @@ terraform {
   required_providers {
     infercrane = {
       source  = "infercrane/infercrane"
-      version = "1.0.0-rc.1"
+      version = "1.0.0-rc.3"
     }
   }
 }
