@@ -19,12 +19,16 @@ func TestClassifyAttentionNeedsAKnownPhase(t *testing.T) {
 
 func TestClassifyNamesReviewedFamiliesOnly(t *testing.T) {
 	for name, want := range map[string]OperatorFamily{
-		"void vllm::fused_add_rms_norm_kernel<c10::BFloat16, 8>": ResidualRMSNorm,
-		"sm90_xmma_gemm_bf16bf16_bf16f32":                        QuantizedLinear,
-		"act_and_mul_kernel<silu_and_mul>":                       SwiGLU,
-		"reshape_and_cache_flash_kernel_kv_cache":                KVCache,
-		"fused_moe_kernel":                                       MoERouting,
-		"chunk_gated_delta_rule_fwd_kernel":                      LinearRecurrence,
+		"void vllm::fused_add_rms_norm_kernel<c10::BFloat16, 8>":                         ResidualRMSNorm,
+		"sm90_xmma_gemm_bf16bf16_bf16f32":                                                QuantizedLinear,
+		"act_and_mul_kernel<silu_and_mul>":                                               SwiGLU,
+		"reshape_and_cache_flash_kernel_kv_cache":                                        KVCache,
+		"fused_moe_kernel":                                                               MoEExperts,
+		"void vllm::moe::topkGatingSoftmax<8, 256, 4, 16, 32, int, float>(float const*)": MoERouting,
+		"void vllm::moe::moe_align_block_size_kernel<int>(int const*)":                   MoERouting,
+		"void deep_gemm::sm90_m_grouped_gemm_fp8_kernel":                                 MoEExperts,
+		"void deep_gemm::sm90_fp8_gemm_1d2d_impl<128u>":                                  QuantizedLinear,
+		"chunk_gated_delta_rule_fwd_kernel":                                              LinearRecurrence,
 	} {
 		if family, ok := ClassifyKernel(name, PhaseDecode); !ok || family != want {
 			t.Errorf("%s: family=%q ok=%v, want %q", name, family, ok, want)

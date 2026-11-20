@@ -41,7 +41,10 @@ const (
 	LinearRecurrence OperatorFamily = "linear-recurrence"
 	StateCommit      OperatorFamily = "state-commit"
 	MoERouting       OperatorFamily = "moe-routing"
-	Sampling         OperatorFamily = "sampling"
+	// MoEExperts is the routed experts' matrix multiplies, activation, and
+	// weighted reduce of a mixture-of-experts layer.
+	MoEExperts OperatorFamily = "moe-experts"
+	Sampling   OperatorFamily = "sampling"
 )
 
 type ModelIdentity struct {
@@ -159,6 +162,7 @@ var templates = map[string]map[OperatorFamily]template{
 		LinearRecurrence: {"fused-linear-recurrence-update", []string{"flashinfer", "triton", "cuda-cute"}},
 		StateCommit:      {"fused-recurrent-state-commit", []string{"triton", "cuda-cute"}},
 		MoERouting:       {"fused-router-topk", []string{"flashinfer", "cutlass", "triton"}},
+		MoEExperts:       {"fused-moe-experts", []string{"triton", "cutlass", "cuda-cute"}},
 		Sampling:         {"sorting-free-sampling", []string{"flashinfer", "triton"}},
 	},
 	"amd": {
@@ -171,6 +175,7 @@ var templates = map[string]map[OperatorFamily]template{
 		LinearRecurrence: {"fused-linear-recurrence-update", []string{"aiter", "triton-rocm", "hip"}},
 		StateCommit:      {"fused-recurrent-state-commit", []string{"aiter", "triton-rocm", "hip"}},
 		MoERouting:       {"fused-router-topk", []string{"aiter", "composable-kernel", "triton-rocm"}},
+		MoEExperts:       {"fused-moe-experts", []string{"aiter", "composable-kernel", "triton-rocm"}},
 		Sampling:         {"sorting-free-sampling", []string{"triton-rocm", "hip"}},
 	},
 	"google": {
@@ -183,6 +188,7 @@ var templates = map[string]map[OperatorFamily]template{
 		LinearRecurrence: {"fused-linear-recurrence-update", []string{"pallas", "xla-custom-call"}},
 		StateCommit:      {"fused-recurrent-state-commit", []string{"pallas", "xla-custom-call"}},
 		MoERouting:       {"fused-router-topk", []string{"pallas", "xla-custom-call"}},
+		MoEExperts:       {"fused-moe-experts", []string{"pallas", "xla-custom-call"}},
 		Sampling:         {"sorting-free-sampling", []string{"pallas", "xla-custom-call"}},
 	},
 	"aws": {
@@ -195,6 +201,7 @@ var templates = map[string]map[OperatorFamily]template{
 		LinearRecurrence: {"fused-linear-recurrence-update", []string{"nki", "neuron-compiler"}},
 		StateCommit:      {"fused-recurrent-state-commit", []string{"nki", "neuron-compiler"}},
 		MoERouting:       {"fused-router-topk", []string{"nki", "neuron-compiler"}},
+		MoEExperts:       {"fused-moe-experts", []string{"nki", "neuron-compiler"}},
 		Sampling:         {"sorting-free-sampling", []string{"nki", "neuron-compiler"}},
 	},
 }

@@ -14,7 +14,11 @@ var operatorMarkers = []markerSet{
 	{LinearRecurrence, []string{"deltanet", "delta_rule", "gdn", "linear_attn", "mamba"}},
 	{StateCommit, []string{"state_commit", "state_scatter", "scatter_state"}},
 	{ResidualRMSNorm, []string{"rmsnorm", "rms_norm", "layernorm", "norm_kernel"}},
-	{MoERouting, []string{"fused_moe", "moe_", "expert"}},
+	// Routing comes before the experts: vLLM's top-k, align, and sum kernels
+	// would otherwise read as the experts' matrix multiplies.
+	{MoERouting, []string{"topkgatingsoftmax", "topk_softmax", "moe_align", "grouped_topk", "moe_sum", "count_and_sort_expert", "moe_permute", "moe_unpermute"}},
+	// The experts come before plain matrix multiplies, whose markers they share.
+	{MoEExperts, []string{"fused_moe", "moe_mm", "grouped_gemm", "ck_moe", "fmoe", "moe_wna16"}},
 	{QuantizedLinear, []string{"gemm", "matmul", "cutlass", "cublas", "wgmma", "nvjet"}},
 	{SwiGLU, []string{"swiglu", "silu_and_mul"}},
 	// vLLM's cache writes (reshape_and_cache_flash_kernel, concat_and_cache_mla_kernel).

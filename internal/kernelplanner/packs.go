@@ -21,6 +21,7 @@ type ReviewedPack struct {
 // reviewedPacks mirrors each pack.json; a test keeps them in step.
 var reviewedPacks = []ReviewedPack{
 	{Family: ResidualRMSNorm, Operator: "norm", Vendor: "nvidia", Engine: "vllm", Versions: []string{"0.22.1"}},
+	{Family: MoEExperts, Operator: "moe-experts", Vendor: "nvidia", Engine: "vllm", Versions: []string{"0.22.1"}},
 }
 
 // ReviewedPacks lists the packs the lab can qualify today.

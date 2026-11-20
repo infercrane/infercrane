@@ -34,12 +34,16 @@ and names the condition. The rule is `gpu_trace.kernel_dominant_operator` in
 
 Reviewed packs today:
 
-| Operator | Kernel | Vendor | Engine |
-|---|---|---|---|
-| Normalization | fused residual-add + RMSNorm, Triton | NVIDIA | vLLM 0.22.1 |
+| Operator | Kernel | Vendor | Engine | Serving scope |
+|---|---|---|---|---|
+| Normalization | fused residual-add + RMSNorm, Triton | NVIDIA | vLLM 0.22.1 | vLLM's `fused_add_rms_norm` |
+| Mixture-of-experts experts | fused routed experts: gate and up, SiLU, down, weighted sum, Triton | NVIDIA | vLLM 0.22.1 | BF16 expert weights with SiLU and no expert map, bias, or LoRA, under `--moe-backend triton`; other calls keep vLLM's kernel |
 
-With one pack, a kernel is rarely planned. That is intended: matrix multiplies, attention, and
-mixture-of-experts kernels need their own reviewed packs first.
+Neither pack has been qualified on a GPU yet. The mixture-of-experts pack comes first because published
+measurements put routed experts at 35–46% of decode kernel time for DeepSeek-V3 on one node (H200 and
+MI300X) and the engine's own Triton experts at 10–20% of HBM bandwidth at batch 1 on an H200. In wide
+expert-parallel decode at large batches, communication and attention dominate instead, so a kernel is
+not planned there. Matrix multiplies and attention have no pack.
 
 ## What the kernel lane does
 

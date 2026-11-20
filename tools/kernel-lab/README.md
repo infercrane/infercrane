@@ -132,3 +132,32 @@ worker's `cudaProfilerStop` ends the session. Nothing in a campaign calls
 Add a pack for an operator only after writing its contract and hidden suite by
 hand. Do not let a model write either one. See
 [Generate a custom kernel](../../docs/features/optimization.mdx).
+
+## Mixture-of-experts experts pack
+
+`packs/moe-experts/` asks for `fused_moe_experts(hidden_states, w13, w2, topk_weights, topk_ids)`:
+for each token, the routed experts' gate and up projections, SiLU, down projection, and the weighted
+sum, in BF16 with FP32 accumulation. Its integration replaces vLLM 0.22.1's `TritonExperts.apply`
+for BF16 weights with SiLU activation and no expert map, bias, LoRA, clamp, or router weight on the
+input; every other call keeps vLLM's kernel. The candidate arm starts vLLM with
+`--moe-backend triton`, so the control arm keeps whatever backend vLLM picks by default and the
+kernel must beat it.
+
+The hidden suite sweeps decode-sized batches (1 to 129 tokens) and shapes no power-of-two tile covers,
+checks large, small, and sparse activations, every token routed to the same experts, the last expert
+index, zero router weights, determinism, and that a token's result does not depend on the batch. On
+a GPU it times the kernel against vLLM's own `fused_experts` at four tokens on Qwen3-30B-A3B's expert
+shape (128 experts, hidden 2048, intermediate 768, top-8) and reports DRAM roofline utilization.
+
+Check the evaluator and a kernel on a GPU inside the pinned image:
+
+```bash
+docker run --rm --gpus all -v "$PWD/tools/kernel-lab/packs/moe-experts:/pack:ro" \
+  --entrypoint sh vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7 -c \
+  'for k in correct wrong_router_weight wrong_gate_up_swapped; do
+     python3 -c "import json,sys; print(json.dumps({\"source\": open(sys.argv[1]).read()}))" /pack/testdata/$k.py |
+       python3 /pack/evaluate.py; done'
+```
+
+The correct kernel must pass every stage but the sanitizer when `compute-sanitizer` is absent from the
+image; both wrong kernels must fail at `smoke`.

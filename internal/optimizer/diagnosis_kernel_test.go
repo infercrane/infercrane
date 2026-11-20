@@ -66,12 +66,13 @@ func TestKernelSetupNeedsEveryGate(t *testing.T) {
 		gpu       string
 		diagnosis *Diagnosis
 	}{
-		"no lab on this control plane": {"H100", kernelDiagnosis(false, operatorTime(gpuprofile.OperatorNorm, .41, weak))},
-		"not dominant":                 {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .2, weak))},
-		"engine kernel not weak":       {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, strong))},
-		"efficiency not measured":      {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, nil))},
-		"no reviewed pack for experts": {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorMoEExperts, .9, weak))},
-		"no reviewed pack on AMD":      {"MI300X", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, weak))},
+		"no lab on this control plane":   {"H100", kernelDiagnosis(false, operatorTime(gpuprofile.OperatorNorm, .41, weak))},
+		"not dominant":                   {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .2, weak))},
+		"engine kernel not weak":         {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, strong))},
+		"efficiency not measured":        {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, nil))},
+		"no reviewed pack for attention": {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorAttention, .6, weak))},
+		"no reviewed MoE pack on AMD":    {"MI300X", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorMoEExperts, .9, weak))},
+		"no reviewed pack on AMD":        {"MI300X", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .41, weak))},
 		"another operator dominates": {"H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorNorm, .32, weak),
 			operatorTime(gpuprofile.OperatorAttention, .5, nil))},
 	} {
@@ -138,5 +139,21 @@ func TestKernelSetupNeedsRecordedTraffic(t *testing.T) {
 	}
 	if skipped := plannedTechnique(t, proposal, TechniqueCustomKernel).Skipped; !strings.Contains(skipped, "recorded traffic") {
 		t.Fatalf("skip reason = %q", skipped)
+	}
+}
+
+// The evidence-picked first pack: MoE expert matrix multiplies on vLLM 0.22.1
+// and NVIDIA, where the engine's own small-batch kernel is reported weakest.
+func TestKernelSetupForWeakMoEExperts(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), kernelRequest("H100", kernelDiagnosis(true, operatorTime(gpuprofile.OperatorMoEExperts, .46, floatPointer(.2)))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kernel := proposal.Candidates[len(proposal.Candidates)-1]
+	if kernel.KernelLane == nil || kernel.KernelLane.Operator != gpuprofile.OperatorMoEExperts || kernel.KernelLane.Family != "moe-experts" {
+		t.Fatalf("lane = %+v order=%v", kernel.KernelLane, reasonOrder(proposal))
+	}
+	if reason := plannedTechnique(t, proposal, TechniqueCustomKernel).Reason; !strings.Contains(reason, "Expert matrix multiplies took 46%") {
+		t.Fatalf("reason = %q", reason)
 	}
 }

@@ -33,7 +33,10 @@ func TestReviewedPackForNeedsTheExactEngineVersion(t *testing.T) {
 	if _, ok := ReviewedPackFor("norm", "nvidia", "vllm", "0.22.1"); !ok {
 		t.Fatal("the reviewed RMSNorm pack was not found")
 	}
-	for _, missing := range [][4]string{{"norm", "nvidia", "vllm", "0.23.0"}, {"norm", "amd", "vllm", "0.22.1"}, {"norm", "nvidia", "sglang", "0.5.12"}, {"moe-experts", "nvidia", "vllm", "0.22.1"}} {
+	if _, ok := ReviewedPackFor("moe-experts", "nvidia", "vllm", "0.22.1"); !ok {
+		t.Fatal("the reviewed MoE experts pack was not found")
+	}
+	for _, missing := range [][4]string{{"norm", "nvidia", "vllm", "0.23.0"}, {"norm", "amd", "vllm", "0.22.1"}, {"norm", "nvidia", "sglang", "0.5.12"}, {"moe-experts", "amd", "vllm", "0.22.1"}, {"attention", "nvidia", "vllm", "0.22.1"}} {
 		if pack, ok := ReviewedPackFor(missing[0], missing[1], missing[2], missing[3]); ok {
 			t.Fatalf("%v matched %+v", missing, pack)
 		}
