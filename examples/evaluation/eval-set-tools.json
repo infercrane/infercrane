@@ -1,0 +1,108 @@
+{
+  "schema": "infercrane.dev/quality-eval-set/v2",
+  "name": "support-agent",
+  "version": "1",
+  "max_tokens": 128,
+  "prompts": [
+    {
+      "id": "refund-window",
+      "system": "You are a support agent.",
+      "prompt": "How many days do customers have to request a refund? Answer in one sentence."
+    },
+    {
+      "id": "order-status",
+      "messages": [
+        {"role": "system", "content": "You are a support agent. Use the tools to look up orders."},
+        {"role": "user", "content": "Where is my order A-10442?"}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_order",
+            "description": "Look up an order by its ID.",
+            "parameters": {
+              "type": "object",
+              "properties": {"order_id": {"type": "string", "pattern": "^A-[0-9]{5}$"}},
+              "required": ["order_id"],
+              "additionalProperties": false
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "create_ticket",
+            "description": "Open a support ticket.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "subject": {"type": "string", "minLength": 1},
+                "priority": {"type": "string", "enum": ["low", "normal", "high"]}
+              },
+              "required": ["subject", "priority"],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    {
+      "id": "refund-request",
+      "messages": [
+        {"role": "system", "content": "You are a support agent. Use the tools to act on requests."},
+        {"role": "user", "content": "My blender arrived broken. Order A-20817. I want a refund."}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "issue_refund",
+            "description": "Refund an order.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "order_id": {"type": "string", "pattern": "^A-[0-9]{5}$"},
+                "reason": {"type": "string", "enum": ["damaged", "late", "wrong_item", "other"]}
+              },
+              "required": ["order_id", "reason"],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "required"
+    },
+    {
+      "id": "order-follow-up",
+      "messages": [
+        {"role": "system", "content": "You are a support agent. Use the tools to look up orders."},
+        {"role": "user", "content": "Where is my order A-10442?"},
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": "get_order", "arguments": "{\"order_id\":\"A-10442\"}"}}
+          ]
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "{\"status\":\"shipped\",\"carrier\":\"DHL\",\"eta\":\"2026-11-24\"}"},
+        {"role": "user", "content": "Can you tell me when it arrives?"}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_order",
+            "description": "Look up an order by its ID.",
+            "parameters": {
+              "type": "object",
+              "properties": {"order_id": {"type": "string", "pattern": "^A-[0-9]{5}$"}},
+              "required": ["order_id"],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

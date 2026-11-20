@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +93,10 @@ type Policy struct {
 	// and a person.
 	AutoRun              bool    `json:"auto_run,omitempty"`
 	MonthlyAutoRunCapUSD float64 `json:"monthly_auto_run_cap_usd,omitempty"`
+	// QualityEvalSet names an uploaded eval set (sha256:DIGEST) whose cases
+	// replace the built-in prompts in the answer check of every proposed run.
+	// Empty uses the built-in prompts.
+	QualityEvalSet string `json:"quality_eval_set,omitempty"`
 }
 
 // CheckInterval is the scheduled check period.
@@ -592,8 +597,13 @@ func ValidatePolicy(policy Policy) error {
 	if policy.AutoRun && policy.MonthlyAutoRunCapUSD <= 0 {
 		return errors.New("auto-run needs a monthly spend cap above zero")
 	}
+	if policy.QualityEvalSet != "" && !evalSetDigest.MatchString(policy.QualityEvalSet) {
+		return errors.New("quality eval set must be the sha256:<64 lowercase hex> digest of an uploaded eval set")
+	}
 	return nil
 }
+
+var evalSetDigest = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 func validateWorkload(workload Workload) error {
 	if workload.Source != SourcePublicPrior && workload.Source != SourceCustomerObserved {

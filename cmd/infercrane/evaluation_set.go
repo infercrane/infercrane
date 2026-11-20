@@ -24,7 +24,7 @@ type qualityEvalSetView struct {
 // check. An eval set is addressed by the SHA-256 digest of the file's exact
 // bytes, so the digest printed here is the one a run names.
 func evaluationSetCommand(ctx context.Context, args []string) error {
-	usage := errors.New("usage: infercrane evaluation set upload FILE | inspect DIGEST | delete DIGEST | digest FILE | default")
+	usage := errors.New("usage: infercrane evaluation set upload FILE | inspect DIGEST | delete DIGEST | digest FILE | default | stay-optimized DEPLOYMENT DIGEST|default")
 	if len(args) == 0 {
 		return usage
 	}
@@ -44,6 +44,12 @@ func evaluationSetCommand(ctx context.Context, args []string) error {
 		// Print the built-in suite so it can be copied and adapted.
 		_, err := os.Stdout.Write(qualitycheck.DefaultSuiteBytes())
 		return err
+	}
+	if action == "stay-optimized" {
+		if fs.NArg() != 2 {
+			return usage
+		}
+		return stayOptimizedEvalSet(ctx, fs.Arg(0), fs.Arg(1), *output)
 	}
 	if fs.NArg() != 1 {
 		return usage
@@ -106,6 +112,64 @@ func evaluationSetCommand(ctx context.Context, args []string) error {
 	default:
 		return usage
 	}
+}
+
+// stayOptimizedEvalSet sets the eval set that runs Stay optimized proposes
+// for a deployment ask in their answer check, or "default" for the built-in
+// prompts. It changes only that field of the saved policy.
+func stayOptimizedEvalSet(ctx context.Context, deployment, digest, output string) error {
+	if digest != "default" && !qualitycheck.ValidDigest(digest) {
+		return errors.New("name the eval set by its digest (sha256:...) as printed by: infercrane evaluation set upload FILE; or default for the built-in prompts")
+	}
+	cfg, err := config.LoadClient()
+	if err != nil {
+		return err
+	}
+	if digest != "default" {
+		// A run waits for a missing eval set, so catch a wrong digest now.
+		if err = controlJSON(ctx, cfg, http.MethodGet, "/api/v1/quality/eval-sets/"+url.PathEscape(digest), "", nil, nil); err != nil {
+			var controlErr *ControlError
+			if errors.As(err, &controlErr) && controlErr.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("eval set %s is not uploaded; upload it first: infercrane evaluation set upload FILE", digest)
+			}
+			return err
+		}
+	}
+	path := "/api/v1/deployments/" + url.PathEscape(deployment) + "/continual-optimization/policy"
+	var current struct {
+		Policy map[string]any `json:"policy"`
+	}
+	if err = controlJSON(ctx, cfg, http.MethodGet, path, "", nil, &current); err != nil {
+		var controlErr *ControlError
+		if errors.As(err, &controlErr) && controlErr.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("stay optimized is not set up for %s; turn it on from the endpoint page first", deployment)
+		}
+		return err
+	}
+	if len(current.Policy) == 0 {
+		return fmt.Errorf("the saved Stay optimized policy for %s could not be read; save it again from the endpoint page first", deployment)
+	}
+	if digest == "default" {
+		delete(current.Policy, "quality_eval_set")
+	} else {
+		current.Policy["quality_eval_set"] = digest
+	}
+	var saved struct {
+		Policy map[string]any `json:"policy"`
+	}
+	if err = controlJSON(ctx, cfg, http.MethodPut, path, "", current.Policy, &saved); err != nil {
+		return err
+	}
+	evalSet, _ := saved.Policy["quality_eval_set"].(string)
+	if output == "json" {
+		return printJSON(map[string]any{"deployment": deployment, "quality_eval_set": evalSet})
+	}
+	if evalSet == "" {
+		fmt.Printf("Stay optimized runs for %s check answers with the built-in prompts.\n", deployment)
+		return nil
+	}
+	fmt.Printf("Stay optimized runs for %s check answers with eval set %s.\n", deployment, evalSet)
+	return nil
 }
 
 func readEvalSet(path string) (qualitycheck.EvalSet, error) {

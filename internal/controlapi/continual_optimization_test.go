@@ -92,6 +92,24 @@ func TestContinualOptimizationPolicyRoundTripsWithoutRetiredCanaryFields(t *test
 	}
 }
 
+func TestContinualOptimizationPolicyNamesAnEvalSet(t *testing.T) {
+	store := &continualPolicyStore{fakeStore: &fakeStore{}, policyJSON: legacyContinualPolicy}
+	handler := (API{Store: store, APIKey: "secret"}).Handler()
+	const path = "/api/v1/deployments/chat/continual-optimization/policy"
+	policy := continualoptimizer.DefaultPolicy()
+	policy.QualityEvalSet = "sha256:" + strings.Repeat("c", 64)
+	body, _ := json.Marshal(policy)
+	response := continualRequest(t, handler, http.MethodPut, path, body)
+	if response.Code != http.StatusOK || store.saved == nil || store.saved.QualityEvalSet != policy.QualityEvalSet || !strings.Contains(response.Body.String(), `"quality_eval_set":"`+policy.QualityEvalSet+`"`) {
+		t.Fatalf("status=%d saved=%+v body=%s", response.Code, store.saved, response.Body.String())
+	}
+	policy.QualityEvalSet = "support-v3"
+	body, _ = json.Marshal(policy)
+	if response = continualRequest(t, handler, http.MethodPut, path, body); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "eval set") {
+		t.Fatalf("a name instead of a digest: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestContinualOptimizationChecksALegacyPolicyWithoutCanaryDecisions(t *testing.T) {
 	store := newStayOptimizedFake(t, continualoptimizer.Policy{})
 	store.policyJSON = legacyContinualPolicy

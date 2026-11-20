@@ -777,9 +777,11 @@ decision without you signing anything:
    uploaded and named with `--eval-set`.
 3. **Answers are scored, then discarded.** Each answer is scored by how closely it matches the
    reference's answer to the same prompt (token overlap, ignoring case, punctuation, and reasoning
-   blocks). A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10%
-   is `BLOCK`, which rejects the candidate with `quality_gate_rejected`. These are the same
-   PASS/WATCH/BLOCK rules Release Guard applies.
+   blocks). A case of your eval set that declares function tools is scored on its tool calls instead.
+   A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10% is `BLOCK`,
+   which rejects the candidate with `quality_gate_rejected`. These are the same PASS/WATCH/BLOCK
+   rules Release Guard applies. A candidate that breaks a tool call the reference made correctly is
+   `BLOCK` whatever its score ([Tool calls](/features/semantic-quality#tool-calls)).
 4. **The result is signed evidence.** It is stored as quality evidence signed with the control plane's
    own key and labelled `source: infercrane`, separate from evidence you sign (`source: customer`).
    The reference gets its own row with score 1: its answers are the reference.
@@ -790,9 +792,9 @@ answers on the same prompts.
 
 The check never passes on missing evidence. When no serving reference exists, for example because
 the control failed to start, the candidate ends `inconclusive` with `quality_reference_unavailable`.
-When the reference gives no answer text to a prompt within the token limit, for example a reasoning
-model cut off mid-reasoning, the candidate ends `inconclusive` with `quality_reference_unanswered`:
-two answers with no text are not a match.
+When the reference gives no answer text and makes no tool call to a prompt within the token limit,
+for example a reasoning model cut off mid-reasoning, the candidate ends `inconclusive` with
+`quality_reference_unanswered`: two answers with no text are not a match.
 When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
 every candidate wait for your own signed evaluation instead, create the campaign with
 `--quality-check customer_evidence`. Each candidate's `quality` object in the campaign API, the run
@@ -802,7 +804,8 @@ covers the evidence format, eval sets, and the signing key.
 
 Agreement with the control is not task accuracy: it shows the candidate answers like your current
 setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
-your prompts, or attach your own evaluator's signed results.
+your own cases, including conversations and tool calls, or attach your own evaluator's signed
+results.
 
 A **migration** run (`--migrate-from ENDPOINT/BINDING`) replaces a closed API instead of improving an
 owned setup. Its baseline is the closed API: candidates are measured in turns with the run's control
@@ -1093,6 +1096,10 @@ creates a run proposal. Each proposal records:
   for their winner, or `unknown` when there are none. The run measures its own;
 - **run cost:** the spend cap that covers every setup for one hour at today's sourced prices
   (approval splits the cap evenly across setups), or `unknown` when a setup has no current price.
+
+The run's answer check asks the eval set the policy names in `quality_eval_set`, or the built-in
+prompts when it names none (`infercrane evaluation set stay-optimized DEPLOYMENT sha256:DIGEST`; see
+[Use your own test set](/features/semantic-quality#use-your-own-test-set)).
 
 The run's approval-needed [notification](#get-told-when-a-run-needs-you) carries the reason and the
 estimated cost in its `proposal` field and summary. Dismissing a proposal cancels the run; its setups

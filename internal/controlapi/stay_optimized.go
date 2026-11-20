@@ -468,6 +468,8 @@ func (a API) planStayOptimized(ctx context.Context, tenant string, evidence stay
 		// Every candidate serves what the endpoint serves: the same private
 		// model credential and LoRA adapter.
 		ModelSecretReferenceID: spec.ModelSecretReferenceID, ModelAdapters: spec.ModelAdapters,
+		// The run's answer check asks the policy's eval set, if it names one.
+		QualityEvalSet: policy.QualityEvalSet,
 	}
 	if trace, found := a.workloadForRun(ctx, tenant, evidence); found {
 		request.WorkloadSource, request.WorkloadFingerprint = optimizer.WorkloadSourceCustomerObserved, "sha256:"+strings.TrimPrefix(trace.ShapeDigest, "sha256:")

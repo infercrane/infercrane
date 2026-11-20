@@ -84,13 +84,13 @@ type keyedCompleter struct {
 	fail     string
 }
 
-func (c *keyedCompleter) Complete(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, prompt qualitycheck.Prompt) (string, error) {
+func (c *keyedCompleter) Complete(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, prompt qualitycheck.Prompt) (qualitycheck.Answer, error) {
 	c.calls++
 	c.keys[target.SubjectID], c.dialects[target.SubjectID] = target.APIKey, target.Dialect
 	if c.fail == target.SubjectID {
-		return "", errors.New("429 rate limited")
+		return qualitycheck.Answer{}, errors.New("429 rate limited")
 	}
-	return c.answers[target.SubjectID](prompt), nil
+	return qualitycheck.Answer{Content: c.answers[target.SubjectID](prompt)}, nil
 }
 
 type migrationCampaign struct {
@@ -106,7 +106,7 @@ func gradedEvalSet(t *testing.T, prompts int) (qualitycheck.EvalSet, domain.Qual
 	for i := range prompts {
 		rows = append(rows, map[string]any{"id": fmt.Sprintf("p%02d", i), "prompt": fmt.Sprintf("Say %d", i), "expected": []string{fmt.Sprint(i)}})
 	}
-	body, _ := json.Marshal(map[string]any{"schema": qualitycheck.EvalSetSchema, "name": "support-graded", "version": "1", "grading": qualitycheck.GradingExactMatch, "prompts": rows})
+	body, _ := json.Marshal(map[string]any{"schema": qualitycheck.EvalSetSchemaV1, "name": "support-graded", "version": "1", "grading": qualitycheck.GradingExactMatch, "prompts": rows})
 	set, err := qualitycheck.DecodeEvalSet(body)
 	if err != nil {
 		t.Fatal(err)
