@@ -46,6 +46,9 @@ POD_SILENCE_SECONDS = 120
 START_MARGIN_SECONDS = 120
 STOP_GRACE_SECONDS = 45
 LIVE = ("requested", "starting", "ready", "stopping")
+# A container on a host whose NVIDIA driver differs from the run's pinned driver stops
+# before loading the model; the lease is started again on another host this many times.
+MAX_DRIVER_RETRIES = 3
 
 
 def rate_per_second(dry: bool) -> float:
@@ -55,8 +58,11 @@ def rate_per_second(dry: bool) -> float:
 
 
 class Broker:
-    def __init__(self, token: str, budget: float, max_gpus: int, max_starts: int, ledger: Path, dry: bool) -> None:
+    def __init__(self, token: str, budget: float, max_gpus: int, max_starts: int, ledger: Path, dry: bool, driver: str | None = None) -> None:
         self.token, self.budget, self.max_gpus, self.max_starts = token, budget, max_gpus, max_starts
+        # Every setup of a run must serve on the same NVIDIA driver; set from --driver or
+        # from the first GPU host that reports one (the baseline, which runs alone first).
+        self.required_driver = driver
         self.ledger_path, self.dry = ledger, dry
         self.rate = rate_per_second(dry)
         self.leases: dict[str, dict] = {}
@@ -77,7 +83,8 @@ class Broker:
         if lease.get("container_started_at"):
             start = max(start, float(lease["container_started_at"]) - START_MARGIN_SECONDS)
         end = lease.get("ended_at") or now
-        return max(0.0, end - start)
+        # Containers this lease already discarded on a mismatched host stay billed.
+        return float(lease.get("prior_seconds", 0.0)) + max(0.0, end - start)
 
     def spend(self, now: float | None = None) -> float:
         now = now or time.time()
@@ -109,8 +116,9 @@ class Broker:
                      "requested_at": now, "last_heartbeat": now, "api_key": secrets.token_urlsafe(24), "dry": self.dry}
             self.leases[lease_id] = lease
         deadline = now + (self.budget - spent) / self.rate  # this lease alone could not pass the cap after this
+        lease["deadline"] = deadline
         with self.modal_lock:
-            modal_gpu.leases.put(f"ctl:{lease_id}", {"expires_at": now + modal_gpu.STARTUP_SECONDS, "deadline": deadline})
+            modal_gpu.leases.put(f"ctl:{lease_id}", self.control(now, deadline))
             function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
             self.calls[lease_id] = function.spawn(lease_id, list(args), lease["api_key"], model)
         with self.lock:
@@ -118,6 +126,35 @@ class Broker:
         log(f"lease {lease_id} for pod {pod}: {' '.join(args)}")
         self.save()
         return 201, self.public(lease) | {"api_key": lease["api_key"]}
+
+    def control(self, now: float, deadline: float) -> dict:
+        control = {"expires_at": now + modal_gpu.STARTUP_SECONDS, "deadline": deadline}
+        if self.required_driver:
+            control["required_driver"] = self.required_driver
+        return control
+
+    def respawn(self, lease: dict, why: str) -> bool:
+        """Starts a lease again after its host refused it. False when it may not: out of
+        retries, or the budget cannot cover another start."""
+        now = time.time()
+        with self.lock:
+            retries = int(lease.get("driver_retries", 0))
+            if retries >= MAX_DRIVER_RETRIES or self.exhausted or self.spend(now) + 10 * 60 * self.rate > self.budget:
+                return False
+            lease["prior_seconds"] = self.lease_seconds(lease, now)
+            for key in ("container_started_at", "ready_at", "url", "error", "reason", "log_tail", "startup_seconds", "stopped_at"):
+                lease.pop(key, None)
+            lease["requested_at"], lease["last_heartbeat"], lease["driver_retries"] = now, now, retries + 1
+            lease.setdefault("refused_hosts", []).append(why)
+        with self.modal_lock:
+            modal_gpu.leases.put(f"st:{lease['lease_id']}", {"state": "requested"})
+            modal_gpu.leases.put(f"ctl:{lease['lease_id']}", self.control(now, float(lease.get("deadline", now + modal_gpu.GPU_TIMEOUT_SECONDS))))
+            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
+            self.calls[lease["lease_id"]] = function.spawn(lease["lease_id"], list(lease["args"]), lease["api_key"], lease["model"])
+        with self.lock:
+            lease["state"], lease["call_id"] = "starting", self.calls[lease["lease_id"]].object_id
+        log(f"lease {lease['lease_id']}: {why}; starting again on another host ({retries + 1} of {MAX_DRIVER_RETRIES})")
+        return True
 
     def refresh(self, lease: dict) -> dict:
         if lease["state"] not in LIVE:
@@ -128,10 +165,17 @@ class Broker:
             remote = modal_gpu.leases.get(f"st:{lease['lease_id']}", {}) or {}
         with self.lock:
             lease["refreshed_at"] = time.time()
-            for key in ("url", "error", "gpu", "vllm_version", "startup_seconds", "container_started_at", "ready_at", "stopped_at", "reason", "runtime_image", "server_env", "log_tail"):
+            for key in ("url", "error", "gpu", "gpu_facts", "vllm_version", "startup_seconds", "container_started_at", "ready_at", "stopped_at", "reason", "runtime_image", "server_env", "log_tail"):
                 if key in remote:
                     lease[key] = remote[key]
             state = remote.get("state")
+            driver = (remote.get("gpu_facts") or {}).get("driver")
+            if self.required_driver is None and not self.dry and driver and driver != "unknown" and state != "failed":
+                self.required_driver = driver
+                log(f"every setup of this run must serve on NVIDIA driver {driver} (pinned by lease {lease['lease_id']})")
+        if state == "failed" and remote.get("reason") == "driver_mismatch" and self.respawn(lease, str(remote.get("error", "driver mismatch"))):
+            return lease
+        with self.lock:
             if state == "ready" and lease["state"] == "starting":
                 lease["state"] = "ready"
                 log(f"lease {lease['lease_id']} ready after {remote.get('startup_seconds')} s on {remote.get('gpu', 'unknown GPU')}")
@@ -215,6 +259,10 @@ class Broker:
                     # a wrong guess here must cost accounting accuracy, never the cap.
                     finished = not ("timeout" in type(error).__name__.lower() or isinstance(error, TimeoutError))
                 if finished:
+                    lease["refreshed_at"] = 0  # read the container's final state before calling it failed
+                    self.refresh(lease)
+                    if lease["state"] in LIVE and self.calls.get(lease["lease_id"]) is not call:
+                        continue  # started again on another host
                     with self.lock:
                         lease["state"], lease["ended_at"] = ("failed" if lease["state"] != "stopping" else "stopped"), time.time()
                     self.refresh(lease)
@@ -326,11 +374,12 @@ def main() -> int:
     parser.add_argument("--listen", default="127.0.0.1:18095")
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--dry", action="store_true", help="CPU stand-in servers, no GPU")
+    parser.add_argument("--driver", help="NVIDIA driver every setup must serve on (default: the first GPU host's)")
     args = parser.parse_args()
     token = json.loads(Path(args.token_file).read_text())["api_key"]
     if args.max_gpus > modal_gpu.MAX_GPUS:
         raise SystemExit(f"--max-gpus may not exceed {modal_gpu.MAX_GPUS}")
-    broker = Broker(token, args.budget_usd, args.max_gpus, args.max_starts, Path(args.ledger), args.dry)
+    broker = Broker(token, args.budget_usd, args.max_gpus, args.max_starts, Path(args.ledger), args.dry, args.driver)
     host, port = args.listen.rsplit(":", 1)
     server = ThreadingHTTPServer((host, int(port)), handler(broker))
     kind = "dry run (CPU stand-in)" if args.dry else "H100"
