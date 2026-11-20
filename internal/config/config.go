@@ -205,7 +205,7 @@ func loadClientContext(contextName string, requireCredential bool) (Config, erro
 	if apiKey == "" {
 		source = ""
 		if requireCredential {
-			return Config{}, fmt.Errorf("not signed in; run infercrane login, or set INFERCRANE_API_KEY")
+			return Config{}, ErrNotSignedIn
 		}
 	}
 	clientCert, clientKey := env("INFERCRANE_CLIENT_TLS_CERT_FILE", ""), env("INFERCRANE_CLIENT_TLS_KEY_FILE", "")
@@ -214,6 +214,10 @@ func loadClientContext(contextName string, requireCredential bool) (Config, erro
 	}
 	return Config{ControlURL: controlURL, APIKey: apiKey, ConsoleURL: consoleURL, ClientContextName: contextName, CredentialSource: source, ClientTLSCertFile: clientCert, ClientTLSKeyFile: clientKey, ClientTLSCAFile: env("INFERCRANE_CLIENT_TLS_CA_FILE", "")}, nil
 }
+
+// ErrNotSignedIn is returned when a command needs a credential and the CLI
+// has none for the selected context.
+var ErrNotSignedIn = errors.New("not signed in; run infercrane login, or set INFERCRANE_API_KEY")
 
 func InitializeClient(controlURL, apiKey string) (string, error) {
 	return InitializeClientContext("default", controlURL, apiKey, true)

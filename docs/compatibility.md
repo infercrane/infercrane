@@ -89,7 +89,8 @@ fields should pass through unless InferCrane must interpret them. Removing or ch
 field requires a deprecation period after `1.0`.
 
 Endpoint admission applies uniformly across qualified protocols. Buffered requests to managed
-capacity may use a bounded retry budget; streaming and external paid routes are never replayed.
+capacity may use a bounded retry budget, and on a `primary-fallback` endpoint move to the next
+binding before any response byte; streaming and external paid routes are never replayed.
 Durable async execution supports Chat Completions, Responses, Embeddings, Completions and bounded
 chat batch only when the selected runtime declares the corresponding protocol capability. Async
 does not make an unsupported runtime protocol compatible.

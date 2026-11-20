@@ -64,13 +64,26 @@ These are what a [migration Proof](./migration.mdx) prices and replays.
 
 - Unknown aliases return an OpenAI-compatible 404.
 - Upstream connection failures return 503; timeouts return 504.
+- A buffered request on a `primary-fallback` endpoint whose binding gave no response byte
+  (connection failure, `502`, `503` or `504`) moves to the next published binding it has not
+  tried, at most twice. `routes.Directory.AcquireFallbackForTenant` picks and pins that binding
+  from the in-memory snapshot. Each further binding gets one attempt; only the first spends the
+  admission retry budget. Streams, cancelled or timed-out requests, and paid external bindings
+  never move. The request record names the binding that answered and sets `fallback_reason`
+  (`upstream_connection_failed` or `upstream_<status>`). See
+  [endpoints](./endpoints.mdx#when-the-primary-fails-mid-request).
+- Weighted endpoints use smooth weighted round-robin (`routes.Directory.selectLocked`), so short
+  windows see the configured share.
 - Client cancellation and upstream disconnects are recorded distinctly.
 - The last published route remains usable during control-plane failure.
 
 ## Tests
 
 `internal/gateway/gateway_test.go` and `internal/routes/routes_test.go` cover authentication,
-alias rewriting, proxying, ordering, and removal. `TestServeChatAs*` and
+alias rewriting, proxying, ordering, and removal. `internal/gateway/failover_test.go` covers
+failover: which failures move, the retry budget, the two-binding bound, paid external bindings,
+pinning, and the recorded reason. `TestWeightedEndpointInterleavesLargeWeights` checks that every
+window of a weighted endpoint gets its share. `TestServeChatAs*` and
 `internal/controlapi/playground_test.go` cover the dashboard entry: tenant isolation, endpoint
 restrictions, quota, recording, and that the caller's credential stays out of the runtime request.
 `internal/gateway/stream_usage_test.go` covers the usage request on closed-API streams, removing the
