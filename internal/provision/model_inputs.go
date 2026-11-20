@@ -302,7 +302,7 @@ func servedCommand(command []string, spec ReplicaSpec) []string {
 // manifest digest already pinned the files), and the server keeps answering to
 // the requested model name.
 func localModelCommand(command []string) []string {
-	out := make([]string, 0, len(command)+2)
+	out := make([]string, 0, len(command))
 	replacedPath, named := false, false
 	for index := 0; index < len(command); index++ {
 		arg := command[index]

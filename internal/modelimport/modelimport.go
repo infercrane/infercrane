@@ -387,6 +387,17 @@ var (
 	hubCommit     = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
+// AdapterSource is huggingface, s3, or gs for an adapter's repository.
+func AdapterSource(adapter domain.ModelAdapter) string {
+	switch {
+	case strings.HasPrefix(adapter.Repository, "s3://"):
+		return "s3"
+	case strings.HasPrefix(adapter.Repository, "gs://"):
+		return "gs"
+	}
+	return "huggingface"
+}
+
 // IsObjectModel reports whether a deployment model names an object store
 // location instead of a Hugging Face repository.
 func IsObjectModel(model string) bool {
@@ -434,7 +445,7 @@ func ValidateDeployment(model, revision, runtime, computeMode string, adapters [
 		if adapter.Rank < 0 || adapter.Rank > 512 {
 			return fmt.Errorf("adapter %q rank must be between 1 and 512", adapter.Name)
 		}
-		switch adapter.Source() {
+		switch AdapterSource(adapter) {
 		case "huggingface":
 			if !hubRepository.MatchString(adapter.Repository) || !hubCommit.MatchString(adapter.Revision) {
 				return fmt.Errorf("adapter %q needs a Hugging Face OWNER/NAME and its 40-character commit as revision", adapter.Name)

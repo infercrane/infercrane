@@ -109,17 +109,6 @@ type ModelAdapter struct {
 	Rank       int    `json:"rank,omitempty" yaml:"rank,omitempty"`
 }
 
-// Source is huggingface, s3, or gs.
-func (a ModelAdapter) Source() string {
-	switch {
-	case len(a.Repository) > 5 && a.Repository[:5] == "s3://":
-		return "s3"
-	case len(a.Repository) > 5 && a.Repository[:5] == "gs://":
-		return "gs"
-	}
-	return "huggingface"
-}
-
 // ModelImport is model weights or a LoRA adapter in a customer's own S3 or GCS
 // bucket, registered by its file manifest. InferCrane never reads the bucket:
 // workers download the listed files with their own identity and check each

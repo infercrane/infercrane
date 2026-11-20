@@ -110,7 +110,7 @@ func (r *CloudRequest) attachModelInputs(ctx context.Context, store CloudStore, 
 		inputs.objects = objectSource(item)
 	}
 	for _, adapter := range r.ModelAdapters {
-		resolved := provision.Adapter{Name: adapter.Name, Source: adapter.Source(), Revision: adapter.Revision, Rank: adapter.Rank}
+		resolved := provision.Adapter{Name: adapter.Name, Source: modelimport.AdapterSource(adapter), Revision: adapter.Revision, Rank: adapter.Rank}
 		if resolved.Source == "huggingface" {
 			resolved.Repository = adapter.Repository
 		} else {

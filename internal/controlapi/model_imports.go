@@ -189,7 +189,7 @@ func (a API) validateModelImports(ctx context.Context, tenant, model, revision s
 		wanted = append(wanted, pinned{model, revision, modelimport.KindWeights})
 	}
 	for _, adapter := range adapters {
-		if adapter.Source() != "huggingface" {
+		if modelimport.AdapterSource(adapter) != "huggingface" {
 			wanted = append(wanted, pinned{adapter.Repository, adapter.Revision, modelimport.KindAdapter})
 		}
 	}
