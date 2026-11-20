@@ -25,7 +25,7 @@ const (
 	// MeasurementMethod identifies how campaign benchmark evidence was
 	// produced. It is part of the workload identity, so evidence from an older
 	// single-run method can never be ranked against it.
-	MeasurementMethod = "campaign-interleaved-control-v2"
+	MeasurementMethod = "campaign-interleaved-control-v3"
 	// measurementRunsPerArm is the number of candidate runs, each bracketed
 	// by control runs. Four paired rounds find a 10% gain about 99% of the
 	// time at 2% run-to-run noise, against about 79% for the three unpaired
@@ -168,6 +168,9 @@ type MeasuredEvidence struct {
 	// run of every segment.
 	Segments      []MeasurementSegment      `json:"segments,omitempty"`
 	Interruptions []MeasurementInterruption `json:"interruptions,omitempty"`
+	// Confirmation is the second window on fresh servers, measured when the
+	// first ended with a gain on the objective (see confirmation.go).
+	Confirmation *ConfirmationEvidence `json:"confirmation,omitempty"`
 }
 
 type measurement struct {

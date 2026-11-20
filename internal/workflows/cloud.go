@@ -45,20 +45,28 @@ const (
 // RemoveLostReplicaRequest names one replica of one deployment. The handler
 // decides from the provider and the runtime whether the machine is lost; the
 // caller's belief that it is lost is never enough to delete it.
+//
+// Retire is the exception: the replica is removed although it still serves,
+// so its exact revision can be provisioned again on a fresh machine. An
+// optimization run sets it to measure a gain again on fresh servers, and only
+// for servers the run itself provisioned, never a live endpoint's.
 type RemoveLostReplicaRequest struct {
 	TenantID     string `json:"tenant_id"`
 	Name         string `json:"name"`
 	DeploymentID string `json:"deployment_id,omitempty"`
 	ReplicaID    string `json:"replica_id"`
 	Actor        string `json:"actor,omitempty"`
+	Retire       bool   `json:"retire,omitempty"`
 }
 
 // RemoveLostReplicaResult says what the handler found. Lost is false when the
-// replica still serves; it was left untouched.
+// replica still serves; it was left untouched. Retired is true when a
+// retirement removed it.
 type RemoveLostReplicaResult struct {
 	ReplicaID  string `json:"replica_id"`
 	RevisionID string `json:"revision_id"`
 	Lost       bool   `json:"lost"`
+	Retired    bool   `json:"retired,omitempty"`
 }
 
 // lostReplicaStore releases a removed machine's target so its replacement
@@ -1415,8 +1423,11 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 	if replica.ID == "" {
 		return "", operations.Permanent("replica_missing", errors.New("replica does not belong to the deployment"))
 	}
-	result := func(lost bool) string {
-		return mustJSON(RemoveLostReplicaResult{ReplicaID: replica.ID, RevisionID: replica.RevisionID, Lost: lost})
+	result := func(removed bool) string {
+		if request.Retire {
+			return mustJSON(RemoveLostReplicaResult{ReplicaID: replica.ID, RevisionID: replica.RevisionID, Retired: removed})
+		}
+		return mustJSON(RemoveLostReplicaResult{ReplicaID: replica.ID, RevisionID: replica.RevisionID, Lost: removed})
 	}
 	if replica.LifecycleState == "deleted" {
 		return result(true), nil
@@ -1473,7 +1484,7 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 	}
 	// A replica already marked failed is being removed; finish the removal
 	// even if its provider reports it again.
-	if replica.LifecycleState != "failed" {
+	if replica.LifecycleState != "failed" && !request.Retire {
 		if observation.Exists && observation.State == "starting" {
 			_ = checkpoint(ctx, store, operation, "replica.recover", "waiting", observation, 40, "Provider is restarting the machine in place")
 			return "", operations.Retryable("replica_restarting", errors.New("provider is restarting the replica in place"))
@@ -1489,7 +1500,12 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 				return "", operations.Retryable("replica_runtime_unconfirmed", errors.New("the runtime did not answer; a single failed check does not prove the machine is lost"))
 			}
 		}
+	}
+	if replica.LifecycleState != "failed" {
 		details := observation.Details
+		if request.Retire {
+			details = "retired so its revision is measured again on a fresh machine"
+		}
 		if details == "" {
 			details = replica.ProviderDetails
 		}
@@ -1516,7 +1532,11 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 	if err = store.MarkReplicaDeleted(ctx, replica.ID); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return "", classify("replica_delete_persist_failed", err)
 	}
-	_ = checkpoint(ctx, store, operation, "replica.recover", "succeeded", map[string]string{"replica_id": replica.ID}, 95, "Lost machine removed")
+	message := "Lost machine removed"
+	if request.Retire {
+		message = "Machine retired for a measurement on a fresh one"
+	}
+	_ = checkpoint(ctx, store, operation, "replica.recover", "succeeded", map[string]string{"replica_id": replica.ID}, 95, message)
 	return result(true), nil
 }
 
