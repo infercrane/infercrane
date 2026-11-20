@@ -63,13 +63,21 @@ func (s *Store) SetReleaseGuardPolicy(ctx context.Context, tenant, deploymentNam
 	return s.ReleaseGuardPolicy(ctx, tenant, deploymentName)
 }
 
+// requestOutputSpeedSQL is the median successful request's output tokens
+// per second of request time. Release Guard compares revisions that serve
+// very different shares of traffic, such as a 5% canary beside the active
+// revision, so it compares how fast each served a request, never how many
+// tokens each served in the window: that would measure demand, and a canary
+// would always look 95% slower.
+const requestOutputSpeedSQL = `percentile_cont(0.5) WITHIN GROUP (ORDER BY output_tokens*1000.0/latency_ms) FILTER (WHERE output_tokens>0 AND latency_ms>0 AND error_type IS NULL AND status_code<400)`
+
 func (s *Store) RevisionMetrics(ctx context.Context, revisionID string, window time.Duration) (domain.RevisionMetrics, error) {
 	if window <= 0 {
 		return domain.RevisionMetrics{}, errors.New("metrics window must be positive")
 	}
 	var metrics domain.RevisionMetrics
 	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),CASE WHEN COUNT(output_tokens)>0 THEN SUM(output_tokens)::double precision/? ELSE NULL END FROM request_records WHERE revision_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, window.Seconds(), revisionID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE revision_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, revisionID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
 	if err != nil {
 		return metrics, err
 	}
@@ -99,7 +107,7 @@ func (s *Store) RevisionMetricsSince(ctx context.Context, revisionID string, sin
 	}
 	var metrics domain.RevisionMetrics
 	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),CASE WHEN COUNT(output_tokens)>0 THEN SUM(output_tokens)::double precision/? ELSE NULL END FROM request_records WHERE revision_id=? AND started_at>=?`, duration.Seconds(), revisionID, since.Format(time.RFC3339Nano)).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE revision_id=? AND started_at>=?`, revisionID, since.Format(time.RFC3339Nano)).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
 	if err != nil {
 		return metrics, err
 	}
