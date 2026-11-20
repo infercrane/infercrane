@@ -842,7 +842,7 @@ func TestReportLabelsALatencyObjectiveRankedOnRequestLatency(t *testing.T) {
 	if winner := report.Candidates[1]; winner.Role != "winner" || winner.VersusBaseline == nil || winner.VersusBaseline.Metric != lab.MetricLatencyP95 {
 		t.Fatalf("winner = %+v", winner)
 	}
-	text := Text(report)
+	text := Text(Document{Report: report})
 	for _, want := range []string{"goal: interactive, ranked on p95 request latency · run campaign-1", "on p95 request latency"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("report lacks %q:\n%s", want, text)
@@ -854,8 +854,8 @@ func TestReportLabelsALatencyObjectiveRankedOnRequestLatency(t *testing.T) {
 	if report.ObjectiveMetric != lab.MetricTTFTP95 || report.ObjectiveNote != "" || report.Noise.ObjectiveMetric != lab.MetricTTFTP95 {
 		t.Fatalf("streaming objective metric=%q note=%q noise=%+v", report.ObjectiveMetric, report.ObjectiveNote, report.Noise)
 	}
-	if !strings.Contains(Text(report), "goal: interactive · run campaign-1") {
-		t.Fatalf("a usual metric needs no label:\n%s", Text(report))
+	if !strings.Contains(Text(Document{Report: report}), "goal: interactive · run campaign-1") {
+		t.Fatalf("a usual metric needs no label:\n%s", Text(Document{Report: report}))
 	}
 }
 
@@ -875,7 +875,7 @@ func TestReportKeepsTheMetricAnEarlierRankingCompared(t *testing.T) {
 	if report.ObjectiveMetric != lab.MetricTTFTP95 || report.ObjectiveNote != "" || report.Noise.ObjectiveMetric != lab.MetricTTFTP95 {
 		t.Fatalf("objective metric=%q note=%q noise=%+v", report.ObjectiveMetric, report.ObjectiveNote, report.Noise)
 	}
-	if strings.Contains(Text(report), "ranked on p95 request latency") {
-		t.Fatalf("an earlier ranking was relabelled:\n%s", Text(report))
+	if strings.Contains(Text(Document{Report: report}), "ranked on p95 request latency") {
+		t.Fatalf("an earlier ranking was relabelled:\n%s", Text(Document{Report: report}))
 	}
 }
