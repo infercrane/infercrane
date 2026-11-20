@@ -141,6 +141,38 @@ func TestRouterConnectionFailureRetriesWithinBudgetLikeAConnectionFailure(t *tes
 	}
 }
 
+// The case that found the leak: the owned primary of a primary-fallback plan
+// was scaled to 0 before routing marked it unroutable, so its router answered
+// with its own 500.
+func TestRouterConnectionFailureFailsOverToTheFallback(t *testing.T) {
+	routerFailure := func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusInternalServerError, Header: http.Header{"Content-Type": {"text/plain; charset=utf-8"}}, Body: io.NopCloser(strings.NewReader(routerConnectionFailure))}, nil
+	}
+	upstream := newUpstreams(map[string]func(*http.Request) (*http.Response, error){
+		"owned":  routerFailure,
+		"closed": answerOK(`{"model":"closed-model","choices":[{"message":{"content":"served by fallback"}}]}`),
+	})
+	directory := routes.New()
+	publishPlan(directory, "primary-fallback", endpointRoute("owned", "owned", "qwen3"), endpointRoute("closed", "closed", "closed-model"))
+	records := &allRecords{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: upstream.client(), Recorder: records}).Handler()
+	response := invokeCoder(handler, `{"model":"coder","messages":[]}`)
+	if record := records.only(t); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "served by fallback") || record.BindingID != "closed" || record.FallbackReason != "upstream_connection_failed" {
+		t.Fatalf("response=%d %s record=%#v", response.Code, response.Body.String(), record)
+	}
+
+	upstream.mu.Lock()
+	upstream.answer["closed"] = routerFailure
+	upstream.mu.Unlock()
+	records = &allRecords{}
+	handler = (&Gateway{Routes: directory, APIKey: "secret", Client: upstream.client(), Recorder: records}).Handler()
+	response = invokeCoder(handler, `{"model":"coder","messages":[]}`)
+	assertGatewayError(t, response, http.StatusServiceUnavailable, "Inference upstream is unavailable", "Request failed", "infercrane-system")
+	if record := records.only(t); record.ErrorType != "upstream_unavailable" {
+		t.Fatalf("record=%#v", record)
+	}
+}
+
 func TestModelServerErrorsStillReachCaller(t *testing.T) {
 	for name, upstream := range map[string]struct {
 		contentType, body string

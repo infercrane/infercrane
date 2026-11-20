@@ -64,6 +64,16 @@ These are what a [migration Proof](./migration.mdx) prices and replays.
 
 - Unknown aliases return an OpenAI-compatible 404.
 - Upstream connection failures return 503; timeouts return 504.
+- A buffered request on a `primary-fallback` endpoint whose binding gave no response byte
+  (connection failure, `502`, `503` or `504`) moves to the next published binding it has not
+  tried, at most twice. `routes.Directory.AcquireFallbackForTenant` picks and pins that binding
+  from the in-memory snapshot. Each further binding gets one attempt; only the first spends the
+  admission retry budget. Streams, cancelled or timed-out requests, and paid external bindings
+  never move. The request record names the binding that answered and sets `fallback_reason`
+  (`upstream_connection_failed` or `upstream_<status>`). See
+  [endpoints](./endpoints.mdx#when-the-primary-fails-mid-request).
+- Weighted endpoints use smooth weighted round-robin (`routes.Directory.selectLocked`), so short
+  windows see the configured share.
 - Client cancellation and upstream disconnects are recorded distinctly.
 - The last published route remains usable during control-plane failure.
 - The caller never gets error text that a model server did not write. A model server answers an
@@ -71,15 +81,19 @@ These are what a [migration Proof](./migration.mdx) prices and replays.
   written in between and can name internal hosts. One example is the instance-local vLLM Router's
   `500 Request failed: error sending request for url (http://<service>.<namespace>.svc:8080/...)`
   when its worker is unreachable. The gateway treats such an answer as an upstream connection
-  failure: it may retry within the retry budget, then returns its own 503 `upstream_unavailable`
-  error. The upstream URL, status, the first 512 bytes of that body, and any connection error are
+  failure: it may retry within the retry budget, a `primary-fallback` endpoint moves the request
+  to its next binding (`fallback_reason` `upstream_connection_failed`), and when nothing answers
+  the caller gets the gateway's own 503 `upstream_unavailable` error. The upstream URL, status, the first 512 bytes of that body, and any connection error are
   logged as `inference upstream failed` with the request ID and attempt. A model server's JSON
   error still reaches the caller with its status. `internal/gateway/upstream_test.go` covers this.
 
 ## Tests
 
 `internal/gateway/gateway_test.go` and `internal/routes/routes_test.go` cover authentication,
-alias rewriting, proxying, ordering, and removal. `TestServeChatAs*` and
+alias rewriting, proxying, ordering, and removal. `internal/gateway/failover_test.go` covers
+failover: which failures move, the retry budget, the two-binding bound, paid external bindings,
+pinning, and the recorded reason. `TestWeightedEndpointInterleavesLargeWeights` checks that every
+window of a weighted endpoint gets its share. `TestServeChatAs*` and
 `internal/controlapi/playground_test.go` cover the dashboard entry: tenant isolation, endpoint
 restrictions, quota, recording, and that the caller's credential stays out of the runtime request.
 `internal/gateway/stream_usage_test.go` covers the usage request on closed-API streams, removing the

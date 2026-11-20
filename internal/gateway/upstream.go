@@ -42,7 +42,8 @@ func (g *Gateway) upstreamClient() *http.Client {
 // not the caller's to read, and it means no model server answered. So the
 // transport returns it as a transport error, which proxyInference already
 // handles like its own connection failure: it may retry within the endpoint's
-// retry budget and then answers 503 upstream_unavailable with its own message.
+// retry budget, fail over to a primary-fallback endpoint's next binding, and
+// otherwise answers 503 upstream_unavailable with its own message.
 // 502, 503 and 504 are left alone; proxyInference never forwards their bodies.
 type upstreamTransport struct {
 	next   http.RoundTripper
