@@ -18,6 +18,8 @@ func workload(source string, requests int) Workload {
 	}
 }
 
+func margin(value float64) *float64 { return &value }
+
 func hypothesis(id, layer string, gain, cost float64) Hypothesis {
 	return Hypothesis{ID: id, Fingerprint: strings.Repeat(id, 64/len(id)), Layer: layer, Description: id, ExpectedEndpointGain: gain, Confidence: .8, Risk: .1, EstimatedCostUSD: cost}
 }
@@ -38,7 +40,7 @@ func TestCustomerReplayTriggersBoundedNovelExperiment(t *testing.T) {
 	input := Input{
 		Now: testNow, Policy: policy, Baseline: &baseline,
 		Current:       workload(SourceCustomerObserved, 1200),
-		ActiveService: ServiceEvidence{RequestCount: 1200, Availability: .9999, ErrorRate: .001, ContributionMargin: .30},
+		ActiveService: ServiceEvidence{RequestCount: 1200, Availability: .9999, ErrorRate: .001, ContributionMargin: margin(.30)},
 		Hypotheses: []Hypothesis{
 			hypothesis("a", "chunked-prefill", .12, 30),
 			hypothesis("b", "kernel", .02, 10),

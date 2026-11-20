@@ -167,15 +167,35 @@ Every evaluation joins four independent inputs:
 3. cost per productive token, contribution margin, and productive utilization;
 4. durable experiment memory, including failures and superseded candidates.
 
-An exact failed fingerprint is suppressed for the configured rejection-memory
-window. Kernel hypotheses are ineligible without measured profiler evidence.
-The loop uses a hard candidate count, spend ceiling, cooldown, and active-
-campaign limit so noisy traffic cannot create an experiment storm. It may
-create experiment intent automatically under standing policy. It never judges
-or promotes a canary: promotion is a human-approved Release Guard rollout, and
-Release Guard alone compares the canary with the active revision and can roll
-it back automatically. Once a recipe is promoted, the loop sees it as the
-active service on its next evaluation.
+An exact failed, rejected, or dismissed fingerprint is suppressed for the
+configured rejection-memory window. Kernel hypotheses are ineligible without
+measured profiler evidence. The loop uses a hard candidate count, spend
+ceiling, cooldown, and active-campaign limit so noisy traffic cannot create an
+experiment storm.
+
+The loop acts on named triggers: a scheduled check (weekly by default), an
+engine release InferCrane pins that the endpoint does not run, a new model
+revision, a 10% move in the setup's sourced price, workload drift, and a
+measured limit breach. Evidence the control plane does not have (availability,
+contribution margin) is listed as unknown on the decision and never triggers a
+run. `StayOptimized` in `internal/controlapi` runs the checks in the
+background on every control-plane instance; a lease on each endpoint's check
+state keeps one check per endpoint at a time, and nothing runs on the
+inference path. A check reads the gateway's content-free request records, the
+running revision, provider prices, and the pinned engine catalog, then asks the
+same planner a person's Optimize uses.
+
+`start_experiment` creates an ordinary optimization campaign in
+`awaiting_approval` whose `origin` records the triggers, reason, expected
+change (measured history or unknown), and estimated cost. It waits for a
+person's approval and spend cap. The policy's opt-in auto-run approves it only
+when its cost is known and fits the endpoint's monthly cap. The loop never
+judges or promotes a canary: promotion is a human-approved Release Guard
+rollout, and Release Guard alone compares the canary with the active revision
+and can roll it back automatically. Once a recipe is promoted, the loop sees
+it as the active service on its next check. When the engine changes, custom
+kernels pinned to another release are switched off or marked for
+re-qualification in `endpoint_custom_kernels`.
 
 The commercial objective is therefore not raw throughput:
 
@@ -193,10 +213,11 @@ qualified performance + lower productive-token cost + availability
 
 `internal/store/migrations/070_continual_optimization.sql` persists reviewed
 policy, customer baseline, exact normalized inputs, immutable decisions, and
-the last experiment boundary. The authenticated deployment API exposes policy,
-evaluation, and decision history. Evaluation records a decision only; paid GPU
-mutation continues through the existing approved optimization-campaign
-workflow.
+the last experiment boundary; `088_stay_optimized_checks.sql` adds the check
+lease and schedule, what the last check saw, a campaign's `origin`, and custom
+kernel engine pins. The authenticated deployment API exposes policy, Check now,
+decision history, and proposed runs. Paid GPU mutation continues through the
+approved optimization-campaign workflow.
 
 ## Capacity loop for marketplace traffic
 

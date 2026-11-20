@@ -738,6 +738,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  listContinualOptimizationSuggestions(name: string): Promise<ObjectList> {
+    const requestPath = `/deployments/${encodeURIComponent(name)}/continual-optimization/suggestions`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
   listOptimizedArtifacts(): Promise<ObjectList> {
     const requestPath = '/optimized-artifacts';
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;

@@ -1029,6 +1029,93 @@ for any provider it runs on. RunPod, which runs InferCrane-managed test servers,
 spot pods. Every measurement's cost evidence, and every result in dollars per million tokens, uses
 the price the setup would be served at.
 
+## Stay optimized
+
+Stay optimized watches a running endpoint and proposes a run when something changes that could make
+another setup better. It never deploys and, unless you turn on auto-run, never spends: every
+proposal is an ordinary [run](#create-a-durable-run) that waits for your approval and spend cap, and
+rolling out its winner still goes through Release Guard and a person.
+
+Turn it on per endpoint with the **Stay optimized** switch on the endpoint page, or set
+`enabled` in the deployment's policy (`PUT /api/v1/deployments/{name}/continual-optimization/policy`).
+
+### What starts a check
+
+| Trigger | When it fires |
+|---|---|
+| Weekly check | Every `check_interval_seconds` (one week when unset; one hour to 30 days). |
+| Engine release | InferCrane pins a newer engine release for the endpoint's engine and GPU platform than the revision runs. The running release comes from the revision's engine version, else its image; with neither recorded, nothing fires. |
+| Model revision | The model's repository on Hugging Face has a newer commit than the one the endpoint pins. Read at most once a day, for public models, only when the control plane has Hugging Face metadata access. |
+| Price change | The sourced hourly price of one replica of the running setup moved by 10% or more since the last check. |
+| Traffic shift | The week's traffic shape (request rate, token counts, streaming share) drifted past the policy's `drift_threshold` from the shape the last proposal was planned for. |
+| Broken limit | At the weekly check or Check now: a measured error rate above `maximum_error_rate`. |
+| Check now | A person presses **Check now** (`POST …/continual-optimization/evaluate`). |
+
+The control plane looks at each endpoint about once an hour, off the inference path. A lease on the
+endpoint's check keeps two control-plane instances from checking it at the same time. Each change
+is acted on once: an engine release, model revision, or price is recorded when a check acts on it.
+While a proposed run waits for approval, a run is active, or the policy's cooldown runs, triggers
+stay pending and nothing is recorded; they fire once the run is decided.
+
+### What a check reads
+
+A check reads only the control plane's own records. Nothing comes from the dashboard.
+
+- **Traffic:** the endpoint's last seven days of content-free request records: request rate, mean
+  input and output tokens of the requests that reported usage, and streaming share. Peak
+  concurrency and prefix or session reuse are not in those records and stay unknown. A proposed run
+  replays a recent recording of your traffic, or one captured from the same records.
+- **Service:** error rate, p95 time to first token, and output tokens per second from the same
+  window; goodput and per-token time only when a qualified collector reports them.
+- **Cost:** cost per million output tokens, from the setup's sourced hourly price, the replicas that
+  ran in the window, and the window's output tokens.
+- **Unknown:** availability and contribution margin are not in the control plane's records (margin
+  needs your revenue). They are listed as unknown on every decision and never start a run.
+
+When a trigger fires, the check asks the planner for setups the same way **Optimize** does for the
+endpoint (same model, provider, GPU, compute connection, and measured bottleneck), drops setups
+measured, rejected, or dismissed on this endpoint in the last `rejection_memory_seconds`, and keeps
+at most `maximum_candidates_per_campaign` that fit `maximum_experiment_cost_usd`. If one is left, it
+creates a run proposal. Each proposal records:
+
+- **reason:** one sentence naming every trigger, for example "vllm 0.22.1 is the new pinned engine
+  release; this endpoint runs 0.21.0";
+- **expected change:** the range of cost-per-token changes earlier runs on this endpoint measured
+  for their winner, or `unknown` when there are none. The run measures its own;
+- **run cost:** the spend cap that covers every setup for one hour at today's sourced prices
+  (approval splits the cap evenly across setups), or `unknown` when a setup has no current price.
+
+The run's approval-needed [notification](#get-told-when-a-run-needs-you) carries the reason and the
+estimated cost in its `proposal` field and summary. Dismissing a proposal cancels the run; its setups
+are not proposed again until the rejection memory ends.
+
+```bash
+curl "$INFERCRANE_URL/api/v1/deployments/chat/continual-optimization/suggestions" \
+  -H "Authorization: Bearer $INFERCRANE_API_KEY"
+```
+
+The suggestions read lists proposed runs with their reason, triggers, expected change, run cost,
+unknown evidence, and what auto-run did; when the endpoint was last checked and is checked next; and
+the endpoint's custom kernels with their engine pins. A run's own read (`GET
+/api/v1/optimization/campaigns/{id}`) carries the same `origin`.
+
+### Auto-run under a monthly cap
+
+Auto-run is off by default. With `auto_run: true` and a `monthly_auto_run_cap_usd` above zero, a
+proposed run is approved without a person when its cost is known and fits what is left of this
+calendar month's (UTC) cap for the endpoint. The approval is the same as a person's: every setup's
+current price is checked against its share, and the run is recorded as approved by
+`stay-optimized`. A run with an unknown cost, or one that would pass the cap, waits for a person.
+Auto-run never rolls out a winner.
+
+### Custom kernels and engine changes
+
+A custom kernel is pinned to the engine release it was qualified on. When a check sees the endpoint
+run a different release than a serving kernel's pin, it switches the kernel off. When InferCrane pins
+a new release, a qualified kernel pinned to an older one is marked for re-qualification; a kernel
+still serving on the running release keeps serving, and the proposal says that a setup on the new
+release rolls out without it unless it is re-qualified. Stay optimized never turns a kernel back on.
+
 ## Generate a custom kernel
 
 A custom kernel is a last resort, never a default. Monitoring can suggest which phase to profile
