@@ -45,7 +45,7 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 			return campaign, false, errors.New("optimization campaign model must match the target deployment")
 		}
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,target_deployment_name,state,proposal_json,max_candidates,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?::jsonb,?,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, campaign.Intent, campaign.TargetDeployment, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), stamp, stamp)
+	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,target_deployment_name,state,proposal_json,max_candidates,origin_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?::jsonb,?,NULLIF(?,'')::jsonb,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, campaign.Intent, campaign.TargetDeployment, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), campaign.OriginJSON, stamp, stamp)
 	if err != nil {
 		return campaign, false, err
 	}
@@ -84,6 +84,9 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 func validateOptimizationCampaign(campaign domain.OptimizationCampaign, candidates []domain.OptimizationCandidateRun) error {
 	if campaign.TenantID == "" || campaign.IdempotencyKey == "" || len(campaign.IdempotencyKey) > 128 || len(campaign.InputDigest) != 64 || campaign.ModelIdentity == "" || campaign.Objective == "" || campaign.Source == "" || !boundedJSON(campaign.ProposalJSON) {
 		return errors.New("complete immutable optimization campaign identity and proposal are required")
+	}
+	if campaign.OriginJSON != "" && (!boundedJSON(campaign.OriginJSON) || campaign.Intent != optimizationcampaign.IntentEvolveEndpoint) {
+		return errors.New("a proposed run's origin must be bounded JSON on a run that evolves an endpoint")
 	}
 	if campaign.Intent != optimizationcampaign.IntentNewEndpoint && campaign.Intent != optimizationcampaign.IntentEvolveEndpoint {
 		return errors.New("optimization campaign intent must be new_endpoint or evolve_endpoint")
@@ -128,10 +131,10 @@ func (s *Store) OptimizationCampaignByIdempotencyKey(ctx context.Context, tenant
 func (s *Store) optimizationCampaign(ctx context.Context, predicate string, values ...any) (domain.OptimizationCampaign, error) {
 	var row domain.OptimizationCampaign
 	var cost sql.NullFloat64
-	var expiry, approvedAt, approvedBy, failure sql.NullString
+	var expiry, approvedAt, approvedBy, failure, origin sql.NullString
 	var created, updated string
-	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,COALESCE(target_deployment_name,''),state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
-	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.Intent, &row.TargetDeployment, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &created, &updated)
+	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,COALESCE(target_deployment_name,''),state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,origin_json::text,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
+	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.Intent, &row.TargetDeployment, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &origin, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
@@ -149,7 +152,7 @@ func (s *Store) optimizationCampaign(ctx context.Context, predicate string, valu
 		value := parseTime(approvedAt.String)
 		row.ApprovedAt = &value
 	}
-	row.ApprovedBy, row.FailureCode = approvedBy.String, failure.String
+	row.ApprovedBy, row.FailureCode, row.OriginJSON = approvedBy.String, failure.String, origin.String
 	row.CreatedAt, row.UpdatedAt = parseTime(created), parseTime(updated)
 	row.Candidates, err = s.optimizationCandidates(ctx, row.TenantID, row.ID)
 	return row, err

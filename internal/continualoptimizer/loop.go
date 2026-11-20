@@ -18,8 +18,10 @@ import (
 )
 
 const (
-	SchemaVersion    = "infercrane.continual-optimizer/v1"
-	AlgorithmVersion = "workload-economic-loop-v1"
+	SchemaVersion = "infercrane.continual-optimizer/v1"
+	// AlgorithmVersion v2 acts on named triggers. Evidence the control plane
+	// does not have stays unknown and never starts a run by itself.
+	AlgorithmVersion = "workload-economic-loop-v2"
 
 	SourcePublicPrior      = "public_prior"
 	SourceCustomerObserved = "customer_observed"
@@ -31,25 +33,73 @@ const (
 	ActionRetainCurrent     = "retain_current"
 )
 
+// Trigger kinds. Schedule, manual, engine release, model revision, and price
+// change are detected outside Evaluate from the control plane's own records;
+// traffic drift, service level, and first customer traffic are detected by
+// Evaluate itself.
+const (
+	TriggerSchedule      = "schedule"
+	TriggerManual        = "manual"
+	TriggerEngineRelease = "engine_release"
+	TriggerModelRevision = "model_revision"
+	TriggerPriceChange   = "price_change"
+	TriggerTrafficDrift  = "traffic_drift"
+	TriggerServiceLevel  = "service_level"
+	TriggerFirstTraffic  = "first_customer_traffic"
+
+	// DefaultCheckInterval is the scheduled check when a policy names none.
+	DefaultCheckInterval = 7 * 24 * time.Hour
+	maxTriggers          = 16
+)
+
+var externalTriggers = map[string]struct{}{TriggerSchedule: {}, TriggerManual: {}, TriggerEngineRelease: {}, TriggerModelRevision: {}, TriggerPriceChange: {}}
+
+// Trigger is one reason to look for a better setup. Key identifies the change
+// it reacts to, so the same engine release or model revision is acted on once.
+type Trigger struct {
+	Kind   string `json:"kind"`
+	Key    string `json:"key,omitempty"`
+	Detail string `json:"detail"`
+}
+
 // Policy is durable authority for one optimization loop. Defaults are
 // deliberately conservative: public data can screen candidates and customer
 // traffic is required for qualification. The loop never judges or promotes a
 // canary; Release Guard owns that decision.
 type Policy struct {
-	Enabled                       bool    `json:"enabled"`
-	MinimumObservedRequests       int     `json:"minimum_observed_requests"`
-	DriftThreshold                float64 `json:"drift_threshold"`
-	MinimumExpectedGain           float64 `json:"minimum_expected_gain"`
-	MinimumContributionMargin     float64 `json:"minimum_contribution_margin"`
-	MinimumAvailability           float64 `json:"minimum_availability"`
-	MaximumErrorRate              float64 `json:"maximum_error_rate"`
-	MaximumExperimentCostUSD      float64 `json:"maximum_experiment_cost_usd"`
-	MaximumCandidatesPerCampaign  int     `json:"maximum_candidates_per_campaign"`
-	MaximumConcurrentCampaigns    int     `json:"maximum_concurrent_campaigns"`
-	CooldownSeconds               int     `json:"cooldown_seconds"`
-	RejectionMemorySeconds        int     `json:"rejection_memory_seconds"`
-	RequireCustomerReplay         bool    `json:"require_customer_replay"`
-	AllowAutomaticExperimentation bool    `json:"allow_automatic_experimentation"`
+	Enabled                      bool    `json:"enabled"`
+	MinimumObservedRequests      int     `json:"minimum_observed_requests"`
+	DriftThreshold               float64 `json:"drift_threshold"`
+	MinimumExpectedGain          float64 `json:"minimum_expected_gain"`
+	MinimumContributionMargin    float64 `json:"minimum_contribution_margin"`
+	MinimumAvailability          float64 `json:"minimum_availability"`
+	MaximumErrorRate             float64 `json:"maximum_error_rate"`
+	MaximumExperimentCostUSD     float64 `json:"maximum_experiment_cost_usd"`
+	MaximumCandidatesPerCampaign int     `json:"maximum_candidates_per_campaign"`
+	MaximumConcurrentCampaigns   int     `json:"maximum_concurrent_campaigns"`
+	CooldownSeconds              int     `json:"cooldown_seconds"`
+	RejectionMemorySeconds       int     `json:"rejection_memory_seconds"`
+	RequireCustomerReplay        bool    `json:"require_customer_replay"`
+	// AllowAutomaticExperimentation lets a check propose a run. A proposed
+	// run waits for a person's approval and spend cap unless AutoRun is on.
+	AllowAutomaticExperimentation bool `json:"allow_automatic_experimentation"`
+	// CheckIntervalSeconds is how often the scheduled check runs. Zero means
+	// DefaultCheckInterval (weekly).
+	CheckIntervalSeconds int `json:"check_interval_seconds,omitempty"`
+	// AutoRun approves a proposed run without a person, only when the run's
+	// cost is known and fits what is left of MonthlyAutoRunCapUSD this
+	// calendar month (UTC). Off by default. Rollout still needs Release Guard
+	// and a person.
+	AutoRun              bool    `json:"auto_run,omitempty"`
+	MonthlyAutoRunCapUSD float64 `json:"monthly_auto_run_cap_usd,omitempty"`
+}
+
+// CheckInterval is the scheduled check period.
+func (p Policy) CheckInterval() time.Duration {
+	if p.CheckIntervalSeconds <= 0 {
+		return DefaultCheckInterval
+	}
+	return time.Duration(p.CheckIntervalSeconds) * time.Second
 }
 
 func DefaultPolicy() Policy {
@@ -96,11 +146,15 @@ type ServiceEvidence struct {
 	QualifiedOutputTokensPerSecond float64 `json:"qualified_output_tokens_per_second,omitempty"`
 	ProductiveUtilization          float64 `json:"productive_utilization,omitempty"`
 	CostPerMillionOutputUSD        float64 `json:"cost_per_million_output_usd,omitempty"`
-	ContributionMargin             float64 `json:"contribution_margin,omitempty"`
+	// ContributionMargin needs the customer's revenue, which the control
+	// plane does not record. Nil means unknown, never zero.
+	ContributionMargin *float64 `json:"contribution_margin,omitempty"`
 }
 
 // Hypothesis is produced by a model/runtime/hardware planner. The loop ranks
-// these proposals but never invents support for an unqualified tuple.
+// these proposals but never invents support for an unqualified tuple. A zero
+// ExpectedEndpointGain or EstimatedCostUSD means unknown: the planner had no
+// measured or sourced number, so the run measures it.
 type Hypothesis struct {
 	ID                    string  `json:"id"`
 	Fingerprint           string  `json:"fingerprint"`
@@ -129,15 +183,23 @@ type Active struct {
 }
 
 type Input struct {
-	Now              time.Time       `json:"now"`
-	Policy           Policy          `json:"policy"`
-	Baseline         *Workload       `json:"baseline,omitempty"`
-	Current          Workload        `json:"current"`
-	ActiveService    ServiceEvidence `json:"active_service"`
-	Hypotheses       []Hypothesis    `json:"hypotheses,omitempty"`
-	History          []Outcome       `json:"history,omitempty"`
-	ActiveCampaigns  []Active        `json:"active_campaigns,omitempty"`
-	LastExperimentAt *time.Time      `json:"last_experiment_at,omitempty"`
+	Now             time.Time       `json:"now"`
+	Policy          Policy          `json:"policy"`
+	Baseline        *Workload       `json:"baseline,omitempty"`
+	Current         Workload        `json:"current"`
+	ActiveService   ServiceEvidence `json:"active_service"`
+	Hypotheses      []Hypothesis    `json:"hypotheses,omitempty"`
+	History         []Outcome       `json:"history,omitempty"`
+	ActiveCampaigns []Active        `json:"active_campaigns,omitempty"`
+	// PendingProposals are runs this loop proposed that still wait for
+	// approval. One waiting proposal is enough; a check never stacks more.
+	PendingProposals []Active   `json:"pending_proposals,omitempty"`
+	LastExperimentAt *time.Time `json:"last_experiment_at,omitempty"`
+	// Triggers detected outside Evaluate for this check.
+	Triggers []Trigger `json:"triggers,omitempty"`
+	// PlanningIssue says why the planner produced no hypotheses, so a check
+	// does not report "nothing left to try" when it could not plan at all.
+	PlanningIssue string `json:"planning_issue,omitempty"`
 }
 
 type RankedHypothesis struct {
@@ -158,8 +220,13 @@ type Decision struct {
 	PromotionEligible   bool               `json:"promotion_eligible"`
 	MaximumCostUSD      float64            `json:"maximum_cost_usd,omitempty"`
 	BaselineReplacement bool               `json:"baseline_replacement"`
-	EvaluatedAt         time.Time          `json:"evaluated_at"`
-	DecisionDigest      string             `json:"decision_digest"`
+	// Triggers are every reason this check looked for a better setup.
+	Triggers []Trigger `json:"triggers,omitempty"`
+	// UnknownEvidence names measurements the control plane did not have.
+	// Unknown evidence is shown as unknown; it never starts a run.
+	UnknownEvidence []string  `json:"unknown_evidence,omitempty"`
+	EvaluatedAt     time.Time `json:"evaluated_at"`
+	DecisionDigest  string    `json:"decision_digest"`
 }
 
 func Evaluate(input Input) (Decision, error) {
@@ -188,6 +255,13 @@ func Evaluate(input Input) (Decision, error) {
 		decision.Reasons = []string{"a bounded optimization campaign is already active"}
 		return seal(decision), nil
 	}
+	if len(input.PendingProposals) > 0 {
+		decision.Action = ActionObserveExperiment
+		decision.Reasons = []string{"a proposed run is already waiting for approval"}
+		return seal(decision), nil
+	}
+	decision.Triggers = append([]Trigger(nil), input.Triggers...)
+	decision.UnknownEvidence = unknownEvidence(input.ActiveService)
 
 	if input.Current.Source == SourcePublicPrior {
 		decision.Action = ActionScreenPublicPrior
@@ -208,24 +282,26 @@ func Evaluate(input Input) (Decision, error) {
 	if input.Baseline != nil {
 		decision.DriftScore = WorkloadDrift(*input.Baseline, input.Current)
 	}
-
-	violations := serviceViolations(input.ActiveService, input.Policy)
-	trigger := len(violations) > 0 || decision.DriftScore >= input.Policy.DriftThreshold
+	for _, violation := range serviceViolations(input.ActiveService, input.Policy) {
+		decision.Triggers = append(decision.Triggers, Trigger{Kind: TriggerServiceLevel, Detail: violation})
+	}
+	if decision.DriftScore >= input.Policy.DriftThreshold {
+		decision.Triggers = append(decision.Triggers, Trigger{Kind: TriggerTrafficDrift, Key: input.Current.Digest, Detail: fmt.Sprintf("workload drift %.3f exceeds policy threshold %.3f", decision.DriftScore, input.Policy.DriftThreshold)})
+		// The run is planned for the new shape, so later drift is measured
+		// from it rather than firing again on every check.
+		decision.BaselineReplacement = true
+	}
 	if decision.BaselineReplacement {
-		trigger = true
+		decision.Triggers = append(decision.Triggers, Trigger{Kind: TriggerFirstTraffic, Key: input.Current.Digest, Detail: "customer-observed workload replaces the public or stale baseline"})
 	}
 	decision.PromotionEligible = true
-	if !trigger {
+	if len(decision.Triggers) == 0 {
 		decision.Action = ActionRetainCurrent
-		decision.Reasons = []string{"customer workload is stable and the active service clears performance, reliability, and margin policy"}
+		decision.Reasons = []string{"nothing changed: no engine release, model revision, price change, traffic shift, or broken limit"}
 		return seal(decision), nil
 	}
-	decision.Reasons = append(decision.Reasons, violations...)
-	if decision.DriftScore >= input.Policy.DriftThreshold {
-		decision.Reasons = append(decision.Reasons, fmt.Sprintf("workload drift %.3f exceeds policy threshold %.3f", decision.DriftScore, input.Policy.DriftThreshold))
-	}
-	if decision.BaselineReplacement {
-		decision.Reasons = append(decision.Reasons, "customer-observed workload replaces the public or stale baseline")
+	for _, trigger := range decision.Triggers {
+		decision.Reasons = append(decision.Reasons, trigger.Detail)
 	}
 	if input.LastExperimentAt != nil && input.Now.Sub(*input.LastExperimentAt) < time.Duration(input.Policy.CooldownSeconds)*time.Second {
 		decision.Action = ActionWaitForEvidence
@@ -238,14 +314,38 @@ func Evaluate(input Input) (Decision, error) {
 		return seal(decision), nil
 	}
 	decision.Selected = rank(input, true)
-	if len(decision.Selected) == 0 {
+	if len(decision.Selected) == 0 && len(input.Hypotheses) == 0 && input.PlanningIssue != "" {
 		decision.Action = ActionWaitForEvidence
-		decision.Reasons = append(decision.Reasons, "no novel, qualified, material hypothesis remains inside the experiment budget")
+		decision.Reasons = append(decision.Reasons, "setups could not be planned: "+input.PlanningIssue)
+		return seal(decision), nil
+	}
+	if len(decision.Selected) == 0 {
+		decision.Action = ActionRetainCurrent
+		decision.Reasons = append(decision.Reasons, "no setup is left to try: every planned setup was measured, rejected, or dismissed recently, or exceeds the experiment budget")
 		return seal(decision), nil
 	}
 	decision.Action = ActionStartExperiment
 	decision.MaximumCostUSD = selectedBudget(decision.Selected, input.Policy.MaximumExperimentCostUSD)
 	return seal(decision), nil
+}
+
+// unknownEvidence names the service measurements the control plane did not
+// have for this check.
+func unknownEvidence(service ServiceEvidence) []string {
+	var unknown []string
+	if service.Availability <= 0 {
+		unknown = append(unknown, "availability")
+	}
+	if service.CostPerMillionOutputUSD <= 0 {
+		unknown = append(unknown, "cost_per_million_output_tokens")
+	}
+	if service.QualifiedOutputTokensPerSecond <= 0 {
+		unknown = append(unknown, "qualified_output_capacity")
+	}
+	if service.ContributionMargin == nil {
+		unknown = append(unknown, "contribution_margin")
+	}
+	return unknown
 }
 
 func rank(input Input, requireMaterial bool) []RankedHypothesis {
@@ -263,11 +363,16 @@ func rank(input Input, requireMaterial bool) []RankedHypothesis {
 		if hypothesis.EstimatedCostUSD > input.Policy.MaximumExperimentCostUSD || hypothesis.RequiresProfiler && !hypothesis.ProfilerEvidenceReady {
 			continue
 		}
-		if requireMaterial && hypothesis.ExpectedEndpointGain < input.Policy.MinimumExpectedGain {
+		// An unknown gain (zero) is not refused as immaterial: the run is
+		// what measures it.
+		if requireMaterial && hypothesis.ExpectedEndpointGain > 0 && hypothesis.ExpectedEndpointGain < input.Policy.MinimumExpectedGain {
 			continue
 		}
 		score := hypothesis.ExpectedEndpointGain*hypothesis.Confidence - .35*hypothesis.Risk - .15*(hypothesis.EstimatedCostUSD/input.Policy.MaximumExperimentCostUSD)
 		reasons := []string{fmt.Sprintf("expected endpoint gain %.1f%% at %.0f%% confidence", hypothesis.ExpectedEndpointGain*100, hypothesis.Confidence*100)}
+		if hypothesis.ExpectedEndpointGain == 0 {
+			reasons = []string{fmt.Sprintf("expected gain unknown until measured; planner confidence %.0f%%", hypothesis.Confidence*100)}
+		}
 		score += workloadFit(hypothesis.Layer, input.Current, &reasons)
 		items = append(items, RankedHypothesis{Hypothesis: hypothesis, Score: score, Reasons: reasons})
 	}
@@ -313,24 +418,18 @@ func workloadFit(layer string, workload Workload, reasons *[]string) float64 {
 	return bonus
 }
 
+// serviceViolations lists measured limit breaches only. Missing evidence is
+// reported by unknownEvidence and never counts as a breach.
 func serviceViolations(service ServiceEvidence, policy Policy) []string {
 	var reasons []string
 	if service.RequestCount > 0 && service.ErrorRate > policy.MaximumErrorRate {
 		reasons = append(reasons, fmt.Sprintf("error rate %.3f exceeds %.3f", service.ErrorRate, policy.MaximumErrorRate))
 	}
-	if service.Availability <= 0 {
-		reasons = append(reasons, "measured availability evidence is unavailable")
-	} else if service.Availability < policy.MinimumAvailability {
+	if service.Availability > 0 && service.Availability < policy.MinimumAvailability {
 		reasons = append(reasons, fmt.Sprintf("availability %.4f is below %.4f", service.Availability, policy.MinimumAvailability))
 	}
-	if service.CostPerMillionOutputUSD <= 0 {
-		reasons = append(reasons, "measured productive-token cost evidence is unavailable")
-	}
-	if service.QualifiedOutputTokensPerSecond <= 0 {
-		reasons = append(reasons, "qualified output-capacity evidence is unavailable")
-	}
-	if service.ContributionMargin < policy.MinimumContributionMargin {
-		reasons = append(reasons, fmt.Sprintf("contribution margin %.3f is below %.3f", service.ContributionMargin, policy.MinimumContributionMargin))
+	if service.ContributionMargin != nil && *service.ContributionMargin < policy.MinimumContributionMargin {
+		reasons = append(reasons, fmt.Sprintf("contribution margin %.3f is below %.3f", *service.ContributionMargin, policy.MinimumContributionMargin))
 	}
 	return reasons
 }
@@ -433,9 +532,20 @@ func validate(input Input) error {
 	if len(input.ActiveCampaigns) > policy.MaximumConcurrentCampaigns {
 		return errors.New("active campaigns exceed policy authority")
 	}
+	if len(input.Triggers) > maxTriggers {
+		return errors.New("too many triggers")
+	}
+	if len(input.PlanningIssue) > 512 {
+		return errors.New("planning issue is too long")
+	}
+	for _, trigger := range input.Triggers {
+		if _, known := externalTriggers[trigger.Kind]; !known || trigger.Detail == "" || len(trigger.Detail) > 512 || len(trigger.Key) > 256 {
+			return errors.New("trigger kind, key, or detail is invalid")
+		}
+	}
 	seen := map[string]struct{}{}
 	for _, item := range input.Hypotheses {
-		if item.ID == "" || !digest(item.Fingerprint) || item.Layer == "" || item.Description == "" || item.ExpectedEndpointGain <= 0 || item.ExpectedEndpointGain > 10 || item.Confidence <= 0 || item.Confidence > 1 || item.Risk < 0 || item.Risk > 1 || item.EstimatedCostUSD < 0 {
+		if item.ID == "" || !digest(item.Fingerprint) || item.Layer == "" || item.Description == "" || item.ExpectedEndpointGain < 0 || item.ExpectedEndpointGain > 10 || math.IsNaN(item.ExpectedEndpointGain) || math.IsNaN(item.EstimatedCostUSD) || math.IsInf(item.EstimatedCostUSD, 0) || item.Confidence <= 0 || item.Confidence > 1 || item.Risk < 0 || item.Risk > 1 || item.EstimatedCostUSD < 0 {
 			return errors.New("hypothesis identity, evidence, gain, confidence, risk, or cost is invalid")
 		}
 		if _, duplicate := seen[item.Fingerprint]; duplicate {
@@ -460,7 +570,7 @@ func validateServiceEvidence(evidence ServiceEvidence) error {
 			return errors.New("error rate, availability, and productive utilization must be in [0,1]")
 		}
 	}
-	if evidence.ContributionMargin < -1 || evidence.ContributionMargin > 1 || math.IsNaN(evidence.ContributionMargin) || math.IsInf(evidence.ContributionMargin, 0) {
+	if margin := evidence.ContributionMargin; margin != nil && (*margin < -1 || *margin > 1 || math.IsNaN(*margin) || math.IsInf(*margin, 0)) {
 		return errors.New("contribution margin must be a finite value in [-1,1]")
 	}
 	return nil
@@ -472,6 +582,15 @@ func validateServiceEvidence(evidence ServiceEvidence) error {
 func ValidatePolicy(policy Policy) error {
 	if policy.MinimumObservedRequests < 1 || policy.DriftThreshold <= 0 || policy.DriftThreshold > 1 || policy.MinimumExpectedGain <= 0 || policy.MinimumExpectedGain > 1 || policy.MinimumContributionMargin < -1 || policy.MinimumContributionMargin >= 1 || policy.MinimumAvailability <= 0 || policy.MinimumAvailability > 1 || policy.MaximumErrorRate < 0 || policy.MaximumErrorRate >= 1 || policy.MaximumExperimentCostUSD <= 0 || policy.MaximumCandidatesPerCampaign < 1 || policy.MaximumCandidatesPerCampaign > 100 || policy.MaximumConcurrentCampaigns < 1 || policy.CooldownSeconds < 0 || policy.RejectionMemorySeconds <= 0 || policy.RejectionMemorySeconds > 365*24*60*60 {
 		return errors.New("continual optimizer policy is outside safe bounds")
+	}
+	if policy.CheckIntervalSeconds != 0 && (policy.CheckIntervalSeconds < 60*60 || policy.CheckIntervalSeconds > 30*24*60*60) {
+		return errors.New("check interval must be between one hour and 30 days")
+	}
+	if policy.MonthlyAutoRunCapUSD < 0 || policy.MonthlyAutoRunCapUSD > 1_000_000 || math.IsNaN(policy.MonthlyAutoRunCapUSD) || math.IsInf(policy.MonthlyAutoRunCapUSD, 0) {
+		return errors.New("monthly auto-run cap must be between 0 and 1,000,000 USD")
+	}
+	if policy.AutoRun && policy.MonthlyAutoRunCapUSD <= 0 {
+		return errors.New("auto-run needs a monthly spend cap above zero")
 	}
 	return nil
 }

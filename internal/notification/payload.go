@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/continualoptimizer"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
@@ -31,9 +32,12 @@ type Body struct {
 	WorkspaceID   string    `json:"workspace_id"`
 	Summary       string    `json:"summary"`
 	Campaign      *Campaign `json:"campaign,omitempty"`
-	Outcome       *Outcome  `json:"outcome,omitempty"`
-	Failure       *Failure  `json:"failure,omitempty"`
-	Links         Links     `json:"links"`
+	// Proposal is set on a run Stay optimized proposed: why, what it may
+	// change, and what it is estimated to cost.
+	Proposal *Proposal `json:"proposal,omitempty"`
+	Outcome  *Outcome  `json:"outcome,omitempty"`
+	Failure  *Failure  `json:"failure,omitempty"`
+	Links    Links     `json:"links"`
 }
 
 type Campaign struct {
@@ -47,6 +51,15 @@ type Campaign struct {
 	// CandidateIDs names the setups the event is about: the ones waiting on
 	// the customer for answer quality, or the ones waiting for rollout.
 	CandidateIDs []string `json:"candidate_ids,omitempty"`
+}
+
+// Proposal is a Stay optimized run's origin, copied for the receiver.
+type Proposal struct {
+	Reason         string                             `json:"reason"`
+	Triggers       []continualoptimizer.Trigger       `json:"triggers"`
+	ExpectedChange continualoptimizer.ExpectedChange  `json:"expected_change"`
+	RunCost        continualoptimizer.RunCostEstimate `json:"run_cost"`
+	AutoRun        continualoptimizer.AutoRunResult   `json:"auto_run"`
 }
 
 // Outcome is the decision, copied from the outcome report.
@@ -105,9 +118,16 @@ func CampaignBody(workspace string, notice Notice, campaign domain.OptimizationC
 		body.Campaign.ApprovalExpiresAt = &expires
 	}
 	model := emptyAs(campaign.ModelIdentity, "your model")
+	origin, proposed := continualoptimizer.DecodeOrigin(campaign.OriginJSON)
+	if proposed {
+		body.Proposal = &Proposal{Reason: origin.Reason, Triggers: origin.Triggers, ExpectedChange: origin.ExpectedChange, RunCost: origin.RunCost, AutoRun: origin.AutoRun}
+	}
 	switch notice.Type {
 	case EventApprovalNeeded:
 		body.Summary = fmt.Sprintf("The %s optimization run is ready and needs your spend approval to start.", model)
+		if proposed {
+			body.Summary = fmt.Sprintf("%s It waits for your approval and spend cap on %s (%s). Nothing changes until you approve.", origin.Reason, origin.Deployment, origin.RunCost.Detail)
+		}
 	case EventApprovalExpiring:
 		ends := "soon"
 		if campaign.ApprovalExpiresAt != nil {

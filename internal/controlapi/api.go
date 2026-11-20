@@ -609,6 +609,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/deployments/{name}/continual-optimization/policy", a.auth(authz.Deploy, a.setContinualOptimizationPolicy))
 	mux.HandleFunc("POST /api/v1/deployments/{name}/continual-optimization/evaluate", a.auth(authz.Deploy, a.evaluateContinualOptimization))
 	mux.HandleFunc("GET /api/v1/deployments/{name}/continual-optimization/decisions", a.auth(authz.Read, a.continualOptimizationDecisions))
+	mux.HandleFunc("GET /api/v1/deployments/{name}/continual-optimization/suggestions", a.auth(authz.Read, a.continualOptimizationSuggestions))
 	mux.HandleFunc("GET /api/v1/optimized-artifacts", a.auth(authz.Read, a.optimizedArtifacts))
 	mux.HandleFunc("POST /api/v1/optimized-artifacts", a.auth(authz.Deploy, a.createOptimizedArtifact))
 	mux.HandleFunc("GET /api/v1/optimized-artifacts/{id}", a.auth(authz.Read, a.getOptimizedArtifact))
@@ -1263,160 +1264,6 @@ func (a API) setContinualOptimizationPolicy(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, continualOptimizationPolicyResponse(row))
 }
 
-type continualOptimizationEconomics struct {
-	Availability                   float64 `json:"availability"`
-	ProductiveUtilization          float64 `json:"productive_utilization"`
-	CostPerMillionOutputUSD        float64 `json:"cost_per_million_output_usd"`
-	ContributionMargin             float64 `json:"contribution_margin"`
-	QualifiedOutputTokensPerSecond float64 `json:"qualified_output_tokens_per_second"`
-}
-
-type continualOptimizationEvaluationRequest struct {
-	PublicProfile string                          `json:"public_profile,omitempty"`
-	ReplayTraceID string                          `json:"replay_trace_id,omitempty"`
-	Hypotheses    []continualoptimizer.Hypothesis `json:"hypotheses,omitempty"`
-	Economics     continualOptimizationEconomics  `json:"economics"`
-}
-
-func (a API) evaluateContinualOptimization(w http.ResponseWriter, r *http.Request) {
-	loopStore, ok := a.Store.(continualOptimizationStore)
-	if !ok {
-		writeError(w, http.StatusNotImplemented, "capability_unavailable", "continual optimization storage is not configured")
-		return
-	}
-	var request continualOptimizationEvaluationRequest
-	if !decodeMutationBody(w, r, &request) {
-		return
-	}
-	if (strings.TrimSpace(request.PublicProfile) == "") == (strings.TrimSpace(request.ReplayTraceID) == "") {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_workload_evidence", "exactly one of public_profile or replay_trace_id is required")
-		return
-	}
-	actor := r.Context().Value(identityKey{}).(domain.Principal)
-	name := r.PathValue("name")
-	policyRow, err := loopStore.ContinualOptimizationPolicy(r.Context(), actor.TenantID, name)
-	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusConflict, "continual_optimization_policy_required", "persist a bounded continual optimization policy before evaluation")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "continual optimization policy could not be loaded")
-		return
-	}
-	var policy continualoptimizer.Policy
-	if err = json.Unmarshal([]byte(policyRow.PolicyJSON), &policy); err != nil || continualoptimizer.ValidatePolicy(policy) != nil {
-		writeError(w, http.StatusInternalServerError, "invalid_persisted_policy", "persisted continual optimization policy is invalid")
-		return
-	}
-
-	var current continualoptimizer.Workload
-	if request.PublicProfile != "" {
-		document, documentErr := workloadprofile.PublicChutesPrior()
-		if documentErr != nil {
-			writeError(w, http.StatusInternalServerError, "invalid_embedded_workload_profile", "the embedded public workload profile failed integrity validation")
-			return
-		}
-		profile, lookupErr := workloadprofile.Lookup(document, request.PublicProfile)
-		if lookupErr != nil || !performanceprofile.IsPublicPrior(profile.Name) {
-			writeError(w, http.StatusUnprocessableEntity, "public_workload_profile_not_found", "public workload profile was not found")
-			return
-		}
-		current, err = continualoptimizer.FromPublicProfile(document, profile)
-	} else {
-		intelligence, available := a.Store.(intelligenceStore)
-		if !available {
-			writeError(w, http.StatusNotImplemented, "capability_unavailable", "replay trace storage is not configured")
-			return
-		}
-		var trace domain.ReplayTrace
-		trace, err = intelligence.ReplayTrace(r.Context(), actor.TenantID, request.ReplayTraceID)
-		if err == nil && trace.DeploymentName != name {
-			err = domain.ErrNotFound
-		}
-		if err == nil {
-			current, err = continualoptimizer.FromReplayTrace(trace)
-		}
-	}
-	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "workload_evidence_not_found", "workload evidence was not found for this deployment")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_workload_evidence", err.Error())
-		return
-	}
-
-	var baseline *continualoptimizer.Workload
-	var lastExperiment *time.Time
-	state, stateErr := loopStore.ContinualOptimizationState(r.Context(), actor.TenantID, name)
-	if stateErr == nil {
-		lastExperiment = state.LastExperimentAt
-		if state.BaselineJSON != "" {
-			var decoded continualoptimizer.Workload
-			if json.Unmarshal([]byte(state.BaselineJSON), &decoded) != nil {
-				writeError(w, http.StatusInternalServerError, "invalid_persisted_baseline", "persisted continual optimization baseline is invalid")
-				return
-			}
-			baseline = &decoded
-		}
-	} else if !errors.Is(stateErr, domain.ErrNotFound) {
-		writeError(w, http.StatusInternalServerError, "internal", "continual optimization state could not be loaded")
-		return
-	}
-
-	service := continualoptimizer.ServiceEvidence{
-		RequestCount: current.RequestCount, Availability: request.Economics.Availability,
-		ProductiveUtilization:          request.Economics.ProductiveUtilization,
-		CostPerMillionOutputUSD:        request.Economics.CostPerMillionOutputUSD,
-		ContributionMargin:             request.Economics.ContributionMargin,
-		QualifiedOutputTokensPerSecond: request.Economics.QualifiedOutputTokensPerSecond,
-	}
-	if current.Source == continualoptimizer.SourceCustomerObserved {
-		resolved, resolveErr := a.Store.ResolveForTenant(r.Context(), actor.TenantID, name)
-		if resolveErr != nil {
-			writeError(w, http.StatusNotFound, "not_found", "deployment was not found")
-			return
-		}
-		window := current.WindowEnd.Sub(current.WindowStart)
-		stats, statsErr := a.Store.RequestStats(r.Context(), resolved.Deployment.ID, window)
-		if statsErr != nil {
-			writeError(w, http.StatusInternalServerError, "internal", "request evidence could not be loaded")
-			return
-		}
-		service.ErrorRate, service.TTFTP95MS, service.OutputTokensPerSecond = stats.ErrorRate, floatValue(stats.P95TTFTMS), stats.OutputTokensPerSecond
-	}
-
-	history, active := continualOptimizationCampaignMemory(r.Context(), a.Store, actor.TenantID, name)
-	input := continualoptimizer.Input{
-		Now: time.Now().UTC(), Policy: policy, Baseline: baseline, Current: current,
-		ActiveService: service, Hypotheses: request.Hypotheses,
-		History: history, ActiveCampaigns: active, LastExperimentAt: lastExperiment,
-	}
-	decision, err := continualoptimizer.Evaluate(input)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_continual_optimization_evaluation", err.Error())
-		return
-	}
-	recorded, created, err := loopStore.RecordContinualOptimizationDecision(r.Context(), actor.TenantID, name, current, decision)
-	if errors.Is(err, domain.ErrConflict) {
-		writeError(w, http.StatusConflict, "decision_conflict", "the same normalized evidence produced a different decision")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "continual optimization decision could not be persisted")
-		return
-	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "continual_optimization.evaluate", ResourceType: "deployment", ResourceName: name, Outcome: "succeeded", Payload: recorded.ID})
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	writeJSON(w, status, map[string]any{
-		"decision": decision, "record_id": recorded.ID, "created": created,
-		"mutation": "decision_record_only", "campaign_execution": "use selected hypotheses to create a bounded optimization campaign",
-	})
-}
-
 func (a API) continualOptimizationDecisions(w http.ResponseWriter, r *http.Request) {
 	store, ok := a.Store.(continualOptimizationStore)
 	if !ok {
@@ -1443,44 +1290,6 @@ func (a API) continualOptimizationDecisions(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
-func continualOptimizationCampaignMemory(ctx context.Context, base Store, tenant, deployment string) ([]continualoptimizer.Outcome, []continualoptimizer.Active) {
-	store, ok := base.(optimizationCampaignStore)
-	if !ok {
-		return nil, nil
-	}
-	campaigns, err := store.OptimizationCampaigns(ctx, tenant, 100)
-	if err != nil {
-		return nil, nil
-	}
-	var history []continualoptimizer.Outcome
-	var active []continualoptimizer.Active
-	for _, campaign := range campaigns {
-		if campaign.Intent != optimizationcampaign.IntentEvolveEndpoint || campaign.TargetDeployment != deployment {
-			continue
-		}
-		if campaign.State == optimizationcampaign.CampaignApproved || campaign.State == optimizationcampaign.CampaignRunning || campaign.State == optimizationcampaign.CampaignRanked || campaign.State == optimizationcampaign.CampaignQualified || campaign.State == optimizationcampaign.CampaignGuardPassed {
-			active = append(active, continualoptimizer.Active{CampaignID: campaign.ID, Phase: campaign.State, Count: len(campaign.Candidates)})
-		}
-		for _, candidate := range campaign.Candidates {
-			decision := ""
-			switch candidate.State {
-			case optimizationcampaign.CandidateRejected:
-				decision = "rejected"
-			case optimizationcampaign.CandidateFailed:
-				decision = "failed"
-			case optimizationcampaign.CandidateCleaned:
-				if candidate.FailureCode != "" {
-					decision = "failed"
-				}
-			}
-			if decision != "" && len(candidate.ProposalCandidateID) == 64 {
-				history = append(history, continualoptimizer.Outcome{Fingerprint: "sha256:" + candidate.ProposalCandidateID, Decision: decision, FailureCode: candidate.FailureCode, CompletedAt: candidate.UpdatedAt})
-			}
-		}
-	}
-	return history, active
-}
-
 func continualOptimizationPolicyResponse(row domain.ContinualOptimizationPolicyRecord) map[string]any {
 	// Decoding returns only settings the loop reads. Policies stored before
 	// canary judgment moved wholly to Release Guard keep canary fields that the
@@ -1491,13 +1300,6 @@ func continualOptimizationPolicyResponse(row domain.ContinualOptimizationPolicyR
 		policy = decoded
 	}
 	return map[string]any{"deployment": row.DeploymentName, "generation": row.Generation, "policy": policy, "created_at": row.CreatedAt, "updated_at": row.UpdatedAt}
-}
-
-func floatValue(value *float64) float64 {
-	if value == nil {
-		return 0
-	}
-	return *value
 }
 
 func (a API) kernelOpportunities(w http.ResponseWriter, r *http.Request) {
@@ -1580,33 +1382,10 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, Intent: request.Intent, TargetDeployment: request.TargetDeployment, ProposalJSON: string(proposalJSON)}
-	candidates := make([]domain.OptimizationCandidateRun, 0, len(request.Proposal.Candidates))
-	for _, candidate := range request.Proposal.Candidates {
-		deployment, marshalErr := json.Marshal(candidate.Deployment)
-		if marshalErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "setup deployment could not be encoded")
-			return
-		}
-		predictedFields := map[string]any{}
-		if candidate.ModeledEvidence != nil {
-			modeled, modeledErr := json.Marshal(candidate.ModeledEvidence)
-			if modeledErr != nil || json.Unmarshal(modeled, &predictedFields) != nil {
-				writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "modeled evidence could not be encoded")
-				return
-			}
-		}
-		if candidate.ArtifactSeed != nil {
-			predictedFields["candidate_kind"] = "publisher_optimized_checkpoint"
-			predictedFields["technique"] = strings.ReplaceAll(candidate.ArtifactSeed.Tool, "-", "_") + "_quantization"
-			predictedFields["artifact_seed"] = candidate.ArtifactSeed
-			predictedFields["artifact_evidence_boundary"] = "publisher provenance only; performance and quality remain unmeasured"
-		}
-		predicted, marshalErr := json.Marshal(predictedFields)
-		if marshalErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", "setup planning evidence could not be encoded")
-			return
-		}
-		candidates = append(candidates, domain.OptimizationCandidateRun{ProposalCandidateID: candidate.ID, Rank: candidate.Rank, EvidenceState: string(candidate.EvidenceState), DeploymentSpecJSON: string(deployment), PredictedEvidenceJSON: string(predicted), ActualEvidenceJSON: `{}`})
+	candidates, invalid := campaignCandidateRuns(request.Proposal)
+	if invalid != "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", invalid)
+		return
 	}
 	campaign, created, err := store.CreateOptimizationCampaign(r.Context(), campaign, candidates)
 	if errors.Is(err, domain.ErrConflict) {
@@ -1624,6 +1403,37 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Location", "/api/v1/optimization/campaigns/"+campaign.ID)
 	writeJSON(w, status, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "created": created, "provider_mutation": false})
+}
+
+// campaignCandidateRuns turns a validated proposal's setups into run rows. A
+// non-empty message says which part could not be encoded.
+func campaignCandidateRuns(proposal optimizer.Proposal) ([]domain.OptimizationCandidateRun, string) {
+	candidates := make([]domain.OptimizationCandidateRun, 0, len(proposal.Candidates))
+	for _, candidate := range proposal.Candidates {
+		deployment, marshalErr := json.Marshal(candidate.Deployment)
+		if marshalErr != nil {
+			return nil, "setup deployment could not be encoded"
+		}
+		predictedFields := map[string]any{}
+		if candidate.ModeledEvidence != nil {
+			modeled, modeledErr := json.Marshal(candidate.ModeledEvidence)
+			if modeledErr != nil || json.Unmarshal(modeled, &predictedFields) != nil {
+				return nil, "modeled evidence could not be encoded"
+			}
+		}
+		if candidate.ArtifactSeed != nil {
+			predictedFields["candidate_kind"] = "publisher_optimized_checkpoint"
+			predictedFields["technique"] = strings.ReplaceAll(candidate.ArtifactSeed.Tool, "-", "_") + "_quantization"
+			predictedFields["artifact_seed"] = candidate.ArtifactSeed
+			predictedFields["artifact_evidence_boundary"] = "publisher provenance only; performance and quality remain unmeasured"
+		}
+		predicted, marshalErr := json.Marshal(predictedFields)
+		if marshalErr != nil {
+			return nil, "setup planning evidence could not be encoded"
+		}
+		candidates = append(candidates, domain.OptimizationCandidateRun{ProposalCandidateID: candidate.ID, Rank: candidate.Rank, EvidenceState: string(candidate.EvidenceState), DeploymentSpecJSON: string(deployment), PredictedEvidenceJSON: string(predicted), ActualEvidenceJSON: `{}`})
+	}
+	return candidates, ""
 }
 
 func (a API) optimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1795,20 +1605,40 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
 	expiresAt := time.Now().UTC().Add(time.Duration(request.ExpiresInSeconds) * time.Second).Truncate(time.Second)
-	pending, err := store.OptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"))
-	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
+	approved, failure := a.approveCampaign(r.Context(), store, actor, r.PathValue("id"), request.MaxCostUSD, expiresAt)
+	if failure != nil {
+		writeError(w, failure.status, failure.code, failure.message)
 		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(approved.campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, approved.campaign)[approved.campaign.ID]), "execution": "queued", "operation": operationResponse(approved.operation), "provider_mutation": false, "machine_replacements_covered": approved.replacementsCovered})
+}
+
+type campaignApproval struct {
+	campaign            domain.OptimizationCampaign
+	operation           domain.Operation
+	replacementsCovered int
+}
+
+type campaignFailure struct {
+	status        int
+	code, message string
+}
+
+// approveCampaign authorizes a run's spend cap against each setup's current
+// price, records the approval, and queues execution. A person's approval and
+// Stay optimized's opt-in auto-run both go through it.
+func (a API) approveCampaign(ctx context.Context, store optimizationCampaignStore, actor domain.Principal, id string, maxCostUSD float64, expiresAt time.Time) (campaignApproval, *campaignFailure) {
+	pending, err := store.OptimizationCampaign(ctx, actor.TenantID, id)
+	if errors.Is(err, domain.ErrNotFound) {
+		return campaignApproval{}, &campaignFailure{http.StatusNotFound, "not_found", "optimization run was not found"}
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "optimization run could not be loaded for cost authorization")
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusInternalServerError, "internal", "optimization run could not be loaded for cost authorization"}
 	}
 	if len(pending.Candidates) == 0 {
-		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization run has no bounded setups")
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusConflict, "campaign_state_conflict", "optimization run has no bounded setups"}
 	}
-	perCandidateBudget := request.MaxCostUSD / float64(len(pending.Candidates))
+	perCandidateBudget := maxCostUSD / float64(len(pending.Candidates))
 	// Each setup's share must cover its machines until the approval ends.
 	// Whatever is left pays for replacing machines lost mid-run; the response
 	// says how many lost machines per setup the cap covers.
@@ -1816,45 +1646,38 @@ func (a API) approveOptimizationCampaign(w http.ResponseWriter, r *http.Request)
 	for _, candidate := range pending.Candidates {
 		var draft optimizer.DeploymentDraft
 		if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) != nil {
-			writeError(w, http.StatusUnprocessableEntity, "optimization_candidate_invalid", "a setup's deployment specification is invalid")
-			return
+			return campaignApproval{}, &campaignFailure{http.StatusUnprocessableEntity, "optimization_candidate_invalid", "a setup's deployment specification is invalid"}
 		}
-		if computeErr := a.validateOptimizationCompute(r.Context(), actor, draft); computeErr != nil {
-			writeError(w, http.StatusConflict, "compute_connection_required", computeErr.Error())
-			return
+		if computeErr := a.validateOptimizationCompute(ctx, actor, draft); computeErr != nil {
+			return campaignApproval{}, &campaignFailure{http.StatusConflict, "compute_connection_required", computeErr.Error()}
 		}
-		covered, costErr := optimizationcampaign.AuthorizeCostCoverage(r.Context(), a.OptimizationCosts, actor.TenantID, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC())
+		covered, costErr := optimizationcampaign.AuthorizeCostCoverage(ctx, a.OptimizationCosts, actor.TenantID, draft, optimizationcampaign.Budget{MaxCostUSD: perCandidateBudget, ExpiresAt: expiresAt}, time.Now().UTC())
 		if costErr != nil {
-			writeError(w, http.StatusUnprocessableEntity, "optimization_cost_authority_rejected", costErr.Error())
-			return
+			return campaignApproval{}, &campaignFailure{http.StatusUnprocessableEntity, "optimization_cost_authority_rejected", costErr.Error()}
 		}
 		replacementsCovered = min(replacementsCovered, covered)
 	}
-	campaign, err := store.ApproveOptimizationCampaign(r.Context(), actor.TenantID, r.PathValue("id"), actor.Name, request.MaxCostUSD, expiresAt)
+	campaign, err := store.ApproveOptimizationCampaign(ctx, actor.TenantID, id, actor.Name, maxCostUSD, expiresAt)
 	if errors.Is(err, domain.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not_found", "optimization run was not found")
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusNotFound, "not_found", "optimization run was not found"}
 	}
 	if errors.Is(err, domain.ErrConflict) {
-		writeError(w, http.StatusConflict, "campaign_state_conflict", "optimization run cannot be approved from its current state")
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusConflict, "campaign_state_conflict", "optimization run cannot be approved from its current state"}
 	}
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_approval", err.Error())
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusUnprocessableEntity, "invalid_approval", err.Error()}
 	}
 	candidateIDs := make([]string, 0, len(campaign.Candidates))
 	for _, candidate := range campaign.Candidates {
 		candidateIDs = append(candidateIDs, candidate.ID)
 	}
 	executionRequest, _ := json.Marshal(optimizationcampaign.ExecuteRequest{TenantID: actor.TenantID, CampaignID: campaign.ID, Candidates: candidateIDs})
-	operation, _, err := a.Store.EnqueueOperation(r.Context(), domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-execute:" + campaign.ID, RequestJSON: string(executionRequest), MaxAttempts: 2000})
+	operation, _, err := a.Store.EnqueueOperation(ctx, domain.Operation{TenantID: actor.TenantID, Kind: optimizationcampaign.ExecuteKind, ResourceType: "optimization_campaign", ResourceName: campaign.ID, IdempotencyKey: "optimization-execute:" + campaign.ID, RequestJSON: string(executionRequest), MaxAttempts: 2000})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "optimization_execution_enqueue_failed", "run was approved but durable execution could not be queued; retry the same approval")
-		return
+		return campaignApproval{}, &campaignFailure{http.StatusInternalServerError, "optimization_execution_enqueue_failed", "run was approved but durable execution could not be queued; retry the same approval"}
 	}
-	_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
-	writeJSON(w, http.StatusAccepted, map[string]any{"campaign": optimizationCampaignResponse(campaign, a.campaignQualityInputs(r.Context(), actor.TenantID, campaign)[campaign.ID]), "execution": "queued", "operation": operationResponse(operation), "provider_mutation": false, "machine_replacements_covered": replacementsCovered})
+	_ = a.Store.Audit(context.WithoutCancel(ctx), domain.AuditEvent{TenantID: actor.TenantID, Actor: actor.Name, Action: "optimization_campaign.approve", ResourceType: "optimization_campaign", ResourceName: campaign.ID, Outcome: "succeeded"})
+	return campaignApproval{campaign: campaign, operation: operation, replacementsCovered: replacementsCovered}, nil
 }
 
 func (a API) cancelOptimizationCampaign(w http.ResponseWriter, r *http.Request) {
@@ -1974,6 +1797,9 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
 	response := map[string]any{"progress": optimizationcampaign.Progress(campaign, time.Now()), "id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
+	if origin, proposed := continualoptimizer.DecodeOrigin(campaign.OriginJSON); proposed {
+		response["origin"] = origin
+	}
 	if recordedOK {
 		response["warnings"] = recorded.Warnings
 		if recorded.Workload != nil {

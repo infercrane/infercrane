@@ -16744,7 +16744,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Evaluate public screening or customer replay evidence and persist a bounded next action",
+        "summary": "Check now: read the deployment's own traffic, prices, and engine and model releases, record a decision, and propose a run that waits for approval",
         "tags": [
           "Inference optimization"
         ]
@@ -16847,6 +16847,53 @@
           }
         ],
         "summary": "Set workload, evidence, experiment budget, reliability, and promotion boundaries",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/deployments/{name}/continual-optimization/suggestions": {
+      "get": {
+        "operationId": "listContinualOptimizationSuggestions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List runs Stay optimized proposed with their reason, expected change, and estimated cost, plus the check schedule and custom-kernel engine pins",
         "tags": [
           "Inference optimization"
         ]

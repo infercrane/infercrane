@@ -92,15 +92,21 @@ func TestContinualOptimizationPolicyRoundTripsWithoutRetiredCanaryFields(t *test
 	}
 }
 
-func TestContinualOptimizationEvaluatesALegacyPolicyWithoutCanaryDecisions(t *testing.T) {
-	store := &continualPolicyStore{fakeStore: &fakeStore{}, policyJSON: legacyContinualPolicy}
-	handler := (API{Store: store, APIKey: "secret"}).Handler()
+func TestContinualOptimizationChecksALegacyPolicyWithoutCanaryDecisions(t *testing.T) {
+	store := newStayOptimizedFake(t, continualoptimizer.Policy{})
+	store.policyJSON = legacyContinualPolicy
+	handler := stayOptimizedAPI(t, store).Handler()
 	request := []byte(`{"public_profile":"public-interactive","economics":{"availability":0.999}}`)
 	response := continualRequest(t, handler, http.MethodPost, "/api/v1/deployments/chat/continual-optimization/evaluate", request)
-	if response.Code != http.StatusCreated || store.decision == nil {
+	if response.Code != http.StatusCreated || len(store.decisions) != 1 {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if store.decision.Action != continualoptimizer.ActionScreenPublicPrior || store.decision.PromotionEligible || strings.Contains(response.Body.String(), "automatic_promotion") || strings.Contains(response.Body.String(), "canary") {
-		t.Fatalf("decision=%+v body=%s", store.decision, response.Body.String())
+	if strings.Contains(response.Body.String(), "automatic_promotion") || strings.Contains(response.Body.String(), "canary") {
+		t.Fatalf("decision=%+v body=%s", store.decisions[0], response.Body.String())
+	}
+	// The economics the old dashboard sent are ignored: availability stays
+	// unknown instead of taking the posted value.
+	if !strings.Contains(strings.Join(store.decisions[0].UnknownEvidence, ","), "availability") {
+		t.Fatalf("posted economics were used: %+v", store.decisions[0])
 	}
 }
