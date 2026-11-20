@@ -123,6 +123,14 @@ func (g *Gateway) Handler() (http.Handler, error) {
 		FlushInterval: -1,
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The transport can still be reading the request body after the
+		// server's response has started: it sends the body while it waits
+		// for the response, and for a body of known length it reads once
+		// more past the end. By default an HTTP/1 server closes the request
+		// body when the response headers go out, which fails that read and
+		// makes the transport close the connection under the response.
+		// Full duplex keeps the body readable until this handler returns.
+		_ = http.NewResponseController(w).EnableFullDuplex()
 		operation := operationFor(r)
 		if operation == "" {
 			proxy.ServeHTTP(w, r)
@@ -134,8 +142,13 @@ func (g *Gateway) Handler() (http.Handler, error) {
 			buffered, readErr := io.ReadAll(io.LimitReader(r.Body, maxParsedRequestBytes+1))
 			if readErr == nil && len(buffered) <= maxParsedRequestBytes {
 				info = g.inspectRequest(buffered, r.Header)
+				// The whole body is in memory: forward that copy, so the
+				// request sent upstream no longer depends on the server's
+				// body at all.
+				r.Body = io.NopCloser(bytes.NewReader(buffered))
+			} else {
+				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buffered), r.Body))
 			}
-			r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buffered), r.Body))
 		}
 		observer := &responseObserver{ResponseWriter: w, gateway: g}
 		local := *proxy
@@ -144,12 +157,18 @@ func (g *Gateway) Handler() (http.Handler, error) {
 			rw.WriteHeader(http.StatusBadGateway)
 			_, _ = rw.Write([]byte(`{"error":{"message":"the local model server did not answer","type":"server_error"}}`))
 		}
-		// A client that disconnects mid-stream makes the proxy abort with
-		// http.ErrAbortHandler; the request is still recorded.
+		// The proxy aborts with http.ErrAbortHandler when copying a started
+		// response fails; the request is still recorded. Only a client that
+		// went away is a cancellation: otherwise the server's response broke
+		// off, and its token counts stay unknown.
 		defer func() {
 			recovered := recover()
 			if recovered != nil && observer.errorType == "" {
-				observer.errorType = "client_cancelled"
+				if observer.clientGone || r.Context().Err() != nil {
+					observer.errorType = "client_cancelled"
+				} else {
+					observer.errorType = "upstream_disconnect"
+				}
 			}
 			g.record(operation, started, info, observer)
 			if recovered != nil {
@@ -232,6 +251,8 @@ type responseObserver struct {
 	body        []byte
 	errorType   string
 	streaming   bool
+	// clientGone is set when writing to the client failed.
+	clientGone bool
 }
 
 func (o *responseObserver) WriteHeader(status int) {
@@ -255,7 +276,11 @@ func (o *responseObserver) Write(p []byte) (int, error) {
 		}
 		o.body = append(o.body, p[:remaining]...)
 	}
-	return o.ResponseWriter.Write(p)
+	n, err := o.ResponseWriter.Write(p)
+	if err != nil {
+		o.clientGone = true
+	}
+	return n, err
 }
 
 func (o *responseObserver) Flush() {

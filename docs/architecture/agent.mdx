@@ -182,8 +182,10 @@ the gateway instead of the server. Every request and response passes through unc
 the application's own `Authorization` header; the agent never adds the server key it holds. For
 `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, and `/v1/responses`, the gateway reads
 the model name, the streaming flag, and token usage on the machine, and records only the shape listed
-above. Give it a loopback address; any other address exposes the gateway, and the server behind it,
-to the network.
+above. A response that breaks off is still recorded: as `client_cancelled` when the application
+disconnected, as `upstream_disconnect` when the server stopped answering. Its token counts stay
+unknown unless the usage arrived before the break. Give it a loopback address; any other address
+exposes the gateway, and the server behind it, to the network.
 
 ## Upgrade and revocation
 

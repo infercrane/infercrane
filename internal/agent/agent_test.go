@@ -232,12 +232,17 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 			t.Fatalf("post: %v %v", response, err)
 		}
 		// Read to the end: closing a stream early is a client cancellation.
-		_, _ = io.ReadAll(response.Body)
+		_, readErr := io.ReadAll(response.Body)
 		response.Body.Close()
+		if readErr != nil {
+			t.Fatalf("the gateway cut the response short: %v", readErr)
+		}
 	}
-	if response, err := http.Get(server.URL + "/v1/models"); err != nil || response.StatusCode != http.StatusOK {
+	response, err := http.Get(server.URL + "/v1/models")
+	if err != nil || response.StatusCode != http.StatusOK {
 		t.Fatalf("models pass-through: %v %v", response, err)
 	}
+	response.Body.Close()
 	// Each shape is recorded after its response is written, so two
 	// back-to-back requests may be recorded in either order.
 	deadline := time.Now().Add(5 * time.Second)
@@ -261,18 +266,16 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 		t.Fatalf("hashes and streaming: %+v", recorded)
 	}
 	for _, shape := range recorded {
-		if *shape.InputTokens != 12 || *shape.OutputTokens != 5 || shape.TTFTMS == nil || shape.Operation != "chat" || shape.RequestModel != "Qwen/Qwen3-8B" {
-			t.Fatalf("shape: %+v", shape)
-		}
-		if err := shape.Validate(); err != nil {
-			t.Fatalf("shape invalid: %v", err)
+		checkCompleteShape(t, shape, 12, 5)
+		if shape.Operation != "chat" || shape.RequestModel != "Qwen/Qwen3-8B" {
+			t.Fatalf("shape: %s", describeShape(shape))
 		}
 	}
 	if other := (&Gateway{HashKey: []byte("another machine")}).digest([]byte("x")); other == (&Gateway{HashKey: []byte("machine-secret")}).digest([]byte("x")) {
 		t.Fatal("hashes do not depend on the machine's secret")
 	}
 	engine.Close()
-	response, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[]}`))
+	response, err = http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","messages":[]}`))
 	if err != nil || response.StatusCode != http.StatusBadGateway {
 		t.Fatalf("upstream down: %v %v", response, err)
 	}
@@ -284,6 +287,169 @@ func TestGatewayRecordsShapesWithoutContent(t *testing.T) {
 	}
 	if failed := shapes.take(10); len(failed) != 1 || failed[0].ErrorType != "upstream_unreachable" || failed[0].StatusCode != http.StatusBadGateway {
 		t.Fatalf("failure shape: %+v", failed)
+	}
+}
+
+// describeShape prints a shape's optional numbers as values, or "unknown".
+func describeShape(shape agentprotocol.TrafficShape) string {
+	tokens := func(value *int) string {
+		if value == nil {
+			return "unknown"
+		}
+		return fmt.Sprint(*value)
+	}
+	ttft := "unknown"
+	if shape.TTFTMS != nil {
+		ttft = fmt.Sprint(*shape.TTFTMS)
+	}
+	return fmt.Sprintf("operation=%s model=%q status=%d streaming=%t error=%q input_tokens=%s output_tokens=%s ttft_ms=%s",
+		shape.Operation, shape.RequestModel, shape.StatusCode, shape.Streaming, shape.ErrorType, tokens(shape.InputTokens), tokens(shape.OutputTokens), ttft)
+}
+
+// checkCompleteShape fails, without dereferencing, unless a request finished
+// cleanly and its token counts were read.
+func checkCompleteShape(t *testing.T, shape agentprotocol.TrafficShape, input, output int) {
+	t.Helper()
+	if shape.ErrorType != "" || shape.StatusCode != http.StatusOK {
+		t.Fatalf("request did not finish cleanly: %s", describeShape(shape))
+	}
+	if shape.InputTokens == nil || shape.OutputTokens == nil || shape.TTFTMS == nil {
+		t.Fatalf("token counts or time to first byte missing from a complete response: %s", describeShape(shape))
+	}
+	if *shape.InputTokens != input || *shape.OutputTokens != output {
+		t.Fatalf("token counts: want %d/%d, got %s", input, output, describeShape(shape))
+	}
+	if err := shape.Validate(); err != nil {
+		t.Fatalf("shape invalid: %v", err)
+	}
+}
+
+// lateBodyTransport answers before it has finished with the request body, the
+// way http.Transport can: it sends the body while waiting for the response,
+// and for a body of known length it reads once more past the end. Here that
+// last read waits until the client already has the response headers, and a
+// failed read breaks the response off, as http.Transport does when it closes
+// the connection.
+type lateBodyTransport struct {
+	headersSeen chan struct{}
+	bodyErr     chan error
+	answer      string
+}
+
+func (l *lateBodyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if _, err := io.CopyN(io.Discard, r.Body, r.ContentLength); err != nil {
+		return nil, err
+	}
+	reader, writer := io.Pipe()
+	go func() {
+		<-l.headersSeen
+		_, err := io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+		l.bodyErr <- err
+		if err != nil {
+			_ = writer.CloseWithError(err)
+			return
+		}
+		_, _ = io.WriteString(writer, l.answer)
+		_ = writer.Close()
+	}()
+	return &http.Response{StatusCode: http.StatusOK, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader, ContentLength: -1, Request: r}, nil
+}
+
+func TestGatewayKeepsRequestBodyReadableAfterTheResponseStarts(t *testing.T) {
+	for _, item := range []struct{ name, path string }{
+		{"recorded inference request", "/v1/chat/completions"},
+		{"other request passed through", "/tokenize"},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			upstream := &lateBodyTransport{headersSeen: make(chan struct{}), bodyErr: make(chan error, 1),
+				answer: "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":5}}\n\ndata: [DONE]\n\n"}
+			shapes := &shapeBuffer{}
+			handler, err := (&Gateway{Upstream: "http://127.0.0.1:1", ServerKey: "127.0.0.1-8000", HashKey: []byte("k"), Shapes: shapes, Transport: upstream}).Handler()
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			response, err := http.Post(server.URL+item.path, "application/json", strings.NewReader(`{"model":"m","stream":true,"messages":[]}`))
+			if err != nil || response.StatusCode != http.StatusOK {
+				t.Fatalf("post: %v %v", response, err)
+			}
+			close(upstream.headersSeen)
+			body, readErr := io.ReadAll(response.Body)
+			response.Body.Close()
+			if err := <-upstream.bodyErr; err != nil {
+				t.Fatalf("the request body was closed while the request was still being sent upstream: %v", err)
+			}
+			if readErr != nil || string(body) != upstream.answer {
+				t.Fatalf("response cut short: %q %v", body, readErr)
+			}
+			if item.path != "/v1/chat/completions" {
+				return
+			}
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				if pending, _ := shapes.stats(); pending > 0 {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			recorded := shapes.take(10)
+			if len(recorded) != 1 {
+				t.Fatalf("shapes: %d", len(recorded))
+			}
+			checkCompleteShape(t, recorded[0], 12, 5)
+		})
+	}
+}
+
+func TestGatewayRecordsABrokenOffResponseAsUpstreamDisconnect(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n"))
+		w.(http.Flusher).Flush()
+		// The server goes away before the usage chunk.
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer upstream.Close()
+	shapes := &shapeBuffer{}
+	handler, err := (&Gateway{Upstream: upstream.URL, ServerKey: "127.0.0.1-8000", HashKey: []byte("k"), Shapes: shapes}).Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	response, err := http.Post(server.URL+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"m","stream":true,"messages":[]}`))
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("post: %v %v", response, err)
+	}
+	if _, err := io.ReadAll(response.Body); err == nil {
+		t.Fatal("a broken-off response reached the client as complete")
+	}
+	response.Body.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pending, _ := shapes.stats(); pending > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	recorded := shapes.take(10)
+	if len(recorded) != 1 {
+		t.Fatalf("shapes: %d", len(recorded))
+	}
+	shape := recorded[0]
+	// The client did not cancel, and the usage never arrived: the token
+	// counts stay unknown rather than zero.
+	if shape.ErrorType != "upstream_disconnect" || shape.StatusCode != http.StatusOK || !shape.Streaming || shape.InputTokens != nil || shape.OutputTokens != nil {
+		t.Fatalf("broken-off response: %s", describeShape(shape))
+	}
+	if err := shape.Validate(); err != nil {
+		t.Fatalf("recorded shape would be refused: %v", err)
 	}
 }
 
