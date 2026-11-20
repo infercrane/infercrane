@@ -3,6 +3,7 @@ package routes
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -151,11 +152,181 @@ func TestWeightedEndpointSelectionIsDeterministic(t *testing.T) {
 		selected = append(selected, route.BindingID)
 		release()
 	}
-	want := []string{"a", "a", "b", "a", "a", "b"}
+	want := []string{"a", "b", "a", "a", "b", "a"}
 	for index := range want {
 		if selected[index] != want[index] {
 			t.Fatalf("selection = %#v, want %#v", selected, want)
 		}
+	}
+}
+
+func weightedPair(first, second int) []Snapshot {
+	return []Snapshot{
+		{TenantID: "tenant", Alias: "model", BindingID: "a", RouterProcessID: "a-g1", RoutingWeight: first},
+		{TenantID: "tenant", Alias: "model", BindingID: "b", RouterProcessID: "b-g1", RoutingWeight: second},
+	}
+}
+
+func acquireBinding(t *testing.T, directory *Directory) string {
+	t.Helper()
+	route, release, ok := directory.AcquireForTenant("tenant", "model")
+	if !ok {
+		t.Fatal("endpoint route unavailable")
+	}
+	release()
+	return route.BindingID
+}
+
+func TestWeightedEndpointInterleavesLargeWeights(t *testing.T) {
+	for _, tc := range []struct {
+		first, second, window int
+	}{
+		{first: 9000, second: 1000, window: 10},
+		{first: 9500, second: 500, window: 20},
+		{first: 19, second: 1, window: 20},
+		{first: 7000, second: 3000, window: 10},
+	} {
+		directory := New()
+		directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: weightedPair(tc.first, tc.second)})
+		total := tc.first + tc.second
+		selected := make([]string, total)
+		for index := range selected {
+			selected[index] = acquireBinding(t, directory)
+		}
+		perWindow := tc.window * tc.second / total
+		for start := 0; start+tc.window <= len(selected); start++ {
+			count := 0
+			for _, binding := range selected[start : start+tc.window] {
+				if binding == "b" {
+					count++
+				}
+			}
+			if count != perWindow {
+				t.Fatalf("%d:%d window at %d sent %d of %d requests to b, want %d", tc.first, tc.second, start, count, tc.window, perWindow)
+			}
+		}
+		count := 0
+		for _, binding := range selected {
+			if binding == "b" {
+				count++
+			}
+		}
+		if count != tc.second {
+			t.Fatalf("%d:%d sent %d of %d requests to b", tc.first, tc.second, count, total)
+		}
+	}
+}
+
+func TestWeightedRepublicationKeepsInterleaving(t *testing.T) {
+	directory := New()
+	routes := weightedPair(9000, 1000)
+	counts := map[string]int{}
+	for index := range 100 {
+		// The reconciler republishes every pass, often between two requests,
+		// and a router restart publishes a new generation of the same binding.
+		published := append([]Snapshot(nil), routes...)
+		published[0].RouterProcessID = "a-g" + string(rune('1'+index%2))
+		directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: published})
+		counts[acquireBinding(t, directory)]++
+	}
+	if counts["a"] != 90 || counts["b"] != 10 {
+		t.Fatalf("republication restarted the interleaving: %#v", counts)
+	}
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: weightedPair(1, 1)})
+	if first, second := acquireBinding(t, directory), acquireBinding(t, directory); first != "a" || second != "b" {
+		t.Fatalf("changed weights did not start a new sequence: %s then %s", first, second)
+	}
+}
+
+func TestWeightedSelectionKeepsExactShareUnderConcurrency(t *testing.T) {
+	directory := New()
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: weightedPair(9000, 1000)})
+	var mu sync.Mutex
+	counts := map[string]int{}
+	var wait sync.WaitGroup
+	for range 20 {
+		wait.Go(func() {
+			for range 500 {
+				route, release, ok := directory.AcquireForTenant("tenant", "model")
+				if !ok {
+					t.Error("endpoint route unavailable")
+					return
+				}
+				mu.Lock()
+				counts[route.BindingID]++
+				mu.Unlock()
+				release()
+			}
+		})
+	}
+	wait.Go(func() {
+		for range 200 {
+			directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "weighted", Routes: weightedPair(9000, 1000)})
+		}
+	})
+	wait.Wait()
+	if counts["a"] != 9000 || counts["b"] != 1000 {
+		t.Fatalf("concurrent selection share = %#v", counts)
+	}
+}
+
+func TestPrimaryFallbackAcquiresNextUntriedRoute(t *testing.T) {
+	directory := New()
+	primary := Snapshot{TenantID: "tenant", Alias: "model", DeploymentID: "owned", BindingID: "primary", RouterProcessID: "owned-g1"}
+	secondary := Snapshot{TenantID: "tenant", Alias: "model", DeploymentID: "spare", BindingID: "secondary", RouterProcessID: "spare-g1"}
+	closed := Snapshot{TenantID: "tenant", Alias: "model", BindingID: "closed-api", RouterURL: "https://api.example.test/v1"}
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "primary-fallback", Routes: []Snapshot{primary, secondary, closed}})
+	first, releaseFirst, ok := directory.AcquireForTenant("tenant", "model")
+	if !ok || first.BindingID != "primary" {
+		t.Fatalf("first route = %#v", first)
+	}
+	defer releaseFirst()
+	next, releaseNext, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first})
+	if !ok || next.BindingID != "secondary" {
+		t.Fatalf("fallback after primary = %#v ok=%t", next, ok)
+	}
+	if pending := directory.inflight[routeID(secondary)]; pending != 1 {
+		t.Fatalf("fallback route was not pinned: in flight %d", pending)
+	}
+	releaseNext()
+	last, releaseLast, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first, next})
+	if !ok || last.BindingID != "closed-api" {
+		t.Fatalf("fallback after two failures = %#v ok=%t", last, ok)
+	}
+	releaseLast()
+	if _, _, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first, next, last}); ok {
+		t.Fatal("fallback returned a route the request already tried")
+	}
+
+	// A new generation of the failed binding is still that binding.
+	restarted := primary
+	restarted.RouterProcessID = "owned-g2"
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "primary-fallback", Routes: []Snapshot{restarted, closed}})
+	if route, release, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first}); !ok || route.BindingID != "closed-api" {
+		t.Fatalf("fallback retried the failed binding's new generation: %#v ok=%t", route, ok)
+	} else {
+		release()
+	}
+
+	// Once the reconciler has withdrawn the failed primary, the fallback is
+	// the first published route.
+	directory.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: "primary-fallback", Routes: []Snapshot{closed}})
+	if route, release, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first}); !ok || route.BindingID != "closed-api" {
+		t.Fatalf("fallback after withdrawal = %#v ok=%t", route, ok)
+	} else {
+		release()
+	}
+
+	for _, policy := range []string{"manual", "weighted"} {
+		other := New()
+		other.PublishEndpoint(EndpointRoute{TenantID: "tenant", Alias: "model", RoutingPolicy: policy, Routes: []Snapshot{primary, closed}})
+		if route, _, ok := other.AcquireFallbackForTenant("tenant", "model", []Snapshot{primary}); ok {
+			t.Fatalf("%s endpoint failed over to %#v", policy, route)
+		}
+	}
+	directory.RemoveEndpointForTenant("tenant", "model")
+	if _, _, ok := directory.AcquireFallbackForTenant("tenant", "model", []Snapshot{first}); ok {
+		t.Fatal("removed endpoint failed over")
 	}
 }
 

@@ -14,6 +14,8 @@ plan, and an update to this document in the same pull request.
   removes the usage-only chunk that adds, so the caller receives the stream it asked for.
 - Server write timeouts remain disabled for long-lived inference streams.
 - Retries are not duplicated between gateway and router.
+- A request moves to another binding only before any response byte reaches the caller, never
+  while streaming, and never away from a paid external binding.
 - A control-plane route may hand a principal it has already authenticated to the gateway
   (`POST /api/v1/playground/chat/completions`). Authentication for `/v1/*` is unchanged, and
   routing the handed-over request reads no PostgreSQL.
