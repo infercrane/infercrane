@@ -1773,6 +1773,53 @@
         ],
         "type": "object"
       },
+      "AuditEventList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Page size served, after clamping the requested limit to 1 through 500.",
+            "type": "integer"
+          },
+          "next": {
+            "description": "Query values for the next page when this page is full; null otherwise.",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "before": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "before_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "before",
+                  "before_id"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "limit",
+          "next"
+        ],
+        "type": "object"
+      },
       "AutopilotPlanRequest": {
         "properties": {
           "objective": {
@@ -10806,10 +10853,67 @@
         "properties": {
           "report": {
             "$ref": "#/components/schemas/OptimizationCampaignReport"
+          },
+          "signature": {
+            "description": "Ed25519 signature of a finished run's report by the control plane's passport signing key; null before the run finishes or without a key, never made up. Verify a saved response with `infercrane optimize report verify FILE`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationCampaignReportSignature"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unsigned_reason": {
+            "description": "Why signature is null; absent when the report is signed.",
+            "enum": [
+              "run_not_finished",
+              "signing_key_not_configured"
+            ],
+            "type": "string"
           }
         },
         "required": [
-          "report"
+          "report",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "OptimizationCampaignReportSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm": {
+            "enum": [
+              "Ed25519-SHA256"
+            ],
+            "type": "string"
+          },
+          "digest": {
+            "description": "The report's report_digest: SHA-256 of the compact report JSON with report_digest emptied.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "key_id": {
+            "description": "sha256: and the first 8 bytes of the SHA-256 of the public key; the same key ID Inference Passports carry.",
+            "pattern": "^sha256:[0-9a-f]{16}$",
+            "type": "string"
+          },
+          "public_key": {
+            "description": "Base64 Ed25519 public key. Compare it, or its key ID, with the key the control plane's operator publishes.",
+            "type": "string"
+          },
+          "signature": {
+            "description": "Base64 Ed25519 signature over the 32 digest bytes.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "algorithm",
+          "key_id",
+          "public_key",
+          "digest",
+          "signature"
         ],
         "type": "object"
       },
@@ -14703,12 +14807,43 @@
     "/api/v1/audit-events": {
       "get": {
         "operationId": "listAuditEvents",
+        "parameters": [
+          {
+            "description": "Events per page. Missing or below 1 returns 100; above 500 returns 500.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "RFC3339 time; returns events older than it. With before_id, the position of the last event already read: pass next.before and next.before_id from the previous page.",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ID of the last event already read. Requires before; together they also return the remaining events that share before's timestamp.",
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ObjectList"
+                  "$ref": "#/components/schemas/AuditEventList"
                 }
               }
             },
@@ -14730,7 +14865,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List tenant audit events",
+        "summary": "List tenant audit events, newest first",
         "tags": [
           "Audit"
         ]

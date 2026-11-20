@@ -50,3 +50,5 @@ Evidence
 Unknown, never estimated
   Answer quality: your current setup is kept, so answer quality is unchanged
   Bottleneck signals: the serving engine's metrics were not scraped while it was measured
+
+Signed by key sha256:fe812c12f3ab4ce6 — verify with infercrane optimize report verify FILE, where FILE is this report saved with --output json.

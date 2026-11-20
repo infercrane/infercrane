@@ -212,6 +212,10 @@ var commandExamples = map[string]string{
   # Show what a finished run changed in cost, speed, and quality, and save a shareable page
   infercrane optimize report RUN_ID --html result.html
 
+  # Save the signed report and check its signature offline
+  infercrane optimize report RUN_ID --output json > report.json
+  infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+
   # Roll out the winning setup of a run
   infercrane optimize activate RUN_ID --candidate SETUP_ID
 
@@ -248,7 +252,8 @@ answer quality. Nothing changes in production until you roll out a winner.
   approve   approve a spend cap and an expiry so the run can start
   watch     follow a run live
   results   show the measured comparison and the decision
-  report    show what a finished run changed in cost, speed, and answer quality
+  report    show what a finished run changed in cost, speed, and answer quality;
+            report verify FILE checks the signature of a saved report
   activate  roll out the winning setup, named with --candidate SETUP_ID
   cancel    stop a run and remove its measurement servers`,
 }

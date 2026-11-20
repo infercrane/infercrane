@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/optimizationreport"
+	"github.com/infercrane/infercrane/internal/passport"
 )
 
 // cliReport is a finished CPU campaign as the control plane returns it.
@@ -25,16 +30,31 @@ func cliReport() optimizationreport.Report {
 			{Key: optimizationreport.MetricCostPerMillion, Label: "Cost per 1M output tokens", Baseline: &baseline, Winner: &winner, ChangePercent: &change, NoiseFloorPercent: &floor, Decision: optimizationreport.DecisionImproved, Basis: optimizationreport.BasisInterleaved},
 			{Key: optimizationreport.MetricTTFTP95, Label: "p95 time to first token", Baseline: &ttftBase, Winner: &ttftWin, Decision: optimizationreport.DecisionUnknown, Basis: optimizationreport.BasisUnknown, Reason: "ttft_p95_ms was not comparable between the interleaved runs"},
 		},
-		Quality:      optimizationreport.Quality{Verdict: "UNKNOWN", Basis: optimizationreport.BasisUnknown, Evals: []optimizationreport.QualityEval{}, Reason: "no signed quality evidence was found for the winner"},
-		Noise:        optimizationreport.Noise{Basis: optimizationreport.BasisUnknown, ObjectiveDecision: optimizationreport.DecisionUnknown, Reason: "the control was not measured alongside the winner"},
-		Monthly:      optimizationreport.Monthly{Basis: optimizationreport.BasisUnknown, HoursPerMonth: optimizationreport.HoursPerMonth, Decision: optimizationreport.DecisionUnknown, Reason: "the campaign did not replay your traffic, so there is no traffic volume to project"},
-		Workload:     optimizationreport.Workload{Source: "synthetic_profile"},
-		Candidates:   []optimizationreport.CandidateResult{},
-		Bottleneck:   optimizationreport.Bottleneck{State: "unknown", Source: optimizationreport.BasisEngineMetrics, GPUTelemetry: "not_collected", Signals: []optimizationreport.EngineSignal{}},
-		Appendix:     optimizationreport.Appendix{Evidence: []optimizationreport.EvidenceDigest{}},
-		Unknown:      []string{"metrics.ttft_p95_ms", "quality.verdict", "noise", "monthly", "bottleneck"},
-		ReportDigest: "sha256:" + strings.Repeat("f", 64),
+		Quality:    optimizationreport.Quality{Verdict: "UNKNOWN", Basis: optimizationreport.BasisUnknown, Evals: []optimizationreport.QualityEval{}, Reason: "no signed quality evidence was found for the winner"},
+		Noise:      optimizationreport.Noise{Basis: optimizationreport.BasisUnknown, ObjectiveDecision: optimizationreport.DecisionUnknown, Reason: "the control was not measured alongside the winner"},
+		Monthly:    optimizationreport.Monthly{Basis: optimizationreport.BasisUnknown, HoursPerMonth: optimizationreport.HoursPerMonth, Decision: optimizationreport.DecisionUnknown, Reason: "the campaign did not replay your traffic, so there is no traffic volume to project"},
+		Workload:   optimizationreport.Workload{Source: "synthetic_profile"},
+		Candidates: []optimizationreport.CandidateResult{},
+		Bottleneck: optimizationreport.Bottleneck{State: "unknown", Source: optimizationreport.BasisEngineMetrics, GPUTelemetry: "not_collected", Signals: []optimizationreport.EngineSignal{}},
+		Appendix:   optimizationreport.Appendix{Evidence: []optimizationreport.EvidenceDigest{}},
+		Unknown:    []string{"metrics.ttft_p95_ms", "quality.verdict", "noise", "monthly", "bottleneck"},
 	}
+}
+
+// signedCLIReport is cliReport as the control plane serves it: with its real
+// report digest, signed by key.
+func signedCLIReport(t *testing.T, key ed25519.PrivateKey) []byte {
+	t.Helper()
+	report := cliReport()
+	unsigned, _ := json.Marshal(report)
+	sum := sha256.Sum256(unsigned)
+	report.ReportDigest = "sha256:" + hex.EncodeToString(sum[:])
+	document, err := optimizationreport.Sign(report, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(document)
+	return body
 }
 
 func serveReport(t *testing.T, body []byte) {
@@ -55,8 +75,7 @@ func serveReport(t *testing.T, body []byte) {
 }
 
 func TestOptimizeReportPrintsOutcomesWithBannerAndUnknowns(t *testing.T) {
-	body, _ := json.Marshal(map[string]any{"report": cliReport()})
-	serveReport(t, body)
+	serveReport(t, signedCLIReport(t, fixtureSigningKey))
 	output, err := captureStdout(t, func() error { return optimizeReportCommand(t.Context(), []string{"campaign-1"}) })
 	if err != nil {
 		t.Fatal(err)
@@ -65,15 +84,16 @@ func TestOptimizeReportPrintsOutcomesWithBannerAndUnknowns(t *testing.T) {
 	if banner < 0 || headline < banner || cost < headline || unknown < cost {
 		t.Fatalf("report text is missing the banner, the outcome, or the unknowns, or is out of order:\n%s", output)
 	}
-	for _, want := range []string{"−23.1%", "better  noise ±4.0%", "└ ttft_p95_ms was not comparable", "Monthly cost: the campaign did not replay your traffic"} {
+	signed := "Signed by key " + passport.KeyID(fixtureSigningKey.Public().(ed25519.PublicKey)) + " — verify with infercrane optimize report verify FILE"
+	for _, want := range []string{"−23.1%", "better  noise ±4.0%", "└ ttft_p95_ms was not comparable", "Monthly cost: the campaign did not replay your traffic", signed} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("report text lacks %q:\n%s", want, output)
 		}
 	}
 }
 
-func TestOptimizeReportJSONIsTheControlPlaneReport(t *testing.T) {
-	body, _ := json.Marshal(map[string]any{"report": cliReport()})
+func TestOptimizeReportJSONIsTheSignedControlPlaneReport(t *testing.T) {
+	body := signedCLIReport(t, fixtureSigningKey)
 	serveReport(t, body)
 	output, err := captureStdout(t, func() error {
 		return optimizeReportCommand(t.Context(), []string{"campaign-1", "--output", "json"})
@@ -81,27 +101,83 @@ func TestOptimizeReportJSONIsTheControlPlaneReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var printed, sent map[string]any
+	var printed struct {
+		Report    map[string]any                `json:"report"`
+		Signature *optimizationreport.Signature `json:"signature"`
+	}
 	if err = json.Unmarshal([]byte(output), &printed); err != nil {
 		t.Fatalf("json output is not JSON: %v\n%s", err, output)
 	}
-	var envelope struct {
-		Report json.RawMessage `json:"report"`
+	var sent optimizationreport.Document
+	_ = json.Unmarshal(body, &sent)
+	if printed.Report["report_digest"] != sent.Report.ReportDigest || printed.Report["simulated_accelerator"] != true || printed.Report["banner"] != optimizationreport.CPUBanner {
+		t.Fatalf("json output changed the report: %v", printed.Report)
 	}
-	_ = json.Unmarshal(body, &envelope)
-	_ = json.Unmarshal(envelope.Report, &sent)
-	if printed["report_digest"] != sent["report_digest"] || printed["simulated_accelerator"] != true || printed["banner"] != optimizationreport.CPUBanner {
-		t.Fatalf("json output changed the report: %v", printed)
+	if printed.Signature == nil || *printed.Signature != *sent.Signature {
+		t.Fatalf("json output dropped or changed the signature: %+v", printed.Signature)
 	}
-	metrics := printed["metrics"].([]any)
+	metrics := printed.Report["metrics"].([]any)
 	if ttft := metrics[1].(map[string]any); ttft["change_percent"] != nil || ttft["decision"] != "unknown" {
 		t.Fatalf("an unknown change was not kept as null: %v", ttft)
 	}
 }
 
+func TestOptimizeReportVerifyChecksASavedReport(t *testing.T) {
+	serveReport(t, signedCLIReport(t, fixtureSigningKey))
+	output, err := captureStdout(t, func() error {
+		return optimizeReportCommand(t.Context(), []string{"campaign-1", "--output", "json"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	saved := filepath.Join(dir, "report.json")
+	if err = os.WriteFile(saved, []byte(output), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trusted := base64.StdEncoding.EncodeToString(fixtureSigningKey.Public().(ed25519.PublicKey))
+	keyID := passport.KeyID(fixtureSigningKey.Public().(ed25519.PublicKey))
+	verify := func(args ...string) (string, error) {
+		return captureStdout(t, func() error { return optimizeReportCommand(t.Context(), append([]string{"verify"}, args...)) })
+	}
+	if printed, err := verify(saved); err != nil || !strings.Contains(printed, "VERIFIED  sha256:") || !strings.Contains(printed, "Run       campaign-1") || !strings.Contains(printed, keyID+" (compare it with your operator's key") {
+		t.Fatalf("untouched report: %q err=%v", printed, err)
+	}
+	if printed, err := verify(saved, "--public-key", trusted); err != nil || !strings.Contains(printed, keyID+" (matches --public-key)") {
+		t.Fatalf("pinned report: %q err=%v", printed, err)
+	}
+	_, other, _ := passport.GenerateKey()
+	if _, err := verify(saved, "--public-key", base64.StdEncoding.EncodeToString(other.Public().(ed25519.PublicKey))); err == nil || !strings.Contains(err.Error(), "not the key you trust") {
+		t.Fatalf("another trusted key: err=%v", err)
+	}
+	changed := filepath.Join(dir, "changed.json")
+	if err = os.WriteFile(changed, []byte(strings.Replace(output, "Qwen/Qwen3-0.6B", "Qwen/Qwen3-0.7B", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verify(changed); err == nil || !strings.Contains(err.Error(), "report verification failed") {
+		t.Fatalf("changed report: err=%v", err)
+	}
+	unsigned := filepath.Join(dir, "unsigned.json")
+	document, _ := optimizationreport.Sign(cliReport(), nil)
+	body, _ := json.Marshal(document)
+	if err = os.WriteFile(unsigned, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verify(unsigned); err == nil || !strings.Contains(err.Error(), "not signed: this control plane has no signing key") {
+		t.Fatalf("unsigned report: err=%v", err)
+	}
+	for _, args := range [][]string{{}, {"--public-key", trusted}, {saved, "extra"}, {saved, "--public-key", "not-a-key"}} {
+		if _, err := verify(args...); err == nil {
+			t.Fatalf("args %v verified", args)
+		}
+	}
+	if _, err := verify(filepath.Join(dir, "missing.json")); err == nil {
+		t.Fatal("a missing file verified")
+	}
+}
+
 func TestOptimizeReportWritesSelfContainedHTML(t *testing.T) {
-	body, _ := json.Marshal(map[string]any{"report": cliReport()})
-	serveReport(t, body)
+	serveReport(t, signedCLIReport(t, fixtureSigningKey))
 	path := filepath.Join(t.TempDir(), "result.html")
 	output, err := captureStdout(t, func() error {
 		return optimizeReportCommand(t.Context(), []string{"campaign-1", "--output", "json", "--html", path})
@@ -121,6 +197,9 @@ func TestOptimizeReportWritesSelfContainedHTML(t *testing.T) {
 	}
 	if bytes.Index(page, []byte("Cost per 1M output tokens")) > bytes.Index(page, []byte("How it was measured")) {
 		t.Fatal("HTML report does not lead with outcome cards")
+	}
+	if !bytes.Contains(page, []byte("Signed by key "+passport.KeyID(fixtureSigningKey.Public().(ed25519.PublicKey))+" — verify with infercrane optimize report verify FILE")) {
+		t.Fatalf("HTML report does not name its signing key:\n%s", page)
 	}
 }
 

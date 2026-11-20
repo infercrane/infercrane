@@ -252,7 +252,7 @@ var Routes = []Route{
 	{"POST", "/admin/billing/reservations/{id}/settlement", "settleManagedUsage", "Billing administration", "Settle a reservation from externally verified token usage", "ManagedUsageSettlement", "ManagedUsageReservationEnvelope", 200, true},
 	{"POST", "/admin/billing/reservations/{id}/release", "releaseManagedUsage", "Billing administration", "Release a reservation after external non-billing is verified", "ManagedUsageRelease", "Object", 200, true},
 	{"GET", "/orphans", "listOrphans", "Infrastructure", "List orphaned provider resources", "", "ObjectList", 200, false},
-	{"GET", "/audit-events", "listAuditEvents", "Audit", "List tenant audit events", "", "ObjectList", 200, false},
+	{"GET", "/audit-events", "listAuditEvents", "Audit", "List tenant audit events, newest first", "", "AuditEventList", 200, false},
 	{"PUT", "/tenant/quota", "setTenantQuota", "Identity", "Set tenant safety quotas", "Object", "Empty", 204, false},
 	{"POST", "/tenants", "createTenant", "Identity", "Create a tenant", "Object", "Object", 201, false},
 	{"POST", "/principals", "createPrincipal", "Identity", "Create a scoped service account", "Object", "Object", 201, false},
@@ -301,6 +301,9 @@ func Document() (map[string]any, error) {
 		}
 		if route.Path == "/catalog/hugging-face/search" {
 			parameters = append(parameters, huggingFaceSearchQueryParameters()...)
+		}
+		if route.Path == "/audit-events" {
+			parameters = append(parameters, auditEventQueryParameters()...)
 		}
 		if route.Path == "/endpoints/{name}/gpu-profiles/compare" {
 			parameters = append(parameters,
@@ -420,6 +423,14 @@ func gpuPriceQueryParameters(public bool) []map[string]any {
 	}
 }
 
+func auditEventQueryParameters() []map[string]any {
+	return []map[string]any{
+		{"name": "limit", "in": "query", "required": false, "description": "Events per page. Missing or below 1 returns 100; above 500 returns 500.", "schema": map[string]any{"type": "integer", "default": 100}},
+		{"name": "before", "in": "query", "required": false, "description": "RFC3339 time; returns events older than it. With before_id, the position of the last event already read: pass next.before and next.before_id from the previous page.", "schema": map[string]any{"type": "string", "format": "date-time"}},
+		{"name": "before_id", "in": "query", "required": false, "description": "ID of the last event already read. Requires before; together they also return the remaining events that share before's timestamp.", "schema": map[string]any{"type": "string"}},
+	}
+}
+
 func huggingFaceSearchQueryParameters() []map[string]any {
 	return []map[string]any{
 		{"name": "query", "in": "query", "required": true, "description": "Text matched against public Hugging Face model repository names. Two to 100 characters.", "schema": map[string]any{"type": "string", "minLength": 2, "maxLength": 100}},
@@ -450,8 +461,15 @@ func ref(name string) map[string]any { return map[string]any{"$ref": "#/componen
 func schemas() map[string]any {
 	stringMap := map[string]any{"type": "object", "additionalProperties": true}
 	result := map[string]any{
-		"Object":                      stringMap,
-		"ObjectList":                  map[string]any{"type": "object", "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": stringMap}}},
+		"Object":     stringMap,
+		"ObjectList": map[string]any{"type": "object", "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": stringMap}}},
+		"AuditEventList": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data", "limit", "next"}, "properties": map[string]any{
+			"data":  map[string]any{"type": "array", "items": stringMap},
+			"limit": map[string]any{"type": "integer", "description": "Page size served, after clamping the requested limit to 1 through 500."},
+			"next": map[string]any{"description": "Query values for the next page when this page is full; null otherwise.", "oneOf": []any{map[string]any{"type": "object", "additionalProperties": false, "required": []string{"before", "before_id"}, "properties": map[string]any{
+				"before": map[string]any{"type": "string", "format": "date-time"}, "before_id": map[string]any{"type": "string"},
+			}}, map[string]any{"type": "null"}}},
+		}},
 		"Error":                       map[string]any{"type": "object", "required": []string{"code", "message"}, "properties": map[string]any{"code": map[string]any{"type": "string"}, "category": map[string]any{"type": "string"}, "message": map[string]any{"type": "string"}, "request_id": map[string]any{"type": "string"}, "retryable": map[string]any{"type": "boolean"}, "remediation": map[string]any{"type": "string"}}},
 		"ErrorEnvelope":               map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{"error": ref("Error")}},
 		"ConsoleIdentityProvisioning": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"provider", "external_user_id", "external_organization_id", "display_name", "role", "access"}, "properties": map[string]any{"provider": map[string]any{"type": "string", "enum": []string{"clerk"}}, "external_user_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "external_organization_id": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "display_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 255}, "role": map[string]any{"type": "string", "enum": []string{"viewer", "operator", "admin"}}, "scopes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 32}, "access": map[string]any{"type": "boolean"}}},
@@ -599,16 +617,27 @@ func schemas() map[string]any {
 		"QualityEvalSet":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"digest", "name", "version", "prompt_count", "created_at"}, "properties": map[string]any{"digest": map[string]any{"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "name": map[string]any{"type": "string"}, "version": map[string]any{"type": "string"}, "prompt_count": map[string]any{"type": "integer", "minimum": 1, "maximum": 200}, "created_at": map[string]any{"type": "string", "format": "date-time"}}},
 		"OptimizationCampaignEnvelope":     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"campaign"}, "properties": map[string]any{"campaign": ref("OptimizationCampaign")}},
 
-		"CLILoginStart":                      map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_name", "client_os", "client_version"}, "properties": map[string]any{"device_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}, "client_os": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}, "client_version": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}},
-		"CLILoginStartResponse":              map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code", "user_code", "expires_at", "expires_in", "interval"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "description": "Secret the CLI polls with. Returned once; only its hash is stored."}, "user_code": map[string]any{"type": "string", "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "expires_in": map[string]any{"type": "integer", "minimum": 1}, "interval": map[string]any{"type": "integer", "minimum": 1}, "verification_uri": map[string]any{"type": "string", "format": "uri"}, "verification_uri_complete": map[string]any{"type": "string", "format": "uri"}}},
-		"CLILoginExchangeRequest":            map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "minLength": 68, "maxLength": 68}}},
-		"CLILoginExchangeResponse":           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"pending", "slow_down", "approved", "denied", "expired", "consumed"}}, "interval": map[string]any{"type": "integer", "minimum": 1}, "credential": map[string]any{"type": "string", "description": "Returned once, on the poll that consumes an approved sign-in."}, "principal": ref("Object"), "credential_cache_synchronized": map[string]any{"type": "boolean"}, "owner_name": map[string]any{"type": "string"}, "console_url": map[string]any{"type": "string", "format": "uri"}}},
-		"CLILogin":                           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"user_code", "device_name", "client_os", "client_version", "status", "created_at", "expires_at"}, "properties": map[string]any{"user_code": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"pending", "approved", "denied", "consumed", "expired"}}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "decided_at": map[string]any{"type": "string", "format": "date-time"}, "decided_by": map[string]any{"type": "string"}}},
-		"CLILoginEnvelope":                   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"login"}, "properties": map[string]any{"login": ref("CLILogin")}},
-		"CLISession":                         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "device_name", "client_os", "client_version", "owner_name", "created_at", "last_used_at", "expires_at", "current"}, "properties": map[string]any{"id": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "owner_name": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "last_used_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "expires_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "current": map[string]any{"type": "boolean"}}},
-		"CLISessionList":                     map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": ref("CLISession")}}},
-		"OptimizationCampaignReportEnvelope": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"report"}, "properties": map[string]any{"report": ref("OptimizationCampaignReport")}},
-		"OptimizationCampaignReport":         optimizationCampaignReportSchema(),
+		"CLILoginStart":            map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_name", "client_os", "client_version"}, "properties": map[string]any{"device_name": map[string]any{"type": "string", "minLength": 1, "maxLength": 120}, "client_os": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}, "client_version": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}},
+		"CLILoginStartResponse":    map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code", "user_code", "expires_at", "expires_in", "interval"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "description": "Secret the CLI polls with. Returned once; only its hash is stored."}, "user_code": map[string]any{"type": "string", "pattern": "^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "expires_in": map[string]any{"type": "integer", "minimum": 1}, "interval": map[string]any{"type": "integer", "minimum": 1}, "verification_uri": map[string]any{"type": "string", "format": "uri"}, "verification_uri_complete": map[string]any{"type": "string", "format": "uri"}}},
+		"CLILoginExchangeRequest":  map[string]any{"type": "object", "additionalProperties": false, "required": []string{"device_code"}, "properties": map[string]any{"device_code": map[string]any{"type": "string", "minLength": 68, "maxLength": 68}}},
+		"CLILoginExchangeResponse": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"status"}, "properties": map[string]any{"status": map[string]any{"type": "string", "enum": []string{"pending", "slow_down", "approved", "denied", "expired", "consumed"}}, "interval": map[string]any{"type": "integer", "minimum": 1}, "credential": map[string]any{"type": "string", "description": "Returned once, on the poll that consumes an approved sign-in."}, "principal": ref("Object"), "credential_cache_synchronized": map[string]any{"type": "boolean"}, "owner_name": map[string]any{"type": "string"}, "console_url": map[string]any{"type": "string", "format": "uri"}}},
+		"CLILogin":                 map[string]any{"type": "object", "additionalProperties": false, "required": []string{"user_code", "device_name", "client_os", "client_version", "status", "created_at", "expires_at"}, "properties": map[string]any{"user_code": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "status": map[string]any{"type": "string", "enum": []string{"pending", "approved", "denied", "consumed", "expired"}}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "expires_at": map[string]any{"type": "string", "format": "date-time"}, "decided_at": map[string]any{"type": "string", "format": "date-time"}, "decided_by": map[string]any{"type": "string"}}},
+		"CLILoginEnvelope":         map[string]any{"type": "object", "additionalProperties": false, "required": []string{"login"}, "properties": map[string]any{"login": ref("CLILogin")}},
+		"CLISession":               map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "device_name", "client_os", "client_version", "owner_name", "created_at", "last_used_at", "expires_at", "current"}, "properties": map[string]any{"id": map[string]any{"type": "string"}, "device_name": map[string]any{"type": "string"}, "client_os": map[string]any{"type": "string"}, "client_version": map[string]any{"type": "string"}, "owner_name": map[string]any{"type": "string"}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "last_used_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "expires_at": map[string]any{"type": []string{"string", "null"}, "format": "date-time"}, "current": map[string]any{"type": "boolean"}}},
+		"CLISessionList":           map[string]any{"type": "object", "additionalProperties": false, "required": []string{"data"}, "properties": map[string]any{"data": map[string]any{"type": "array", "items": ref("CLISession")}}},
+		"OptimizationCampaignReportEnvelope": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"report", "signature"}, "properties": map[string]any{
+			"report":          ref("OptimizationCampaignReport"),
+			"signature":       map[string]any{"oneOf": []any{ref("OptimizationCampaignReportSignature"), map[string]any{"type": "null"}}, "description": "Ed25519 signature of a finished run's report by the control plane's passport signing key; null before the run finishes or without a key, never made up. Verify a saved response with `infercrane optimize report verify FILE`."},
+			"unsigned_reason": map[string]any{"type": "string", "enum": []string{"run_not_finished", "signing_key_not_configured"}, "description": "Why signature is null; absent when the report is signed."},
+		}},
+		"OptimizationCampaignReportSignature": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"algorithm", "key_id", "public_key", "digest", "signature"}, "properties": map[string]any{
+			"algorithm":  map[string]any{"type": "string", "enum": []string{"Ed25519-SHA256"}},
+			"key_id":     map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{16}$", "description": "sha256: and the first 8 bytes of the SHA-256 of the public key; the same key ID Inference Passports carry."},
+			"public_key": map[string]any{"type": "string", "description": "Base64 Ed25519 public key. Compare it, or its key ID, with the key the control plane's operator publishes."},
+			"digest":     map[string]any{"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "The report's report_digest: SHA-256 of the compact report JSON with report_digest emptied."},
+			"signature":  map[string]any{"type": "string", "description": "Base64 Ed25519 signature over the 32 digest bytes."},
+		}},
+		"OptimizationCampaignReport": optimizationCampaignReportSchema(),
 
 		"KernelOpportunityRequest": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema_version", "model", "runtime", "hardware", "workload", "profile", "policy"}, "properties": map[string]any{
 			"schema_version": map[string]any{"type": "string", "const": "infercrane.kernel-opportunity-request/v1"},

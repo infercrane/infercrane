@@ -1141,6 +1141,16 @@ type AuditEvent struct {
 	CreatedAt                                               time.Time
 }
 
+// AuditCursor is a position in a tenant's audit log, which pages newest
+// first: a page holds the events older than the cursor. Events can share a
+// timestamp, so the position is the last event read, (CreatedAt, ID); with an
+// empty ID a page holds only events older than CreatedAt. The zero cursor
+// starts at the newest event.
+type AuditCursor struct {
+	CreatedAt time.Time
+	ID        string
+}
+
 type Principal struct {
 	ID, TenantID, Name, Role, Kind string
 	Scopes                         []string

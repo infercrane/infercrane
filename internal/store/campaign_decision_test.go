@@ -181,7 +181,7 @@ func reportMetric(t *testing.T, report optimizationreport.Report, key string) op
 // outcomeCards returns the large value of every outcome card on the HTML page.
 func outcomeCards(t *testing.T, report optimizationreport.Report) []string {
 	t.Helper()
-	page, err := optimizationreport.HTML(report)
+	page, err := optimizationreport.HTML(optimizationreport.Document{Report: report})
 	if err != nil {
 		t.Fatal(err)
 	}

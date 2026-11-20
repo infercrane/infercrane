@@ -114,3 +114,6 @@ Unknown, never estimated ──────────────────�
   ○ Monthly cost: cost per output token is unknown: no setup qualified
   ○ Bottleneck signals: the serving engine's metrics were not scraped while it
     was measured
+
+Not signed: this control plane has no signing key
+(INFERCRANE_PASSPORT_SIGNING_KEY_FILE).

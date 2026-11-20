@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -192,18 +193,12 @@ func Sign(payload any, privateKey ed25519.PrivateKey) (Envelope, error) {
 	if err != nil {
 		return Envelope{}, fmt.Errorf("encode passport payload: %w", err)
 	}
-	if len(privateKey) != ed25519.PrivateKeySize {
-		return Envelope{}, errors.New("invalid Ed25519 private key")
-	}
 	digest := sha256.Sum256(canonical)
-	publicKey := privateKey.Public().(ed25519.PublicKey)
-	publicDigest := sha256.Sum256(publicKey)
-	return Envelope{
-		PayloadJSON: string(canonical), Digest: "sha256:" + hex.EncodeToString(digest[:]),
-		Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, digest[:])),
-		PublicKey: base64.StdEncoding.EncodeToString(publicKey), Algorithm: Algorithm,
-		KeyID: "sha256:" + hex.EncodeToString(publicDigest[:8]),
-	}, nil
+	signed, err := SignDigest("sha256:"+hex.EncodeToString(digest[:]), privateKey)
+	if err != nil {
+		return Envelope{}, err
+	}
+	return Envelope{PayloadJSON: string(canonical), Digest: signed.Digest, Signature: signed.Signature, PublicKey: signed.PublicKey, Algorithm: signed.Algorithm, KeyID: signed.KeyID}, nil
 }
 
 func Verify(envelope Envelope) error {
@@ -215,26 +210,92 @@ func Verify(envelope Envelope) error {
 		return err
 	}
 	digest := sha256.Sum256(canonical)
-	want := "sha256:" + hex.EncodeToString(digest[:])
-	if envelope.Digest != want {
+	if envelope.Digest != "sha256:"+hex.EncodeToString(digest[:]) {
 		return errors.New("passport payload digest mismatch")
 	}
-	publicKey, err := base64.StdEncoding.DecodeString(envelope.PublicKey)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
-		return errors.New("invalid passport public key")
-	}
-	signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
-	if err != nil || len(signature) != ed25519.SignatureSize {
-		return errors.New("invalid passport signature")
-	}
-	if !ed25519.Verify(ed25519.PublicKey(publicKey), digest[:], signature) {
-		return errors.New("passport signature verification failed")
-	}
-	publicDigest := sha256.Sum256(publicKey)
-	if envelope.KeyID != "sha256:"+hex.EncodeToString(publicDigest[:8]) {
-		return errors.New("passport key ID mismatch")
+	if err = VerifyDigest(DigestSignature{Algorithm: envelope.Algorithm, KeyID: envelope.KeyID, PublicKey: envelope.PublicKey, Digest: envelope.Digest, Signature: envelope.Signature}); err != nil {
+		return fmt.Errorf("passport %w", err)
 	}
 	return nil
+}
+
+// DigestSignature is an Ed25519 signature over the 32 bytes of a SHA-256
+// digest, with the public key that made it and that key's ID. Inference
+// Passports, quality evidence, and optimization reports share it, so one key
+// ID names the control plane's signing key everywhere.
+type DigestSignature struct {
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"key_id"`
+	PublicKey string `json:"public_key"`
+	Digest    string `json:"digest"`
+	Signature string `json:"signature"`
+}
+
+// KeyID names a public key: "sha256:" and the first 8 bytes of its SHA-256.
+func KeyID(publicKey ed25519.PublicKey) string {
+	sum := sha256.Sum256(publicKey)
+	return "sha256:" + hex.EncodeToString(sum[:8])
+}
+
+// SignDigest signs a "sha256:<64 hex>" digest. Ed25519 is deterministic, so
+// the same digest and key always give the same signature.
+func SignDigest(digest string, privateKey ed25519.PrivateKey) (DigestSignature, error) {
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return DigestSignature{}, errors.New("invalid Ed25519 private key")
+	}
+	raw, err := digestBytes(digest)
+	if err != nil {
+		return DigestSignature{}, err
+	}
+	publicKey := privateKey.Public().(ed25519.PublicKey)
+	return DigestSignature{Algorithm: Algorithm, KeyID: KeyID(publicKey), PublicKey: base64.StdEncoding.EncodeToString(publicKey), Digest: digest, Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(privateKey, raw))}, nil
+}
+
+// VerifyDigest checks the algorithm, the Ed25519 signature over the digest,
+// and that the key ID names the public key. It does not say whose key it is:
+// a caller that trusts one key compares PublicKey with it.
+func VerifyDigest(signed DigestSignature) error {
+	if signed.Algorithm != Algorithm {
+		return fmt.Errorf("unsupported signature algorithm %q", signed.Algorithm)
+	}
+	raw, err := digestBytes(signed.Digest)
+	if err != nil {
+		return err
+	}
+	publicKey, err := DecodePublicKey(signed.PublicKey)
+	if err != nil {
+		return err
+	}
+	signature, err := base64.StdEncoding.DecodeString(signed.Signature)
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return errors.New("invalid Ed25519 signature")
+	}
+	if !ed25519.Verify(publicKey, raw, signature) {
+		return errors.New("signature verification failed")
+	}
+	if signed.KeyID != KeyID(publicKey) {
+		return errors.New("key ID does not match the public key")
+	}
+	return nil
+}
+
+// DecodePublicKey reads a base64 Ed25519 public key, the form every signature
+// envelope carries.
+func DecodePublicKey(encoded string) (ed25519.PublicKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+	if err != nil || len(raw) != ed25519.PublicKeySize {
+		return nil, errors.New("invalid Ed25519 public key: want 32 bytes in base64")
+	}
+	return ed25519.PublicKey(raw), nil
+}
+
+func digestBytes(digest string) ([]byte, error) {
+	encoded, ok := strings.CutPrefix(digest, "sha256:")
+	raw, err := hex.DecodeString(encoded)
+	if !ok || err != nil || len(raw) != sha256.Size || hex.EncodeToString(raw) != encoded {
+		return nil, fmt.Errorf("invalid SHA-256 digest %q", digest)
+	}
+	return raw, nil
 }
 
 // compactPayload makes signed payload verification insensitive to JSON

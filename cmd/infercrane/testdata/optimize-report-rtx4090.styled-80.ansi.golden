@@ -114,3 +114,6 @@
   [38;2;161;161;170m○[m [38;2;161;161;170mMonthly cost: cost per output token is unknown: no setup qualified[m
   [38;2;161;161;170m○[m [38;2;161;161;170mBottleneck signals: the serving engine's metrics were not scraped while it[m
     [38;2;161;161;170mwas measured[m
+
+[38;2;161;161;170mNot signed: this control plane has no signing key[m
+[38;2;161;161;170m(INFERCRANE_PASSPORT_SIGNING_KEY_FILE).[m
