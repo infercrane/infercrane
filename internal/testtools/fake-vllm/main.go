@@ -1,12 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
-	"strings"
-	"sync/atomic"
+
+	"github.com/infercrane/infercrane/internal/testtools/fakevllm"
 )
 
 func main() {
@@ -14,96 +13,11 @@ func main() {
 	worker := flag.String("worker", "gpu", "worker")
 	model := flag.String("model", "Qwen/Qwen3-8B", "model")
 	apiKey := flag.String("api-key", "", "optional bearer token")
+	toolName := flag.String("tool-call-name", fakevllm.DefaultToolCall.Name, "function the fake calls when a request offers tools")
+	toolArguments := flag.String("tool-call-arguments", fakevllm.DefaultToolCall.Arguments, "arguments of that call, as JSON text")
 	flag.Parse()
-	var running, waiting atomic.Int64
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-	mux.HandleFunc("GET /v1/models", func(w http.ResponseWriter, _ *http.Request) {
-		write(w, map[string]any{"object": "list", "data": []map[string]string{{"id": *model, "object": "model"}}})
-	})
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "vllm:num_requests_running %d\nvllm:num_requests_waiting %d\nvllm:kv_cache_usage_perc 0\n", running.Load(), waiting.Load())
-	})
-	mux.HandleFunc("POST /test/metrics", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Running int64 `json:"running"`
-			Waiting int64 `json:"waiting"`
-		}
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Running < 0 || body.Waiting < 0 {
-			http.Error(w, "non-negative running and waiting are required", http.StatusBadRequest)
-			return
-		}
-		running.Store(body.Running)
-		waiting.Store(body.Waiting)
-		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if streaming, _ := body["stream"].(bool); streaming {
-			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-fake\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"content\":%q}}]}\n\n", body["model"], "response from "+*worker)
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-			// Load generators count tokens from the server's usage report.
-			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-fake\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":3,\"total_tokens\":%d}}\n\n", body["model"], promptTokens(body), promptTokens(body)+3)
-			fmt.Fprint(w, "data: [DONE]\n\n")
-			return
-		}
-		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {
-			write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "call_fake", "type": "function", "function": map[string]string{"name": "weather", "arguments": `{"city":"Berlin"}`}}}}, "finish_reason": "tool_calls"}}})
-			return
-		}
-		if format, ok := body["response_format"].(map[string]any); ok && format["type"] == "json_schema" {
-			write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": `{"answer":"ok"}`}, "finish_reason": "stop"}}})
-			return
-		}
-		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + *worker}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": promptTokens(body), "completion_tokens": 3, "total_tokens": promptTokens(body) + 3}})
-	})
-	mux.HandleFunc("POST /v1/completions", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		write(w, map[string]any{"id": "cmpl-fake", "object": "text_completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "text": "response from " + *worker, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 3, "total_tokens": 4}})
-	})
-	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		write(w, map[string]any{"object": "list", "model": body["model"], "data": []any{map[string]any{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2, 0.3}}}, "usage": map[string]int{"prompt_tokens": 1, "total_tokens": 1}})
-	})
-	handler := http.Handler(mux)
-	if *apiKey != "" {
-		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/health" && r.Header.Get("Authorization") != "Bearer "+*apiKey {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			mux.ServeHTTP(w, r)
-		})
-	}
+	handler := fakevllm.Handler(fakevllm.Options{Worker: *worker, Model: *model, APIKey: *apiKey, ToolCall: fakevllm.ToolCall{Name: *toolName, Arguments: *toolArguments}})
 	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), handler); err != nil {
 		panic(err)
 	}
-}
-func write(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-// promptTokens approximates a prompt's token count by its words, so a fake
-// usage report scales with the request.
-func promptTokens(body map[string]any) int {
-	count := 0
-	messages, _ := body["messages"].([]any)
-	for _, raw := range messages {
-		if message, ok := raw.(map[string]any); ok {
-			if text, ok := message["content"].(string); ok {
-				count += len(strings.Fields(text))
-			}
-		}
-	}
-	if count == 0 {
-		count = 1
-	}
-	return count
 }

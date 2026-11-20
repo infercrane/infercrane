@@ -180,7 +180,11 @@ reference revisions and compares the answers in memory; answers are never stored
 set is the one place InferCrane keeps prompts you choose to give it: `infercrane evaluation set
 upload` stores the uploaded file in plaintext, bounded to 512 KiB and 200 prompts, scoped to your
 organization, and readable only by the worker. The API returns its metadata, never its prompts, and
-`evaluation set delete` removes it. Do not upload prompts containing personal data or secrets.
+`evaluation set delete` removes it. Do not upload prompts containing personal data or secrets. An
+eval set's conversations, tool definitions, and earlier tool results are stored the same way. Tool
+calls the models make during the check are compared in memory and never executed: the worker
+validates their arguments against the JSON Schema the eval set declares, with no loader, so a
+schema's remote `$ref` is refused at upload and validation fetches nothing.
 
 Durable async inference is the explicit exception. It remains disabled until an operator injects
 `INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.

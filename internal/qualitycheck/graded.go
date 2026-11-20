@@ -60,10 +60,10 @@ func CompareGraded(ctx context.Context, completer Completer, set EvalSet, refere
 		if err != nil {
 			return GradedComparison{}, fmt.Errorf("candidate revision: %w", err)
 		}
-		comparison.ReferenceScores = append(comparison.ReferenceScores, Grade(set.Grading, prompt, referenceAnswer))
-		comparison.CandidateScores = append(comparison.CandidateScores, Grade(set.Grading, prompt, candidateAnswer))
-		referenceAnswers = append(referenceAnswers, answerDigest(referenceAnswer))
-		candidateAnswers = append(candidateAnswers, answerDigest(candidateAnswer))
+		comparison.ReferenceScores = append(comparison.ReferenceScores, Grade(set.Grading, prompt, referenceAnswer.Content))
+		comparison.CandidateScores = append(comparison.CandidateScores, Grade(set.Grading, prompt, candidateAnswer.Content))
+		referenceAnswers = append(referenceAnswers, referenceAnswer.digest())
+		candidateAnswers = append(candidateAnswers, candidateAnswer.digest())
 	}
 	bundle, _ := json.Marshal(map[string]any{
 		"evaluator": GradedEvaluator, "evaluator_version": GradedEvaluatorVersion, "eval_set": set.Digest, "grading": set.Grading,

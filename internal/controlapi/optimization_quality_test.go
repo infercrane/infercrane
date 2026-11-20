@@ -3,8 +3,10 @@ package controlapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +98,22 @@ func TestCandidateQualityReportsBuiltinAndCustomerVerdicts(t *testing.T) {
 			t.Errorf("%s: %+v", tc.name, view)
 		}
 	}
+	withToolCalls := func(score float64, passed bool, broken int) campaignQualityInputs {
+		inputs := builtin(score, passed, "rev-control")
+		row := inputs.evidence["q1"]
+		row.DistributionJSON = fmt.Sprintf(`{"schema":"infercrane.dev/quality-distribution/v1","kind":"paired_scores","pairing_digest":"sha256:%s","scores":[],"tool_calls":{"cases":3,"score":%v,"broken":%d,"reference_invalid":0,"candidate":{"missing_call":%d,"malformed_arguments":0,"wrong_function":0,"schema_invalid":0,"extra_calls":0,"unexpected_call":0},"reference":{"missing_call":0,"malformed_arguments":0,"wrong_function":0,"schema_invalid":0,"extra_calls":0,"unexpected_call":0}}}`, strings.Repeat("a", 64), map[int]float64{0: 1, 1: 0.6667}[broken], broken, broken)
+		inputs.evidence["q1"] = row
+		return inputs
+	}
+	// A broken tool call blocks even when the mean is inside the PASS band.
+	broken := candidateQuality(campaign, ranked, withToolCalls(0.96, false, 1))
+	if broken.State != qualityStateBlocked || broken.ToolCalls == nil || broken.ToolCalls.Broken != 1 || broken.ToolCalls.Candidate.MissingCall != 1 || !strings.Contains(broken.Reason, "broke 1 of 3 tool calls the reference made correctly (missing call 1)") || !strings.Contains(broken.Reason, "tool calls matched 67% across 3") {
+		t.Fatalf("broken tool call = %+v", broken)
+	}
+	kept := candidateQuality(campaign, ranked, withToolCalls(0.99, true, 0))
+	if kept.State != qualityStatePassed || kept.ToolCalls == nil || kept.ToolCalls.Cases != 3 || !strings.Contains(kept.Reason, "tool calls matched 100% across 3") {
+		t.Fatalf("kept tool calls = %+v", kept)
+	}
 	customer := candidateQuality(campaign, ranked, campaignQualityInputs{evidence: map[string]domain.QualityEvidence{"q1": {ID: "q1", Source: domain.QualityEvidenceSourceCustomer, Suite: "support", Score: 0.4, Passed: false}}})
 	if customer.State != qualityStateBlocked || customer.Source != domain.QualityEvidenceSourceCustomer || customer.BlockLimitPercent != nil || !strings.Contains(customer.Reason, "Your signed evaluation support failed") {
 		t.Fatalf("customer = %+v", customer)
@@ -168,6 +186,13 @@ func TestQualityEvalSetUploadInspectAndDelete(t *testing.T) {
 	}
 	if response = send(http.MethodGet, "/api/v1/quality/eval-sets/"+digest, ""); response.Code != http.StatusOK || strings.Contains(response.Body.String(), "refund") {
 		t.Fatalf("inspect status=%d body=%s", response.Code, response.Body.String())
+	}
+	tools, err := os.ReadFile("../../examples/evaluation/eval-set-tools.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response = send(http.MethodPost, "/api/v1/quality/eval-sets", string(tools)); response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"prompt_count":4`) || strings.Contains(response.Body.String(), "get_order") {
+		t.Fatalf("v2 upload status=%d body=%s", response.Code, response.Body.String())
 	}
 	if response = send(http.MethodGet, "/api/v1/quality/eval-sets/not-a-digest", ""); response.Code != http.StatusBadRequest {
 		t.Fatalf("bad digest status=%d", response.Code)

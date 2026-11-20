@@ -2,7 +2,9 @@
 // optimization candidate. It sends a small, versioned prompt suite to the
 // candidate and to a reference revision with greedy decoding, scores how well
 // the candidate's answers agree with the reference's, and classifies the
-// result with the same PASS, WATCH, and BLOCK rules Release Guard uses.
+// result with the same PASS, WATCH, and BLOCK rules Release Guard uses. Cases
+// that declare function tools are scored on the tool calls, and a candidate
+// that breaks a call the reference made correctly is blocked.
 //
 // Answers are compared in memory and never stored. Evidence carries only
 // aggregate and per-prompt scores plus digests that commit to the suite and
@@ -21,18 +23,23 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/jsonschema-go/jsonschema"
 )
 
 const (
-	// EvalSetSchema is the schema of the default suite and of customer eval
-	// sets.
-	EvalSetSchema = "infercrane.dev/quality-eval-set/v1"
+	// EvalSetSchemaV1 is the schema of the default suite: single-turn prompts.
+	EvalSetSchemaV1 = "infercrane.dev/quality-eval-set/v1"
+	// EvalSetSchemaV2 adds conversations and function tools to a case.
+	EvalSetSchemaV2 = "infercrane.dev/quality-eval-set/v2"
 	// MaxEvalSetBytes bounds an uploaded eval set.
 	MaxEvalSetBytes = 512 << 10
 	// MaxPrompts bounds the prompts in one eval set. Every prompt is sent to
 	// two revisions during a campaign, so the bound also caps that load.
 	MaxPrompts      = 200
 	maxPromptBytes  = 8 << 10
+	maxMessages     = 64
+	maxTools        = 64
 	maxNameBytes    = 128
 	maxMaxTokens    = 512
 	defaultMaxToken = 64
@@ -51,13 +58,20 @@ var (
 	digestPattern   = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 )
 
-// Prompt is one single-turn request in an eval set. Expected holds the
+// Prompt is one case in an eval set: a single prompt with an optional system
+// message, or, in schema v2, a conversation in Messages. A v2 case may declare
+// function Tools the model can call, and ToolChoice. Expected holds the
 // accepted answers of a graded set and is empty otherwise.
 type Prompt struct {
-	ID       string   `json:"id"`
-	System   string   `json:"system,omitempty"`
-	Prompt   string   `json:"prompt"`
-	Expected []string `json:"expected,omitempty"`
+	ID         string          `json:"id"`
+	System     string          `json:"system,omitempty"`
+	Prompt     string          `json:"prompt,omitempty"`
+	Messages   []Message       `json:"messages,omitempty"`
+	Tools      []Tool          `json:"tools,omitempty"`
+	ToolChoice json.RawMessage `json:"tool_choice,omitempty"`
+	Expected   []string        `json:"expected,omitempty"`
+	// schemas holds each declared function's resolved parameters schema.
+	schemas map[string]*jsonschema.Resolved
 }
 
 // EvalSet is a bounded list of prompts. Digest is the SHA-256 of the exact
@@ -130,8 +144,8 @@ func DecodeEvalSet(body []byte) (EvalSet, error) {
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		return EvalSet{}, errors.New("eval set contains trailing JSON")
 	}
-	if set.Schema != EvalSetSchema {
-		return EvalSet{}, fmt.Errorf("eval set schema must be %q", EvalSetSchema)
+	if set.Schema != EvalSetSchemaV1 && set.Schema != EvalSetSchemaV2 {
+		return EvalSet{}, fmt.Errorf("eval set schema must be %q or %q", EvalSetSchemaV1, EvalSetSchemaV2)
 	}
 	for field, value := range map[string]string{"name": set.Name, "version": set.Version} {
 		if strings.TrimSpace(value) == "" || len(value) > maxNameBytes || !utf8.ValidString(value) || strings.ContainsAny(value, "@\n\r\t") {
@@ -159,12 +173,33 @@ func DecodeEvalSet(body []byte) (EvalSet, error) {
 			return EvalSet{}, fmt.Errorf("prompt id %q is repeated", prompt.ID)
 		}
 		seen[prompt.ID] = struct{}{}
-		if strings.TrimSpace(prompt.Prompt) == "" || len(prompt.Prompt) > maxPromptBytes || len(prompt.System) > maxPromptBytes || !utf8.ValidString(prompt.Prompt) || !utf8.ValidString(prompt.System) {
+		if set.Schema == EvalSetSchemaV1 && (prompt.Messages != nil || prompt.Tools != nil || prompt.ToolChoice != nil) {
+			return EvalSet{}, fmt.Errorf("prompt %q uses messages, tools, or tool_choice, which need schema %q", prompt.ID, EvalSetSchemaV2)
+		}
+		if prompt.Messages != nil {
+			if prompt.Prompt != "" || prompt.System != "" {
+				return EvalSet{}, fmt.Errorf("prompt %q must set either prompt (with an optional system) or messages, not both", prompt.ID)
+			}
+		} else if strings.TrimSpace(prompt.Prompt) == "" || len(prompt.Prompt) > maxPromptBytes || len(prompt.System) > maxPromptBytes || !utf8.ValidString(prompt.Prompt) || !utf8.ValidString(prompt.System) {
 			return EvalSet{}, fmt.Errorf("prompt %q must be valid UTF-8, non-empty, and at most %d KiB", prompt.ID, maxPromptBytes>>10)
 		}
 		if err := validExpected(set.Grading, prompt); err != nil {
 			return EvalSet{}, err
 		}
+		if set.Graded() && prompt.HasTools() {
+			// A graded set scores answer text against expected answers.
+			return EvalSet{}, fmt.Errorf("prompt %q declares tools, which a graded set does not score; use a set without grading", prompt.ID)
+		}
+		resolved, err := validateTools(prompt)
+		if err != nil {
+			return EvalSet{}, fmt.Errorf("prompt %q: %w", prompt.ID, err)
+		}
+		if prompt.Messages != nil {
+			if err = validateMessages(prompt.Messages, resolved); err != nil {
+				return EvalSet{}, fmt.Errorf("prompt %q: %w", prompt.ID, err)
+			}
+		}
+		set.Prompts[index].schemas = resolved
 	}
 	set.Digest = Digest(body)
 	return set, nil
