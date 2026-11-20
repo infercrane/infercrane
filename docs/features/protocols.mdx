@@ -197,7 +197,8 @@ to set a small staging-only requests-per-minute ceiling without guessing the exi
 quota. Then perform four independent checks:
 
 1. Send a successful buffered request and verify `X-InferCrane-Attempt` never exceeds the configured
-   retry budget. Only connection failures and `502`, `503`, or `504` on InferCrane-managed capacity
+   retry budget, plus one for each binding a `primary-fallback` endpoint moved the request to (at
+   most two). Only connection failures and `502`, `503`, or `504` on InferCrane-managed capacity
    are retryable. Queue wait, retry backoff, every attempt, and response delivery must all fit inside
    the single endpoint `request_timeout_ms`; retries never receive a fresh deadline.
 2. Start the `curl -N` streaming request above, capture its response headers, and terminate the
