@@ -596,22 +596,22 @@
     "report_digest": "sha256:1c90b3982b1e6ff47caef08100f9fee39689097b5890a2838842eca8242ae8a0"
   },
   "billing": {
-    "source": "modal billing report --for today --show-resources (2026-11-20)",
+    "source": "modal billing report --for today --show-resources, read 2026-11-20 08:55 CET after every container stopped",
     "campaign_app": "ap-Wut2pdJwIP8LG1zE5CgAlu",
-    "campaign_usd": 6.371,
+    "campaign_usd": 6.3924,
     "campaign_breakdown_usd": {
-      "H100": 5.7977,
-      "CPU": 0.2777,
-      "Memory": 0.2818,
-      "Network Egress": 0.0138
+      "Network Egress": 0.0138,
+      "CPU": 0.2786,
+      "H100": 5.8172,
+      "Memory": 0.2828
     },
-    "this_work_total_usd": 7.1269,
+    "this_work_total_usd": 7.1483,
     "this_work_runs": {
       "weights staging (CPU)": 0.0241,
       "dry run (CPU)": 0.0002,
       "attempt 1: baseline and replay; approval refused (2-replica price)": 0.3172,
       "attempt 4: stopped to fix spend accounting": 0.4143,
-      "campaign": 6.371
+      "campaign": 6.3924
     },
     "broker_estimate_usd": 6.7413,
     "control_plane_estimate_usd": 8.87261464550529

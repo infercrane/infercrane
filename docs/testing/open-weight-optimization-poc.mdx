@@ -142,7 +142,7 @@ cache turns it measured 912 output tokens/s, 2,000 ms p95 TTFT, and 17,122 ms p9
 | FP8 weights (`--quantization fp8`) | 1,084 (+18.7%, noise floor 1.2%) | 1,596 ms | 14,273 ms | 1.01 | 100% match | proposed |
 | FP8 KV cache (`--kv-cache-dtype fp8`) | 996 (+9.3%, noise floor 0.8%) | 1,925 ms (within noise) | 15,679 ms | 1.10 | 100% match | superseded by FP8 weights |
 
-Costs use Modal's H100 list price of $3.9492 per hour, GPU only. The campaign was billed $6.37 by
+Costs use Modal's H100 list price of $3.9492 per hour, GPU only. The campaign was billed $6.39 by
 Modal. The current setup ran on a host with a different NVIDIA driver (610.57.04) from both
 candidates (620.70.06); turns control for time, not for hosts. Latency includes a laptop-to-Modal
 round trip of 28 to 71 ms at the median and about 300 ms at p95. The record, the outcome report, and
