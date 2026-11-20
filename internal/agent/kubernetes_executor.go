@@ -167,8 +167,8 @@ func (e KubernetesExecutor) RunCandidate(ctx context.Context, run CandidateRun, 
 			completer = qualitycheck.HTTPCompleter{Client: &http.Client{Transport: localTransport()}}
 		}
 		comparison, compareErr := qualitycheck.Compare(ctx, completer, set,
-			qualitycheck.Target{Endpoint: run.Control.BaseURL, APIKey: run.Control.Token, Model: run.Control.Model, RevisionID: "current-setup"},
-			qualitycheck.Target{Endpoint: candidate.BaseURL, APIKey: candidate.Token, Model: candidate.Model, RevisionID: "candidate-" + run.ID},
+			qualitycheck.Target{Endpoint: run.Control.BaseURL, APIKey: run.Control.Token, Model: run.Control.Model, SubjectID: "current-setup"},
+			qualitycheck.Target{Endpoint: candidate.BaseURL, APIKey: candidate.Token, Model: candidate.Model, SubjectID: "candidate-" + run.ID},
 			e.now)
 		if compareErr != nil {
 			return result, &CandidateError{Code: "answer_check_failed", Detail: compareErr.Error(), Result: &result}

@@ -53,6 +53,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
 	{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
 	{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
+	{use: "migrate capture|price|verdicts|canary|primary|rollback ENDPOINT [flags]", short: "Prove an open model you own against your closed API, then switch in stages", group: "understand"},
 	{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
 	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Inspect cache evidence and request provider-native prefetch", group: "understand"},
 	{use: "sandbox ACTION [arguments]", short: "Compose external sandboxes with expiring endpoint access", group: "operate"},
@@ -82,7 +83,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "open [endpoint|deployment|run|model|operation NAME] [flags]", short: "Open a dashboard page in the browser", group: "operate"},
 	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
 	{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
-	{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
+	{use: "secret ACTION [arguments]", short: "Manage workspace secrets: sealed values or references", group: "admin"},
 	{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
 	{use: "serve", short: "Run the control plane and gateway", group: "admin"},
 }
@@ -175,6 +176,21 @@ var commandExamples = map[string]string{
 
   # Roll back to an earlier revision
   infercrane rollout rollback production REVISION_ID --reason "p95 latency regressed" --wait`,
+	"migrate": `  # 1. Route your closed API through InferCrane and capture its traffic
+  OPENAI_API_KEY=... infercrane connect https://api.openai.com/v1 --as support-bot --model gpt-4.1-mini --manage-traffic --token-env OPENAI_API_KEY
+  infercrane migrate capture support-bot --binding primary --window 24h
+
+  # 2. Record its price (list price or your contract)
+  infercrane migrate price support-bot primary --authority list_price --input-usd 0.40 --cached-input-usd 0.10 --output-usd 1.60 --valid-until 2026-12-31
+
+  # 3. Compare open models with it (graded eval set, at least 30 prompts)
+  infercrane optimize create Qwen/Qwen3-8B --provider runpod --gpu H100 --migrate-from support-bot/primary --dialect openai --workload-fingerprint sha256:DIGEST --eval-set sha256:EVAL_DIGEST
+
+  # 4. Switch in stages: 5% canary, then your deployment first with the closed API as fallback
+  infercrane migrate verdicts RUN_ID
+  infercrane migrate canary support-bot --verdict VERDICT_ID
+  infercrane migrate primary support-bot
+  infercrane migrate rollback support-bot`,
 	"optimize": `  # One command: use pinned AIConfigurator when available, otherwise safe reviewed setups
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
@@ -200,6 +216,19 @@ var commandExamples = map[string]string{
 // commandLong explains a command whose action names are the control API's
 // verbs, in the words the dashboard uses.
 var commandLong = map[string]string{
+	"migrate": `A migration Proof measures your closed API (OpenAI, Anthropic, or any
+OpenAI-compatible API) as the baseline, then compares open models you own with it
+on cost, speed, and graded answer quality before anything switches.
+
+  capture   capture the closed API's traffic shape (no prompts or answers stored)
+  price     record what the closed API charges per token: list price or your contract
+  verdicts  list the signed quality verdicts a migration run recorded
+  canary    send at most 5% of the endpoint's traffic to your deployment
+  primary   serve from your deployment first, with the closed API as fallback;
+            Release Guard compares the two on the canary's live traffic
+  rollback  go back to the closed API alone
+
+Run the comparison with: infercrane optimize create MODEL --migrate-from ENDPOINT/BINDING`,
 	"optimize": `An optimization run measures setups side by side on the same traffic and checks
 answer quality. Nothing changes in production until you roll out a winner.
 
@@ -303,7 +332,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 	boolFlag := func(flag, help string) { command.Flags().Bool(flag, false, help) }
 	intFlag := func(flag string, value int, help string) { command.Flags().Int(flag, value, help) }
 	switch name {
-	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "events", "inspect", "explain", "benchmark", "replay", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "profile", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "route", "version", "login", "logout", "whoami":
+	case "init", "workload", "evaluation", "doctor", "connect", "adopt", "alert", "admission", "async", "plan", "deploy", "apply", "request", "deployments", "endpoints", "endpoint", "environment", "logical-model", "status", "events", "inspect", "explain", "benchmark", "replay", "migrate", "capacity", "artifact", "sandbox", "training", "finops", "autopilot", "session", "burst", "recipe", "recipes", "models", "lab", "optimize", "passport", "recommend", "slo", "delete", "orphans", "operation", "integrations", "observe", "telemetry", "profile", "inbox", "target", "provider", "model-api", "auth", "system", "secret", "external", "rollout", "route", "version", "login", "logout", "whoami":
 		stringFlag("output", "human", "output format: human or json")
 	case "logs":
 		stringFlag("output", "human", "output format: human, or json for JSON Lines (one event object per line)")
@@ -416,7 +445,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("model", "", "physical upstream model; discovered when omitted")
 		stringFlag("type", "auto", "auto, vllm, litellm, or openai-compatible")
 		boolFlag("manage-traffic", "route requests through InferCrane after qualification")
-		stringFlag("token-env", "", "environment variable holding the server's API key; sent once and stored encrypted")
+		stringFlag("token-env", "", "environment variable holding the server's API key; sent once, stored encrypted, and used on routed requests")
 	case "observe":
 		boolFlag("watch", "refresh until interrupted")
 		boolFlag("diagnose", "persist a fresh deterministic Doctor evaluation")
@@ -517,6 +546,9 @@ func addHelpFlags(command *cobra.Command, name string) {
 			stringFlag("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
 			boolFlag("infercrane-cloud", "deploy on InferCrane Cloud, paid from prepaid credits")
 			stringFlag("stop-after", "1h", "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
+			stringFlag("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model")
+			stringFlag("model-revision", "", "model commit, or the sha256 manifest digest of imported s3:// or gs:// weights")
+			stringFlag("adapter", "", "serve a LoRA adapter: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 		}
 	case "agent":
 		stringFlag("output", "human", "output format: human or json (json needs --once)")
@@ -576,6 +608,18 @@ func addHelpFlags(command *cobra.Command, name string) {
 		boolFlag("execute", "run an explicit AIPerf approximation of the captured shape")
 		boolFlag("acknowledge-cost", "acknowledge that execution can consume provider capacity")
 		stringFlag("revision", "candidate", "revision used by explicit execution")
+	case "migrate":
+		stringFlag("binding", "", "the closed API's binding (capture)")
+		stringFlag("window", "", "capture window (default 24h) or Release Guard window for primary (default 1h)")
+		intFlag("max-requests", 1000, "maximum captured requests")
+		stringFlag("authority", "", "list_price or contract (price)")
+		stringFlag("input-usd", "", "USD per 1M input tokens (price)")
+		stringFlag("cached-input-usd", "", "USD per 1M cached input tokens (price)")
+		stringFlag("output-usd", "", "USD per 1M output tokens (price)")
+		stringFlag("valid-until", "", "date after which the price is no longer used (price)")
+		stringFlag("source", "", "where the price comes from (price)")
+		stringFlag("verdict", "", "signed PASS migration verdict (canary)")
+		stringFlag("percent", "5", "share of traffic the canary sends to your deployment, at most 5")
 	case "capacity":
 		stringFlag("window", "720h", "observation window")
 	case "finops":
@@ -609,6 +653,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
 		stringFlag("workload-digest", "", "optional exact benchmark workload SHA-256")
 	case "optimize":
+		stringFlag("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model")
+		stringFlag("adapter", "", "serve a LoRA adapter on every setup: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 		stringFlag("provider", "", "provider cloud or exact adapter")
 		stringFlag("region", "", "exact provider region")
 		stringFlag("gpu", "", "exact accelerator identity")
@@ -720,7 +766,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"workload":    {"--model", "--recipe", "--profile", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
 		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
-		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--model-secret", "--model-revision", "--adapter", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"apply":       {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"plan":        {"--name", "--targets", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
 		"request":     {"--message", "--stream", "--output"},
@@ -728,12 +774,13 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"logs":        {"--follow", "--since", "--type", "--output"},
 		"events":      {"--output"},
 		"delete":      {"--plan", "--yes", "--wait", "--idempotency-key", "--output"},
+		"migrate":     {"--binding", "--window", "--max-requests", "--authority", "--input-usd", "--cached-input-usd", "--output-usd", "--valid-until", "--source", "--verdict", "--percent", "--output"},
 		"benchmark":   {"--requests", "--concurrency", "--input-tokens", "--output-tokens", "--random-seed", "--profile", "--revision", "--streaming", "--ttft-slo-ms", "--tpot-slo-ms", "--latency-slo-ms", "--output"},
 		"recipe":      {"--name", "--version", "--benchmark", "--output"},
 		"recipes":     {"--limit", "--output"},
-		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--output"},
+		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--from", "--kind", "--base-model", "--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
+		"optimize":    {"--model-secret", "--adapter", "--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},

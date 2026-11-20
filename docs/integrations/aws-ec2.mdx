@@ -273,6 +273,22 @@ the embedding protocol fixture, while gated Llama and Gemma recipes require the 
 their upstream terms. Each real run must archive the exact model revision and must not transfer a
 benchmark claim from one model family to another.
 
+## Private models, S3 weights, and LoRA adapters
+
+A private Hugging Face token stays in Secrets Manager in your account. Name its ARN with an
+`aws-secrets-manager` reference and pass the ID as `model_secret_reference_id`:
+
+```bash
+infercrane secret create hf-token --aws-secret arn:aws:secretsmanager:eu-central-1:123456789012:secret:hf-token-AbCdEf
+```
+
+The instance profile reads it at boot, like the worker key, and passes it to the runtime as
+`HF_TOKEN` through the inherited environment, never the docker command line. Weights or adapters
+imported from S3 (`infercrane models import`) are downloaded on the instance with `aws s3 cp`, and
+every file's sha256 is checked before the runtime starts. Grant the instance profile
+`secretsmanager:GetSecretValue` on that secret and `s3:GetObject` on the model prefix, nothing
+wider. GCS files need the Kubernetes adapter. See [model artifacts](/features/model-artifacts).
+
 ## Security and accounting behavior
 
 STS credentials are short lived and exist only in the child AWS CLI process environment. InferCrane

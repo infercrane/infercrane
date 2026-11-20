@@ -79,7 +79,7 @@ func (s *Store) PublishDeploymentEndpoint(ctx context.Context, tenant, endpointN
 	if planErr != nil {
 		return domain.ResolvedEndpoint{}, planErr
 	}
-	_, planBody, planErr := normalizePlan("manual", []domain.ServingPlanBinding{{BindingID: bindingID, Priority: 0, Weight: 100}})
+	_, planBody, planErr := normalizePlan("manual", []domain.ServingPlanBinding{{BindingID: bindingID, Priority: 0, Weight: 100}}, "")
 	if planErr != nil {
 		return domain.ResolvedEndpoint{}, planErr
 	}

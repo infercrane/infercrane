@@ -16,25 +16,22 @@ The resulting `ModelArtifact` can include repository identity, immutable revisio
 
 ## Private and gated repositories
 
-Register a reference to a fine-grained read token already injected into the control-plane
-environment. The API and database receive the reference, never the token value:
+Save a fine-grained read token as a sealed workspace secret. It is encrypted at rest, bound to the
+workspace, and never returned:
 
 ```bash
-export HF_TOKEN='injected-by-your-secret-manager'
-curl -fsS "$INFERCRANE_API_URL/api/v1/secrets" \
-  -H "Authorization: Bearer $INFERCRANE_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"model-huggingface-production","resolver":"env","reference":"HF_TOKEN"}'
+export HF_TOKEN='hf_...'
+infercrane secret create hf-token --sealed-from-env HF_TOKEN
 ```
 
-Pass the returned ID as `model_secret_reference_id` when creating the deployment. InferCrane
-resolves that credential only at the artifact boundary, verifies repository access, and persists the
-immutable revision plus the reference ID. It does not persist or return the token.
-
-Artifact access and runtime delivery are separate controls. RunPod should receive a provider-native
-secret name, Kubernetes should use a namespace-scoped Secret, and offline AWS/GCP workers should use
-an immutable pre-materialized model cache. A successful Hub resolution does not claim that an
-unconfigured runtime can download the repository.
+Pass the returned ID as `model_secret_reference_id` when creating the deployment (`--model-secret`
+in the CLI). The control plane uses the token to pin the commit and read the model's metadata. On
+RunPod Pods it is stored as a RunPod secret in the account that runs the Pod, and the Pod names only
+that secret. A Kubernetes cluster or AWS account keeps the token itself: name it with a `kubernetes`
+reference (a `secretKeyRef`) or an `aws-secrets-manager` reference (an ARN the instance profile
+reads), and the control plane never sees it. The token is never stored in plaintext or returned, and
+the runtime sends it only to Hugging Face. See
+[model artifacts](/features/model-artifacts#private-and-gated-models).
 
 <Card title="Model artifacts" icon="cube" href="/features/model-artifacts">
   See the persisted identity and evidence model.

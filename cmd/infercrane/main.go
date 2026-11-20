@@ -79,6 +79,7 @@ import (
 	runtimeadapter "github.com/infercrane/infercrane/internal/runtime"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
+	"github.com/infercrane/infercrane/internal/secretcipher"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/spec"
@@ -439,6 +440,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return benchmarkCommand(ctx, cfg, args[1:])
 	case "replay":
 		return replayCommand(ctx, cfg, args[1:])
+	case "migrate":
+		return migrateCommand(ctx, cfg, args[1:])
 	case "capacity":
 		return capacityCommand(ctx, cfg, args[1:])
 	case "artifact":
@@ -462,6 +465,12 @@ func runLegacy(ctx context.Context, args []string) error {
 	case "models":
 		if len(args) > 1 && args[1] == "check" {
 			return modelsCheckCommand(ctx, cfg, args[2:])
+		}
+		if len(args) > 1 && args[1] == "import" {
+			return modelsImportCommand(ctx, cfg, args[2:])
+		}
+		if len(args) > 1 && args[1] == "adapter-check" {
+			return modelsAdapterCheckCommand(ctx, cfg, args[2:])
 		}
 		return modelsCommand(args[1:])
 	case "lab":
@@ -1938,6 +1947,9 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	computeConnection := fs.String("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
+	modelSecret := fs.String("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model; your provider receives it natively")
+	modelRevisionFlag := fs.String("model-revision", "", "commit of a Hugging Face model, or the sha256 manifest digest of imported s3:// or gs:// weights")
+	adapterFlag := fs.String("adapter", "", "serve a LoRA adapter: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 	infercraneCloud := fs.Bool("infercrane-cloud", false, "deploy on InferCrane Cloud, paid from prepaid credits")
 	stopAfter := fs.Duration("stop-after", time.Hour, "with --infercrane-cloud: stop the deployment after this long (15m to 24h)")
 	output := fs.String("output", "human", "human or json")
@@ -1989,20 +2001,31 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	var runtimeWorkload runtimecontract.Workload
 	var servingTopology servingcontract.Topology
 	runtimeEngine := *runtimeFlag
-	modelRevision := ""
+	modelRevision := *modelRevisionFlag
+	modelSecretReferenceID := *modelSecret
+	var modelAdapters []domain.ModelAdapter
+	if *adapterFlag != "" {
+		adapter, adapterErr := parseAdapterFlag(*adapterFlag)
+		if adapterErr != nil {
+			return adapterErr
+		}
+		modelAdapters = []domain.ModelAdapter{adapter}
+	}
 	runtimeVersion := ""
 	if ext := filepath.Ext(model); ext == ".yaml" || ext == ".yml" {
 		file, err := spec.Load(model)
 		if err != nil {
 			return err
 		}
-		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeFlag != "vllm" {
+		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeFlag != "vllm" || *modelSecret != "" || *modelRevisionFlag != "" || *adapterFlag != "" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
 		*endpointName = file.Endpoint
 		model = file.Model.ID
 		modelRevision = file.Model.Revision
+		modelSecretReferenceID = file.Model.SecretReferenceID
+		modelAdapters = file.Model.Adapters
 		runtimeVersion = file.Runtime.Version
 		runtimeEngine = file.Runtime.Engine
 		*computeMode = file.Compute.Mode
@@ -2075,7 +2098,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, ModelSecretReferenceID: modelSecretReferenceID, ModelAdapters: modelAdapters, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
 			ComputeConnectionID: selfServe.connectionID, BillingMode: selfServe.billingMode, ManagedRuntimeSeconds: selfServe.runtimeSeconds}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
@@ -3064,21 +3087,30 @@ func principalAPICommand(ctx context.Context, cfg config.Config, args []string) 
 
 func secretAPICommand(ctx context.Context, cfg config.Config, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane secret create NAME --from-env VARIABLE | secret list [--output human|json] | secret delete ID --yes")
+		return errors.New("usage: infercrane secret create NAME --sealed-from-env VARIABLE | --from-env VARIABLE | --kubernetes SECRET/KEY | --aws-secret ARN | secret list [--output human|json] | secret delete ID --yes")
 	}
 	switch args[0] {
 	case "create":
 		if len(args) < 2 {
-			return errors.New("usage: infercrane secret create NAME --from-env VARIABLE")
+			return errors.New("usage: infercrane secret create NAME --sealed-from-env VARIABLE | --from-env VARIABLE | --kubernetes SECRET/KEY | --aws-secret ARN")
 		}
 		fs := newFlagSet("secret create")
-		fromEnv := fs.String("from-env", "", "environment variable containing the secret")
+		sealedFromEnv := fs.String("sealed-from-env", "", "seal the value of this local environment variable in InferCrane; it is never shown again")
+		fromEnv := fs.String("from-env", "", "operator only: reference a variable of the control plane's own environment")
+		kubernetesSecret := fs.String("kubernetes", "", "name a Secret in the cluster's InferCrane namespace as SECRET/KEY; workers read it")
+		awsSecret := fs.String("aws-secret", "", "name a Secrets Manager ARN; the worker's instance profile reads it")
 		output := fs.String("output", "human", "human or json")
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
-		if *fromEnv == "" {
-			return errors.New("--from-env is required; raw secret values are never accepted")
+		chosen := 0
+		for _, value := range []string{*sealedFromEnv, *fromEnv, *kubernetesSecret, *awsSecret} {
+			if value != "" {
+				chosen++
+			}
+		}
+		if chosen != 1 {
+			return errors.New("choose one of --sealed-from-env, --from-env, --kubernetes, or --aws-secret; raw secret values are never accepted as arguments")
 		}
 		if err := validateOutput(*output); err != nil {
 			return err
@@ -3087,13 +3119,29 @@ func secretAPICommand(ctx context.Context, cfg config.Config, args []string) err
 			Secret domain.SecretReference `json:"secret"`
 		}
 		request := map[string]string{"name": args[1], "resolver": "env", "reference": *fromEnv}
+		switch {
+		case *sealedFromEnv != "":
+			value, found := os.LookupEnv(*sealedFromEnv)
+			if !found || strings.TrimSpace(value) == "" {
+				return fmt.Errorf("environment variable %s is not set", *sealedFromEnv)
+			}
+			request = map[string]string{"name": args[1], "resolver": "sealed", "value": strings.TrimSpace(value)}
+		case *kubernetesSecret != "":
+			request = map[string]string{"name": args[1], "resolver": "kubernetes", "reference": *kubernetesSecret}
+		case *awsSecret != "":
+			request = map[string]string{"name": args[1], "resolver": "aws-secrets-manager", "reference": *awsSecret}
+		}
 		if err := controlJSON(ctx, cfg, http.MethodPost, "/api/v1/secrets", "", request, &response); err != nil {
 			return err
 		}
 		if *output == "json" {
 			return printJSON(response)
 		}
-		fmt.Printf("secret reference %s created\nResolver  env:%s\n", response.Secret.ID, response.Secret.Reference)
+		if response.Secret.Resolver == "sealed" {
+			fmt.Printf("secret %s created\nSealed    the value is stored encrypted and never shown again\n", response.Secret.ID)
+		} else {
+			fmt.Printf("secret reference %s created\nResolver  %s:%s\n", response.Secret.ID, response.Secret.Resolver, response.Secret.Reference)
+		}
 		return nil
 	case "list":
 		fs := newFlagSet("secret list")
@@ -4293,9 +4341,29 @@ func environmentSecrets(cfg config.Config) secrets.Environment {
 	return secrets.Environment{Tenants: secrets.NewTenantPolicy(tenants...)}
 }
 
+// workspaceSecrets resolves every secret kind the control plane may read: the
+// operator's env references and each workspace's sealed values. Kubernetes and
+// aws-secrets-manager references stay with the workers and never resolve here.
+func workspaceSecrets(cfg config.Config) (secrets.Resolvers, error) {
+	resolvers := secrets.Resolvers{Environment: environmentSecrets(cfg)}
+	if cfg.CredentialEncryptionKey == "" {
+		return resolvers, nil
+	}
+	cipher, err := secretcipher.New(cfg.CredentialEncryptionKey)
+	if err != nil {
+		return secrets.Resolvers{}, fmt.Errorf("configure sealed secrets: %w", err)
+	}
+	resolvers.Sealed = secrets.Sealed{Cipher: &cipher, KeyReference: cfg.CredentialEncryptionKeyReference}
+	return resolvers, nil
+}
+
 func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	secretResolvers, err := workspaceSecrets(cfg)
+	if err != nil {
+		return err
+	}
 	const membershipLiveFor = 45 * time.Second
 	if err := s.RegisterControlPlaneInstance(ctx, domain.ControlPlaneInstance{ID: cfg.InstanceID, BinaryVersion: version, ProtocolMin: controlPlaneProtocolMin, ProtocolMax: controlPlaneProtocolMax}, membershipLiveFor); err != nil {
 		return fmt.Errorf("register control-plane instance: %w", err)
@@ -4330,7 +4398,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	serverless := provision.RunPodServerless{APIKey: cfg.RunPodAPIKey, BaseURL: cfg.RunPodRESTURL, TemplateID: cfg.RunPodServerlessTemplateID}
 	externalBudgets := external.NewBudgetPool()
-	externalCoordinator := &external.Coordinator{Store: s, Secrets: environmentSecrets(cfg), Budgets: externalBudgets}
+	externalCoordinator := &external.Coordinator{Store: s, Secrets: secretResolvers, Budgets: externalBudgets}
 	logger := slog.Default()
 	recorder := accounting.New(s, logger, 8192, 4)
 	defer func() {
@@ -4618,7 +4686,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if cipherErr != nil {
 			return fmt.Errorf("configure async inference encryption: %w", cipherErr)
 		}
-		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: environmentSecrets(cfg)}
+		asyncService = &asyncinference.Service{Store: s, Cipher: cipher, KeyReference: cfg.AsyncEncryptionKeyReference, GatewayURL: cfg.ControlURL, APIKey: cfg.APIKey, Owner: cfg.InstanceID + ":async", Lease: time.Minute, Secrets: secretResolvers}
 	}
 	computeConnectionService, err := newComputeConnectionService(cfg, s)
 	if err != nil {
@@ -4682,7 +4750,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	var hostedModels *modelapirouting.Runtime
 	if len(cfg.HostedModelAPIEndpoints) > 0 {
 		hostedRoutes := modelapirouting.NewDirectory()
-		targetResolver, resolverErr := modelapirouting.NewRegistryTargetResolver(cfg.HostedModelAPIEndpoints, s, environmentSecrets(cfg))
+		targetResolver, resolverErr := modelapirouting.NewRegistryTargetResolver(cfg.HostedModelAPIEndpoints, s, secretResolvers)
 		if resolverErr != nil {
 			return fmt.Errorf("configure hosted Model API targets: %w", resolverErr)
 		}
@@ -4730,7 +4798,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Store: s, Resolver: modelAPIUsageResolvers, Logger: logger, Telemetry: modelAPIUsageTelemetry,
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
-	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: environmentSecrets(cfg), AlertDeliverer: alert.Deliverer{Store: s, Secrets: environmentSecrets(cfg)}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
+	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secretResolvers, SealedSecrets: secretResolvers.Sealed, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secretResolvers}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
 	huggingFaceSearch, huggingFaceSearchErr := huggingfacesearch.New(huggingfacesearch.Options{})
 	if huggingFaceSearchErr != nil {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
@@ -4873,7 +4941,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
 		}
-		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs}
+		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs, ObjectStoreSecretName: cfg.KubernetesObjectStoreSecret, S3FetchImage: cfg.KubernetesS3FetchImage, GCSFetchImage: cfg.KubernetesGCSFetchImage}
 		artifactCacheAdapters["kubernetes"] = kubernetesProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
@@ -4903,7 +4971,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("configure replica backends: %w", err)
 	}
-	huggingFaceResolver := artifact.TenantHuggingFace{Public: artifact.HuggingFace{}, Store: s, Secrets: environmentSecrets(cfg)}
+	huggingFaceResolver := artifact.TenantHuggingFace{Public: artifact.HuggingFace{}, Store: s, Secrets: secretResolvers}
 	for kind, handler := range workflows.CloudHandlersWithBackendsAndDrain(s, replicaBackends, runtimeBackends, directory, huggingFaceResolver) {
 		handlers[kind] = handler
 	}
@@ -4925,7 +4993,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return err
 	}
 	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Replays: s}
+	migrationCheck := optimizationcampaign.MigrationQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Credentials: closedAPICredentials{upstreamCredentials}, Signer: qualitySigner}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}

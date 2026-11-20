@@ -25,7 +25,7 @@ func connectCommand(ctx context.Context, cfg config.Config, args []string) error
 	upstreamModel := fs.String("model", "", "physical upstream model; discovered when omitted")
 	typeName := fs.String("type", "auto", "auto, vllm, litellm, or openai-compatible")
 	manageTraffic := fs.Bool("manage-traffic", false, "route requests through InferCrane after qualification")
-	tokenEnv := fs.String("token-env", "", "environment variable holding the server's API key; it is sent once, stored encrypted, and used for discovery and health checks")
+	tokenEnv := fs.String("token-env", "", "environment variable holding the server's API key; it is sent once, stored encrypted, and used for discovery, health checks, and the requests InferCrane routes to the server")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

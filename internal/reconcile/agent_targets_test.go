@@ -161,3 +161,49 @@ func TestAgentManagedEndpointServesThroughItsAgentAndIsNeverRoutedHere(t *testin
 		t.Fatal("a deleted endpoint kept its residency marker")
 	}
 }
+
+func TestTrafficManagedAdoptedRouteSendsSealedCredential(t *testing.T) {
+	target := domain.Target{ID: "closed-api", URL: "https://api.openai.invalid/v1", Runtime: "openai-compatible", Provider: "external", UpstreamModel: "gpt-4.1-mini", Health: "healthy"}
+	_, reconciler, _ := adoptedFixture(t, target, "traffic-managed")
+	reconciler.UpstreamCredentials = staticCredentials{"closed-api": "sk-sealed"}
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	route, release, ok := reconciler.Routes.AcquireForTenant("global", "local-qwen")
+	if !ok {
+		t.Fatal("adopted endpoint published no route")
+	}
+	release()
+	if route.UpstreamAPIKey != "sk-sealed" || route.ComputeMode != "external" || route.BindingID != "binding" {
+		t.Fatalf("route=%+v", route)
+	}
+
+	// A server without a credential routes without one.
+	_, reconciler, _ = adoptedFixture(t, target, "traffic-managed")
+	reconciler.UpstreamCredentials = staticCredentials{}
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if route, release, ok := reconciler.Routes.AcquireForTenant("global", "local-qwen"); !ok || route.UpstreamAPIKey != "" {
+		t.Fatalf("uncredentialed route ok=%v key=%q", ok, route.UpstreamAPIKey)
+	} else {
+		release()
+	}
+
+	// A credential that cannot be opened never routes unauthenticated.
+	_, reconciler, _ = adoptedFixture(t, target, "traffic-managed")
+	reconciler.UpstreamCredentials = failingCredentials{err: upstreamcredential.ErrUnreadable}
+	if err := reconciler.RefreshEndpoints(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if route, _, ok := reconciler.Routes.AcquireForTenant("global", "local-qwen"); ok {
+		t.Fatalf("unreadable credential published an unauthenticated route: %+v", route)
+	}
+
+	// A transient read error keeps the pass from publishing anything new.
+	_, reconciler, _ = adoptedFixture(t, target, "traffic-managed")
+	reconciler.UpstreamCredentials = failingCredentials{err: context.DeadlineExceeded}
+	if err := reconciler.RefreshEndpoints(context.Background()); err == nil {
+		t.Fatal("transient credential error was swallowed")
+	}
+}

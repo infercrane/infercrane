@@ -523,6 +523,15 @@ sign and attach instead. `inspect` prints each setup's answer-check result and, 
 waits on you, the exact command that unblocks it. `--output json` returns the control API's
 `quality` object for every setup, under `candidates`.
 
+`--migrate-from ENDPOINT/BINDING` makes the run a [migration Proof](/features/migration): the closed
+API behind that endpoint's external binding is the baseline, `--workload-fingerprint` must name a
+trace captured from that endpoint (`infercrane migrate capture`), and `--eval-set` must name a graded
+set of at least 30 prompts. `--dialect openai` sends `max_completion_tokens` to OpenAI's API;
+`openai-compatible` (the default) sends `max_tokens`. `--max-quality-drop` (default 5) is the
+largest graded-quality drop, at the upper bound of the paired-bootstrap interval, a setup may show
+and still pass. `optimize activate` on a migration run starts a 5% canary on the closed API's
+endpoint.
+
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
 the run's proposal recorded warnings, such as skipped speculative-decoding setups.
 `--output json` keeps `warnings` as the control API returned it: an empty list means none were
@@ -816,7 +825,8 @@ infercrane connect https://vllm.internal/v1 --as coder-production --type vllm
 Use `--model` when the endpoint exposes more than one physical model. Use `--manage-traffic` only
 when the endpoint has been qualified and should immediately enter the InferCrane logical route.
 For a server started with an API key, `--token-env VAR` sends the key held in `VAR` once; the control
-plane stores it encrypted and uses it for discovery and health checks (this needs
+plane stores it encrypted and uses it for discovery, health checks, and, with `--manage-traffic`,
+the requests it routes to the server (this needs
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane). `connect` refuses a loopback URL when
 the control plane runs elsewhere, because the control plane would probe its own machine; use the
 agent for that server.
@@ -1011,6 +1021,32 @@ The objective can be `interactive`, `latency`, `throughput`, or `cost-efficiency
 an exact common workload digest; mixed shapes remain `UNRANKED`. See
 [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
 
+## Migrate from a closed API
+
+`infercrane migrate` measures a closed API routed through an endpoint as the baseline and switches the
+endpoint to an owned deployment in stages. See [Migrate from a closed API](/features/migration).
+
+```bash
+infercrane migrate capture support-bot --binding primary --window 24h
+infercrane migrate price support-bot primary --authority list_price \
+  --input-usd 0.40 --cached-input-usd 0.10 --output-usd 1.60 --valid-until 2026-12-31
+infercrane migrate verdicts RUN_ID
+infercrane migrate canary support-bot --verdict VERDICT_ID --percent 5
+infercrane migrate primary support-bot --window 1h
+infercrane migrate rollback support-bot
+```
+
+| Action | What it does |
+|---|---|
+| `capture ENDPOINT` | Captures a content-free trace of the endpoint's requests (`--binding` for one binding); prints the workload fingerprint |
+| `price ENDPOINT BINDING` | Records the closed API's per-token rate card: `--authority list_price` or `contract`, USD per 1M tokens, `--valid-until` |
+| `verdicts RUN` | Lists the signed quality verdicts of a migration run |
+| `canary ENDPOINT` | Sends at most 5% (`--percent`) of the endpoint's traffic to the deployment a PASS `--verdict` judged |
+| `primary ENDPOINT` | Serves from the owned deployment first with the closed API as fallback, if Release Guard passes on the canary's per-binding traffic (`--window`) |
+| `rollback ENDPOINT` | Routes the endpoint to the closed API alone |
+
+A step Release Guard does not pass changes nothing and exits with the decision and its reasons.
+
 ## Replay and capacity
 
 ```bash
@@ -1114,17 +1150,36 @@ New and rotated tokens are returned once. Service-account scopes can only restri
 they can never grant an action unavailable to `viewer`, `operator`, or `admin`. Omitting `--scopes`
 uses every action allowed by the selected role for compatibility.
 
-## Secret references
+## Secrets
 
-Register metadata that points to an injected environment value. InferCrane never accepts the raw
-secret on the command line or through its API.
+Seal a value from a local environment variable, or name a secret that stays in your own cluster or
+AWS account. A raw secret is never accepted as a command-line argument, and a sealed value is never
+shown again.
 
 ```bash
-infercrane secret create openrouter --from-env OPENROUTER_API_KEY
+export HF_TOKEN='hf_...'
+infercrane secret create hf-token --sealed-from-env HF_TOKEN
+infercrane secret create hf-token --kubernetes hf-token/HF_TOKEN
+infercrane secret create hf-token --aws-secret arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY   # operator workspaces only
 infercrane secret list
 infercrane secret list --output json
 infercrane secret delete SECRET_ID --yes
 ```
+
+## Bring a model you trained
+
+```bash
+infercrane deploy acme/support-model --model-secret SECRET_ID --compute-connection my-runpod --gpu H100
+infercrane models import s3://acme-models/run-42 --from ./run-42
+infercrane deploy s3://acme-models/run-42 --model-revision sha256:DIGEST --cloud kubernetes --gpu L4 --name run-42
+infercrane models adapter-check acme/support-lora --base-model Qwen/Qwen3-8B
+infercrane deploy Qwen/Qwen3-8B --adapter support-bot=acme/support-lora@COMMIT --compute-connection my-runpod --gpu H100
+infercrane optimize propose acme/support-model --model-secret SECRET_ID --adapter support-bot=acme/support-lora@COMMIT --provider runpod --gpu H100
+```
+
+`models import` hashes the local copy into a manifest; workers check every downloaded file against
+it. See [model artifacts](/features/model-artifacts).
 
 ## Signed alerts
 

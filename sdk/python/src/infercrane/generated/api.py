@@ -99,6 +99,18 @@ class ControlAPI:
         request_path = "/catalog/hugging-face/check"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def check_hugging_face_adapter(self) -> dict[str, Any]:
+        request_path = "/catalog/hugging-face/adapter-check"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def list_model_imports(self) -> dict[str, Any]:
+        request_path = "/model-imports"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def create_model_import(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/model-imports"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         request_path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))
@@ -399,6 +411,38 @@ class ControlAPI:
         request_path = f"/endpoints/{quote(name, safe='')}/release-guard/evaluations"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
+    def capture_endpoint_replay(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/replays"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def list_endpoint_replays(self, name: str) -> ObjectList:
+        request_path = f"/endpoints/{quote(name, safe='')}/replays"
+        return cast(ObjectList, self._transport.request("GET", request_path))
+
+    def import_endpoint_traffic_observations(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/traffic-observations"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def set_binding_rate_card(self, name: str, binding: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/bindings/{quote(binding, safe='')}/rate-card"
+        return cast(dict[str, Any], self._transport.request("PUT", request_path, body=body))
+
+    def get_binding_rate_card(self, name: str, binding: str) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/bindings/{quote(binding, safe='')}/rate-card"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def attach_binding_quality_evidence(self, name: str, binding: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/bindings/{quote(binding, safe='')}/quality-evidence"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def list_binding_quality_evidence(self, name: str, binding: str) -> ObjectList:
+        request_path = f"/endpoints/{quote(name, safe='')}/bindings/{quote(binding, safe='')}/quality-evidence"
+        return cast(ObjectList, self._transport.request("GET", request_path))
+
+    def stage_endpoint_migration(self, name: str, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = f"/endpoints/{quote(name, safe='')}/migration"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def list_operation_events(self, id: str) -> ObjectList:
         request_path = f"/operations/{quote(id, safe='')}/events"
         return cast(ObjectList, self._transport.request("GET", request_path))
@@ -562,6 +606,10 @@ class ControlAPI:
     def get_optimization_campaign(self, id: str) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def list_migration_verdicts(self, id: str) -> ObjectList:
+        request_path = f"/optimization/campaigns/{quote(id, safe='')}/migration-verdicts"
+        return cast(ObjectList, self._transport.request("GET", request_path))
 
     def get_optimization_campaign_report(self, id: str) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/report"

@@ -18,7 +18,7 @@ func TestNormalizeServingPlanIsCanonicalAndBounded(t *testing.T) {
 		{BindingID: "secondary", Priority: 1, Weight: 25},
 		{BindingID: "primary", Priority: 0, Weight: 75},
 	}
-	plan, body, err := normalizePlan("weighted", bindings)
+	plan, body, err := normalizePlan("weighted", bindings, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,15 +31,15 @@ func TestNormalizeServingPlanIsCanonicalAndBounded(t *testing.T) {
 		"unbounded weight":   {{BindingID: "a", Weight: 10001}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := normalizePlan("weighted", candidate); err == nil {
+			if _, _, err := normalizePlan("weighted", candidate, ""); err == nil {
 				t.Fatal("invalid plan accepted")
 			}
 		})
 	}
-	if _, _, err = normalizePlan("manual", bindings); err == nil {
+	if _, _, err = normalizePlan("manual", bindings, ""); err == nil {
 		t.Fatal("manual plan accepted multiple bindings")
 	}
-	if _, _, err = normalizePlan("weighted", bindings[:1]); err == nil {
+	if _, _, err = normalizePlan("weighted", bindings[:1], ""); err == nil {
 		t.Fatal("weighted plan accepted a non-active-active binding count")
 	}
 	if err = validateActiveActiveIdentities([]activeActiveIdentity{{Model: "org/model", Provider: "aws"}, {Model: "org/model", Provider: "gcp"}}); err != nil {

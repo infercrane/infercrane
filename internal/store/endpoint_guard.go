@@ -175,6 +175,9 @@ func (s *Store) EvaluateEndpointReleaseGuard(ctx context.Context, tenant, name s
 	if err != nil {
 		return domain.EndpointReleaseGuardEvaluation{}, err
 	}
+	if evaluation, migration, migrationErr := s.evaluateMigrationGuard(ctx, tenant, resolved, policy, window); migration || migrationErr != nil {
+		return evaluation, migrationErr
+	}
 	topologyQualified, topologyEvidence := endpointPlanTopologyEvidence(resolved)
 	if !topologyQualified {
 		return s.recordEndpointGuardEvaluation(ctx, tenant, resolved, policy, "INCONCLUSIVE", []string{"serving_plan_topology_unqualified"}, map[string]any{"plan_topology": topologyEvidence})

@@ -80,14 +80,37 @@ func (e Environment) AllowsTenant(tenant string) bool {
 	return e.Tenants.Allows(tenant)
 }
 
+// ValidateReference checks the stored, non-secret part of a reference for its
+// resolver. A sealed reference stores no reference text: its value is sealed
+// separately and never leaves the control plane.
 func ValidateReference(reference domain.SecretReference) error {
-	if reference.Resolver != "env" || !environmentName.MatchString(reference.Reference) {
-		return errors.New("secret reference is not a valid environment reference")
+	switch reference.Resolver {
+	case ResolverEnvironment:
+		if !environmentName.MatchString(reference.Reference) {
+			return errors.New("secret reference is not a valid environment reference")
+		}
+	case ResolverSealed:
+		if reference.Reference != "" {
+			return errors.New("a sealed secret takes a value, not a reference")
+		}
+	case ResolverKubernetes:
+		if _, _, ok := KubernetesSecretKey(reference.Reference); !ok {
+			return errors.New("a kubernetes secret reference must be SECRET-NAME/KEY in the cluster's InferCrane namespace")
+		}
+	case ResolverAWSSecretsManager:
+		if !awsSecretARN.MatchString(reference.Reference) {
+			return errors.New("an aws-secrets-manager reference must be a Secrets Manager secret ARN")
+		}
+	default:
+		return fmt.Errorf("unsupported secret resolver %q", reference.Resolver)
 	}
 	return nil
 }
 
 func (e Environment) Resolve(_ context.Context, reference domain.SecretReference) (string, error) {
+	if reference.Resolver != ResolverEnvironment {
+		return "", errors.New("secret reference is not a valid environment reference")
+	}
 	if err := ValidateReference(reference); err != nil {
 		return "", err
 	}

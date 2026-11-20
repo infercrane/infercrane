@@ -321,12 +321,14 @@ Face did not publish is `null`.
 The check never claims throughput, latency, answer quality, capacity, or price. Measure those with
 an [optimization run](/features/optimization).
 
-**Gated and private models.** Save a Hugging Face token as a workspace credential named `model-…`
-under Settings › Connections (or `infercrane secret`), from an account that accepted the model's
-terms. Pass its ID as `model_secret_reference_id` (`--secret` in the CLI). The token is resolved
-only to read the model, is never returned, and its reads are cached per workspace and credential,
-so one workspace's token never answers another's request. The token pins and reads the model; the
-GPU provider still downloads weights with its own configured Hugging Face credential.
+**Gated and private models.** Save a Hugging Face token as a sealed workspace secret under
+Settings › Connections (or `infercrane secret create NAME --sealed-from-env HF_TOKEN`), from an
+account that accepted the model's terms. Pass its ID as `model_secret_reference_id` (`--secret` in
+the CLI). The token is never returned, and its reads are cached per workspace and credential, so one
+workspace's token never answers another's request. The check also says whether `config.json` was
+read and tokenizer files are present. A deployment with the same ID delivers the token to the worker
+through the provider's own secret store; see
+[model artifacts](/features/model-artifacts#private-and-gated-models).
 
 **Turning it on.** The control plane reads Hugging Face for checks only when the operator sets
 `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. It is off by default; planning then says that
