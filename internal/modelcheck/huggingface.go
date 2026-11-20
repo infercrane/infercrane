@@ -88,6 +88,19 @@ type Files struct {
 	Safetensors bool
 	GGUF        bool
 	PyTorch     bool
+	// Tokenizer is true when a tokenizer file the runtimes load is listed.
+	Tokenizer bool
+}
+
+// TokenizerFile reports whether a repository file is one of the tokenizer
+// files vLLM and SGLang load through transformers or mistral_common.
+func TokenizerFile(name string) bool {
+	name = strings.ToLower(name)
+	switch name {
+	case "tokenizer.json", "tokenizer.model", "tokenizer_config.json", "vocab.json", "tekken.json":
+		return true
+	}
+	return strings.HasSuffix(name, ".tiktoken")
 }
 
 // Weights is Hugging Face's safetensors summary: stored parameter counts by
@@ -372,6 +385,8 @@ func (r *Resolver) read(ctx context.Context, repository, revision, token string)
 		switch {
 		case name == "config.json":
 			model.Files.Config = true
+		case TokenizerFile(name):
+			model.Files.Tokenizer = true
 		case strings.HasSuffix(name, ".safetensors"):
 			model.Files.Safetensors = true
 		case strings.HasSuffix(name, ".gguf"):
@@ -515,4 +530,40 @@ func license(cardData json.RawMessage, tags []string) string {
 func ConfigDigest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// AdapterRead is a LoRA adapter repository pinned to a commit and the bytes of
+// its adapter_config.json, when Hugging Face returned them.
+type AdapterRead struct {
+	Model       Model
+	Config      []byte
+	ConfigState string
+	Weights     bool
+}
+
+// ResolveAdapter pins an adapter repository to a commit and reads its
+// adapter_config.json with the same bounds, cache scope, and token rules as a
+// model read. The token goes only to the Hub host.
+func (r *Resolver) ResolveAdapter(ctx context.Context, request Request) (AdapterRead, error) {
+	model, err := r.Resolve(ctx, request)
+	if err != nil {
+		return AdapterRead{}, err
+	}
+	read := AdapterRead{Model: model, ConfigState: ConfigNotFound, Weights: model.Files.Safetensors}
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
+	status, _, body, err := r.get(ctx, r.endpoint+"/"+repositoryPath(model.Repository)+"/raw/"+model.Commit+"/adapter_config.json", request.Token, maxConfigBytes)
+	if err != nil {
+		return AdapterRead{}, err
+	}
+	switch status {
+	case http.StatusOK:
+		read.Config, read.ConfigState = body, ConfigRead
+	case http.StatusUnauthorized, http.StatusForbidden:
+		read.ConfigState = ConfigTokenRequired
+	case http.StatusNotFound:
+	default:
+		return AdapterRead{}, &Error{Code: CodeUnavailable, Message: fmt.Sprintf("Hugging Face answered with status %d for adapter_config.json", status)}
+	}
+	return read, nil
 }

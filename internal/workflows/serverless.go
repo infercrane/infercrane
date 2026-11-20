@@ -66,7 +66,7 @@ func ServerlessHandlers(store CloudStore, backend ServerlessBackend, artifactRes
 			if artifactResolver == nil {
 				return "", operations.Permanent("artifact_resolver_unavailable", errors.New("Hugging Face artifact resolver is required"))
 			}
-			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, artifactResolver, request)
+			modelArtifact, artifactErr = resolveRequestedArtifact(ctx, store, artifactResolver, request)
 			if artifactErr == nil {
 				modelArtifact, artifactErr = store.AttachModelArtifact(ctx, request.TenantID, request.RevisionID, modelArtifact)
 			}

@@ -99,6 +99,18 @@ class ControlAPI:
         request_path = "/catalog/hugging-face/check"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def check_hugging_face_adapter(self) -> dict[str, Any]:
+        request_path = "/catalog/hugging-face/adapter-check"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def list_model_imports(self) -> dict[str, Any]:
+        request_path = "/model-imports"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def create_model_import(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/model-imports"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
     def plan_intent(self, *, body: dict[str, Any]) -> IntentPlanEnvelope:
         request_path = "/planning/intents"
         return cast(IntentPlanEnvelope, self._transport.request("POST", request_path, body=body))

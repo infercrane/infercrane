@@ -858,6 +858,48 @@
         ],
         "type": "object"
       },
+      "AdapterCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ModelImportCheck"
+          },
+          "gated": {
+            "type": "boolean"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "requested_revision": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "The commit read; pin the adapter to it.",
+            "type": "string"
+          },
+          "token_used": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repository",
+          "requested_revision",
+          "revision",
+          "private",
+          "gated",
+          "token_used",
+          "checks",
+          "performance_claims"
+        ],
+        "type": "object"
+      },
       "AdmissionMonitoring": {
         "additionalProperties": false,
         "properties": {
@@ -2700,13 +2742,23 @@
             "type": "integer"
           },
           "model": {
+            "description": "Hugging Face OWNER/NAME, or the s3:// or gs:// location of weights imported into this workspace (served from the worker's verified local copy under this name).",
             "type": "string"
           },
+          "model_adapters": {
+            "description": "LoRA adapter served on the model with the vllm or sglang runtime. LoRA flags come from here, never from runtime_args.",
+            "items": {
+              "$ref": "#/components/schemas/ModelAdapter"
+            },
+            "maxItems": 1,
+            "type": "array"
+          },
           "model_revision": {
+            "description": "Hugging Face branch, tag, or commit; for an imported s3:// or gs:// model, the sha256 manifest digest of its import.",
             "type": "string"
           },
           "model_secret_reference_id": {
-            "description": "Tenant-scoped server-side credential reference for private or gated model resolution.",
+            "description": "Workspace secret with the Hugging Face token for a private or gated model. The provider delivers it natively: a RunPod secret in the account that runs the Pod (sealed), a Kubernetes secretKeyRef (kubernetes), or a Secrets Manager ARN read by the instance profile (aws-secrets-manager).",
             "type": "string"
           },
           "name": {
@@ -7227,6 +7279,39 @@
         ],
         "type": "object"
       },
+      "ModelAdapter": {
+        "additionalProperties": false,
+        "description": "A LoRA adapter served on the model. The endpoint answers with the adapter; one endpoint serves one adapter.",
+        "properties": {
+          "name": {
+            "description": "Model name the endpoint answers to.",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "rank": {
+            "description": "LoRA rank r from adapter_config.json; sets the runtime's maximum rank. Read from the import when omitted.",
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "repository": {
+            "description": "Hugging Face OWNER/NAME, or an imported s3:// or gs:// location.",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "revision": {
+            "description": "The adapter's 40-character Hugging Face commit, or the sha256 manifest digest of its import.",
+            "pattern": "^([0-9a-f]{40}|sha256:[0-9a-f]{64})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "repository",
+          "revision"
+        ],
+        "type": "object"
+      },
       "ModelCheck": {
         "additionalProperties": false,
         "properties": {
@@ -7757,6 +7842,228 @@
           "check",
           "reviewed_model",
           "performance_claims"
+        ],
+        "type": "object"
+      },
+      "ModelFile": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "size",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "ModelImport": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ModelImportCheck"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ModelFile"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "weights",
+              "adapter"
+            ],
+            "type": "string"
+          },
+          "manifest_digest": {
+            "description": "Pin a deployment to it with model_revision or an adapter's revision.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "s3",
+              "gs"
+            ],
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "uri",
+          "manifest_digest",
+          "files",
+          "checks",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ModelImportCheck": {
+        "additionalProperties": false,
+        "description": "What the manifest and the configuration bytes sent with it prove. Unknown stays unknown: workers check the downloaded bytes.",
+        "properties": {
+          "adapter_base_model": {
+            "type": "string"
+          },
+          "adapter_rank": {
+            "type": "integer"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "config_digest": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "model_type": {
+            "type": "string"
+          },
+          "tokenizer_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "verified": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "verified",
+          "unknown",
+          "failed",
+          "total_bytes"
+        ],
+        "type": "object"
+      },
+      "ModelImportEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "description": "Weights only: the automatic model check of the imported configuration.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "import": {
+            "$ref": "#/components/schemas/ModelImport"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "import",
+          "performance_claims"
+        ],
+        "type": "object"
+      },
+      "ModelImportList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelImport"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ModelImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_config_base64": {
+            "description": "Adapter only: adapter_config.json bytes, checked against its manifest entry and read for the rank and base model.",
+            "type": "string"
+          },
+          "base_model": {
+            "description": "Adapter only: the base model it will be served on.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "config_base64": {
+            "description": "Weights only: config.json bytes, checked against its manifest entry and read for the architecture.",
+            "type": "string"
+          },
+          "files": {
+            "description": "Every file at the location; infercrane models import builds it from a local copy.",
+            "items": {
+              "$ref": "#/components/schemas/ModelFile"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "weights",
+              "adapter"
+            ],
+            "type": "string"
+          },
+          "uri": {
+            "description": "Location in the workspace's own bucket.",
+            "pattern": "^(s3|gs)://[a-z0-9][a-z0-9._-]{1,61}[a-z0-9](/[A-Za-z0-9._/=+-]*)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "uri",
+          "files"
         ],
         "type": "object"
       },
@@ -10663,6 +10970,14 @@
             "minimum": 0,
             "type": "number"
           },
+          "model_adapters": {
+            "description": "LoRA adapter every candidate serves on the model. Checkpoint swaps are skipped because the adapter was trained on this checkpoint.",
+            "items": {
+              "$ref": "#/components/schemas/ModelAdapter"
+            },
+            "maxItems": 1,
+            "type": "array"
+          },
           "model_config_digest": {
             "description": "Digest of the pinned model configuration that declared model_features.",
             "pattern": "^sha256:[a-fA-F0-9]{64}$",
@@ -10686,11 +11001,12 @@
             "type": "string"
           },
           "model_revision": {
-            "pattern": "^[a-fA-F0-9]{40,64}$",
+            "description": "Model commit, or the sha256 manifest digest of imported s3:// or gs:// weights.",
+            "pattern": "^([a-fA-F0-9]{40,64}|sha256:[a-f0-9]{64})$",
             "type": "string"
           },
           "model_secret_reference_id": {
-            "description": "Saved Hugging Face token reference used to check a gated model outside the reviewed catalog. The token never enters the proposal.",
+            "description": "Workspace secret with the Hugging Face token for a private or gated model. It checks a model outside the reviewed catalog and is delivered to every candidate's worker natively by the provider. The reference enters the proposal; the token never does.",
             "maxLength": 255,
             "type": "string"
           },
@@ -11815,6 +12131,42 @@
           "provider",
           "external_id",
           "endpoint"
+        ],
+        "type": "object"
+      },
+      "SecretReferenceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "reference": {
+            "description": "For env, kubernetes, and aws-secrets-manager.",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "resolver": {
+            "description": "sealed keeps the value encrypted in InferCrane and never returns it. env names the control plane's environment and is for the operator's workspaces only. kubernetes (SECRET/KEY in the cluster's InferCrane namespace) and aws-secrets-manager (an ARN) stay in the customer's own cluster or account and are read only by workers, for workspaces the operator lets deploy there.",
+            "enum": [
+              "sealed",
+              "env",
+              "kubernetes",
+              "aws-secrets-manager"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "For sealed only: one line of printable ASCII. Sealed at once and never returned or logged.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "name",
+          "resolver"
         ],
         "type": "object"
       },
@@ -14193,6 +14545,85 @@
         "summary": "List timestamped GPU price observations without claiming stock",
         "tags": [
           "Compute"
+        ]
+      }
+    },
+    "/api/v1/catalog/hugging-face/adapter-check": {
+      "get": {
+        "operationId": "checkHuggingFaceAdapter",
+        "parameters": [
+          {
+            "description": "Exact owner/name Hugging Face adapter repository.",
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "maxLength": 193,
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Branch, tag, or commit. Defaults to main; the check reports the commit it read.",
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace's saved Hugging Face token, for a private adapter. The token is sent only to Hugging Face.",
+            "in": "query",
+            "name": "model_secret_reference_id",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The base model the adapter will be served on, compared with the base model adapter_config.json declares.",
+            "in": "query",
+            "name": "base_model",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdapterCheck"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pin a Hugging Face LoRA adapter to a commit and read its adapter_config.json: rank and declared base model; not a performance claim",
+        "tags": [
+          "Model catalog"
         ]
       }
     },
@@ -19665,6 +20096,86 @@
         ]
       }
     },
+    "/api/v1/model-imports": {
+      "get": {
+        "operationId": "listModelImports",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List weights and LoRA adapters imported from the workspace's own S3 or GCS buckets",
+        "tags": [
+          "Model catalog"
+        ]
+      },
+      "post": {
+        "operationId": "createModelImport",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import weights or a LoRA adapter from the workspace's own S3 or GCS bucket by file manifest; InferCrane never reads the bucket, and workers check every file's sha256",
+        "tags": [
+          "Model catalog"
+        ]
+      }
+    },
     "/api/v1/notifications/subscriptions": {
       "get": {
         "operationId": "listNotificationSubscriptions",
@@ -22965,7 +23476,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Object"
+                "$ref": "#/components/schemas/SecretReferenceCreate"
               }
             }
           },
@@ -22998,7 +23509,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a reference to an external secret",
+        "summary": "Seal a workspace secret, or name one in the workspace's own cluster or AWS account; values are never returned",
         "tags": [
           "Secrets"
         ]
