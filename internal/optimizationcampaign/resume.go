@@ -45,17 +45,20 @@ type MeasurementCheckpointSink interface {
 // follows it. A run whose pair the interruption left unfinished is dropped and
 // counted in the interruption.
 type MeasurementCheckpoint struct {
-	Version        int                       `json:"version"`
-	Method         string                    `json:"method"`
-	Identity       string                    `json:"identity"`
-	InvocationBase int64                     `json:"invocation_base"`
-	NextInvocation int64                     `json:"next_invocation"`
-	Control        ControlEvidence           `json:"control"`
-	Order          []string                  `json:"order"`
-	ControlRuns    []benchmark.Result        `json:"control_runs,omitempty"`
-	CandidateRuns  []benchmark.Result        `json:"candidate_runs,omitempty"`
-	Segments       []MeasurementSegment      `json:"segments"`
-	Interruptions  []MeasurementInterruption `json:"interruptions,omitempty"`
+	Version        int             `json:"version"`
+	Method         string          `json:"method"`
+	Identity       string          `json:"identity"`
+	InvocationBase int64           `json:"invocation_base"`
+	NextInvocation int64           `json:"next_invocation"`
+	Control        ControlEvidence `json:"control"`
+	// Comparisons is how many candidates the campaign compares with its
+	// control, fixed when the measurement starts; it widens the interval.
+	Comparisons   int                       `json:"comparisons,omitempty"`
+	Order         []string                  `json:"order"`
+	ControlRuns   []benchmark.Result        `json:"control_runs,omitempty"`
+	CandidateRuns []benchmark.Result        `json:"candidate_runs,omitempty"`
+	Segments      []MeasurementSegment      `json:"segments"`
+	Interruptions []MeasurementInterruption `json:"interruptions,omitempty"`
 }
 
 // MeasurementSegment is one stretch of measuring between interruptions.
@@ -282,8 +285,12 @@ func (s *measurementSession) finish() measurement {
 	// Runs are listed as they ran: each segment's accepted runs are
 	// C X C ... C with a control, or the candidate's runs alone.
 	control, candidate := 0, 0
+	restarts := map[int]bool{}
 	for _, segment := range state.Segments {
 		if segment.ControlRuns > 0 && control < len(state.ControlRuns) {
+			if control > 0 {
+				restarts[control] = true
+			}
 			evidence.Runs = append(evidence.Runs, summarizeRun("control", state.ControlRuns[control]))
 			control++
 		}
@@ -307,11 +314,11 @@ func (s *measurementSession) finish() measurement {
 				expected++
 			}
 		}
-		if reason, drift := validControl(state.ControlRuns, expected); reason != "" {
-			evidence.Control.Role, evidence.Control.Reason, evidence.Control.MaxDrift = ControlRoleInvalid, reason, drift
+		if reason, drift, limit := validControl(state.ControlRuns, expected, restarts); reason != "" {
+			evidence.Control.Role, evidence.Control.Reason, evidence.Control.MaxDrift, evidence.Control.DriftLimit = ControlRoleInvalid, reason, drift, limit
 		} else {
 			evidence.Control.MaxDrift = drift
-			evidence.Comparison = compareArms(state.ControlRuns, state.CandidateRuns)
+			evidence.Comparison = comparePairedArms(evidence.Runs, state.Comparisons)
 		}
 	}
 	return measurement{candidate: state.CandidateRuns, evidence: evidence}

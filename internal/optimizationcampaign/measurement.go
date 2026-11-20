@@ -25,15 +25,30 @@ const (
 	// MeasurementMethod identifies how campaign benchmark evidence was
 	// produced. It is part of the workload identity, so evidence from an older
 	// single-run method can never be ranked against it.
-	MeasurementMethod = "campaign-interleaved-control-v1"
-	// measurementRunsPerArm is the number of independent AIPerf invocations
-	// per arm. Three is the smallest count that yields a Student-t interval
-	// with a usable width.
-	measurementRunsPerArm = 3
-	// maxControlDrift matches kernel qualification: when consecutive control
-	// runs differ by more than this in output throughput, the comparison is
-	// invalid rather than a measurement of the candidate.
-	maxControlDrift   = 0.05
+	MeasurementMethod = "campaign-interleaved-control-v2"
+	// measurementRunsPerArm is the number of candidate runs, each bracketed
+	// by control runs. Four paired rounds find a 10% gain about 99% of the
+	// time at 2% run-to-run noise, against about 79% for the three unpaired
+	// rounds of v1 (see TestJudgeCalibration).
+	measurementRunsPerArm = 4
+	// maxControlDrift marks a broken window: consecutive control runs that
+	// differ by more than this in output throughput mean the server or its
+	// machine changed under the measurement, so the comparison is invalid.
+	// Ordinary drift is cancelled by pairing each candidate run with the
+	// control runs around it, so this limit is wider than v1's 5%, which
+	// discarded about one window in five at 2% noise.
+	maxControlDrift = 0.15
+	// maxRestartDrift applies across a resumed measurement instead: a
+	// replaced server must serve like the one it replaced, because pairing in
+	// time cannot cancel a change of machine.
+	maxRestartDrift = 0.05
+	// familyAlpha bounds the chance that a campaign declares any copy of its
+	// control better or worse. Each candidate's interval is widened for the
+	// number of candidates the campaign compares (Bonferroni).
+	familyAlpha = 0.05
+	// ComparisonPaired names the statistic in MetricComparison.Method.
+	ComparisonPaired = "paired_bracketing_log_ratio"
+
 	minWarmupRequests = 16
 	maxWarmupRequests = 256
 	// measurementSeed is the recorded workload seed. Each invocation's actual
@@ -112,9 +127,16 @@ type ControlEvidence struct {
 }
 
 // MetricComparison is the candidate-versus-control result for one metric.
-// The noise floor is the larger of the control-to-control spread and the
-// candidate's own 95% interval half-width, both relative to their means. A
-// relative delta inside it is no measurable difference.
+//
+// With Method ComparisonPaired, each candidate run is divided by the mean of
+// the two control runs around it. Delta is the geometric mean of those
+// ratios minus one, and the noise floor is the half-width of its Student-t
+// interval at Confidence, which is widened for the campaign's Comparisons
+// candidates. A candidate is better or worse only when the whole interval is
+// on one side of no change. Without Method (v1 evidence), the noise floor is
+// the larger of the control-to-control spread and the candidate's own 95%
+// interval half-width, and a delta inside it is no measurable difference.
+// ControlSpread and CandidateUncertainty are reported either way.
 type MetricComparison struct {
 	HigherIsBetter       bool    `json:"higher_is_better"`
 	ControlMean          float64 `json:"control_mean"`
@@ -124,6 +146,10 @@ type MetricComparison struct {
 	Delta                float64 `json:"delta"`
 	NoiseFloor           float64 `json:"noise_floor"`
 	Decision             string  `json:"decision"`
+	Method               string  `json:"method,omitempty"`
+	Pairs                int     `json:"pairs,omitempty"`
+	Comparisons          int     `json:"comparisons,omitempty"`
+	Confidence           float64 `json:"confidence,omitempty"`
 }
 
 // MeasuredEvidence is stored under the workload document's "measured" key.
@@ -153,15 +179,16 @@ type comparedMetric struct {
 	name         string
 	higherBetter bool
 	value        func(benchmark.Result) *float64
+	run          func(RunSummary) *float64
 }
 
 var comparedMetrics = []comparedMetric{
-	{"output_token_throughput", true, func(r benchmark.Result) *float64 { return r.OutputTokenThroughput }},
-	{"request_throughput", true, func(r benchmark.Result) *float64 { return r.RequestThroughput }},
-	{"ttft_p95_ms", false, func(r benchmark.Result) *float64 { return r.TTFTP95MS }},
-	{"tpot_p95_ms", false, func(r benchmark.Result) *float64 { return r.TPOTP95MS }},
-	{"latency_p95_ms", false, func(r benchmark.Result) *float64 { return r.LatencyP95MS }},
-	{"goodput", true, func(r benchmark.Result) *float64 { return r.Goodput }},
+	{"output_token_throughput", true, func(r benchmark.Result) *float64 { return r.OutputTokenThroughput }, func(r RunSummary) *float64 { return r.OutputTokenThroughput }},
+	{"request_throughput", true, func(r benchmark.Result) *float64 { return r.RequestThroughput }, func(r RunSummary) *float64 { return r.RequestThroughput }},
+	{"ttft_p95_ms", false, func(r benchmark.Result) *float64 { return r.TTFTP95MS }, func(r RunSummary) *float64 { return r.TTFTP95MS }},
+	{"tpot_p95_ms", false, func(r benchmark.Result) *float64 { return r.TPOTP95MS }, func(r RunSummary) *float64 { return r.TPOTP95MS }},
+	{"latency_p95_ms", false, func(r benchmark.Result) *float64 { return r.LatencyP95MS }, func(r RunSummary) *float64 { return r.LatencyP95MS }},
+	{"goodput", true, func(r benchmark.Result) *float64 { return r.Goodput }, func(r RunSummary) *float64 { return r.Goodput }},
 }
 
 // invocations gives every AIPerf run a distinct seed and, for replay, a
@@ -228,44 +255,159 @@ func (i *invocations) run(ctx context.Context, target armTarget, requests int) (
 	return result, nil
 }
 
-// validControl applies kernel qualification's control discipline: the
-// expected control runs all completed, every one is clean, and consecutive
-// runs agree within the drift limit. After a resume the expected count grows
-// by one per segment, and the drift check spans each restart.
-func validControl(runs []benchmark.Result, expected int) (string, float64) {
+// validControl checks the control's runs before any comparison: the expected
+// runs all completed, every one is clean, and consecutive runs agree within
+// maxControlDrift, or within maxRestartDrift across a restart. restarts marks
+// the index of each segment's first control run after the first segment.
+// After a resume the expected count grows by one per segment. It returns the
+// reason the window is invalid (empty when valid), the largest relative
+// change between consecutive runs, and the limit that change was held to.
+func validControl(runs []benchmark.Result, expected int, restarts map[int]bool) (string, float64, float64) {
 	if len(runs) != expected {
-		return fmt.Sprintf("control completed %d of %d runs", len(runs), expected), 0
+		return fmt.Sprintf("control completed %d of %d runs", len(runs), expected), 0, maxControlDrift
 	}
-	drift := 0.0
+	drift, restartDrift := 0.0, 0.0
 	for index, run := range runs {
 		if run.Failed > 0 || run.Succeeded == 0 || run.OutputTokenThroughput == nil || *run.OutputTokenThroughput <= 0 {
-			return "control runs were not clean", 0
+			return "control runs were not clean", 0, maxControlDrift
 		}
 		if index > 0 {
 			before := *runs[index-1].OutputTokenThroughput
-			drift = math.Max(drift, math.Abs(*run.OutputTokenThroughput-before)/before)
+			change := math.Abs(*run.OutputTokenThroughput-before) / before
+			drift = math.Max(drift, change)
+			if restarts[index] {
+				restartDrift = math.Max(restartDrift, change)
+			}
 		}
 	}
 	if drift > maxControlDrift {
-		return fmt.Sprintf("control output throughput drifted %.1f%% between adjacent runs, above the %.0f%% limit", drift*100, maxControlDrift*100), drift
+		return fmt.Sprintf("control output throughput drifted %.1f%% between adjacent runs, above the %.0f%% limit", drift*100, maxControlDrift*100), drift, maxControlDrift
 	}
-	return "", drift
+	if restartDrift > maxRestartDrift {
+		return fmt.Sprintf("control output throughput drifted %.1f%% across a restart, above the %.0f%% limit for a replaced server", restartDrift*100, maxRestartDrift*100), restartDrift, maxRestartDrift
+	}
+	return "", drift, maxControlDrift
 }
 
-func compareArms(control, candidate []benchmark.Result) map[string]MetricComparison {
-	comparisons := map[string]MetricComparison{}
+// comparePairedArms compares every metric of a valid interleaved window.
+// runs is the window in run order, as finish lists it.
+func comparePairedArms(runs []RunSummary, comparisons int) map[string]MetricComparison {
+	out := map[string]MetricComparison{}
 	for _, metric := range comparedMetrics {
-		controlSamples, candidateSamples := samples(control, metric.value), samples(candidate, metric.value)
-		if comparison, ok := compareMetric(controlSamples, candidateSamples, metric.higherBetter); ok {
-			comparisons[metric.name] = comparison
+		if comparison, ok := comparePaired(runs, metric.run, metric.higherBetter, comparisons); ok {
+			out[metric.name] = comparison
 		}
 	}
-	if len(comparisons) == 0 {
+	if len(out) == 0 {
 		return nil
 	}
-	return comparisons
+	return out
 }
 
+// comparePaired is the campaign judge for one metric. Every segment of the
+// window runs control, candidate, control, ..., control, so each candidate
+// run sits between two control runs. Dividing it by their mean cancels slow
+// changes both arms share, such as thermal drift or a neighbour's load,
+// instead of discarding the window. The decision uses the mean log ratio and
+// a Student-t interval at confidence 1 − familyAlpha/comparisons, so across a
+// campaign of comparisons candidates the chance of declaring any copy of the
+// control different is at most familyAlpha. Runs on separate machines can
+// still differ by a fixed amount that pairing in time cannot remove.
+func comparePaired(runs []RunSummary, value func(RunSummary) *float64, higherBetter bool, comparisons int) (MetricComparison, bool) {
+	comparisons = max(1, comparisons)
+	positive := func(run RunSummary) (float64, bool) {
+		measured := value(run)
+		if measured == nil || math.IsNaN(*measured) || math.IsInf(*measured, 0) || *measured <= 0 {
+			return 0, false
+		}
+		return *measured, true
+	}
+	var logs, controls, candidates []float64
+	for index, run := range runs {
+		switch run.Arm {
+		case "control":
+			measured, ok := positive(run)
+			if !ok {
+				return MetricComparison{}, false
+			}
+			controls = append(controls, measured)
+		case "candidate":
+			measured, ok := positive(run)
+			if !ok || index == 0 || index == len(runs)-1 || runs[index-1].Arm != "control" || runs[index+1].Arm != "control" {
+				return MetricComparison{}, false
+			}
+			before, okBefore := positive(runs[index-1])
+			after, okAfter := positive(runs[index+1])
+			if !okBefore || !okAfter {
+				return MetricComparison{}, false
+			}
+			candidates = append(candidates, measured)
+			logs = append(logs, math.Log(measured/((before+after)/2)))
+		}
+	}
+	if len(logs) < 2 {
+		return MetricComparison{}, false
+	}
+	mean := 0.0
+	for _, value := range logs {
+		mean += value
+	}
+	mean /= float64(len(logs))
+	squared := 0.0
+	for _, value := range logs {
+		squared += (value - mean) * (value - mean)
+	}
+	confidence := 1 - familyAlpha/float64(comparisons)
+	half := benchmark.StudentTQuantile(1-(1-confidence)/2, len(logs)-1) * math.Sqrt(squared/float64(len(logs)-1)) * pairedStandardErrorScale(len(logs))
+	controlMean, low, high := 0.0, controls[0], controls[0]
+	for _, value := range controls {
+		controlMean += value
+		low, high = math.Min(low, value), math.Max(high, value)
+	}
+	controlMean /= float64(len(controls))
+	comparison := MetricComparison{
+		HigherIsBetter: higherBetter, ControlMean: controlMean, ControlSpread: (high - low) / controlMean,
+		Delta: math.Exp(mean) - 1, NoiseFloor: math.Exp(half) - 1, Decision: DecisionNoMeasurableDifference,
+		Method: ComparisonPaired, Pairs: len(logs), Comparisons: comparisons, Confidence: confidence,
+	}
+	if interval, ok := benchmark.Confidence95(candidates); ok && interval.Mean > 0 {
+		comparison.CandidateMean, comparison.CandidateUncertainty = interval.Mean, (interval.Upper95-interval.Mean)/interval.Mean
+	} else {
+		for _, value := range candidates {
+			comparison.CandidateMean += value
+		}
+		comparison.CandidateMean /= float64(len(candidates))
+	}
+	switch {
+	case mean-half > 0:
+		comparison.Decision = DecisionRegressed
+		if higherBetter {
+			comparison.Decision = DecisionImproved
+		}
+	case mean+half < 0:
+		comparison.Decision = DecisionImproved
+		if higherBetter {
+			comparison.Decision = DecisionRegressed
+		}
+	}
+	return comparison, true
+}
+
+// pairedStandardErrorScale turns the sample standard deviation of n
+// bracketed log ratios into the standard error of their mean. Neighbouring
+// ratios share the control run between them, so they are correlated and the
+// textbook 1/√n understates the error (by about 15% at n = 4). With
+// independent run noise of variance σ², each ratio has variance 1.5σ², the
+// expected sample variance is σ²(1.5 − 0.5/n), and the mean's variance is
+// σ²(2n − 0.5)/n²; the scale is the square root of their quotient.
+func pairedStandardErrorScale(n int) float64 {
+	pairs := float64(n)
+	return math.Sqrt((2*pairs - 0.5) / (pairs * (1.5*pairs - 0.5)))
+}
+
+// compareMetric is v1's unpaired comparison. It remains for a window the
+// control invalidated by drifting, where MeasuredRegressions may still show
+// a candidate is worse; it never selects a winner.
 func compareMetric(control, candidate []float64, higherBetter bool) (MetricComparison, bool) {
 	if len(control) < 2 || len(candidate) < 2 {
 		return MetricComparison{}, false
