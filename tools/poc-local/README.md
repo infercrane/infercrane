@@ -31,9 +31,15 @@ call that cannot apply twice: a read, a write with an idempotency key, or a requ
 plane never received. If the connection drops after an approval or activation was sent, the harness
 reads the campaign back instead of sending it again.
 
+Postgres keeps its data on a volume in the kind node, so a database container restarted by memory
+or disk pressure keeps the campaign; `make poc-local-down` deletes it with the cluster. If the
+control plane no longer knows the campaign, `make poc-local-resume` stops at once and says to start a
+fresh run instead of waiting.
+
 Requirements: Docker, kubectl, Go, curl, Python 3.9+. With 7.7 GB of Docker memory, the first run
 had model servers killed for running out of memory and the control plane lost its database for
-hours; give Docker more memory than that. The working minimum is not measured yet. Pinned inputs: kind node image, llama.cpp
+hours; give Docker more memory than that. Keep free disk space too: when the Mac's disk filled,
+Docker's disk turned read-only mid-run. The working minimum is not measured yet. Pinned inputs: kind node image, llama.cpp
 server image, Qwen3-0.6B revision and its Q8_0 GGUF (checked by sha256), Postgres and registry
 images. State, the API key, and outputs live in `.infercrane/poc/` (git-ignored).
 
