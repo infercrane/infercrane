@@ -421,3 +421,46 @@ func TestActivationHandlerRejectsExpiredOrUnqualifiedCandidateBeforeMutation(t *
 		})
 	}
 }
+
+// migrationSwitchFixture is an activation store that can also start a
+// migration canary.
+type migrationSwitchFixture struct {
+	*activationStoreFixture
+	verdicts  []domain.MigrationQualityVerdict
+	started   []string
+	activated bool
+	decision  string
+}
+
+func (f *migrationSwitchFixture) MigrationVerdictsForCampaign(context.Context, string, string) ([]domain.MigrationQualityVerdict, error) {
+	return f.verdicts, nil
+}
+
+func (f *migrationSwitchFixture) StartMigrationCanary(_ context.Context, tenant, endpoint, verdictID string) (bool, string, error) {
+	f.started = append(f.started, tenant+"/"+endpoint+"/"+verdictID)
+	return f.activated, f.decision, nil
+}
+
+func TestActivatingAMigrationWinnerStartsTheCanaryOnTheClosedAPIEndpoint(t *testing.T) {
+	now := time.Now().UTC()
+	repository, _, _ := approvedCoordinatorFixture(now, 1)
+	proposal, _ := json.Marshal(optimizer.Proposal{Input: optimizer.Request{Migration: &optimizer.MigrationBaseline{Endpoint: "support-bot", Binding: "primary", Dialect: optimizer.MigrationDialectOpenAI, MaxQualityRegressionPercent: 5}}})
+	repository.campaign.Intent, repository.campaign.TargetDeployment, repository.campaign.State = IntentNewEndpoint, "", CampaignQualified
+	repository.campaign.ProposalJSON = string(proposal)
+	repository.campaign.Candidates[0].State = CandidateQualified
+	repository.campaign.Candidates[0].DeploymentName, repository.campaign.Candidates[0].RevisionID = "qwen-opt-1", "rev-1"
+	repository.campaign.Candidates[0].DeploymentSpecJSON = `{"name":"qwen","model":{"id":"Qwen/Qwen3-8B"}}`
+	store := &migrationSwitchFixture{activationStoreFixture: &activationStoreFixture{coordinatorRepository: repository}, verdicts: []domain.MigrationQualityVerdict{{ID: "blocked", CandidateRunID: "candidate-a", RevisionID: "rev-1", Verdict: "BLOCK"}}, activated: true, decision: "PASS"}
+	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+	handler := ActivationHandlers(store, func(context.Context) error { return nil }, func() time.Time { return now })[ActivateKind]
+
+	// No PASS verdict for the candidate: nothing switches.
+	if _, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)}); err == nil || !strings.Contains(err.Error(), "PASS migration verdict") || len(store.started) != 0 {
+		t.Fatalf("activation without a PASS verdict: err=%v started=%v", err, store.started)
+	}
+	store.verdicts = append(store.verdicts, domain.MigrationQualityVerdict{ID: "pass", CandidateRunID: "candidate-a", RevisionID: "rev-1", Verdict: "PASS"})
+	result, err := handler(context.Background(), domain.Operation{RequestJSON: string(payload)})
+	if err != nil || store.started[0] != "tenant/support-bot/pass" || store.publishedEndpoint != "" || !strings.Contains(result, `"endpoint":"support-bot"`) || repository.campaign.Candidates[0].State != CandidatePromoted {
+		t.Fatalf("migration activation result=%s err=%v started=%v published=%q", result, err, store.started, store.publishedEndpoint)
+	}
+}

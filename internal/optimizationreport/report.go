@@ -86,30 +86,33 @@ const (
 // objective on buffered answers ranks on p95 request latency, because
 // buffered runs measure no first token.
 type Report struct {
-	SchemaVersion        string            `json:"schema_version"`
-	AlgorithmVersion     string            `json:"algorithm_version"`
-	CampaignID           string            `json:"campaign_id"`
-	ModelIdentity        string            `json:"model_identity"`
-	Objective            string            `json:"objective"`
-	ObjectiveMetric      string            `json:"objective_metric,omitempty"`
-	ObjectiveNote        string            `json:"objective_note,omitempty"`
-	Intent               string            `json:"intent"`
-	CampaignState        string            `json:"campaign_state"`
-	Finished             bool              `json:"finished"`
-	SimulatedAccelerator bool              `json:"simulated_accelerator"`
-	Banner               string            `json:"banner,omitempty"`
-	Outcome              Outcome           `json:"outcome"`
-	Metrics              []Metric          `json:"metrics"`
-	Quality              Quality           `json:"quality"`
-	Noise                Noise             `json:"noise"`
-	Monthly              Monthly           `json:"monthly"`
-	Workload             Workload          `json:"workload"`
-	Candidates           []CandidateResult `json:"candidates"`
-	Warnings             []string          `json:"warnings"`
-	Bottleneck           Bottleneck        `json:"bottleneck"`
-	Appendix             Appendix          `json:"appendix"`
-	Unknown              []string          `json:"unknown"`
-	ReportDigest         string            `json:"report_digest"`
+	SchemaVersion        string   `json:"schema_version"`
+	AlgorithmVersion     string   `json:"algorithm_version"`
+	CampaignID           string   `json:"campaign_id"`
+	ModelIdentity        string   `json:"model_identity"`
+	Objective            string   `json:"objective"`
+	ObjectiveMetric      string   `json:"objective_metric,omitempty"`
+	ObjectiveNote        string   `json:"objective_note,omitempty"`
+	Intent               string   `json:"intent"`
+	CampaignState        string   `json:"campaign_state"`
+	Finished             bool     `json:"finished"`
+	SimulatedAccelerator bool     `json:"simulated_accelerator"`
+	Banner               string   `json:"banner,omitempty"`
+	Outcome              Outcome  `json:"outcome"`
+	Metrics              []Metric `json:"metrics"`
+	Quality              Quality  `json:"quality"`
+	Noise                Noise    `json:"noise"`
+	Monthly              Monthly  `json:"monthly"`
+	// CurrentAPI is set for a migration campaign: the closed API the setups
+	// would replace.
+	CurrentAPI   *CurrentAPI       `json:"current_api,omitempty"`
+	Workload     Workload          `json:"workload"`
+	Candidates   []CandidateResult `json:"candidates"`
+	Warnings     []string          `json:"warnings"`
+	Bottleneck   Bottleneck        `json:"bottleneck"`
+	Appendix     Appendix          `json:"appendix"`
+	Unknown      []string          `json:"unknown"`
+	ReportDigest string            `json:"report_digest"`
 }
 
 // Outcome is the decision in plain words.
@@ -346,6 +349,8 @@ type Evidence struct {
 	// one and was found. ReplayReason says why it is absent.
 	Replay       *domain.ReplayTrace
 	ReplayReason string
+	// CurrentAPI is the closed API of a migration campaign; nil otherwise.
+	CurrentAPI *CurrentAPIEvidence
 }
 
 // arm is one candidate with its decoded evidence.
@@ -407,6 +412,7 @@ func Assemble(e Evidence) Report {
 	report.Quality = quality(campaign, kind, baseline, winner, e)
 	report.Noise = noise(objectiveMetric.Name, kind, baseline, winner, arms)
 	report.Monthly = monthly(proposal, proposalOK, kind, report.Metrics, e)
+	report.CurrentAPI = currentAPI(e, report)
 	report.Workload = workload(baseline, winner)
 	report.Candidates = candidateResults(campaign, objectiveMetric.Name, baseline, winner, arms)
 	report.Warnings = warnings(report.Candidates)
@@ -1520,6 +1526,19 @@ func unknownFields(report Report) []string {
 	}
 	if report.Bottleneck.State == BasisUnknown {
 		unknown = append(unknown, "bottleneck")
+	}
+	if current := report.CurrentAPI; current != nil {
+		if current.Cost.MonthlyUSD == nil {
+			unknown = append(unknown, "current_api.cost")
+		} else if current.Cost.MonthlyChangeUSD == nil {
+			unknown = append(unknown, "current_api.cost.monthly_change")
+		}
+		if current.Latency.TTFTP95MS == nil {
+			unknown = append(unknown, "current_api.latency")
+		}
+		if current.Quality.Verdict == releaseguard.QualityUnknown {
+			unknown = append(unknown, "current_api.quality")
+		}
 	}
 	return unknown
 }

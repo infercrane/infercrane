@@ -101,11 +101,11 @@ type scriptedCompleter struct {
 func (c *scriptedCompleter) Complete(_ context.Context, target Target, _ EvalSet, prompt Prompt) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.calls = append(c.calls, target.RevisionID+"/"+prompt.ID)
-	if c.fail == target.RevisionID {
+	c.calls = append(c.calls, target.SubjectID+"/"+prompt.ID)
+	if c.fail == target.SubjectID {
 		return "", errors.New("unreachable")
 	}
-	return c.answers[target.RevisionID][prompt.ID], nil
+	return c.answers[target.SubjectID][prompt.ID], nil
 }
 
 func testSet(t *testing.T) EvalSet {
@@ -124,7 +124,7 @@ func TestCompareScoresCandidateAgainstReferenceInTurns(t *testing.T) {
 		"cand": {"a": "843", "b": "Tokyo", "c": "negative", "d": "select * from orders"},
 	}}
 	stamp := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
-	comparison, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "cand"}, func() time.Time { return stamp })
+	comparison, err := Compare(context.Background(), completer, set, Target{SubjectID: "ref"}, Target{SubjectID: "cand"}, func() time.Time { return stamp })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestCompareScoresCandidateAgainstReferenceInTurns(t *testing.T) {
 func TestCompareAgainstItselfAsksOnce(t *testing.T) {
 	set := testSet(t)
 	completer := &scriptedCompleter{answers: map[string]map[string]string{"ref": {"a": "1", "b": "2", "c": "3", "d": "4"}}}
-	comparison, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "ref"}, nil)
+	comparison, err := Compare(context.Background(), completer, set, Target{SubjectID: "ref"}, Target{SubjectID: "ref"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestCompareAgainstItselfAsksOnce(t *testing.T) {
 func TestCompareFailsWhenARevisionDoesNotAnswer(t *testing.T) {
 	set := testSet(t)
 	completer := &scriptedCompleter{fail: "cand", answers: map[string]map[string]string{"ref": {"a": "1"}}}
-	if _, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "cand"}, nil); err == nil || !strings.Contains(err.Error(), "candidate revision") {
+	if _, err := Compare(context.Background(), completer, set, Target{SubjectID: "ref"}, Target{SubjectID: "cand"}, nil); err == nil || !strings.Contains(err.Error(), "candidate revision") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestHTTPCompleterSendsGreedyBoundedRequest(t *testing.T) {
 	}))
 	defer server.Close()
 	set := testSet(t)
-	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, APIKey: "worker-key", Model: "qwen", RevisionID: "r"}, set, Prompt{ID: "a", System: "be brief", Prompt: "What is 487 + 356?"})
+	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, APIKey: "worker-key", Model: "qwen", SubjectID: "r"}, set, Prompt{ID: "a", System: "be brief", Prompt: "What is 487 + 356?"})
 	if err != nil || answer != "843" {
 		t.Fatalf("answer = %q, %v", answer, err)
 	}
@@ -209,7 +209,7 @@ func TestHTTPCompleterReturnsNoTextWhenOnlyReasoningCameBack(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":null,"reasoning_content":"Let me add 487"},"finish_reason":"length"}]}`))
 	}))
 	defer server.Close()
-	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, RevisionID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"})
+	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, SubjectID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"})
 	if err != nil || answer != "" {
 		t.Fatalf("answer = %q, %v; want no text and no error", answer, err)
 	}
@@ -221,7 +221,7 @@ func TestCompareStopsWhenTheReferenceGivesNoAnswerText(t *testing.T) {
 		"ref":  {"a": "843", "b": "<think>still adding", "c": "", "d": "4"},
 		"cand": {"a": "843", "b": "<think>still adding", "c": "", "d": "4"},
 	}}
-	_, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "cand"}, nil)
+	_, err := Compare(context.Background(), completer, set, Target{SubjectID: "ref"}, Target{SubjectID: "cand"}, nil)
 	if !errors.Is(err, ErrReferenceUnanswered) {
 		t.Fatalf("err = %v, want ErrReferenceUnanswered", err)
 	}
@@ -237,7 +237,7 @@ func TestCompareStopsWhenTheReferenceGivesNoAnswerText(t *testing.T) {
 func TestCompareAgainstItselfNeedsAnswerText(t *testing.T) {
 	set := testSet(t)
 	completer := &scriptedCompleter{answers: map[string]map[string]string{"ref": {"a": "", "b": "", "c": "", "d": ""}}}
-	if _, err := Compare(context.Background(), completer, set, Target{RevisionID: "ref"}, Target{RevisionID: "ref"}, nil); !errors.Is(err, ErrReferenceUnanswered) {
+	if _, err := Compare(context.Background(), completer, set, Target{SubjectID: "ref"}, Target{SubjectID: "ref"}, nil); !errors.Is(err, ErrReferenceUnanswered) {
 		t.Fatalf("err = %v, want ErrReferenceUnanswered", err)
 	}
 }
@@ -260,7 +260,7 @@ func TestHTTPCompleterRejectsErrorsAndEmptyAnswers(t *testing.T) {
 		},
 	} {
 		server := httptest.NewServer(handler)
-		if _, err := (HTTPCompleter{}).Complete(context.Background(), Target{Endpoint: server.URL, RevisionID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"}); err == nil {
+		if _, err := (HTTPCompleter{}).Complete(context.Background(), Target{Endpoint: server.URL, SubjectID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"}); err == nil {
 			t.Errorf("%s accepted", name)
 		}
 		server.Close()

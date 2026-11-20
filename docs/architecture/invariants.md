@@ -8,7 +8,10 @@ plan, and an update to this document in the same pull request.
 - No PostgreSQL read occurs while routing an inference request.
 - Authentication and aliases are resolved from immutable tenant-scoped in-memory snapshots.
 - A published route is immutable; updates replace snapshots atomically.
-- The gateway rewrites only the model alias and preserves streaming semantics.
+- The gateway rewrites only the model alias and preserves streaming semantics. One addition is
+  allowed: on a streamed chat or completions request to an external (closed API) route, it asks for
+  token usage with `stream_options.include_usage` and, when the caller did not ask for usage,
+  removes the usage-only chunk that adds, so the caller receives the stream it asked for.
 - Server write timeouts remain disabled for long-lived inference streams.
 - Retries are not duplicated between gateway and router.
 - A control-plane route may hand a principal it has already authenticated to the gateway

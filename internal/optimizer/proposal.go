@@ -120,6 +120,57 @@ type Request struct {
 	// by what the diagnosis says is most likely to help. The control API
 	// reads it server-side; it is bound by the input digest.
 	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	// Migration makes the campaign a migration Proof: the closed API behind
+	// an external binding of an existing endpoint is the baseline the
+	// candidates are compared with on cost, speed, and quality. The closed
+	// API is never a candidate, so lineage still binds the candidates to one
+	// open base model.
+	Migration *MigrationBaseline `json:"migration,omitempty"`
+}
+
+// MigrationBaseline names the closed API a migration campaign replaces.
+type MigrationBaseline struct {
+	// Endpoint is the customer's endpoint; Binding names its external
+	// binding to the closed API.
+	Endpoint string `json:"endpoint"`
+	Binding  string `json:"binding"`
+	// Dialect is how the closed API reads a chat request:
+	// MigrationDialectOpenAI or MigrationDialectOpenAICompatible.
+	Dialect string `json:"dialect"`
+	// MaxQualityRegressionPercent is the largest drop in graded quality, at
+	// the upper bound of the paired-bootstrap interval, a candidate may show
+	// against the closed API and still pass.
+	MaxQualityRegressionPercent float64 `json:"max_quality_regression_percent"`
+}
+
+const (
+	MigrationDialectOpenAI           = "openai"
+	MigrationDialectOpenAICompatible = "openai-compatible"
+	// DefaultMigrationQualityMargin is the regression margin when a request
+	// names none.
+	DefaultMigrationQualityMargin = 5.0
+)
+
+var migrationName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+func validateMigration(request Request) error {
+	migration := request.Migration
+	if !migrationName.MatchString(migration.Endpoint) || !migrationName.MatchString(migration.Binding) {
+		return errors.New("migration.endpoint and migration.binding must name an endpoint and its external binding")
+	}
+	if migration.Dialect != MigrationDialectOpenAI && migration.Dialect != MigrationDialectOpenAICompatible {
+		return errors.New("migration.dialect must be openai or openai-compatible")
+	}
+	if math.IsNaN(migration.MaxQualityRegressionPercent) || migration.MaxQualityRegressionPercent <= 0 || migration.MaxQualityRegressionPercent > 50 {
+		return errors.New("migration.max_quality_regression_percent must be greater than 0 and at most 50")
+	}
+	if request.WorkloadSource != WorkloadSourceCustomerObserved || request.WorkloadFingerprint == "" {
+		return errors.New("a migration measures the closed API's own traffic: capture it from the endpoint and pass workload_fingerprint")
+	}
+	if request.QualityCheck != QualityCheckCustomer && request.QualityEvalSet == "" {
+		return errors.New("a migration compares answers with expected answers: name a graded quality_eval_set, or choose customer_evidence")
+	}
+	return nil
 }
 
 const (
@@ -534,6 +585,19 @@ func normalizeRequest(request Request) Request {
 		diagnosis := normalizeDiagnosis(*request.Diagnosis)
 		request.Diagnosis = &diagnosis
 	}
+	if request.Migration != nil {
+		migration := *request.Migration
+		migration.Endpoint = strings.TrimSpace(migration.Endpoint)
+		migration.Binding = strings.TrimSpace(migration.Binding)
+		migration.Dialect = strings.ToLower(strings.TrimSpace(migration.Dialect))
+		if migration.Dialect == "" {
+			migration.Dialect = MigrationDialectOpenAICompatible
+		}
+		if migration.MaxQualityRegressionPercent == 0 {
+			migration.MaxQualityRegressionPercent = DefaultMigrationQualityMargin
+		}
+		request.Migration = &migration
+	}
 	if request.QualityCheck == QualityCheckBuiltin {
 		// The default is stored as empty so existing proposal digests stay stable.
 		request.QualityCheck = ""
@@ -671,6 +735,11 @@ func validateRequest(request Request) error {
 	}
 	if request.Diagnosis != nil {
 		if err := validateDiagnosis(*request.Diagnosis); err != nil {
+			return err
+		}
+	}
+	if request.Migration != nil {
+		if err := validateMigration(request); err != nil {
 			return err
 		}
 	}
