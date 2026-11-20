@@ -68,6 +68,11 @@ func measuredWorkload(t *testing.T, base string, evidence MeasuredEvidence, conf
 	if err := json.Unmarshal([]byte(base), &document); err != nil {
 		t.Fatal(err)
 	}
+	if evidence.Method == MeasurementMethod && evidence.Control.Role == ControlRoleBracketed && evidence.Confirmation == nil {
+		// Ranking tests that are not about the confirmation confirm every
+		// first window exactly as measured; confirmation tests set their own.
+		evidence.Confirmation = &ConfirmationEvidence{Control: evidence.Control, Runs: evidence.Runs, Comparison: evidence.Comparison, FreshCandidate: true, FreshControl: true}
+	}
 	document["measured"] = evidence
 	if confidence != nil {
 		document["confidence_95"] = confidence

@@ -20,7 +20,7 @@ const (
 // RankingAlgorithmVersion is appended to the Lab algorithm version on every
 // persisted campaign ranking. It names the control and noise-floor gate; v3
 // adds the failed-request and answer-length guards.
-const RankingAlgorithmVersion = "campaign-control-noise-floor-v3"
+const RankingAlgorithmVersion = "campaign-paired-confirmed-v5"
 
 // FailureNoMeasurableDifference marks a candidate whose objective result is
 // inside the measurement noise of the campaign control. It is reported as no

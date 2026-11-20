@@ -128,7 +128,8 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if e.Progress != nil {
 		tracker = newProgressTracker(e.Progress, candidate, e.now)
 	}
-	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now}
+	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now,
+		confirm: e.confirmation(ctx, campaign, candidate, draft), keepControl: campaign.Intent == IntentEvolveEndpoint}
 	measured, err := session.run(ctx)
 	ended := e.now()
 	if err != nil {
@@ -206,7 +207,54 @@ func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, cand
 	if err != nil {
 		return MeasurementCheckpoint{}, err
 	}
-	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control}, nil
+	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control, Comparisons: campaignComparisons(campaign)}, nil
+}
+
+// confirmation decides, from a finished first window, whether the candidate
+// gained on the campaign's objective and must be measured again on fresh
+// servers before the gain counts. It applies the ranking's own objective
+// rule. A cost objective also needs both setups' sourced hourly rates;
+// without them the ranking cannot decide on cost either, so nothing is
+// confirmed.
+func (e BenchmarkExecutor) confirmation(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) func(MeasuredEvidence) bool {
+	metric, _, costScale := objectiveMetric(campaignRequest(campaign).Objective)
+	if metric == "" {
+		return nil
+	}
+	return func(evidence MeasuredEvidence) bool {
+		ratio := 1.0
+		if costScale {
+			control, found := CampaignControl(campaign)
+			if !found {
+				return false
+			}
+			controlDraft, err := candidateDraft(control)
+			if err != nil {
+				return false
+			}
+			controlQuote, controlErr := e.Costs.Quote(ctx, control.TenantID, controlDraft, e.now())
+			candidateQuote, candidateErr := e.Costs.Quote(ctx, candidate.TenantID, draft, e.now())
+			if controlErr != nil || candidateErr != nil || controlQuote.HourlyUSD <= 0 || candidateQuote.HourlyUSD <= 0 {
+				return false
+			}
+			ratio = controlQuote.HourlyUSD / candidateQuote.HourlyUSD
+		}
+		comparison, found := objectiveComparison(evidence.Comparison, metric, costScale, ratio)
+		return found && comparison.Decision == DecisionImproved
+	}
+}
+
+// campaignComparisons counts the candidates a campaign compares with its
+// control. The count comes from the proposal, not from how many candidates
+// survived to measurement, so a candidate that failed to start still widens
+// every other candidate's interval: the family of comparisons is fixed before
+// any result is seen.
+func campaignComparisons(campaign domain.OptimizationCampaign) int {
+	count := len(campaign.Candidates)
+	if _, found := CampaignControl(campaign); found {
+		count--
+	}
+	return max(1, count)
 }
 
 // directTarget selects the lowest-ordinal healthy ready replica of one exact

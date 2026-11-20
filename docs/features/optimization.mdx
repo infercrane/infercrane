@@ -932,28 +932,96 @@ messages are, so one shared block is assumed. Tool pauses, parent-session links,
 assistant output are not modeled.
 
 **Runs.** Each server receives warmup requests (twice the concurrency, between 16 and 256) before
-measurement, and each arm runs three independent AIPerf invocations. Every invocation gets its own
+measurement, and each candidate runs four independent AIPerf invocations. Every invocation gets its own
 seed and, for a replay, its own prompt-block namespace, drawn from a random base for each
 measurement. A server is therefore not answered from prefix-cache entries that an earlier run
 created, including when the control is measured again inside another candidate's measurement or a
 measurement is retried. The base is kept as `measured.invocation_base`. The candidate's stored metrics
-are the mean of its three runs, with Student-t 95% intervals in `confidence_95`.
+are the mean of its four runs, with Student-t 95% intervals in `confidence_95`.
 
 **Control.** The control is the proposal's starting point: the untuned control arm when the proposal
 includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
 serving, every other candidate is measured interleaved with it, as control, candidate, control,
-candidate, control, candidate, control. The control and candidate share a time window, not a GPU, so
-differences between their nodes are not removed. Control runs whose output throughput differs by more
-than 5% between adjacent runs make that comparison invalid; the candidate's own measurement is kept,
-and its result against the control is unknown. A control or candidate run that fails stops the
+candidate, control, candidate, control, candidate, control. The control and candidate share a time
+window, not a GPU, so differences between their machines are not removed (see
+[what the judge can and cannot tell](#what-the-judge-can-and-cannot-tell)). Adjacent control runs
+whose output throughput differs by more than 15% mean the server changed under the measurement, so
+that comparison is invalid; the candidate's own measurement is kept, and its result against the
+control is unknown. Smaller changes that both setups share, such as a GPU warming up, are cancelled
+by pairing instead of voiding the window. A control or candidate run that fails stops the
 measurement so the server can be checked and replaced (see
 [When a measured server is lost](#when-a-measured-server-is-lost)). A failure to look the control up
 is retried rather than recorded as a measurement without one.
 
-**Noise floor.** For each metric the noise floor is the larger of the control-to-control spread and
-the candidate's 95% interval half-width, both relative to their means. A candidate whose change is
-inside it shows no measurable difference. The workload's `measured.comparison` records the control
-mean, spread, candidate mean, delta, floor, and decision for throughput, latency, and goodput.
+**Paired comparison.** Each candidate run is divided by the mean of the two control runs around it.
+The change is the geometric mean of those four ratios, and the noise floor is the half-width of its
+Student-t interval, corrected for the control run that neighbouring pairs share. A candidate is
+better or worse only when the whole interval lies on one side of no change; otherwise it shows no
+measurable difference. The interval is widened for the number of candidates the run compares with
+its control (Bonferroni): 95% confidence for one candidate, 98.75% for four. So a run of several
+candidates is no more likely to crown a candidate that is really no better than the control. The
+workload's `measured.comparison` records, for throughput, latency, and goodput, the control mean and
+spread, the candidate mean, the change, the floor, the decision, and the method
+(`paired_bracketing_log_ratio`), pairs, comparisons, and confidence. Measurements made before this
+method (`campaign-interleaved-control-v1`) keep their stored comparison, which used the larger of the
+control-to-control spread and the candidate's own interval.
+
+#### What the judge can and cannot tell
+
+`TestJudgeCalibration` in `internal/optimizationcampaign` runs this exact decision code on simulated
+runs and prints how often it declares a win when nothing changed (false wins) and how often it finds
+a real gain. With 2% run-to-run noise, roughly what real GPU runs show:
+
+| Condition | False wins, 1 candidate | False wins, 4 candidates | Finds +5% | Finds +10% | Windows voided |
+|---|---|---|---|---|---|
+| v1 method, same machine | 0.8% | 2.8% | 42% | 79% | 19% |
+| This method, same machine | 2.6% | 3.1% | 67% | 99% | 0% |
+| This method, machines differ by 2% | 8.6% | 11.3% | 62% | 95% | 0% |
+
+On one machine the judge keeps false wins near the designed 2.5% and finds far more real gains.
+When the control and the candidate run on different machines whose speed differs by a fixed amount,
+no pairing in time can remove that difference, and false wins rise. That is why a gain is confirmed
+on fresh servers before it counts.
+
+#### A gain is measured again on fresh servers
+
+When a candidate's window shows a gain on the objective (by the same rule, cost included, that the
+ranking applies), the run does not count it yet. It retires the candidate's server and then the
+control's, provisions each setup's exact revision again on a fresh server, and measures a second
+window of four paired rounds there. The candidate wins only if the second window shows the gain too.
+The ranking then reports the second window's change, which is free of the first window's selection,
+and the reason names both, for example `p95 time to first token changed -36.4% (noise ±4.0%), then
+-32.4% (noise ±5.0%) measured again on fresh servers`. A gain that does not hold is superseded with
+`measured_gain_not_confirmed`.
+
+- The control of a run that evolves a live endpoint serves production traffic, so its server is
+  kept and only the candidate's is retired. A serverless provider places workers itself; its
+  retirement is recorded as `provider_managed`.
+- Retiring a serving machine is never a loss: it does not count against the two lost machines a
+  setup may replace or against the interruption limit. It is recorded in the setup's
+  `machine_replacements` with `purpose: confirmation`, and in the measurement's interruptions as
+  kind `confirmation`, recovered as `machine_retired`.
+- Nothing is retired that the approved cap cannot replace: the replacement is authorized first,
+  with the same one-hour reserve as a lost machine. A setup whose fresh servers the cap does not
+  cover stops with `optimization_confirmation_not_covered`.
+- The measurement keeps the second window in `measured.confirmation`: its runs, control check,
+  paired comparison at the 95% level (it tests the one candidate it confirms), and
+  `fresh_candidate` and `fresh_control`.
+
+`TestJudgeCalibrationWithConfirmation` runs the whole rule, both windows and the ranking's
+decision, on simulated machines. Real GPU runs are quiet (the H100 control of 2026-11-20 varied
+about 0.3% between runs), so at 0.5% run-to-run noise:
+
+| Condition | False wins, 4 candidates, first window only | With the confirmation | Finds +5% |
+|---|---|---|---|
+| Same machine | 2.7% | 0.1% | 100% |
+| Machines differ by 1% | 30% | 6.8% | 99.9% |
+| Machines differ by 2% | 62% | 24% | 94% |
+
+The confirmation cuts false wins several times, but it does not make them rare once machines differ
+by 2% or more: two pairs of machines cannot measure how much machines differ. How much real
+same-model GPUs differ is not known yet; measuring it is the next step, and until then a gain of a
+few percent on separate machines is reported as measured, not as proven.
 
 **Failed requests and answer length.** Latency percentiles count only requests that succeeded, and a
 shorter answer finishes sooner and needs fewer tokens. So a setup could look faster or cheaper by
@@ -970,8 +1038,8 @@ together, it comes from the control's own runs on the same workload. These check
 control was measured, also when the control misses the constraints. An answer length a run did not
 record, as in runs measured before it was recorded, is unknown and stops nothing. The persisted
 ranking keeps each candidate's `guard_check`: both sides' requests, failed requests, and answer
-length, and which check fired. Rankings with these checks record algorithm
-`campaign-control-noise-floor-v3`.
+length, and which check fired. Rankings with these checks, the paired comparison, and the
+confirmation on fresh servers record algorithm `campaign-paired-confirmed-v5`.
 
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric and
@@ -984,6 +1052,7 @@ a code that says why:
 | `measured_output_length_regression` | Answered more than 5% shorter than the control, for example `answered 18% shorter than the current setup; a speed or cost gain may come from shorter answers` |
 | `measured_candidate_regressed` | Worse than the control by more than the noise floor on the objective, or on throughput, p95 time to first token, or p95 latency in its own window |
 | `measured_no_measurable_difference` | Inside the noise floor on the objective and not measurably worse on any of those outcomes |
+| `measured_gain_not_confirmed` | Measurably better than the control in its first window, but not again on fresh servers. The reason names both changes |
 | `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted, and not shown worse |
 | `measured_candidate_superseded` | Measurably better than the control, but another candidate ranked higher |
 
@@ -1007,8 +1076,9 @@ included. Custom images without a declared path record no runtime metrics, and G
 scraped without a usable result (with AIPerf's reason), or scraped without any cache, queue, or
 preemption metric.
 
-This method sends nine AIPerf invocations per non-control candidate instead of one, so measurement
-takes several times longer. The approval window must cover it. Campaign ranking does not use the
+This method sends eleven AIPerf invocations per non-control candidate (two warmups and nine
+measured runs) instead of one, and a candidate that gains is measured again on two fresh servers,
+eleven more. Measurement takes several times longer than a single benchmark. The approval window must cover it. Campaign ranking does not use the
 [multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
 limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
 
@@ -1038,10 +1108,11 @@ unknown.
 **Measuring resumes at the next pair.** Both servers are warmed again, and the next segment starts
 with a control run, so every pair after the restart is again bracketed by control runs from its own
 window. Each segment's invocations get fresh seeds and prompt-block namespaces. The drift check
-runs over every adjacent pair of control runs, including the pair across the restart, so a
-replacement control that serves more than 5% differently invalidates the comparison instead of
-passing silently. A replaced candidate server that serves differently widens the candidate's 95%
-interval and with it the noise floor. The workload's `measured.segments` and
+runs over every adjacent pair of control runs, including the pair across the restart, and holds that
+pair to a tighter limit: a replacement control that serves more than 5% differently from the server
+it replaced invalidates the comparison instead of passing silently, because pairing cannot cancel a
+change of machine. A replaced candidate server that serves differently widens the paired interval
+and with it the noise floor. The workload's `measured.segments` and
 `measured.interruptions` record each stretch of measuring, each interruption, and how it was
 recovered: `machine_serving`, `machine_replaced`, or `provider_managed` for serverless workers, which
 their provider replaces itself.
@@ -1055,6 +1126,7 @@ authorized again with a fresh sourced quote: its share of the cap must cover its
 until the approval ends, plus one hour for this and each earlier replacement, at the higher of the
 fresh rate and the rate its first servers were bound to. Approval returns
 `machine_replacements_covered`, the number of lost servers per setup the cap covers, from 0 to 2.
+A confirmation on fresh servers is authorized the same way before anything is retired.
 
 **The run stops cleanly when it cannot recover.** A setup that stops is marked `failed` and its
 servers are removed; nothing waits for the approval to end.

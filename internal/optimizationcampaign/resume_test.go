@@ -98,10 +98,10 @@ func interruptedRun(t *testing.T, fixture executorFixture) *MeasurementInterrupt
 func TestLostCandidateMachineKeepsCompletedPairsAndResumesAtTheNextPair(t *testing.T) {
 	const warm = 1.0
 	fixture, runner, sink := sequencedFixture(t, map[string][]float64{
-		// Segment one: warmup, C1, C2 | segment two: warmup, C3, C4, C5.
-		controlEndpoint: {warm, 100, 101, warm, 100, 101, 100},
-		// Segment one: warmup, X1, X2 fails | segment two: warmup, X2, X3.
-		candidateEndpoint: {warm, 130, 0, warm, 131, 129},
+		// Segment one: warmup, C1, C2 | segment two: warmup, C3, C4, C5, C6.
+		controlEndpoint: {warm, 100, 101, warm, 100, 101, 100, 101},
+		// Segment one: warmup, X1, X2 fails | segment two: warmup, X2, X3, X4.
+		candidateEndpoint: {warm, 130, 0, warm, 131, 129, 130},
 	})
 	interrupted := interruptedRun(t, fixture)
 	if !interrupted.Persisted || interrupted.Interruption.Arm != ArmCandidate || interrupted.Interruption.OwnerCandidateID != fixture.candidate.ID || interrupted.Interruption.ReplicaID != "replica-candidate" || interrupted.Interruption.DiscardedRuns != 0 || interrupted.Interruption.Sequence != 1 {
@@ -120,11 +120,11 @@ func TestLostCandidateMachineKeepsCompletedPairsAndResumesAtTheNextPair(t *testi
 	fixture.candidate.MeasurementCheckpointJSON = resolvedCheckpoint(t, sink.last, RecoveryMachineReplaced)
 	row, workload := fixture.run(t)
 	evidence := measuredEvidence(t, workload)
-	if evidence.Control.Role != ControlRoleBracketed || evidence.Control.Runs != 5 || len(evidence.Segments) != 2 || len(evidence.Interruptions) != 1 || evidence.Interruptions[0].Recovery != RecoveryMachineReplaced {
+	if evidence.Control.Role != ControlRoleBracketed || evidence.Control.Runs != 6 || len(evidence.Segments) != 2 || len(evidence.Interruptions) != 1 || evidence.Interruptions[0].Recovery != RecoveryMachineReplaced {
 		t.Fatalf("resumed evidence = %+v", evidence)
 	}
-	if row.RequestCount != 3*fixture.profile.Requests || row.OutputTokenThroughput == nil || *row.OutputTokenThroughput != 130 {
-		t.Fatalf("candidate arm must pool exactly its three accepted runs: %+v", row)
+	if row.RequestCount != 4*fixture.profile.Requests || row.OutputTokenThroughput == nil || *row.OutputTokenThroughput != 130 {
+		t.Fatalf("candidate arm must pool exactly its four accepted runs: %+v", row)
 	}
 	if comparison := evidence.Comparison["output_token_throughput"]; comparison.Decision != DecisionImproved {
 		t.Fatalf("comparison across the restart = %+v", evidence.Comparison)
@@ -133,11 +133,11 @@ func TestLostCandidateMachineKeepsCompletedPairsAndResumesAtTheNextPair(t *testi
 	for _, run := range evidence.Runs {
 		arms = append(arms, run.Arm)
 	}
-	if got := strings.Join(arms, ","); got != "control,candidate,control,control,candidate,control,candidate,control" {
+	if got := strings.Join(arms, ","); got != "control,candidate,control,control,candidate,control,candidate,control,candidate,control" {
 		t.Fatalf("accepted runs must be listed as they ran: %s", got)
 	}
 	order := strings.Join(evidence.Order, ",")
-	if order != "warmup:control,warmup:candidate,control,candidate,control,interrupted:candidate,resume,warmup:control,warmup:candidate,control,candidate,control,candidate,control" {
+	if order != "warmup:control,warmup:candidate,control,candidate,control,interrupted:candidate,resume,warmup:control,warmup:candidate,control,candidate,control,candidate,control,candidate,control" {
 		t.Fatalf("order = %s", order)
 	}
 	// Every invocation got its own seed, and the resumed segment starts past
@@ -154,9 +154,10 @@ func TestLostCandidateMachineKeepsCompletedPairsAndResumesAtTheNextPair(t *testi
 func TestReplacedControlThatServesDifferentlyInvalidatesTheComparison(t *testing.T) {
 	const warm = 1.0
 	fixture, _, sink := sequencedFixture(t, map[string][]float64{
-		// The replacement control runs 10% slower than the lost one.
-		controlEndpoint:   {warm, 100, 101, 0, warm, 90, 91, 90},
-		candidateEndpoint: {warm, 130, 131, warm, 129, 130},
+		// The replacement control runs 10% slower than the lost one: well
+		// inside the within-window limit, outside the limit for a restart.
+		controlEndpoint:   {warm, 100, 101, 0, warm, 90, 91, 90, 91},
+		candidateEndpoint: {warm, 130, 131, warm, 129, 130, 131},
 	})
 	interrupted := interruptedRun(t, fixture)
 	// C1 X1 C2 X2 then the closing control failed: X2 had no closing bracket.
@@ -166,7 +167,7 @@ func TestReplacedControlThatServesDifferentlyInvalidatesTheComparison(t *testing
 	fixture.candidate.MeasurementCheckpointJSON = resolvedCheckpoint(t, sink.last, RecoveryMachineReplaced)
 	_, workload := fixture.run(t)
 	evidence := measuredEvidence(t, workload)
-	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || evidence.Control.MaxDrift < 0.09 || !strings.Contains(evidence.Control.Reason, "drifted") {
+	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || evidence.Control.MaxDrift < 0.09 || evidence.Control.DriftLimit != maxRestartDrift || !strings.Contains(evidence.Control.Reason, "across a restart") {
 		t.Fatalf("drift across the restart must invalidate the control: %+v", evidence.Control)
 	}
 }
@@ -186,7 +187,7 @@ func TestOpeningControlIsDroppedWhenItsFirstPairNeverFinished(t *testing.T) {
 
 func TestCandidateMeasuredAloneResumesWithoutAControl(t *testing.T) {
 	const warm = 1.0
-	fixture, _, sink := sequencedFixture(t, map[string][]float64{candidateEndpoint: {warm, 130, 0, warm, 131, 129}})
+	fixture, _, sink := sequencedFixture(t, map[string][]float64{candidateEndpoint: {warm, 130, 0, warm, 131, 129, 130}})
 	fixture.campaign.Candidates[0].State = CandidateCleaned
 	interrupted := interruptedRun(t, fixture)
 	if interrupted.Interruption.Arm != ArmCandidate || interrupted.Interruption.DiscardedRuns != 0 {
@@ -194,7 +195,7 @@ func TestCandidateMeasuredAloneResumesWithoutAControl(t *testing.T) {
 	}
 	fixture.candidate.MeasurementCheckpointJSON = resolvedCheckpoint(t, sink.last, RecoveryMachineServing)
 	row, workload := fixture.run(t)
-	if evidence := measuredEvidence(t, workload); evidence.Control.Role != ControlRoleUnavailable || len(evidence.Segments) != 2 || row.RequestCount != 3*fixture.profile.Requests {
+	if evidence := measuredEvidence(t, workload); evidence.Control.Role != ControlRoleUnavailable || len(evidence.Segments) != 2 || row.RequestCount != 4*fixture.profile.Requests {
 		t.Fatalf("evidence=%+v row=%+v", evidence, row)
 	}
 }
@@ -202,8 +203,8 @@ func TestCandidateMeasuredAloneResumesWithoutAControl(t *testing.T) {
 func TestCheckpointFromOtherArmsOrLoadIsNeverResumed(t *testing.T) {
 	const warm = 1.0
 	fixture, _, sink := sequencedFixture(t, map[string][]float64{
-		controlEndpoint:   {warm, 100, 101, warm, 100, 101, 100, 101},
-		candidateEndpoint: {warm, 130, 0, warm, 130, 131, 129},
+		controlEndpoint:   {warm, 100, 101, warm, 100, 101, 100, 101, 100},
+		candidateEndpoint: {warm, 130, 0, warm, 130, 131, 129, 130},
 	})
 	interruptedRun(t, fixture)
 	checkpoint, _ := DecodeMeasurementCheckpoint(resolvedCheckpoint(t, sink.last, RecoveryMachineReplaced))
@@ -211,7 +212,7 @@ func TestCheckpointFromOtherArmsOrLoadIsNeverResumed(t *testing.T) {
 	encoded, _ := json.Marshal(checkpoint)
 	fixture.candidate.MeasurementCheckpointJSON = string(encoded)
 	_, workload := fixture.run(t)
-	if evidence := measuredEvidence(t, workload); len(evidence.Segments) != 0 || evidence.Control.Runs != 4 {
+	if evidence := measuredEvidence(t, workload); len(evidence.Segments) != 0 || evidence.Control.Runs != 5 {
 		t.Fatalf("a foreign checkpoint was resumed: %+v", evidence)
 	}
 }
@@ -255,8 +256,8 @@ func TestLostCheckpointWriteStillReportsTheInterruption(t *testing.T) {
 func TestControlServerMetricsRequestIsRecorded(t *testing.T) {
 	const warm = 1.0
 	fixture, _, _ := sequencedFixture(t, map[string][]float64{
-		controlEndpoint:   {warm, 100, 101, 100, 101},
-		candidateEndpoint: {warm, 130, 131, 129},
+		controlEndpoint:   {warm, 100, 101, 100, 101, 100},
+		candidateEndpoint: {warm, 130, 131, 129, 130},
 	})
 	fixture.campaign.Candidates[0].DeploymentSpecJSON = measurementDraft("control", true)
 	_, workload := fixture.run(t)
@@ -268,8 +269,8 @@ func TestControlServerMetricsRequestIsRecorded(t *testing.T) {
 func TestFullyMeasuredCheckpointIsAnalyzedWithoutMeasuringAgain(t *testing.T) {
 	const warm = 1.0
 	fixture, runner, sink := sequencedFixture(t, map[string][]float64{
-		controlEndpoint:   {warm, 100, 101, 100, 101},
-		candidateEndpoint: {warm, 130, 131, 129},
+		controlEndpoint:   {warm, 100, 101, 100, 101, 100},
+		candidateEndpoint: {warm, 130, 131, 129, 130},
 	})
 	_, first := fixture.run(t)
 	invocations := len(runner.configs)
