@@ -12,7 +12,9 @@ import (
 type Observation struct {
 	StartedAt                                            time.Time
 	DurationMS                                           float64
+	TTFTMS                                               *float64
 	InputTokens, OutputTokens                            *int
+	CachedInputTokens                                    *int
 	Operation                                            string
 	Streaming                                            bool
 	SessionIDHash, ParentSessionIDHash, SharedPrefixHash string
@@ -21,8 +23,10 @@ type Observation struct {
 type shape struct {
 	ArrivalMS           int64    `json:"arrival_ms"`
 	DurationMS          float64  `json:"duration_ms"`
+	TTFTMS              *float64 `json:"ttft_ms,omitempty"`
 	InputTokens         *int     `json:"input_tokens,omitempty"`
 	OutputTokens        *int     `json:"output_tokens,omitempty"`
+	CachedInputTokens   *int     `json:"cached_input_tokens,omitempty"`
 	Operation           string   `json:"operation"`
 	Streaming           bool     `json:"streaming"`
 	SessionIDHash       string   `json:"session_id_hash,omitempty"`
@@ -52,7 +56,7 @@ func Build(deploymentID, deploymentName, revisionID string, windowStart, windowE
 	}
 	events := make([]event, 0, len(observations)*2)
 	for _, o := range observations {
-		rows = append(rows, shape{ArrivalMS: o.StartedAt.Sub(windowStart).Milliseconds(), DurationMS: o.DurationMS, InputTokens: o.InputTokens, OutputTokens: o.OutputTokens, Operation: o.Operation, Streaming: o.Streaming, SessionIDHash: o.SessionIDHash, ParentSessionIDHash: o.ParentSessionIDHash, SharedPrefixHash: o.SharedPrefixHash, ToolPauseMS: o.ToolPauseMS})
+		rows = append(rows, shape{ArrivalMS: o.StartedAt.Sub(windowStart).Milliseconds(), DurationMS: o.DurationMS, TTFTMS: o.TTFTMS, InputTokens: o.InputTokens, OutputTokens: o.OutputTokens, CachedInputTokens: o.CachedInputTokens, Operation: o.Operation, Streaming: o.Streaming, SessionIDHash: o.SessionIDHash, ParentSessionIDHash: o.ParentSessionIDHash, SharedPrefixHash: o.SharedPrefixHash, ToolPauseMS: o.ToolPauseMS})
 		if o.InputTokens != nil {
 			inputTotal += *o.InputTokens
 			inputCount++

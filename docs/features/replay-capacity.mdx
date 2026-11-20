@@ -19,6 +19,21 @@ trace sets `request_limit_reached` to `true`: its requests cover less time than 
 recorded. An optimization report uses it to project monthly cost over the time the kept requests
 cover.
 
+A trace can also be captured from an endpoint's requests, or from one binding of it, such as a closed
+API routed through InferCrane, which has no deployment:
+
+```bash
+infercrane migrate capture support-bot --binding primary --window 24h
+# POST /api/v1/endpoints/support-bot/replays {"binding":"primary","window_seconds":86400}
+```
+
+Such a trace names `endpoint_id`, `endpoint_name`, and `binding_id` instead of a deployment, and is
+listed by `GET /api/v1/endpoints/{name}/replays`. Every trace records, per request, the time to
+first token and the cached input tokens when the upstream reported them. `POST
+/api/v1/endpoints/{name}/traffic-observations` imports observations the same way the deployment
+route does, with an optional `binding` and `cached_input_tokens`, so a closed API's own logs can
+become a trace. See [Migrate from a closed API](/features/migration).
+
 This command only captures persisted observations. It sends no workload and creates no infrastructure.
 To approximate the captured mean token sizes and peak concurrency with AIPerf, opt in explicitly:
 

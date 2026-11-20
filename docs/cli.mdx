@@ -523,6 +523,15 @@ sign and attach instead. `inspect` prints each setup's answer-check result and, 
 waits on you, the exact command that unblocks it. `--output json` returns the control API's
 `quality` object for every setup, under `candidates`.
 
+`--migrate-from ENDPOINT/BINDING` makes the run a [migration Proof](/features/migration): the closed
+API behind that endpoint's external binding is the baseline, `--workload-fingerprint` must name a
+trace captured from that endpoint (`infercrane migrate capture`), and `--eval-set` must name a graded
+set of at least 30 prompts. `--dialect openai` sends `max_completion_tokens` to OpenAI's API;
+`openai-compatible` (the default) sends `max_tokens`. `--max-quality-drop` (default 5) is the
+largest graded-quality drop, at the upper bound of the paired-bootstrap interval, a setup may show
+and still pass. `optimize activate` on a migration run starts a 5% canary on the closed API's
+endpoint.
+
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
 the run's proposal recorded warnings, such as skipped speculative-decoding setups.
 `--output json` keeps `warnings` as the control API returned it: an empty list means none were
@@ -816,7 +825,8 @@ infercrane connect https://vllm.internal/v1 --as coder-production --type vllm
 Use `--model` when the endpoint exposes more than one physical model. Use `--manage-traffic` only
 when the endpoint has been qualified and should immediately enter the InferCrane logical route.
 For a server started with an API key, `--token-env VAR` sends the key held in `VAR` once; the control
-plane stores it encrypted and uses it for discovery and health checks (this needs
+plane stores it encrypted and uses it for discovery, health checks, and, with `--manage-traffic`,
+the requests it routes to the server (this needs
 `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane). `connect` refuses a loopback URL when
 the control plane runs elsewhere, because the control plane would probe its own machine; use the
 agent for that server.
@@ -1010,6 +1020,32 @@ infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
 The objective can be `interactive`, `latency`, `throughput`, or `cost-efficiency`. InferCrane recommends only across
 an exact common workload digest; mixed shapes remain `UNRANKED`. See
 [Recipes and Inference Lab](/features/recipes-lab) for the provenance and missing-evidence contract.
+
+## Migrate from a closed API
+
+`infercrane migrate` measures a closed API routed through an endpoint as the baseline and switches the
+endpoint to an owned deployment in stages. See [Migrate from a closed API](/features/migration).
+
+```bash
+infercrane migrate capture support-bot --binding primary --window 24h
+infercrane migrate price support-bot primary --authority list_price \
+  --input-usd 0.40 --cached-input-usd 0.10 --output-usd 1.60 --valid-until 2026-12-31
+infercrane migrate verdicts RUN_ID
+infercrane migrate canary support-bot --verdict VERDICT_ID --percent 5
+infercrane migrate primary support-bot --window 1h
+infercrane migrate rollback support-bot
+```
+
+| Action | What it does |
+|---|---|
+| `capture ENDPOINT` | Captures a content-free trace of the endpoint's requests (`--binding` for one binding); prints the workload fingerprint |
+| `price ENDPOINT BINDING` | Records the closed API's per-token rate card: `--authority list_price` or `contract`, USD per 1M tokens, `--valid-until` |
+| `verdicts RUN` | Lists the signed quality verdicts of a migration run |
+| `canary ENDPOINT` | Sends at most 5% (`--percent`) of the endpoint's traffic to the deployment a PASS `--verdict` judged |
+| `primary ENDPOINT` | Serves from the owned deployment first with the closed API as fallback, if Release Guard passes on the canary's per-binding traffic (`--window`) |
+| `rollback ENDPOINT` | Routes the endpoint to the closed API alone |
+
+A step Release Guard does not pass changes nothing and exits with the decision and its reasons.
 
 ## Replay and capacity
 

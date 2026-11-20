@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 
@@ -297,4 +298,107 @@ func TraceOutputVolume(trace domain.ReplayTrace) (OutputVolume, error) {
 		volume.OutputTokens += int64(*row.OutputTokens)
 	}
 	return volume, nil
+}
+
+// TokenVolume is the token volume a stored trace observed during its capture
+// window, for pricing it at a per-token rate. A request counts toward
+// Requests when it is a generation request; MissingInput and MissingOutput
+// count those without a recorded input or output count. CachedInputTokens
+// sums only the requests whose upstream reported a cached count, and
+// CachedReported says how many did; the rest are priced as uncached input.
+type TokenVolume struct {
+	Requests          int     `json:"requests"`
+	InputTokens       int64   `json:"input_tokens"`
+	CachedInputTokens int64   `json:"cached_input_tokens"`
+	CachedReported    int     `json:"cached_reported"`
+	OutputTokens      int64   `json:"output_tokens"`
+	MissingInput      int     `json:"missing_input"`
+	MissingOutput     int     `json:"missing_output"`
+	KeptSpanSeconds   float64 `json:"kept_span_seconds"`
+}
+
+// TraceTokenVolume sums the input, cached input, and output tokens of every
+// generation request in a stored trace. It reads the content-free shape only
+// and estimates nothing.
+func TraceTokenVolume(trace domain.ReplayTrace) (TokenVolume, error) {
+	var shapes []shape
+	if err := json.Unmarshal([]byte(trace.ShapeJSON), &shapes); err != nil {
+		return TokenVolume{}, fmt.Errorf("decode replay trace shape: %w", err)
+	}
+	var volume TokenVolume
+	if len(shapes) > 0 {
+		first, last := shapes[0].ArrivalMS, shapes[0].ArrivalMS
+		for _, row := range shapes {
+			first, last = min(first, row.ArrivalMS), max(last, row.ArrivalMS)
+		}
+		volume.KeptSpanSeconds = float64(last-first) / 1000
+	}
+	for _, row := range shapes {
+		if !generationOperation(row.Operation) {
+			continue
+		}
+		volume.Requests++
+		if row.InputTokens == nil || *row.InputTokens < 0 {
+			volume.MissingInput++
+		} else {
+			volume.InputTokens += int64(*row.InputTokens)
+			if row.CachedInputTokens != nil && *row.CachedInputTokens >= 0 && *row.CachedInputTokens <= *row.InputTokens {
+				volume.CachedInputTokens += int64(*row.CachedInputTokens)
+				volume.CachedReported++
+			}
+		}
+		if row.OutputTokens == nil || *row.OutputTokens < 0 {
+			volume.MissingOutput++
+			continue
+		}
+		volume.OutputTokens += int64(*row.OutputTokens)
+	}
+	return volume, nil
+}
+
+// Latency is what the requests in a stored trace observed, end to end and to
+// the first token, as served live. It describes the window the trace was
+// captured in, not a controlled measurement.
+type Latency struct {
+	Requests     int      `json:"requests"`
+	LatencyP50MS *float64 `json:"latency_p50_ms"`
+	LatencyP95MS *float64 `json:"latency_p95_ms"`
+	TTFTP95MS    *float64 `json:"ttft_p95_ms"`
+	TTFTRequests int      `json:"ttft_requests"`
+}
+
+// TraceLatency reads the observed latency percentiles of a stored trace's
+// generation requests. A percentile is nil when no request recorded it.
+func TraceLatency(trace domain.ReplayTrace) (Latency, error) {
+	var shapes []shape
+	if err := json.Unmarshal([]byte(trace.ShapeJSON), &shapes); err != nil {
+		return Latency{}, fmt.Errorf("decode replay trace shape: %w", err)
+	}
+	var latency Latency
+	durations, ttfts := []float64{}, []float64{}
+	for _, row := range shapes {
+		if !generationOperation(row.Operation) {
+			continue
+		}
+		latency.Requests++
+		durations = append(durations, row.DurationMS)
+		if row.TTFTMS != nil {
+			ttfts = append(ttfts, *row.TTFTMS)
+		}
+	}
+	latency.TTFTRequests = len(ttfts)
+	latency.LatencyP50MS, latency.LatencyP95MS, latency.TTFTP95MS = percentile(durations, 0.5), percentile(durations, 0.95), percentile(ttfts, 0.95)
+	return latency, nil
+}
+
+// percentile is the nearest-rank percentile, or nil for no values.
+func percentile(values []float64, rank float64) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	index := int(math.Ceil(rank*float64(len(sorted)))) - 1
+	value := sorted[max(0, min(len(sorted)-1, index))]
+	return &value
 }

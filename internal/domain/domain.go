@@ -272,7 +272,12 @@ type ServingPlan struct {
 	SpecJSON, SpecDigest                    string
 	Version                                 int
 	Bindings                                []ServingPlanBinding
-	CreatedAt                               time.Time
+	// MigrationVerdictID makes the plan a migration plan: it routes between
+	// a closed API's external binding and an owned deployment that a signed
+	// PASS migration quality verdict found as good, in place of a same-model
+	// check. It is part of the plan's canonical spec.
+	MigrationVerdictID string
+	CreatedAt          time.Time
 }
 
 type ResolvedEndpoint struct {
@@ -605,22 +610,31 @@ type InferenceRecord struct {
 	LatencyMS                                               float64
 	TTFTMS                                                  *float64
 	InputTokens, OutputTokens                               *int
-	ColdStart                                               *bool
-	ProviderWorkersAtArrival                                *int
-	ProviderCapacityObservedAt                              *time.Time
-	Streaming                                               bool
-	RetryCount                                              int
-	QueueMS, GenerationMS                                   *float64
-	FallbackReason                                          string
-	SessionIDHash, ParentSessionIDHash, SharedPrefixHash    string
-	ToolPauseMS                                             *float64
+	// CachedInputTokens is the part of InputTokens the upstream reported as
+	// served from its prompt cache; nil when it did not say.
+	CachedInputTokens                                    *int
+	ColdStart                                            *bool
+	ProviderWorkersAtArrival                             *int
+	ProviderCapacityObservedAt                           *time.Time
+	Streaming                                            bool
+	RetryCount                                           int
+	QueueMS, GenerationMS                                *float64
+	FallbackReason                                       string
+	SessionIDHash, ParentSessionIDHash, SharedPrefixHash string
+	ToolPauseMS                                          *float64
 }
 
 type ReplayTrace struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"-"`
-	DeploymentID   string    `json:"deployment_id"`
-	DeploymentName string    `json:"deployment_name"`
+	ID       string `json:"id"`
+	TenantID string `json:"-"`
+	// A trace is captured from one deployment's requests, or from one
+	// endpoint's requests (BindingID narrows it to one binding), such as a
+	// closed API adopted as an external binding. Exactly one scope is set.
+	DeploymentID   string    `json:"deployment_id,omitempty"`
+	DeploymentName string    `json:"deployment_name,omitempty"`
+	EndpointID     string    `json:"endpoint_id,omitempty"`
+	EndpointName   string    `json:"endpoint_name,omitempty"`
+	BindingID      string    `json:"binding_id,omitempty"`
 	RevisionID     string    `json:"revision_id,omitempty"`
 	SchemaVersion  string    `json:"schema_version"`
 	ShapeJSON      string    `json:"shape"`
@@ -1388,4 +1402,32 @@ var RoutingStrategies = map[string]string{
 	"consistent-hash": "consistent_hash",
 	"power-of-two":    "power_of_two",
 	"cache-aware":     "cache_aware",
+}
+
+// BindingQualityEvidence is signed quality evidence for the closed API behind
+// an endpoint's external binding: the baseline a migration candidate is
+// compared with. PayloadJSON is the signed payload; it holds scores and
+// digests only, never prompts or answers.
+type BindingQualityEvidence struct {
+	ID, TenantID, EndpointID, BindingID, Source      string
+	Suite, SuiteVersion, Evaluator, EvaluatorVersion string
+	Score                                            float64
+	SampleCount                                      int
+	PairingDigest                                    string
+	PayloadJSON, PayloadDigest, Signature, PublicKey string
+	Algorithm, KeyID                                 string
+	EvaluatedAt, CreatedAt                           time.Time
+}
+
+// MigrationQualityVerdict is a stored, signed verdict that a candidate
+// revision answers a graded suite within MarginPercent of the closed API
+// behind BindingID. Verdict is PASS, WATCH, BLOCK, or UNKNOWN.
+type MigrationQualityVerdict struct {
+	ID, TenantID, CampaignID, CandidateRunID         string
+	EndpointID, BindingID, DeploymentID, RevisionID  string
+	Verdict, Code                                    string
+	MarginPercent                                    float64
+	PayloadJSON, PayloadDigest, Signature, PublicKey string
+	Algorithm, KeyID                                 string
+	EvaluatedAt, CreatedAt                           time.Time
 }
