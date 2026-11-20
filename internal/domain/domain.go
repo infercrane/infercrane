@@ -833,13 +833,16 @@ type ReleaseGuardPolicy struct {
 }
 
 type RevisionMetrics struct {
-	EvidenceSource        string    `json:"evidence_source,omitempty"`
-	EvidenceID            string    `json:"evidence_id,omitempty"`
-	Requests              int       `json:"requests"`
-	ReadyReplicas         int       `json:"ready_replicas"`
-	ErrorRate             float64   `json:"error_rate"`
-	P95TTFTMS             *float64  `json:"p95_ttft_ms"`
-	P95LatencyMS          *float64  `json:"p95_latency_ms"`
+	EvidenceSource string   `json:"evidence_source,omitempty"`
+	EvidenceID     string   `json:"evidence_id,omitempty"`
+	Requests       int      `json:"requests"`
+	ReadyReplicas  int      `json:"ready_replicas"`
+	ErrorRate      float64  `json:"error_rate"`
+	P95TTFTMS      *float64 `json:"p95_ttft_ms"`
+	P95LatencyMS   *float64 `json:"p95_latency_ms"`
+	// OutputTokensPerSecond is, for request telemetry, the median successful
+	// request's output tokens per second of request time, so revisions that
+	// serve different shares of traffic compare on speed, not demand.
 	OutputTokensPerSecond *float64  `json:"output_tokens_per_second"`
 	SourcedHourlyCost     *float64  `json:"sourced_hourly_cost,omitempty"`
 	Compatible            *bool     `json:"compatible,omitempty"`

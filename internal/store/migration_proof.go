@@ -88,7 +88,7 @@ func (s *Store) BindingMetrics(ctx context.Context, tenant string, binding domai
 	}
 	var metrics domain.RevisionMetrics
 	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),CASE WHEN COUNT(output_tokens)>0 THEN SUM(output_tokens)::double precision/? ELSE NULL END FROM request_records WHERE tenant_id=? AND binding_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, window.Seconds(), tenant, binding.ID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE tenant_id=? AND binding_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, tenant, binding.ID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
 	if err != nil {
 		return metrics, err
 	}

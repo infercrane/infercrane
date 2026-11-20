@@ -80,7 +80,7 @@ identities. Repeating an explanation therefore produces the same answer from sto
 a metric table and shows unavailable measurements explicitly. JSON output retains the complete
 policy, measurements, reason codes, revision identities, and evaluation timestamp.
 
-Missing measurements are not fabricated. Output throughput is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
+Missing measurements are not fabricated. Output throughput from request telemetry is the median successful request's output tokens per second of request time, so a canary serving 5% of traffic is compared with the active revision on speed, not on how many tokens each served. It is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
 Endpoint Release Guard never applies one primary deployment's metrics to an arbitrary routing
 graph. It currently qualifies single-primary comparisons, a primary change with an unchanged
