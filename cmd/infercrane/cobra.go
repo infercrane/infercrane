@@ -594,6 +594,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("max-ttft-p95-ms", "", "optional p95 TTFT SLO")
 		stringFlag("workload-digest", "", "optional exact benchmark workload SHA-256")
 	case "optimize":
+		stringFlag("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model")
+		stringFlag("adapter", "", "serve a LoRA adapter on every setup: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 		stringFlag("provider", "", "provider cloud or exact adapter")
 		stringFlag("region", "", "exact provider region")
 		stringFlag("gpu", "", "exact accelerator identity")
@@ -718,7 +720,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"recipes":     {"--limit", "--output"},
 		"models":      {"--revision", "--secret", "--context-tokens", "--concurrency", "--spec", "--from", "--kind", "--base-model", "--output"},
 		"lab":         {"--objective", "--profile", "--max-ttft-p95-ms", "--workload-digest", "--output"},
-		"optimize":    {"--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
+		"optimize":    {"--model-secret", "--adapter", "--provider", "--region", "--gpu", "--runtimes", "--objective", "--profile", "--source", "--target-concurrency", "--workload-fingerprint", "--aiconfigurator-python", "--allow-model-metadata-network", "--search", "--model-config", "--max-ttft-p95-ms", "--max-tpot-p95-ms", "--max-error-rate", "--min-goodput", "--min-output-tokens-second", "--max-hourly-cost", "--include-simulated", "--max-candidates", "--write-dir", "--file", "--idempotency-key", "--target-deployment", "--limit", "--max-cost-usd", "--expires-in", "--candidate", "--yes", "--output", "--once", "--html"},
 		"passport":    {"--revision", "--file", "--output"},
 		"recommend":   {"--history", "--output"},
 		"slo":         {"--ttft-p95", "--latency-p95", "--error-rate", "--output-tokens-second", "--hourly-cost", "--output"},
