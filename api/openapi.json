@@ -858,6 +858,48 @@
         ],
         "type": "object"
       },
+      "AdapterCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ModelImportCheck"
+          },
+          "gated": {
+            "type": "boolean"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "requested_revision": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "The commit read; pin the adapter to it.",
+            "type": "string"
+          },
+          "token_used": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "repository",
+          "requested_revision",
+          "revision",
+          "private",
+          "gated",
+          "token_used",
+          "checks",
+          "performance_claims"
+        ],
+        "type": "object"
+      },
       "AdmissionMonitoring": {
         "additionalProperties": false,
         "properties": {
@@ -1849,6 +1891,53 @@
         ],
         "type": "object"
       },
+      "BindingRateCard": {
+        "additionalProperties": false,
+        "properties": {
+          "authority": {
+            "description": "list_price is the supplier's published price; contract is your own negotiated price.",
+            "enum": [
+              "list_price",
+              "contract"
+            ],
+            "type": "string"
+          },
+          "cached_input_microusd_per_million": {
+            "description": "Price of input served from the prompt cache; uncached input price when absent.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "currency": {
+            "const": "USD",
+            "type": "string"
+          },
+          "input_microusd_per_million": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_microusd_per_million": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "valid_until": {
+            "description": "After this time the rate card prices nothing and cost is unknown.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authority",
+          "currency",
+          "input_microusd_per_million",
+          "output_microusd_per_million",
+          "valid_until"
+        ],
+        "type": "object"
+      },
       "BurstGuardEvaluationRequest": {
         "properties": {
           "breach_intervals": {
@@ -2700,13 +2789,23 @@
             "type": "integer"
           },
           "model": {
+            "description": "Hugging Face OWNER/NAME, or the s3:// or gs:// location of weights imported into this workspace (served from the worker's verified local copy under this name).",
             "type": "string"
           },
+          "model_adapters": {
+            "description": "LoRA adapter served on the model with the vllm or sglang runtime. LoRA flags come from here, never from runtime_args.",
+            "items": {
+              "$ref": "#/components/schemas/ModelAdapter"
+            },
+            "maxItems": 1,
+            "type": "array"
+          },
           "model_revision": {
+            "description": "Hugging Face branch, tag, or commit; for an imported s3:// or gs:// model, the sha256 manifest digest of its import.",
             "type": "string"
           },
           "model_secret_reference_id": {
-            "description": "Tenant-scoped server-side credential reference for private or gated model resolution.",
+            "description": "Workspace secret with the Hugging Face token for a private or gated model. The provider delivers it natively: a RunPod secret in the account that runs the Pod (sealed), a Kubernetes secretKeyRef (kubernetes), or a Secrets Manager ARN read by the instance profile (aws-secrets-manager).",
             "type": "string"
           },
           "name": {
@@ -3021,6 +3120,41 @@
         },
         "type": "object"
       },
+      "EndpointMigrationStep": {
+        "additionalProperties": false,
+        "properties": {
+          "canary_basis_points": {
+            "default": 500,
+            "description": "Share of traffic the canary sends to the owned deployment, in basis points (500 = 5%).",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "step": {
+            "enum": [
+              "canary",
+              "primary",
+              "rollback"
+            ],
+            "type": "string"
+          },
+          "verdict_id": {
+            "description": "The signed PASS migration verdict a canary rests on; primary uses the canary's when omitted.",
+            "type": "string"
+          },
+          "window_seconds": {
+            "default": 3600,
+            "description": "Release Guard window for the per-binding comparison.",
+            "maximum": 2592000,
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "step"
+        ],
+        "type": "object"
+      },
       "EndpointMonitoring": {
         "additionalProperties": false,
         "properties": {
@@ -3132,6 +3266,29 @@
           "max_output_throughput_drop_percent",
           "require_compatibility_evidence"
         ],
+        "type": "object"
+      },
+      "EndpointReplayCaptureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "description": "Capture only this binding's requests, such as the closed API's external binding.",
+            "maxLength": 128,
+            "type": "string"
+          },
+          "max_requests": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_seconds": {
+            "default": 86400,
+            "maximum": 2592000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "EnvironmentCreate": {
@@ -7227,6 +7384,39 @@
         ],
         "type": "object"
       },
+      "ModelAdapter": {
+        "additionalProperties": false,
+        "description": "A LoRA adapter served on the model. The endpoint answers with the adapter; one endpoint serves one adapter.",
+        "properties": {
+          "name": {
+            "description": "Model name the endpoint answers to.",
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "rank": {
+            "description": "LoRA rank r from adapter_config.json; sets the runtime's maximum rank. Read from the import when omitted.",
+            "maximum": 512,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "repository": {
+            "description": "Hugging Face OWNER/NAME, or an imported s3:// or gs:// location.",
+            "maxLength": 1024,
+            "type": "string"
+          },
+          "revision": {
+            "description": "The adapter's 40-character Hugging Face commit, or the sha256 manifest digest of its import.",
+            "pattern": "^([0-9a-f]{40}|sha256:[0-9a-f]{64})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "repository",
+          "revision"
+        ],
+        "type": "object"
+      },
       "ModelCheck": {
         "additionalProperties": false,
         "properties": {
@@ -7757,6 +7947,228 @@
           "check",
           "reviewed_model",
           "performance_claims"
+        ],
+        "type": "object"
+      },
+      "ModelFile": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "size",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "ModelImport": {
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ModelImportCheck"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ModelFile"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "weights",
+              "adapter"
+            ],
+            "type": "string"
+          },
+          "manifest_digest": {
+            "description": "Pin a deployment to it with model_revision or an adapter's revision.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "s3",
+              "gs"
+            ],
+            "type": "string"
+          },
+          "uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "uri",
+          "manifest_digest",
+          "files",
+          "checks",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "ModelImportCheck": {
+        "additionalProperties": false,
+        "description": "What the manifest and the configuration bytes sent with it prove. Unknown stays unknown: workers check the downloaded bytes.",
+        "properties": {
+          "adapter_base_model": {
+            "type": "string"
+          },
+          "adapter_rank": {
+            "type": "integer"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "config_digest": {
+            "type": "string"
+          },
+          "failed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "model_type": {
+            "type": "string"
+          },
+          "tokenizer_files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "total_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "verified": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "verified",
+          "unknown",
+          "failed",
+          "total_bytes"
+        ],
+        "type": "object"
+      },
+      "ModelImportEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "description": "Weights only: the automatic model check of the imported configuration.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelCheck"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "import": {
+            "$ref": "#/components/schemas/ModelImport"
+          },
+          "performance_claims": {
+            "const": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "import",
+          "performance_claims"
+        ],
+        "type": "object"
+      },
+      "ModelImportList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ModelImport"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ModelImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter_config_base64": {
+            "description": "Adapter only: adapter_config.json bytes, checked against its manifest entry and read for the rank and base model.",
+            "type": "string"
+          },
+          "base_model": {
+            "description": "Adapter only: the base model it will be served on.",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "config_base64": {
+            "description": "Weights only: config.json bytes, checked against its manifest entry and read for the architecture.",
+            "type": "string"
+          },
+          "files": {
+            "description": "Every file at the location; infercrane models import builds it from a local copy.",
+            "items": {
+              "$ref": "#/components/schemas/ModelFile"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "weights",
+              "adapter"
+            ],
+            "type": "string"
+          },
+          "uri": {
+            "description": "Location in the workspace's own bucket.",
+            "pattern": "^(s3|gs)://[a-z0-9][a-z0-9._-]{1,61}[a-z0-9](/[A-Za-z0-9._/=+-]*)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "uri",
+          "files"
         ],
         "type": "object"
       },
@@ -8671,6 +9083,35 @@
           "max_candidates": {
             "type": "integer"
           },
+          "migration": {
+            "additionalProperties": false,
+            "description": "Present for a migration Proof: the closed API the setups are compared with and would replace.",
+            "properties": {
+              "binding": {
+                "type": "string"
+              },
+              "dialect": {
+                "enum": [
+                  "openai",
+                  "openai-compatible"
+                ],
+                "type": "string"
+              },
+              "endpoint": {
+                "type": "string"
+              },
+              "max_quality_regression_percent": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "endpoint",
+              "binding",
+              "dialect",
+              "max_quality_regression_percent"
+            ],
+            "type": "object"
+          },
           "model_identity": {
             "type": "string"
           },
@@ -9530,6 +9971,273 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "current_api": {
+            "additionalProperties": false,
+            "description": "Present only for a migration campaign: the closed API the setups would replace, measured by its rate card at your replayed traffic, its observed live latency, and the chosen setup's signed quality verdict against it.",
+            "properties": {
+              "binding": {
+                "type": "string"
+              },
+              "cost": {
+                "additionalProperties": false,
+                "properties": {
+                  "authority": {
+                    "enum": [
+                      "list_price",
+                      "contract"
+                    ],
+                    "type": "string"
+                  },
+                  "basis": {
+                    "enum": [
+                      "rate_card_at_replayed_volume",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "blended_usd_per_million_tokens": {
+                    "description": "Cost of the captured requests divided by all their input and output tokens, per million.",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "cached_input_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "input_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "monthly_change_percent": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "monthly_change_usd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "monthly_usd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "output_tokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "rate_card_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "usd_per_million_output_tokens": {
+                    "description": "Cost of the captured requests per million output tokens, comparable with the setups' cost per million output tokens.",
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "valid_until": {
+                    "format": "date-time",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "winner_monthly_usd": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "basis",
+                  "valid_until",
+                  "input_tokens",
+                  "cached_input_tokens",
+                  "output_tokens",
+                  "blended_usd_per_million_tokens",
+                  "usd_per_million_output_tokens",
+                  "monthly_usd",
+                  "winner_monthly_usd",
+                  "monthly_change_usd",
+                  "monthly_change_percent"
+                ],
+                "type": "object"
+              },
+              "endpoint": {
+                "type": "string"
+              },
+              "latency": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "enum": [
+                      "observed_live_traffic",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "latency_p95_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "note": {
+                    "description": "Observed on live traffic in a different window from the setups' measurements; not a side-by-side run.",
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "requests": {
+                    "type": "integer"
+                  },
+                  "ttft_p95_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "window_end": {
+                    "format": "date-time",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "window_start": {
+                    "format": "date-time",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "winner_ttft_p95_ms": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "basis",
+                  "window_start",
+                  "window_end",
+                  "requests",
+                  "ttft_p95_ms",
+                  "latency_p95_ms",
+                  "winner_ttft_p95_ms",
+                  "note"
+                ],
+                "type": "object"
+              },
+              "model": {
+                "type": "string"
+              },
+              "quality": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "enum": [
+                      "signed_migration_verdict",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "current_api_score": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "evaluator": {
+                    "type": "string"
+                  },
+                  "interval_lower_percent": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "interval_upper_percent": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "margin_percent": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "suite": {
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "enum": [
+                      "PASS",
+                      "WATCH",
+                      "BLOCK",
+                      "UNKNOWN"
+                    ],
+                    "type": "string"
+                  },
+                  "verdict_id": {
+                    "type": "string"
+                  },
+                  "winner_score": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "verdict",
+                  "basis",
+                  "margin_percent",
+                  "current_api_score",
+                  "winner_score",
+                  "interval_lower_percent",
+                  "interval_upper_percent"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "endpoint",
+              "binding",
+              "model",
+              "cost",
+              "latency",
+              "quality"
+            ],
+            "type": "object"
           },
           "finished": {
             "type": "boolean"
@@ -10655,6 +11363,43 @@
             "minimum": 0,
             "type": "number"
           },
+          "migration": {
+            "additionalProperties": false,
+            "description": "Makes the campaign a migration Proof: the closed API behind this endpoint's external binding is the baseline the setups are compared with on cost, speed, and graded answer quality. Needs workload_fingerprint from a trace captured on that endpoint.",
+            "properties": {
+              "binding": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "dialect": {
+                "default": "openai-compatible",
+                "description": "openai sends max_completion_tokens; both omit model-server-only fields.",
+                "enum": [
+                  "openai",
+                  "openai-compatible"
+                ],
+                "type": "string"
+              },
+              "endpoint": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "max_quality_regression_percent": {
+                "default": 5,
+                "description": "Largest graded-quality drop, at the upper bound of the paired-bootstrap interval, a setup may show and still pass.",
+                "exclusiveMinimum": 0,
+                "maximum": 50,
+                "type": "number"
+              }
+            },
+            "required": [
+              "endpoint",
+              "binding"
+            ],
+            "type": "object"
+          },
           "min_goodput": {
             "minimum": 0,
             "type": "number"
@@ -10662,6 +11407,14 @@
           "min_output_tokens_second": {
             "minimum": 0,
             "type": "number"
+          },
+          "model_adapters": {
+            "description": "LoRA adapter every candidate serves on the model. Checkpoint swaps are skipped because the adapter was trained on this checkpoint.",
+            "items": {
+              "$ref": "#/components/schemas/ModelAdapter"
+            },
+            "maxItems": 1,
+            "type": "array"
           },
           "model_config_digest": {
             "description": "Digest of the pinned model configuration that declared model_features.",
@@ -10686,11 +11439,12 @@
             "type": "string"
           },
           "model_revision": {
-            "pattern": "^[a-fA-F0-9]{40,64}$",
+            "description": "Model commit, or the sha256 manifest digest of imported s3:// or gs:// weights.",
+            "pattern": "^([a-fA-F0-9]{40,64}|sha256:[a-f0-9]{64})$",
             "type": "string"
           },
           "model_secret_reference_id": {
-            "description": "Saved Hugging Face token reference used to check a gated model outside the reviewed catalog. The token never enters the proposal.",
+            "description": "Workspace secret with the Hugging Face token for a private or gated model. It checks a model outside the reviewed catalog and is delivered to every candidate's worker natively by the provider. The reference enters the proposal; the token never does.",
             "maxLength": 255,
             "type": "string"
           },
@@ -10719,7 +11473,7 @@
             "type": "string"
           },
           "quality_eval_set": {
-            "description": "Digest of an uploaded customer eval set that replaces the built-in prompts. Only with quality_check builtin.",
+            "description": "Digest of an uploaded customer eval set that replaces the built-in prompts. Only with quality_check builtin. A migration needs a graded set (grading and expected answers, at least 30 prompts).",
             "pattern": "^sha256:[a-f0-9]{64}$",
             "type": "string"
           },
@@ -11818,6 +12572,42 @@
         ],
         "type": "object"
       },
+      "SecretReferenceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "reference": {
+            "description": "For env, kubernetes, and aws-secrets-manager.",
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "resolver": {
+            "description": "sealed keeps the value encrypted in InferCrane and never returns it. env names the control plane's environment and is for the operator's workspaces only. kubernetes (SECRET/KEY in the cluster's InferCrane namespace) and aws-secrets-manager (an ARN) stay in the customer's own cluster or account and are read only by workers, for workspaces the operator lets deploy there.",
+            "enum": [
+              "sealed",
+              "env",
+              "kubernetes",
+              "aws-secrets-manager"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "For sealed only: one line of printable ASCII. Sealed at once and never returned or logged.",
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "name",
+          "resolver"
+        ],
+        "type": "object"
+      },
       "ServingPlanCreate": {
         "additionalProperties": false,
         "properties": {
@@ -12054,6 +12844,12 @@
       "TrafficObservation": {
         "additionalProperties": false,
         "properties": {
+          "cached_input_tokens": {
+            "description": "Part of input_tokens served from the upstream's prompt cache.",
+            "maximum": 10000000,
+            "minimum": 0,
+            "type": "integer"
+          },
           "error_type": {
             "maxLength": 255,
             "type": "string"
@@ -12166,6 +12962,11 @@
       "TrafficObservationImport": {
         "additionalProperties": false,
         "properties": {
+          "binding": {
+            "description": "Endpoint imports only: the binding the requests went to, such as a closed API's external binding.",
+            "maxLength": 128,
+            "type": "string"
+          },
           "observations": {
             "items": {
               "$ref": "#/components/schemas/TrafficObservation"
@@ -12184,6 +12985,8 @@
               "datadog",
               "baseten",
               "fireworks",
+              "openai",
+              "anthropic",
               "custom"
             ],
             "type": "string"
@@ -14193,6 +14996,85 @@
         "summary": "List timestamped GPU price observations without claiming stock",
         "tags": [
           "Compute"
+        ]
+      }
+    },
+    "/api/v1/catalog/hugging-face/adapter-check": {
+      "get": {
+        "operationId": "checkHuggingFaceAdapter",
+        "parameters": [
+          {
+            "description": "Exact owner/name Hugging Face adapter repository.",
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "maxLength": 193,
+              "minLength": 3,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Branch, tag, or commit. Defaults to main; the check reports the commit it read.",
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The workspace's saved Hugging Face token, for a private adapter. The token is sent only to Hugging Face.",
+            "in": "query",
+            "name": "model_secret_reference_id",
+            "required": false,
+            "schema": {
+              "maxLength": 255,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The base model the adapter will be served on, compared with the base model adapter_config.json declares.",
+            "in": "query",
+            "name": "base_model",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdapterCheck"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pin a Hugging Face LoRA adapter to a commit and read its adapter_config.json: rank and declared base model; not a performance claim",
+        "tags": [
+          "Model catalog"
         ]
       }
     },
@@ -18354,6 +19236,246 @@
         ]
       }
     },
+    "/api/v1/endpoints/{name}/bindings/{binding}/quality-evidence": {
+      "get": {
+        "operationId": "listBindingQualityEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List signed quality evidence for a closed API's binding without prompt or output content",
+        "tags": [
+          "Migration Proof"
+        ]
+      },
+      "post": {
+        "operationId": "attachBindingQualityEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignedEvidenceEnvelope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Attach your evaluator's signed result for the closed API behind an external binding (revision_id binding:\u003cid\u003e)",
+        "tags": [
+          "Migration Proof"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/bindings/{binding}/rate-card": {
+      "get": {
+        "operationId": "getBindingRateCard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inspect a closed API's rate card; null means its cost is unknown",
+        "tags": [
+          "Migration Proof"
+        ]
+      },
+      "put": {
+        "operationId": "setBindingRateCard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "binding",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindingRateCard"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Record what a closed API behind an external binding charges per token: its list price or your contract, valid until a date",
+        "tags": [
+          "Migration Proof"
+        ]
+      }
+    },
     "/api/v1/endpoints/{name}/doctor": {
       "post": {
         "operationId": "diagnoseEndpoint",
@@ -18625,6 +19747,63 @@
         "summary": "Read one retained GPU profile capture behind an endpoint",
         "tags": [
           "Monitoring"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/migration": {
+      "post": {
+        "operationId": "stageEndpointMigration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointMigrationStep"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Take one step of the staged switch from a closed API to an owned deployment: canary, primary with the closed API as fallback, or rollback",
+        "tags": [
+          "Migration Proof"
         ]
       }
     },
@@ -19114,6 +20293,165 @@
         "summary": "Set endpoint Release Guard policy",
         "tags": [
           "Endpoints"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/replays": {
+      "get": {
+        "operationId": "listEndpointReplays",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List workload-shape traces captured from one endpoint",
+        "tags": [
+          "Replay"
+        ]
+      },
+      "post": {
+        "operationId": "captureEndpointReplay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndpointReplayCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Capture a privacy-preserving workload shape from an endpoint's requests, or from one of its bindings such as a closed API",
+        "tags": [
+          "Replay"
+        ]
+      }
+    },
+    "/api/v1/endpoints/{name}/traffic-observations": {
+      "post": {
+        "operationId": "importEndpointTrafficObservations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrafficObservationImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import bounded content-free request shapes for an endpoint or one of its bindings, such as a closed API's own logs",
+        "tags": [
+          "Monitoring"
         ]
       }
     },
@@ -19662,6 +21000,86 @@
         "summary": "Read tenant-scoped hosted Model API settlement evidence",
         "tags": [
           "Model APIs"
+        ]
+      }
+    },
+    "/api/v1/model-imports": {
+      "get": {
+        "operationId": "listModelImports",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List weights and LoRA adapters imported from the workspace's own S3 or GCS buckets",
+        "tags": [
+          "Model catalog"
+        ]
+      },
+      "post": {
+        "operationId": "createModelImport",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportEnvelope"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Import weights or a LoRA adapter from the workspace's own S3 or GCS bucket by file manifest; InferCrane never reads the bucket, and workers check every file's sha256",
+        "tags": [
+          "Model catalog"
         ]
       }
     },
@@ -20589,6 +22007,53 @@
         "summary": "Send one chat completion to the exact revision of a decided candidate; refused while the run is still measuring it, never recorded as a request trace",
         "tags": [
           "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/campaigns/{id}/migration-verdicts": {
+      "get": {
+        "operationId": "listMigrationVerdicts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the signed verdicts comparing a migration campaign's setups with the closed API",
+        "tags": [
+          "Migration Proof"
         ]
       }
     },
@@ -22965,7 +24430,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Object"
+                "$ref": "#/components/schemas/SecretReferenceCreate"
               }
             }
           },
@@ -22998,7 +24463,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create a reference to an external secret",
+        "summary": "Seal a workspace secret, or name one in the workspace's own cluster or AWS account; values are never returned",
         "tags": [
           "Secrets"
         ]
@@ -23786,6 +25251,9 @@
     },
     {
       "name": "Marketplace administration"
+    },
+    {
+      "name": "Migration Proof"
     },
     {
       "name": "Model API administration"

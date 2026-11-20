@@ -103,6 +103,10 @@ func ActivationHandlers(store ActivationStore, refresh func(context.Context) err
 			if childErr := childComplete(child, "guarded candidate promotion"); childErr != nil {
 				return "", childErr
 			}
+		} else if migration := campaignRequest(campaign).Migration; migration != nil {
+			if canaryErr := startMigrationCanary(ctx, store, campaign, candidate, migration.Endpoint); canaryErr != nil {
+				return "", canaryErr
+			}
 		} else {
 			draft, draftErr := candidateDraft(candidate)
 			if draftErr != nil {
@@ -141,9 +145,55 @@ func ActivationHandlers(store ActivationStore, refresh func(context.Context) err
 	}}
 }
 
+// MigrationSwitcher starts the staged switch of a migration campaign's
+// endpoint from its closed API to the qualified candidate.
+type MigrationSwitcher interface {
+	MigrationVerdictsForCampaign(context.Context, string, string) ([]domain.MigrationQualityVerdict, error)
+	StartMigrationCanary(ctx context.Context, tenant, endpoint, verdictID string) (activated bool, decision string, err error)
+}
+
+// startMigrationCanary activates a migration winner the only way a closed
+// API's endpoint changes: a canary that sends at most 5% of its traffic to
+// the candidate, admitted on the candidate's signed PASS verdict. The closed
+// API keeps the rest; later steps are taken on the endpoint.
+func startMigrationCanary(ctx context.Context, store ActivationStore, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, endpoint string) error {
+	switcher, ok := store.(MigrationSwitcher)
+	if !ok {
+		return operations.Permanent("optimization_migration_switch_unavailable", errors.New("the staged migration switch is not configured"))
+	}
+	verdicts, err := switcher.MigrationVerdictsForCampaign(ctx, campaign.TenantID, campaign.ID)
+	if err != nil {
+		return operations.Retryable("optimization_migration_verdict_lookup_failed", err)
+	}
+	verdictID := ""
+	for _, verdict := range verdicts {
+		if verdict.CandidateRunID == candidate.ID && verdict.RevisionID == candidate.RevisionID && verdict.Verdict == "PASS" {
+			verdictID = verdict.ID
+			break
+		}
+	}
+	if verdictID == "" {
+		return operations.Permanent("optimization_migration_verdict_missing", errors.New("the candidate has no PASS migration verdict against the closed API"))
+	}
+	activated, decision, err := switcher.StartMigrationCanary(ctx, campaign.TenantID, endpoint, verdictID)
+	if errors.Is(err, domain.ErrConflict) {
+		return operations.Permanent("optimization_migration_canary_refused", err)
+	}
+	if err != nil {
+		return operations.Retryable("optimization_migration_canary_failed", err)
+	}
+	if !activated {
+		return operations.Permanent("optimization_migration_canary_refused", fmt.Errorf("endpoint Release Guard decided %s for the canary", decision))
+	}
+	return nil
+}
+
 func activationEndpoint(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) string {
 	if campaign.Intent == IntentEvolveEndpoint {
 		return campaign.TargetDeployment
+	}
+	if migration := campaignRequest(campaign).Migration; migration != nil {
+		return migration.Endpoint
 	}
 	draft, err := candidateDraft(candidate)
 	if err != nil {

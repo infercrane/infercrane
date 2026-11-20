@@ -124,7 +124,7 @@ func (c BuiltinQualityCheck) Check(ctx context.Context, campaign domain.Optimiza
 			return domain.QualityEvidence{}, err
 		}
 	}
-	return c.record(ctx, candidate.TenantID, candidate.DeploymentName, comparison.Payload(candidate.DeploymentName, false), comparison.ReferenceRevisionID)
+	return c.record(ctx, candidate.TenantID, candidate.DeploymentName, comparison.Payload(candidate.DeploymentName, false), comparison.ReferenceID)
 }
 
 // recordReference keeps one InferCrane-run reference row per reference
@@ -135,10 +135,10 @@ func (c BuiltinQualityCheck) recordReference(ctx context.Context, tenant, deploy
 	if err != nil {
 		return fmt.Errorf("list reference quality evidence: %w", err)
 	}
-	if newestEvidence(rows, comparison.ReferenceRevisionID, func(row domain.QualityEvidence) bool { return builtinEvidence(row, set) }) != nil {
+	if newestEvidence(rows, comparison.ReferenceID, func(row domain.QualityEvidence) bool { return builtinEvidence(row, set) }) != nil {
 		return nil
 	}
-	_, err = c.record(ctx, tenant, deployment, comparison.Payload(deployment, true), comparison.ReferenceRevisionID)
+	_, err = c.record(ctx, tenant, deployment, comparison.Payload(deployment, true), comparison.ReferenceID)
 	return err
 }
 
@@ -249,7 +249,7 @@ func (c BuiltinQualityCheck) now() time.Time {
 }
 
 func (t armTarget) qualityTarget() qualitycheck.Target {
-	return qualitycheck.Target{Endpoint: t.endpoint, APIKey: t.apiKey, Model: t.model, RevisionID: t.revisionID}
+	return qualitycheck.Target{Endpoint: t.endpoint, APIKey: t.apiKey, Model: t.model, SubjectID: t.revisionID}
 }
 
 func builtinEvidence(row domain.QualityEvidence, set qualitycheck.EvalSet) bool {

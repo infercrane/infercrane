@@ -64,6 +64,7 @@ type DeploymentRevisionSpec struct {
 	Model                  string                   `json:"model"`
 	ModelRevision          string                   `json:"model_revision,omitempty"`
 	ModelSecretReferenceID string                   `json:"model_secret_reference_id,omitempty"`
+	ModelAdapters          []ModelAdapter           `json:"model_adapters,omitempty"`
 	Runtime                string                   `json:"runtime"`
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
@@ -95,6 +96,56 @@ type ControlPlaneInstance struct {
 	StartedAt     time.Time `json:"started_at"`
 	HeartbeatAt   time.Time `json:"heartbeat_at"`
 	Draining      bool      `json:"draining"`
+}
+
+// ModelAdapter is a LoRA adapter served on a deployment's base model. The
+// repository is a Hugging Face OWNER/NAME pinned to a 40-character commit, or
+// an s3:// or gs:// location pinned to the sha256 digest of its imported
+// manifest. Rank is the adapter's r from adapter_config.json, when known.
+type ModelAdapter struct {
+	Name       string `json:"name" yaml:"name"`
+	Repository string `json:"repository" yaml:"repository"`
+	Revision   string `json:"revision" yaml:"revision"`
+	Rank       int    `json:"rank,omitempty" yaml:"rank,omitempty"`
+}
+
+// ModelImport is model weights or a LoRA adapter in a customer's own S3 or GCS
+// bucket, registered by its file manifest. InferCrane never reads the bucket:
+// workers download the listed files with their own identity and check each
+// sha256. Checks record what the import verified and what stays unknown.
+type ModelImport struct {
+	ID             string           `json:"id"`
+	TenantID       string           `json:"-"`
+	Kind           string           `json:"kind"`
+	Source         string           `json:"source"`
+	URI            string           `json:"uri"`
+	ManifestDigest string           `json:"manifest_digest"`
+	Files          []ModelFile      `json:"files"`
+	Checks         ModelImportCheck `json:"checks"`
+	CreatedAt      time.Time        `json:"created_at"`
+}
+
+// ModelFile is one manifest entry.
+type ModelFile struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// ModelImportCheck is the import's verdict on what it could verify from the
+// manifest and the configuration bytes it was given. Unknown stays unknown:
+// whether the bucket holds these exact bytes is checked by the worker.
+type ModelImportCheck struct {
+	Verified       []string `json:"verified"`
+	Unknown        []string `json:"unknown"`
+	Failed         []string `json:"failed"`
+	TotalBytes     int64    `json:"total_bytes"`
+	Architecture   string   `json:"architecture,omitempty"`
+	ModelType      string   `json:"model_type,omitempty"`
+	AdapterRank    int      `json:"adapter_rank,omitempty"`
+	AdapterBase    string   `json:"adapter_base_model,omitempty"`
+	ConfigDigest   string   `json:"config_digest,omitempty"`
+	TokenizerFiles []string `json:"tokenizer_files,omitempty"`
 }
 
 type ModelArtifact struct {
@@ -221,7 +272,12 @@ type ServingPlan struct {
 	SpecJSON, SpecDigest                    string
 	Version                                 int
 	Bindings                                []ServingPlanBinding
-	CreatedAt                               time.Time
+	// MigrationVerdictID makes the plan a migration plan: it routes between
+	// a closed API's external binding and an owned deployment that a signed
+	// PASS migration quality verdict found as good, in place of a same-model
+	// check. It is part of the plan's canonical spec.
+	MigrationVerdictID string
+	CreatedAt          time.Time
 }
 
 type ResolvedEndpoint struct {
@@ -554,22 +610,31 @@ type InferenceRecord struct {
 	LatencyMS                                               float64
 	TTFTMS                                                  *float64
 	InputTokens, OutputTokens                               *int
-	ColdStart                                               *bool
-	ProviderWorkersAtArrival                                *int
-	ProviderCapacityObservedAt                              *time.Time
-	Streaming                                               bool
-	RetryCount                                              int
-	QueueMS, GenerationMS                                   *float64
-	FallbackReason                                          string
-	SessionIDHash, ParentSessionIDHash, SharedPrefixHash    string
-	ToolPauseMS                                             *float64
+	// CachedInputTokens is the part of InputTokens the upstream reported as
+	// served from its prompt cache; nil when it did not say.
+	CachedInputTokens                                    *int
+	ColdStart                                            *bool
+	ProviderWorkersAtArrival                             *int
+	ProviderCapacityObservedAt                           *time.Time
+	Streaming                                            bool
+	RetryCount                                           int
+	QueueMS, GenerationMS                                *float64
+	FallbackReason                                       string
+	SessionIDHash, ParentSessionIDHash, SharedPrefixHash string
+	ToolPauseMS                                          *float64
 }
 
 type ReplayTrace struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"-"`
-	DeploymentID   string    `json:"deployment_id"`
-	DeploymentName string    `json:"deployment_name"`
+	ID       string `json:"id"`
+	TenantID string `json:"-"`
+	// A trace is captured from one deployment's requests, or from one
+	// endpoint's requests (BindingID narrows it to one binding), such as a
+	// closed API adopted as an external binding. Exactly one scope is set.
+	DeploymentID   string    `json:"deployment_id,omitempty"`
+	DeploymentName string    `json:"deployment_name,omitempty"`
+	EndpointID     string    `json:"endpoint_id,omitempty"`
+	EndpointName   string    `json:"endpoint_name,omitempty"`
+	BindingID      string    `json:"binding_id,omitempty"`
 	RevisionID     string    `json:"revision_id,omitempty"`
 	SchemaVersion  string    `json:"schema_version"`
 	ShapeJSON      string    `json:"shape"`
@@ -1109,6 +1174,8 @@ type ConsoleIdentity struct {
 	Access      bool     `json:"access"`
 }
 
+// SecretReference names where a workspace secret lives. For the sealed
+// resolver the value is stored only as ciphertext, which is never serialized.
 type SecretReference struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -1117,6 +1184,10 @@ type SecretReference struct {
 	Reference string    `json:"reference"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Sealed and KeyReference hold a sealed value. They never leave the
+	// control plane.
+	Sealed       SealedCredential `json:"-"`
+	KeyReference string           `json:"-"`
 }
 
 type ExternalTargetPolicy struct {
@@ -1331,4 +1402,32 @@ var RoutingStrategies = map[string]string{
 	"consistent-hash": "consistent_hash",
 	"power-of-two":    "power_of_two",
 	"cache-aware":     "cache_aware",
+}
+
+// BindingQualityEvidence is signed quality evidence for the closed API behind
+// an endpoint's external binding: the baseline a migration candidate is
+// compared with. PayloadJSON is the signed payload; it holds scores and
+// digests only, never prompts or answers.
+type BindingQualityEvidence struct {
+	ID, TenantID, EndpointID, BindingID, Source      string
+	Suite, SuiteVersion, Evaluator, EvaluatorVersion string
+	Score                                            float64
+	SampleCount                                      int
+	PairingDigest                                    string
+	PayloadJSON, PayloadDigest, Signature, PublicKey string
+	Algorithm, KeyID                                 string
+	EvaluatedAt, CreatedAt                           time.Time
+}
+
+// MigrationQualityVerdict is a stored, signed verdict that a candidate
+// revision answers a graded suite within MarginPercent of the closed API
+// behind BindingID. Verdict is PASS, WATCH, BLOCK, or UNKNOWN.
+type MigrationQualityVerdict struct {
+	ID, TenantID, CampaignID, CandidateRunID         string
+	EndpointID, BindingID, DeploymentID, RevisionID  string
+	Verdict, Code                                    string
+	MarginPercent                                    float64
+	PayloadJSON, PayloadDigest, Signature, PublicKey string
+	Algorithm, KeyID                                 string
+	EvaluatedAt, CreatedAt                           time.Time
 }

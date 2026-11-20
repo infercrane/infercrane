@@ -23,7 +23,9 @@ import (
 
 	"github.com/infercrane/infercrane/internal/checkpointcatalog"
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -97,6 +99,12 @@ type Request struct {
 	// longer context than the GPU was sized for. Reviewed profiles keep their
 	// own arguments.
 	MaxModelLen int `json:"max_model_len,omitempty"`
+	// ModelSecretReferenceID names the workspace credential every candidate's
+	// worker uses for a private model. It is a reference, never the token.
+	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty"`
+	// ModelAdapters is the LoRA adapter every candidate serves on the model,
+	// pinned by commit or manifest digest.
+	ModelAdapters []domain.ModelAdapter `json:"model_adapters,omitempty"`
 	// QualityCheck chooses who decides whether a candidate's answers are still
 	// good enough. QualityCheckBuiltin (the default) runs InferCrane's
 	// built-in answer check against the campaign control; QualityCheckCustomer
@@ -111,6 +119,57 @@ type Request struct {
 	// by what the diagnosis says is most likely to help. The control API
 	// reads it server-side; it is bound by the input digest.
 	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	// Migration makes the campaign a migration Proof: the closed API behind
+	// an external binding of an existing endpoint is the baseline the
+	// candidates are compared with on cost, speed, and quality. The closed
+	// API is never a candidate, so lineage still binds the candidates to one
+	// open base model.
+	Migration *MigrationBaseline `json:"migration,omitempty"`
+}
+
+// MigrationBaseline names the closed API a migration campaign replaces.
+type MigrationBaseline struct {
+	// Endpoint is the customer's endpoint; Binding names its external
+	// binding to the closed API.
+	Endpoint string `json:"endpoint"`
+	Binding  string `json:"binding"`
+	// Dialect is how the closed API reads a chat request:
+	// MigrationDialectOpenAI or MigrationDialectOpenAICompatible.
+	Dialect string `json:"dialect"`
+	// MaxQualityRegressionPercent is the largest drop in graded quality, at
+	// the upper bound of the paired-bootstrap interval, a candidate may show
+	// against the closed API and still pass.
+	MaxQualityRegressionPercent float64 `json:"max_quality_regression_percent"`
+}
+
+const (
+	MigrationDialectOpenAI           = "openai"
+	MigrationDialectOpenAICompatible = "openai-compatible"
+	// DefaultMigrationQualityMargin is the regression margin when a request
+	// names none.
+	DefaultMigrationQualityMargin = 5.0
+)
+
+var migrationName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+func validateMigration(request Request) error {
+	migration := request.Migration
+	if !migrationName.MatchString(migration.Endpoint) || !migrationName.MatchString(migration.Binding) {
+		return errors.New("migration.endpoint and migration.binding must name an endpoint and its external binding")
+	}
+	if migration.Dialect != MigrationDialectOpenAI && migration.Dialect != MigrationDialectOpenAICompatible {
+		return errors.New("migration.dialect must be openai or openai-compatible")
+	}
+	if math.IsNaN(migration.MaxQualityRegressionPercent) || migration.MaxQualityRegressionPercent <= 0 || migration.MaxQualityRegressionPercent > 50 {
+		return errors.New("migration.max_quality_regression_percent must be greater than 0 and at most 50")
+	}
+	if request.WorkloadSource != WorkloadSourceCustomerObserved || request.WorkloadFingerprint == "" {
+		return errors.New("a migration measures the closed API's own traffic: capture it from the endpoint and pass workload_fingerprint")
+	}
+	if request.QualityCheck != QualityCheckCustomer && request.QualityEvalSet == "" {
+		return errors.New("a migration compares answers with expected answers: name a graded quality_eval_set, or choose customer_evidence")
+	}
+	return nil
 }
 
 const (
@@ -138,9 +197,16 @@ type DeploymentDraft struct {
 	Kind                string `json:"kind" yaml:"kind"`
 	Name                string `json:"name" yaml:"name"`
 	ComputeConnectionID string `json:"compute_connection_id,omitempty" yaml:"computeConnectionID,omitempty"`
-	Model               struct {
+	// ModelSecretReferenceID names the workspace credential the worker uses
+	// for a private model; the provider delivers it natively.
+	ModelSecretReferenceID string `json:"model_secret_reference_id,omitempty" yaml:"modelSecretReferenceID,omitempty"`
+	Model                  struct {
 		ID       string `json:"id" yaml:"id"`
 		Revision string `json:"revision" yaml:"revision"`
+		// Adapters are LoRA adapters served on the model, pinned by commit
+		// or manifest digest. Omitted when empty so candidate identities of
+		// existing proposals hold.
+		Adapters []domain.ModelAdapter `json:"adapters,omitempty" yaml:"adapters,omitempty"`
 	} `json:"model" yaml:"model"`
 	Runtime struct {
 		Engine  string   `json:"engine" yaml:"engine"`
@@ -494,6 +560,7 @@ func normalizeRequest(request Request) Request {
 	}
 	request.Provider = strings.ToLower(strings.TrimSpace(request.Provider))
 	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
+	request.ModelSecretReferenceID = strings.TrimSpace(request.ModelSecretReferenceID)
 	request.ProviderAdapter = strings.ToLower(strings.TrimSpace(request.ProviderAdapter))
 	request.Region = strings.TrimSpace(request.Region)
 	request.GPU = strings.TrimSpace(request.GPU)
@@ -512,6 +579,19 @@ func normalizeRequest(request Request) Request {
 	if request.Diagnosis != nil {
 		diagnosis := normalizeDiagnosis(*request.Diagnosis)
 		request.Diagnosis = &diagnosis
+	}
+	if request.Migration != nil {
+		migration := *request.Migration
+		migration.Endpoint = strings.TrimSpace(migration.Endpoint)
+		migration.Binding = strings.TrimSpace(migration.Binding)
+		migration.Dialect = strings.ToLower(strings.TrimSpace(migration.Dialect))
+		if migration.Dialect == "" {
+			migration.Dialect = MigrationDialectOpenAICompatible
+		}
+		if migration.MaxQualityRegressionPercent == 0 {
+			migration.MaxQualityRegressionPercent = DefaultMigrationQualityMargin
+		}
+		request.Migration = &migration
 	}
 	if request.QualityCheck == QualityCheckBuiltin {
 		// The default is stored as empty so existing proposal digests stay stable.
@@ -561,6 +641,12 @@ func validateRequest(request Request) error {
 	if request.ModelIdentity == "" || request.Provider == "" || request.GPU == "" {
 		return errors.New("model identity, provider, and GPU are required")
 	}
+	if len(request.ModelSecretReferenceID) > 255 {
+		return errors.New("model_secret_reference_id must not exceed 255 characters")
+	}
+	if err := modelimport.ValidateDeployment(request.ModelIdentity, request.ModelRevision, "", "elastic", request.ModelAdapters, nil); err != nil {
+		return err
+	}
 	if err := validateSearch(request); err != nil {
 		return err
 	}
@@ -601,7 +687,7 @@ func validateRequest(request Request) error {
 	if _, embeddedRevision, found := splitPinnedModel(request.ModelIdentity); found && embeddedRevision != request.ModelRevision {
 		return errors.New("model identity revision and model_revision must match")
 	}
-	if request.ModelRevision != "" && !immutableModelRevision(request.ModelRevision) {
+	if request.ModelRevision != "" && !immutableModelRevision(request.ModelRevision) && !(modelimport.IsObjectModel(request.ModelIdentity) && modelimport.ValidDigest(request.ModelRevision)) {
 		return errors.New("model revision must be an immutable 40 to 64 character hexadecimal commit")
 	}
 	if len(request.WorkloadFingerprint) > 256 {
@@ -644,6 +730,11 @@ func validateRequest(request Request) error {
 	}
 	if request.Diagnosis != nil {
 		if err := validateDiagnosis(*request.Diagnosis); err != nil {
+			return err
+		}
+	}
+	if request.Migration != nil {
+		if err := validateMigration(request); err != nil {
 			return err
 		}
 	}
@@ -759,8 +850,26 @@ func attachStartingPoint(proposal *Proposal) {
 	proposal.PostDeployWorkflow = []string{firstStep, "assess serving-stage bottlenecks", "profile the exact runtime and target GPU", "search existing implementations before custom code", "qualify candidates with workload, quality, cost, and Release Guard evidence"}
 }
 
+// applyModelInputs gives a candidate the request's model credential and LoRA
+// adapter, so every setup serves what the customer serves.
+func applyModelInputs(draft *DeploymentDraft, request Request) {
+	draft.ModelSecretReferenceID = request.ModelSecretReferenceID
+	draft.Model.Adapters = append([]domain.ModelAdapter(nil), request.ModelAdapters...)
+}
+
+// ServedModel is the model name a candidate answers to: its LoRA adapter when
+// it serves one, otherwise the model.
+func (d DeploymentDraft) ServedModel() string {
+	if len(d.Model.Adapters) > 0 {
+		return d.Model.Adapters[0].Name
+	}
+	return d.Model.ID
+}
+
 func (s CatalogSource) expandCheckpointCandidates(baselines []Candidate, request Request) ([]Candidate, error) {
-	if len(s.Checkpoints.Candidates()) == 0 {
+	// A LoRA adapter is trained on one base checkpoint; serving it on another
+	// would change what the customer's endpoint answers.
+	if len(s.Checkpoints.Candidates()) == 0 || len(request.ModelAdapters) > 0 {
 		return baselines, nil
 	}
 	out := append([]Candidate(nil), baselines...)
@@ -947,6 +1056,7 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 	draft.Name = safeName(model + "-" + compatible.Runtime + "-baseline-" + compatible.Adapter)
 	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = model, revision
+	applyModelInputs(&draft, request)
 	draft.Runtime.Engine, draft.Runtime.Version = compatible.Runtime, runtimeVersion
 	draft.Runtime.Args = genericRuntimeArgs(compatible, request)
 	draft.Compute.Mode = string(compatible.Mode)
@@ -1061,6 +1171,7 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	draft.Name = safeName(entry.Name + "-" + profile.Name + "-" + compatible.Cloud)
 	draft.ComputeConnectionID = request.ComputeConnectionID
 	draft.Model.ID, draft.Model.Revision = entry.Model, entry.Revision
+	applyModelInputs(&draft, request)
 	draft.Runtime.Engine, draft.Runtime.Version = profile.Runtime, runtimeVersion
 	draft.Runtime.Workload = profile.Workload
 	draft.Compute.Mode = profile.ComputeMode

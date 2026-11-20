@@ -561,7 +561,8 @@ func TestAdmissionRetryBudgetDoesNotRetryStreaming(t *testing.T) {
 
 func TestResponsesUsageNormalizesInputAndOutputTokens(t *testing.T) {
 	input, output := 7, 3
-	_, actualInput, actualOutput := (responseObservation{body: []byte(`{"model":"model","usage":{"input_tokens":7,"output_tokens":3}}`)}).usage()
+	usage := (responseObservation{body: []byte(`{"model":"model","usage":{"input_tokens":7,"output_tokens":3}}`)}).usage()
+	actualInput, actualOutput := usage.inputTokens, usage.outputTokens
 	if actualInput == nil || *actualInput != input || actualOutput == nil || *actualOutput != output {
 		t.Fatalf("input=%v output=%v", actualInput, actualOutput)
 	}
@@ -728,7 +729,7 @@ func TestCopyResponseStopsAtTerminalSSEMarker(t *testing.T) {
 	response := &http.Response{Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"choices\":[]}\n\ndata: [DONE]\n\n"))}
 	recorder := httptest.NewRecorder()
 	observation := responseObservation{}
-	if err := copyResponse(recorder, response, &observation); err != nil || !hasSSEDone(observation.body) {
+	if err := copyResponse(recorder, response, &observation, false); err != nil || !hasSSEDone(observation.body) {
 		t.Fatalf("body=%q err=%v", observation.body, err)
 	}
 }

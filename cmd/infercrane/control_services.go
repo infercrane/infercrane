@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/infercrane/infercrane/internal/alert"
@@ -89,4 +90,13 @@ func bindUpstreamCredentials(api *controlapi.API, reconciler *reconcile.Reconcil
 	if sealer.Cipher != nil {
 		api.UpstreamCredentials = sealer
 	}
+}
+
+// closedAPICredentials lets a migration's quality check ask the closed API
+// with the credential sealed when it was connected, and fail closed when that
+// credential cannot be opened.
+type closedAPICredentials struct{ *upstreamcredential.Sealer }
+
+func (c closedAPICredentials) Unreadable(err error) bool {
+	return errors.Is(err, upstreamcredential.ErrUnreadable)
 }

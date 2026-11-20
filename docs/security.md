@@ -51,9 +51,13 @@ old one.
 
 `infercrane connect --token-env VAR` sends a server's API key to the control plane once. It is
 stored only as AES-256-GCM ciphertext bound to the workspace and endpoint, sealed with
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only for discovery and health
-probes of that server. Without that key the control plane refuses the credential, and the agent,
-which keeps the key on the server's machine, is the path.
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only toward that server: for
+discovery and health probes, as the bearer token on requests the gateway routes to it when its
+binding is traffic-managed, and by a migration Proof's graded quality check of that server. It is
+held in the gateway's in-memory route snapshot and is never logged or shown. A key that cannot be
+opened makes the server unroutable and unchecked, never reached without it. Without the encryption
+key the control plane refuses the credential, and the agent, which keeps the key on the server's
+machine, is the path.
 
 Compute configured on the control-plane process (cloud workload identity, a kubeconfig context,
 SkyPilot manifests) is not tenant-scoped. Only the bootstrap operator may deploy or optimize on it
@@ -69,17 +73,44 @@ revocation take effect on the next successful snapshot refresh. If immediate rev
 while PostgreSQL is unreachable, restore authoritative database access or fence/restart the affected
 gateway instances; InferCrane cannot infer a revocation it cannot read.
 
-Secret objects are references, not a secret store. For example:
+A workspace secret is sealed in InferCrane, or a reference to where the secret already lives:
 
 ```bash
+export HF_TOKEN='hf_...'
+infercrane secret create hf-token --sealed-from-env HF_TOKEN       # sealed
+infercrane secret create hf-token --kubernetes hf-token/HF_TOKEN   # stays in your cluster
+infercrane secret create hf-token --aws-secret arn:aws:secretsmanager:...  # stays in your AWS account
 export OPENROUTER_API_KEY='...'
-infercrane secret create openrouter --from-env OPENROUTER_API_KEY
+infercrane secret create openrouter --from-env OPENROUTER_API_KEY  # operator only
 ```
 
-PostgreSQL stores the resolver (`env`) and reference (`OPENROUTER_API_KEY`), never the environment
-value. Resolved values stay in process memory and are excluded from API responses, logs, audit
-payloads and qualification evidence. Operators should inject referenced variables from their
-existing secret manager and restrict the control-plane process environment.
+- `sealed` stores the value only as AES-256-GCM ciphertext, sealed with
+  `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and bound to the workspace and secret name, so a row moved to
+  another workspace or renamed does not open. The value is write-only: never returned, logged, or
+  audited. Without that key the API answers `sealed_secrets_unavailable`, and a value sealed under
+  another key reference does not open. To replace a value, delete the secret and create it again.
+- `kubernetes` (`SECRET/KEY` in the cluster's InferCrane namespace) and `aws-secrets-manager` (an ARN)
+  name a secret in the customer's own cluster or AWS account. Workers read it there; the control plane
+  never resolves it and needs no permission on it. Only workspaces the operator lets deploy on its own
+  cluster or AWS account may create one (`worker_secret_reference_not_allowed` otherwise).
+- `env` stores the variable name, never its value.
+
+Resolved values stay in process memory and are excluded from API responses, logs, audit payloads and
+qualification evidence.
+
+A model credential (`model_secret_reference_id`) reaches a worker only through its provider's own
+secret store: a RunPod secret in the account that runs the Pod (the workspace's own account for a
+compute connection), whose Pod specification holds only the `{{ RUNPOD_SECRET_... }}` placeholder; a
+Kubernetes `secretKeyRef`; or a Secrets Manager ARN the EC2 instance profile reads and passes to the
+runtime through the inherited environment, never a command line. The runtime gets it as `HF_TOKEN`,
+which `huggingface_hub` sends only to `huggingface.co`; InferCrane never sets `HF_ENDPOINT`. Every other
+adapter refuses a model credential before provisioning.
+
+Model weights and LoRA adapters in a customer's S3 or GCS bucket are never read by the control plane.
+An import stores a file manifest (paths, sizes, sha256) and the import's checks, never file contents.
+Workers download the listed files with their own cloud identity (a Kubernetes service account, an
+optional operator-named Secret for an S3-compatible store, or the EC2 instance profile) and check
+every sha256 before the server starts; the serving container never receives object store keys.
 
 An `env` reference reads the control-plane process environment, which also holds the operator's own
 keys. So only the operator's workspaces may create or resolve one: the workspace of the operator API
@@ -88,7 +119,8 @@ named in `INFERCRANE_ENV_SECRET_TENANTS`. Any other workspace gets `env_secret_r
 when it creates one, and a reference it already holds stops resolving instead of returning a value.
 Left unset, `INFERCRANE_ENV_SECRET_TENANTS` is `*` on a control plane that serves one customer and
 empty where it sells managed capacity or provisions workspaces at sign-up; there, startup also refuses
-`*`. Workspaces on such a control plane keep their provider keys in their own compute connection.
+`*`. Workspaces on such a control plane keep their provider keys in their own compute connection and
+their other credentials as sealed secrets.
 
 ## Validate provider access without enabling traffic
 
@@ -189,7 +221,7 @@ When the operator sets `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`, the cont
 model info, `config.json`, and the safetensors summary from `huggingface.co` to check a model outside
 the reviewed catalog (planning, `GET /api/v1/catalog/hugging-face/check`, and optimization
 proposals). It is off by default. For a gated or private model, the workspace's saved Hugging Face
-token reference is resolved at that read and sent only as an `Authorization` header to the same host:
+token is resolved at that read and sent only as an `Authorization` header to the same host:
 redirects to another host are refused, and the token is never logged, cached, stored, or returned.
 Reads made with a token are cached per workspace and credential. See
 [Check any model automatically](/features/model-catalog#check-any-model-automatically).

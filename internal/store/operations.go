@@ -565,8 +565,8 @@ func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord
 		streaming,cold_start,provider_workers_at_arrival,provider_capacity_observed_at,
 		logical_model_id,environment_id,endpoint_id,serving_plan_id,binding_id,queue_ms,
 		generation_ms,fallback_reason,session_id_hash,parent_session_id_hash,
-		shared_prefix_hash,tool_pause_ms
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		shared_prefix_hash,tool_pause_ms,cached_input_tokens
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	ON CONFLICT(request_id) DO UPDATE SET
 		completed_at=EXCLUDED.completed_at,status_code=EXCLUDED.status_code,
 		latency_ms=EXCLUDED.latency_ms,ttft_ms=EXCLUDED.ttft_ms,
@@ -582,7 +582,8 @@ func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord
 		binding_id=EXCLUDED.binding_id,queue_ms=EXCLUDED.queue_ms,
 		generation_ms=EXCLUDED.generation_ms,fallback_reason=EXCLUDED.fallback_reason,
 		session_id_hash=EXCLUDED.session_id_hash,parent_session_id_hash=EXCLUDED.parent_session_id_hash,
-		shared_prefix_hash=EXCLUDED.shared_prefix_hash,tool_pause_ms=EXCLUDED.tool_pause_ms`
+		shared_prefix_hash=EXCLUDED.shared_prefix_hash,tool_pause_ms=EXCLUDED.tool_pause_ms,
+		cached_input_tokens=EXCLUDED.cached_input_tokens`
 	_, err := s.ExecContext(ctx, query,
 		record.RequestID, record.TenantID, null(record.DeploymentID), null(record.RevisionID), null(record.TargetID),
 		record.StartedAt.UTC().Format(time.RFC3339Nano), now(), record.StatusCode,
@@ -594,7 +595,7 @@ func (s *Store) RecordRequest(ctx context.Context, record domain.InferenceRecord
 		null(record.LogicalModelID), null(record.EnvironmentID), null(record.EndpointID),
 		null(record.ServingPlanID), null(record.BindingID), record.QueueMS, record.GenerationMS,
 		null(record.FallbackReason), null(record.SessionIDHash), null(record.ParentSessionIDHash),
-		null(record.SharedPrefixHash), record.ToolPauseMS,
+		null(record.SharedPrefixHash), record.ToolPauseMS, record.CachedInputTokens,
 	)
 	return err
 }

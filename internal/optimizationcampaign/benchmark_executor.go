@@ -244,7 +244,7 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	// runtime's draft carries no workload, so read the contract the replica
 	// was provisioned with, not the empty draft.
 	served := support.ServedWorkload(draft.Runtime.Engine, draft.Resources.GPU, draft.Runtime.Workload)
-	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.Model.ID, replicaID: replicaID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
+	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.ServedModel(), replicaID: replicaID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 
 // controlTarget resolves the campaign control's live endpoint. The control is

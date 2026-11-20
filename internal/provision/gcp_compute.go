@@ -202,6 +202,9 @@ func (g GCPCompute) Handle(externalKey string) ProviderHandle {
 	return ProviderHandle{RequestID: g.requestID(externalKey), ResourceID: g.name(externalKey), ExternalKey: externalKey}
 }
 func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
+	if err := refuseModelInputs("gcp-compute", spec, ModelInputs{}); err != nil {
+		return ProviderHandle{}, err
+	}
 	if err := g.validate(spec); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}

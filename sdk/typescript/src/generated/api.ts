@@ -113,6 +113,21 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  checkHuggingFaceAdapter(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/catalog/hugging-face/adapter-check';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listModelImports(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/model-imports';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  createModelImport(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/model-imports';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   planIntent(body: JsonValue): Promise<IntentPlanEnvelope> {
     const requestPath = '/planning/intents';
     return this.transport.request('POST', requestPath, { body }) as Promise<IntentPlanEnvelope>;
@@ -443,6 +458,46 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
+  captureEndpointReplay(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listEndpointReplays(name: string): Promise<ObjectList> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/replays`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  importEndpointTrafficObservations(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/traffic-observations`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  setBindingRateCard(name: string, binding: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/bindings/${encodeURIComponent(binding)}/rate-card`;
+    return this.transport.request('PUT', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getBindingRateCard(name: string, binding: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/bindings/${encodeURIComponent(binding)}/rate-card`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  attachBindingQualityEvidence(name: string, binding: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/bindings/${encodeURIComponent(binding)}/quality-evidence`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  listBindingQualityEvidence(name: string, binding: string): Promise<ObjectList> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/bindings/${encodeURIComponent(binding)}/quality-evidence`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  stageEndpointMigration(name: string, body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = `/endpoints/${encodeURIComponent(name)}/migration`;
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
   listOperationEvents(id: string): Promise<ObjectList> {
     const requestPath = `/operations/${encodeURIComponent(id)}/events`;
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
@@ -646,6 +701,11 @@ export class ControlApi {
   getOptimizationCampaign(id: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listMigrationVerdicts(id: string): Promise<ObjectList> {
+    const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/migration-verdicts`;
+    return this.transport.request('GET', requestPath) as Promise<ObjectList>;
   }
 
   getOptimizationCampaignReport(id: string): Promise<Record<string, JsonValue>> {
