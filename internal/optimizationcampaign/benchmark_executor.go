@@ -128,7 +128,8 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if e.Progress != nil {
 		tracker = newProgressTracker(e.Progress, candidate, e.now)
 	}
-	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now}
+	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now,
+		confirm: e.confirmation(ctx, campaign, candidate, draft), keepControl: campaign.Intent == IntentEvolveEndpoint}
 	measured, err := session.run(ctx)
 	ended := e.now()
 	if err != nil {
@@ -207,6 +208,40 @@ func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, cand
 		return MeasurementCheckpoint{}, err
 	}
 	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control, Comparisons: campaignComparisons(campaign)}, nil
+}
+
+// confirmation decides, from a finished first window, whether the candidate
+// gained on the campaign's objective and must be measured again on fresh
+// servers before the gain counts. It applies the ranking's own objective
+// rule. A cost objective also needs both setups' sourced hourly rates;
+// without them the ranking cannot decide on cost either, so nothing is
+// confirmed.
+func (e BenchmarkExecutor) confirmation(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) func(MeasuredEvidence) bool {
+	metric, _, costScale := objectiveMetric(campaignRequest(campaign).Objective)
+	if metric == "" {
+		return nil
+	}
+	return func(evidence MeasuredEvidence) bool {
+		ratio := 1.0
+		if costScale {
+			control, found := CampaignControl(campaign)
+			if !found {
+				return false
+			}
+			controlDraft, err := candidateDraft(control)
+			if err != nil {
+				return false
+			}
+			controlQuote, controlErr := e.Costs.Quote(ctx, control.TenantID, controlDraft, e.now())
+			candidateQuote, candidateErr := e.Costs.Quote(ctx, candidate.TenantID, draft, e.now())
+			if controlErr != nil || candidateErr != nil || controlQuote.HourlyUSD <= 0 || candidateQuote.HourlyUSD <= 0 {
+				return false
+			}
+			ratio = controlQuote.HourlyUSD / candidateQuote.HourlyUSD
+		}
+		comparison, found := objectiveComparison(evidence.Comparison, metric, costScale, ratio)
+		return found && comparison.Decision == DecisionImproved
+	}
 }
 
 // campaignComparisons counts the candidates a campaign compares with its

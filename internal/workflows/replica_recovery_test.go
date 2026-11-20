@@ -196,3 +196,25 @@ func TestOneFailedRuntimeCheckNeverRemovesAMachineTheProviderReportsReady(t *tes
 		t.Fatalf("a runtime silent over the whole window is lost: result=%+v err=%v deletes=%d", result, err, provider.DeleteCalls)
 	}
 }
+
+// A retirement removes a machine that still serves, so an optimization run
+// can measure its revision again on a fresh one; converge then provisions
+// that revision under a new provider identity, as for a lost machine.
+func TestRetiredMachineIsRemovedAlthoughItServesAndIsReplaced(t *testing.T) {
+	store, provider, handlers, serving := recoveryFixture(t)
+	request, _ := json.Marshal(RemoveLostReplicaRequest{TenantID: "global", Name: "qwen-opt-12345678", DeploymentID: "deployment-1", ReplicaID: serving.ID, Retire: true})
+	raw, err := handlers[ReplicaRemoveLostKind](t.Context(), domain.Operation{ID: "retire-" + serving.ID, LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: string(request)})
+	var result RemoveLostReplicaResult
+	if err != nil || json.Unmarshal([]byte(raw), &result) != nil || !result.Retired || result.Lost || result.ReplicaID != serving.ID {
+		t.Fatalf("result=%s err=%v", raw, err)
+	}
+	if provider.DeleteCalls != 1 || provider.Exists(serving.ExternalKey) || store.replicas[serving.ID].LifecycleState != "deleted" || len(store.released) != 1 {
+		t.Fatalf("a retired machine must be deleted at the provider: deletes=%d replica=%+v released=%v", provider.DeleteCalls, store.replicas[serving.ID], store.released)
+	}
+	if _, err = handlers[ConvergeKind](t.Context(), domain.Operation{ID: "converge-retired", LeaseOwner: "worker", LeaseGeneration: 1, RequestJSON: recoveryConverge}); err != nil {
+		t.Fatal(err)
+	}
+	if fresh := liveReplica(t, store); fresh.ID == serving.ID || fresh.ExternalKey == serving.ExternalKey || fresh.RevisionID != serving.RevisionID {
+		t.Fatalf("fresh replica = %+v, retired %+v", fresh, serving)
+	}
+}

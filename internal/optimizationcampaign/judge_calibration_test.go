@@ -2,6 +2,7 @@ package optimizationcampaign
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -143,5 +144,103 @@ func TestJudgeWindowUsesTheCampaignRules(t *testing.T) {
 	}
 	if got := judgeWindow(rng, judgeScenario{Noise: 0.30}, 0, 1); got != "invalid" {
 		t.Fatalf("30%% noise should break the window, got %q", got)
+	}
+}
+
+// judgeConfirmed measures one candidate the way a campaign now decides it:
+// a first window, and when that gains, a second window after both servers
+// were retired and provisioned again. Each machine gets its own speed,
+// drawn so that two machines differ by about scenario.HostBias. The decision
+// is the ranking's own confirmedDecision on what finish recorded.
+func judgeConfirmed(rng *rand.Rand, scenario judgeScenario, effect float64, comparisons int) string {
+	machine := func() float64 { return 1 + rng.NormFloat64()*scenario.HostBias/math.Sqrt2 }
+	state := MeasurementCheckpoint{Method: MeasurementMethod, Control: ControlEvidence{Role: ControlRoleBracketed, CandidateID: "control"}, Comparisons: comparisons}
+	window := func(controlSpeed, candidateSpeed float64, confirmation bool) {
+		step := 0
+		run := func(speed float64) benchmark.Result {
+			value := 1000 * speed * (1 + scenario.Trend*float64(step)) * (1 + rng.NormFloat64()*scenario.Noise)
+			step++
+			return benchmark.Result{Requests: 200, Succeeded: 200, OutputTokenThroughput: &value}
+		}
+		state.ControlRuns = append(state.ControlRuns, run(controlSpeed))
+		for range measurementRunsPerArm {
+			state.CandidateRuns = append(state.CandidateRuns, run(candidateSpeed*(1+effect)))
+			state.ControlRuns = append(state.ControlRuns, run(controlSpeed))
+		}
+		state.Segments = append(state.Segments, MeasurementSegment{ControlRuns: measurementRunsPerArm + 1, CandidateRuns: measurementRunsPerArm, Ended: SegmentCompleted, Confirmation: confirmation})
+	}
+	window(machine(), machine(), false)
+	session := measurementSession{state: &state, now: time.Now}
+	first := session.finish().evidence
+	comparison, found := first.Comparison["output_token_throughput"]
+	if first.Control.Role != ControlRoleBracketed || !found {
+		return "invalid"
+	}
+	if comparison.Decision == DecisionImproved {
+		state.Confirmation = &ConfirmationState{Phase: ConfirmMeasure}
+		state.Interruptions = []MeasurementInterruption{{Kind: RunKindConfirmation, Arm: ArmCandidate, Recovery: RecoveryMachineRetired}, {Kind: RunKindConfirmation, Arm: ArmControl, Recovery: RecoveryMachineRetired}}
+		window(machine(), machine(), true)
+	}
+	evidence := session.finish().evidence
+	decision, _, _ := confirmedDecision(&evidence, comparison, "output_token_throughput", "throughput", false, 1)
+	return decision
+}
+
+func confirmedRate(seed uint64, trials int, scenario judgeScenario, effects []float64) float64 {
+	rng := rand.New(rand.NewPCG(seed, 0x5eed))
+	wins := 0
+	for range trials {
+		for _, effect := range effects {
+			if judgeConfirmed(rng, scenario, effect, len(effects)) == DecisionImproved {
+				wins++
+				break
+			}
+		}
+	}
+	return float64(wins) / float64(trials)
+}
+
+// TestJudgeCalibrationWithConfirmation measures the full rule: a gain counts
+// only when it holds again on fresh servers. Real GPU runs are quiet (the
+// H100 control of 2026-11-20 varied about 0.3% between runs), so machine
+// differences, not run noise, decide false wins there; the 0.5% rows show it.
+// "First window" is the decision without the confirmation.
+func TestJudgeCalibrationWithConfirmation(t *testing.T) {
+	const trials = 2000
+	rows := []struct {
+		name     string
+		scenario judgeScenario
+	}{
+		{"0.5% noise, same machine", judgeScenario{Noise: 0.005}},
+		{"0.5% noise, machines differ 1%", judgeScenario{Noise: 0.005, HostBias: 0.01}},
+		{"0.5% noise, machines differ 2%", judgeScenario{Noise: 0.005, HostBias: 0.02}},
+		{"2% noise, same machine", judgeScenario{Noise: 0.02}},
+		{"2% noise, machines differ 2%", judgeScenario{Noise: 0.02, HostBias: 0.02}},
+	}
+	type result struct{ first4, aa1, aa4, p3, p5, p10 float64 }
+	results := map[string]result{}
+	var table strings.Builder
+	fmt.Fprintf(&table, "\n%-31s %13s %8s %8s %7s %7s %7s\n", "condition", "first window", "AA x1", "AA x4", "+3%", "+5%", "+10%")
+	for index, row := range rows {
+		seed := uint64(index+1) * 7000
+		var r result
+		r.first4, _ = judgeRates(seed, trials, judgeScenario{Noise: row.scenario.Noise, HostBias: row.scenario.HostBias}, []float64{0, 0, 0, 0})
+		r.aa1 = confirmedRate(seed+1, trials, row.scenario, []float64{0})
+		r.aa4 = confirmedRate(seed+2, trials, row.scenario, []float64{0, 0, 0, 0})
+		r.p3 = confirmedRate(seed+3, trials, row.scenario, []float64{0.03})
+		r.p5 = confirmedRate(seed+4, trials, row.scenario, []float64{0.05})
+		r.p10 = confirmedRate(seed+5, trials, row.scenario, []float64{0.10})
+		results[row.name] = r
+		fmt.Fprintf(&table, "%-31s %12.1f%% %7.1f%% %7.1f%% %6.1f%% %6.1f%% %6.1f%%\n", row.name, r.first4*100, r.aa1*100, r.aa4*100, r.p3*100, r.p5*100, r.p10*100)
+	}
+	t.Log(table.String())
+	if r := results["0.5% noise, same machine"]; r.aa4 > 0.01 || r.p3 < 0.9 {
+		t.Errorf("same machine: false wins %.1f%%, +3%% found %.1f%%", r.aa4*100, r.p3*100)
+	}
+	if r := results["0.5% noise, machines differ 1%"]; r.aa4 > 0.07 || r.aa4 >= r.first4/3 || r.p5 < 0.95 {
+		t.Errorf("machines differ 1%%: false wins %.1f%% (first window %.1f%%), +5%% found %.1f%%", r.aa4*100, r.first4*100, r.p5*100)
+	}
+	if r := results["2% noise, same machine"]; r.aa4 > 0.01 || r.p10 < 0.95 {
+		t.Errorf("2%% noise: false wins %.1f%%, +10%% found %.1f%%", r.aa4*100, r.p10*100)
 	}
 }

@@ -22,7 +22,7 @@ const (
 	maxMeasurementInterruptions = 4
 	// resumeInvocationGap separates each resumed segment's invocation
 	// numbers from every number an earlier segment may have used, including
-	// runs whose checkpoint write was lost. A segment makes at most nine
+	// runs whose checkpoint write was lost. A segment makes at most eleven
 	// invocations and starts only after its start is stored, so a surviving
 	// server never sees a seed or replay prefix namespace twice.
 	resumeInvocationGap = 64
@@ -59,9 +59,13 @@ type MeasurementCheckpoint struct {
 	CandidateRuns []benchmark.Result        `json:"candidate_runs,omitempty"`
 	Segments      []MeasurementSegment      `json:"segments"`
 	Interruptions []MeasurementInterruption `json:"interruptions,omitempty"`
+	// Confirmation is set once the first window ended with a gain on the
+	// objective; the candidate is then measured again on fresh servers.
+	Confirmation *ConfirmationState `json:"confirmation,omitempty"`
 }
 
 // MeasurementSegment is one stretch of measuring between interruptions.
+// Confirmation marks a segment of the second window, on fresh servers.
 type MeasurementSegment struct {
 	StartedAt       time.Time  `json:"started_at"`
 	EndedAt         *time.Time `json:"ended_at,omitempty"`
@@ -69,6 +73,7 @@ type MeasurementSegment struct {
 	ControlRuns     int        `json:"control_runs"`
 	CandidateRuns   int        `json:"candidate_runs"`
 	Ended           string     `json:"ended,omitempty"`
+	Confirmation    bool       `json:"confirmation,omitempty"`
 }
 
 // MeasurementInterruption is one stop of a measurement: which arm's
@@ -160,14 +165,70 @@ type measurementSession struct {
 	owner     domain.OptimizationCandidateRun
 	tracker   *progressTracker
 	now       func() time.Time
+	// confirm reports whether a finished first window gained on the
+	// objective, so the candidate must be measured again on fresh servers.
+	// Nil never confirms.
+	confirm func(MeasuredEvidence) bool
+	// keepControl keeps the control's server for the confirmation because it
+	// serves production.
+	keepControl bool
+}
+
+// windowRuns counts the accepted candidate runs of the first window and of
+// the confirmation window.
+func (s *measurementSession) windowRuns() (int, int) {
+	first, second := 0, 0
+	for _, segment := range s.state.Segments {
+		if segment.Confirmation {
+			second += segment.CandidateRuns
+		} else {
+			first += segment.CandidateRuns
+		}
+	}
+	return first, second
+}
+
+// retire stops the measurement so the driver retires one arm's server and
+// provisions it again; the next attempt continues the confirmation.
+func (s *measurementSession) retire(arm string, target armTarget) error {
+	state := s.state
+	interruption := MeasurementInterruption{Sequence: len(state.Interruptions) + 1, At: s.now(), Arm: arm, Kind: RunKindConfirmation, OwnerCandidateID: target.candidateID, ReplicaID: target.replicaID, Reason: "retired so the gain can be measured again on a fresh server"}
+	state.Interruptions = append(state.Interruptions, interruption)
+	state.Order = append(state.Order, "retire:"+arm)
+	return &MeasurementInterruptedError{Interruption: interruption, Persisted: s.save()}
 }
 
 func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 	state := s.state
-	if len(state.CandidateRuns) >= measurementRunsPerArm {
-		// Every pair was measured before a later step failed; analyze the
-		// stored runs instead of measuring again.
-		return s.finish(), nil
+	first, second := s.windowRuns()
+	if first >= measurementRunsPerArm && state.Confirmation == nil {
+		// Every pair of the first window was measured, possibly before a
+		// later step failed; analyze the stored runs instead of measuring
+		// again, and confirm a gain on fresh servers before it counts.
+		measured := s.finish()
+		if s.confirm == nil || s.control == nil || measured.evidence.Control.Role != ControlRoleBracketed || !s.confirm(measured.evidence) {
+			return measured, nil
+		}
+		state.Confirmation = &ConfirmationState{Phase: ConfirmRetireCandidate, KeepControl: s.keepControl}
+	}
+	if confirmation := state.Confirmation; confirmation != nil {
+		if s.control == nil {
+			return measurement{}, operations.Permanent("optimization_confirmation_invalid", errors.New("the control is no longer serving, so the gain cannot be measured again"))
+		}
+		switch confirmation.Phase {
+		case ConfirmRetireCandidate:
+			return measurement{}, s.retire(ArmCandidate, s.candidate)
+		case ConfirmRetireControl:
+			return measurement{}, s.retire(ArmControl, *s.control)
+		}
+		if second >= measurementRunsPerArm {
+			return s.finish(), nil
+		}
+	}
+	confirming := state.Confirmation != nil
+	done := first
+	if confirming {
+		done = second
 	}
 	resumed := len(state.Segments) > 0
 	if resumed {
@@ -175,8 +236,8 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 		state.Order = append(state.Order, "resume")
 	}
 	s.runs.base, s.runs.next = state.InvocationBase, state.NextInvocation
-	remaining := measurementRunsPerArm - len(state.CandidateRuns)
-	state.Segments = append(state.Segments, MeasurementSegment{StartedAt: s.now(), FirstInvocation: state.InvocationBase + state.NextInvocation})
+	remaining := measurementRunsPerArm - done
+	state.Segments = append(state.Segments, MeasurementSegment{StartedAt: s.now(), FirstInvocation: state.InvocationBase + state.NextInvocation, Confirmation: confirming})
 	segment := &state.Segments[len(state.Segments)-1]
 	// Nothing is sent until the segment's start is stored: a resume adds the
 	// invocation gap to the stored counter, so an unstored start could hand a
@@ -227,7 +288,7 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 	s.save()
 
 	if s.control == nil {
-		for len(state.CandidateRuns) < measurementRunsPerArm {
+		for segment.CandidateRuns < remaining {
 			measured, err := invoke(RunKindTurn, ArmCandidate, s.candidate, s.runs.plan.requests)
 			if err != nil {
 				return measurement{}, interrupt(RunKindTurn, s.candidate, err, 0)
@@ -247,7 +308,7 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 	}
 	state.Order = append(state.Order, "control")
 	leading := &opening
-	for len(state.CandidateRuns) < measurementRunsPerArm {
+	for segment.CandidateRuns < remaining {
 		candidateRun, err := invoke(RunKindTurn, ArmCandidate, s.candidate, s.runs.plan.requests)
 		if err != nil {
 			return measurement{}, interrupt(RunKindTurn, s.candidate, err, boolCount(leading != nil))
@@ -265,14 +326,18 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 		accept(&closing, &candidateRun)
 		s.save()
 	}
-	return s.finish(), nil
+	// The window is complete: analyze it, and start its confirmation when
+	// it gained on the objective.
+	return s.run(ctx)
 }
 
-// finish closes the last segment and analyzes every accepted run. Drift is
-// checked across all adjacent control runs in order, including the pair that
-// spans each restart, and the candidate's interval spans every segment, so a
-// replaced machine that serves differently widens the noise floor or
-// invalidates the control instead of passing silently.
+// finish closes the last segment and analyzes every accepted run. The first
+// window and the confirmation window on fresh servers are analyzed apart:
+// each has its own control check and paired comparison, because the change
+// of servers between them is exactly what the confirmation samples. Within a
+// window, drift is checked across all adjacent control runs in order,
+// including the pair that spans each restart, so a replaced machine that
+// serves differently invalidates the control instead of passing silently.
 func (s *measurementSession) finish() measurement {
 	state := s.state
 	if segment := &state.Segments[len(state.Segments)-1]; segment.Ended == "" {
@@ -281,47 +346,110 @@ func (s *measurementSession) finish() measurement {
 		s.save()
 	}
 	evidence := MeasuredEvidence{Method: MeasurementMethod, InvocationBase: state.InvocationBase, Order: state.Order, Control: state.Control, ServerMetricsRequested: s.candidate.serverMetrics, GPUTelemetry: "not_collected"}
-	evidence.Control.DriftLimit = maxControlDrift
+	firstWindow := window{control: state.Control}
+	var second *window
+	if state.Confirmation != nil {
+		second = &window{control: state.Control}
+	}
 	// Runs are listed as they ran: each segment's accepted runs are
 	// C X C ... C with a control, or the candidate's runs alone.
 	control, candidate := 0, 0
-	restarts := map[int]bool{}
+	var firstCandidates []benchmark.Result
 	for _, segment := range state.Segments {
+		target := &firstWindow
+		if segment.Confirmation && second != nil {
+			target = second
+		}
 		if segment.ControlRuns > 0 && control < len(state.ControlRuns) {
-			if control > 0 {
-				restarts[control] = true
-			}
-			evidence.Runs = append(evidence.Runs, summarizeRun("control", state.ControlRuns[control]))
+			target.addControl(state.ControlRuns[control])
 			control++
 		}
 		for index := 0; index < segment.CandidateRuns && candidate < len(state.CandidateRuns); index++ {
-			evidence.Runs = append(evidence.Runs, summarizeRun("candidate", state.CandidateRuns[candidate]))
+			target.addCandidate(state.CandidateRuns[candidate])
+			if target == &firstWindow {
+				firstCandidates = append(firstCandidates, state.CandidateRuns[candidate])
+			}
 			candidate++
 			if segment.ControlRuns > 0 && control < len(state.ControlRuns) {
-				evidence.Runs = append(evidence.Runs, summarizeRun("control", state.ControlRuns[control]))
+				target.addControl(state.ControlRuns[control])
 				control++
 			}
+		}
+		if segment.CandidateRuns > 0 {
+			target.segments++
 		}
 	}
 	if len(state.Segments) > 1 || len(state.Interruptions) > 0 {
 		evidence.Segments, evidence.Interruptions = state.Segments, state.Interruptions
 	}
-	evidence.Control.Runs = len(state.ControlRuns)
-	if evidence.Control.Role == ControlRoleBracketed {
-		expected := measurementRunsPerArm
-		for _, segment := range state.Segments {
-			if segment.CandidateRuns > 0 {
-				expected++
-			}
+	evidence.Runs = firstWindow.runs
+	evidence.Control = firstWindow.analyze(state.Comparisons, &evidence.Comparison)
+	if second != nil {
+		confirmation := &ConfirmationEvidence{Runs: second.runs, FreshCandidate: freshServer(state, ArmCandidate), FreshControl: freshServer(state, ArmControl)}
+		confirmation.Control = second.analyze(1, &confirmation.Comparison)
+		evidence.Confirmation = confirmation
+	}
+	// The stored candidate row describes the first window, the one its
+	// control runs and guard checks come from.
+	return measurement{candidate: firstCandidates, evidence: evidence}
+}
+
+// window collects one measurement window's runs in order.
+type window struct {
+	control      ControlEvidence
+	runs         []RunSummary
+	controlRuns  []benchmark.Result
+	restarts     map[int]bool
+	segments     int
+	lastSegments int
+}
+
+func (w *window) addControl(run benchmark.Result) {
+	if w.segments != w.lastSegments && len(w.controlRuns) > 0 {
+		if w.restarts == nil {
+			w.restarts = map[int]bool{}
 		}
-		if reason, drift, limit := validControl(state.ControlRuns, expected, restarts); reason != "" {
-			evidence.Control.Role, evidence.Control.Reason, evidence.Control.MaxDrift, evidence.Control.DriftLimit = ControlRoleInvalid, reason, drift, limit
-		} else {
-			evidence.Control.MaxDrift = drift
-			evidence.Comparison = comparePairedArms(evidence.Runs, state.Comparisons)
+		w.restarts[len(w.controlRuns)] = true
+	}
+	w.lastSegments = w.segments
+	w.controlRuns = append(w.controlRuns, run)
+	w.runs = append(w.runs, summarizeRun("control", run))
+}
+
+func (w *window) addCandidate(run benchmark.Result) {
+	w.runs = append(w.runs, summarizeRun("candidate", run))
+}
+
+// analyze checks the window's control runs and compares the candidate with
+// them. comparisons widens the interval for the number of candidates the
+// window's result selects among: the first window selects among the
+// campaign's candidates, the confirmation tests only the one it confirms.
+func (w *window) analyze(comparisons int, into *map[string]MetricComparison) ControlEvidence {
+	evidence := w.control
+	evidence.DriftLimit = maxControlDrift
+	evidence.Runs = len(w.controlRuns)
+	if evidence.Role != ControlRoleBracketed {
+		return evidence
+	}
+	reason, drift, limit := validControl(w.controlRuns, measurementRunsPerArm+w.segments, w.restarts)
+	evidence.MaxDrift = drift
+	if reason != "" {
+		evidence.Role, evidence.Reason, evidence.DriftLimit = ControlRoleInvalid, reason, limit
+		return evidence
+	}
+	*into = comparePairedArms(w.runs, comparisons)
+	return evidence
+}
+
+// freshServer reports whether the confirmation retired and replaced arm's
+// server; a serverless provider places workers itself.
+func freshServer(state *MeasurementCheckpoint, arm string) bool {
+	for _, interruption := range state.Interruptions {
+		if interruption.Kind == RunKindConfirmation && interruption.Arm == arm && interruption.Recovery == RecoveryMachineRetired {
+			return true
 		}
 	}
-	return measurement{candidate: state.CandidateRuns, evidence: evidence}
+	return false
 }
 
 // save stores the checkpoint. A failed write is logged and the measurement
