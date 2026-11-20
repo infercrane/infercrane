@@ -932,28 +932,56 @@ messages are, so one shared block is assumed. Tool pauses, parent-session links,
 assistant output are not modeled.
 
 **Runs.** Each server receives warmup requests (twice the concurrency, between 16 and 256) before
-measurement, and each arm runs three independent AIPerf invocations. Every invocation gets its own
+measurement, and each candidate runs four independent AIPerf invocations. Every invocation gets its own
 seed and, for a replay, its own prompt-block namespace, drawn from a random base for each
 measurement. A server is therefore not answered from prefix-cache entries that an earlier run
 created, including when the control is measured again inside another candidate's measurement or a
 measurement is retried. The base is kept as `measured.invocation_base`. The candidate's stored metrics
-are the mean of its three runs, with Student-t 95% intervals in `confidence_95`.
+are the mean of its four runs, with Student-t 95% intervals in `confidence_95`.
 
 **Control.** The control is the proposal's starting point: the untuned control arm when the proposal
 includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
 serving, every other candidate is measured interleaved with it, as control, candidate, control,
-candidate, control, candidate, control. The control and candidate share a time window, not a GPU, so
-differences between their nodes are not removed. Control runs whose output throughput differs by more
-than 5% between adjacent runs make that comparison invalid; the candidate's own measurement is kept,
-and its result against the control is unknown. A control or candidate run that fails stops the
+candidate, control, candidate, control, candidate, control. The control and candidate share a time
+window, not a GPU, so differences between their machines are not removed (see
+[what the judge can and cannot tell](#what-the-judge-can-and-cannot-tell)). Adjacent control runs
+whose output throughput differs by more than 15% mean the server changed under the measurement, so
+that comparison is invalid; the candidate's own measurement is kept, and its result against the
+control is unknown. Smaller changes that both setups share, such as a GPU warming up, are cancelled
+by pairing instead of voiding the window. A control or candidate run that fails stops the
 measurement so the server can be checked and replaced (see
 [When a measured server is lost](#when-a-measured-server-is-lost)). A failure to look the control up
 is retried rather than recorded as a measurement without one.
 
-**Noise floor.** For each metric the noise floor is the larger of the control-to-control spread and
-the candidate's 95% interval half-width, both relative to their means. A candidate whose change is
-inside it shows no measurable difference. The workload's `measured.comparison` records the control
-mean, spread, candidate mean, delta, floor, and decision for throughput, latency, and goodput.
+**Paired comparison.** Each candidate run is divided by the mean of the two control runs around it.
+The change is the geometric mean of those four ratios, and the noise floor is the half-width of its
+Student-t interval, corrected for the control run that neighbouring pairs share. A candidate is
+better or worse only when the whole interval lies on one side of no change; otherwise it shows no
+measurable difference. The interval is widened for the number of candidates the run compares with
+its control (Bonferroni): 95% confidence for one candidate, 98.75% for four. So a run of several
+candidates is no more likely to crown a candidate that is really no better than the control. The
+workload's `measured.comparison` records, for throughput, latency, and goodput, the control mean and
+spread, the candidate mean, the change, the floor, the decision, and the method
+(`paired_bracketing_log_ratio`), pairs, comparisons, and confidence. Measurements made before this
+method (`campaign-interleaved-control-v1`) keep their stored comparison, which used the larger of the
+control-to-control spread and the candidate's own interval.
+
+#### What the judge can and cannot tell
+
+`TestJudgeCalibration` in `internal/optimizationcampaign` runs this exact decision code on simulated
+runs and prints how often it declares a win when nothing changed (false wins) and how often it finds
+a real gain. With 2% run-to-run noise, roughly what real GPU runs show:
+
+| Condition | False wins, 1 candidate | False wins, 4 candidates | Finds +5% | Finds +10% | Windows voided |
+|---|---|---|---|---|---|
+| v1 method, same machine | 0.8% | 2.8% | 42% | 79% | 19% |
+| This method, same machine | 2.6% | 3.1% | 67% | 99% | 0% |
+| This method, machines differ by 2% | 8.6% | 11.3% | 62% | 95% | 0% |
+
+On one machine the judge keeps false wins near the designed 2.5% and finds far more real gains.
+When the control and the candidate run on different machines whose speed differs by a fixed amount,
+no pairing in time can remove that difference, and false wins rise. A measured win should therefore
+be confirmed on another server before it is trusted. Runs do not do that themselves yet.
 
 **Failed requests and answer length.** Latency percentiles count only requests that succeeded, and a
 shorter answer finishes sooner and needs fewer tokens. So a setup could look faster or cheaper by
@@ -970,8 +998,8 @@ together, it comes from the control's own runs on the same workload. These check
 control was measured, also when the control misses the constraints. An answer length a run did not
 record, as in runs measured before it was recorded, is unknown and stops nothing. The persisted
 ranking keeps each candidate's `guard_check`: both sides' requests, failed requests, and answer
-length, and which check fired. Rankings with these checks record algorithm
-`campaign-control-noise-floor-v3`.
+length, and which check fired. Rankings with these checks and the paired comparison record algorithm
+`campaign-paired-control-v4`.
 
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric and
@@ -1007,8 +1035,8 @@ included. Custom images without a declared path record no runtime metrics, and G
 scraped without a usable result (with AIPerf's reason), or scraped without any cache, queue, or
 preemption metric.
 
-This method sends nine AIPerf invocations per non-control candidate instead of one, so measurement
-takes several times longer. The approval window must cover it. Campaign ranking does not use the
+This method sends eleven AIPerf invocations per non-control candidate (two warmups and nine
+measured runs) instead of one, so measurement takes several times longer. The approval window must cover it. Campaign ranking does not use the
 [multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
 limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
 
@@ -1038,10 +1066,11 @@ unknown.
 **Measuring resumes at the next pair.** Both servers are warmed again, and the next segment starts
 with a control run, so every pair after the restart is again bracketed by control runs from its own
 window. Each segment's invocations get fresh seeds and prompt-block namespaces. The drift check
-runs over every adjacent pair of control runs, including the pair across the restart, so a
-replacement control that serves more than 5% differently invalidates the comparison instead of
-passing silently. A replaced candidate server that serves differently widens the candidate's 95%
-interval and with it the noise floor. The workload's `measured.segments` and
+runs over every adjacent pair of control runs, including the pair across the restart, and holds that
+pair to a tighter limit: a replacement control that serves more than 5% differently from the server
+it replaced invalidates the comparison instead of passing silently, because pairing cannot cancel a
+change of machine. A replaced candidate server that serves differently widens the paired interval
+and with it the noise floor. The workload's `measured.segments` and
 `measured.interruptions` record each stretch of measuring, each interruption, and how it was
 recovered: `machine_serving`, `machine_replaced`, or `provider_managed` for serverless workers, which
 their provider replaces itself.

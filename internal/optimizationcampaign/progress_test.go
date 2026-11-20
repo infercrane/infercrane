@@ -47,22 +47,22 @@ func tickingClock(start time.Time, step time.Duration) func() time.Time {
 
 func TestMeasurementProgressRecordsEveryTurnAsItRuns(t *testing.T) {
 	fixture := newExecutorFixture(t, optimizer.Request{})
-	fixture.runner.throughput[controlEndpoint] = []float64{246, 247, 245, 246}
-	fixture.runner.throughput[candidateEndpoint] = []float64{301, 300, 302}
+	fixture.runner.throughput[controlEndpoint] = []float64{246, 247, 245, 246, 247}
+	fixture.runner.throughput[candidateEndpoint] = []float64{301, 300, 302, 301}
 	sink := &progressSinkFixture{}
 	fixture.executor.Progress = sink
 	fixture.executor.Now = tickingClock(time.Date(2026, 11, 17, 1, 0, 0, 0, time.UTC), 30*time.Second)
 	fixture.run(t)
 
 	final := sink.records[len(sink.records)-1]
-	if final.Method != MeasurementMethod || final.TurnsPlanned != 7 || final.WarmupsPlanned != 2 || final.TurnsDone() != 7 || len(final.Runs) != 9 {
+	if final.Method != MeasurementMethod || final.TurnsPlanned != 9 || final.WarmupsPlanned != 2 || final.TurnsDone() != 9 || len(final.Runs) != 11 {
 		t.Fatalf("final record = %+v", final)
 	}
 	if _, running := final.Current(); running {
 		t.Fatal("a finished measurement still reports a running invocation")
 	}
-	wantArms := []string{"control", "candidate", "control", "candidate", "control", "candidate", "control", "candidate", "control"}
-	wantTPS := []float64{0, 0, 246, 301, 247, 300, 245, 302, 246}
+	wantArms := []string{"control", "candidate", "control", "candidate", "control", "candidate", "control", "candidate", "control", "candidate", "control"}
+	wantTPS := []float64{0, 0, 246, 301, 247, 300, 245, 302, 246, 301, 247}
 	for index, run := range final.Runs {
 		kind := RunKindTurn
 		if index < 2 {
@@ -76,11 +76,11 @@ func TestMeasurementProgressRecordsEveryTurnAsItRuns(t *testing.T) {
 		}
 	}
 	// Every invocation is written when it starts, so a reader sees turn 4 of
-	// 7 running after three finished turns.
+	// 9 running after three finished turns.
 	seen := false
 	for _, record := range sink.records {
 		if current, running := record.Current(); running && current.Turn == 4 {
-			seen = record.TurnsDone() == 3 && record.TurnsPlanned == 7
+			seen = record.TurnsDone() == 3 && record.TurnsPlanned == 9
 		}
 	}
 	if !seen {
@@ -99,7 +99,7 @@ func TestMeasurementProgressKeepsTheFailedTurnAndPlansTheResumedSegment(t *testi
 	}
 	stopped := sink.records[len(sink.records)-1]
 	// Two warmups, then C X C(failed): three turns ended, the last with an error.
-	if stopped.TurnsPlanned != 7 || stopped.WarmupsPlanned != 2 || stopped.TurnsDone() != 3 || len(stopped.Runs) != 5 || stopped.Runs[4].Error == "" || stopped.Runs[4].Arm != ArmControl {
+	if stopped.TurnsPlanned != 9 || stopped.WarmupsPlanned != 2 || stopped.TurnsDone() != 3 || len(stopped.Runs) != 5 || stopped.Runs[4].Error == "" || stopped.Runs[4].Arm != ArmControl {
 		t.Fatalf("stopped record = %+v", stopped)
 	}
 
@@ -111,9 +111,9 @@ func TestMeasurementProgressKeepsTheFailedTurnAndPlansTheResumedSegment(t *testi
 	fixture.runner.failAt = map[string]int{}
 	fixture.run(t)
 	final := sink.records[len(sink.records)-1]
-	// The failed control turn dropped the open pair, so all three pairs are
-	// measured again: two more warmups and C X C X C X C.
-	if final.TurnsPlanned != 3+7 || final.WarmupsPlanned != 4 || final.TurnsDone() != 10 || len(final.Runs) != 14 || !final.StartedAt.Equal(stopped.StartedAt) {
+	// The failed control turn dropped the open pair, so all four pairs are
+	// measured again: two more warmups and C X C X C X C X C.
+	if final.TurnsPlanned != 3+9 || final.WarmupsPlanned != 4 || final.TurnsDone() != 12 || len(final.Runs) != 16 || !final.StartedAt.Equal(stopped.StartedAt) {
 		t.Fatalf("resumed record = %+v", final)
 	}
 }
@@ -125,7 +125,7 @@ func TestMeasurementProgressPlansTheControlAlone(t *testing.T) {
 	fixture.executor.Progress = sink
 	fixture.run(t)
 	final := sink.records[len(sink.records)-1]
-	if final.TurnsPlanned != 3 || final.WarmupsPlanned != 1 || final.TurnsDone() != 3 {
+	if final.TurnsPlanned != 4 || final.WarmupsPlanned != 1 || final.TurnsDone() != 4 {
 		t.Fatalf("control-alone record = %+v", final)
 	}
 }
@@ -192,7 +192,7 @@ func TestProgressSaysRunningWhileALaterSetupStillMeasures(t *testing.T) {
 	now := base.Add(2580 * time.Second)
 
 	progress := Progress(campaign, now)
-	if progress.Stage != StageRunning || progress.SetupsMeasured != 1 || progress.SetupsTotal != 3 || progress.TurnsDone != 4 || progress.TurnsTotal == nil || *progress.TurnsTotal != 17 {
+	if progress.Stage != StageRunning || progress.SetupsMeasured != 1 || progress.SetupsTotal != 3 || progress.TurnsDone != 4 || progress.TurnsTotal == nil || *progress.TurnsTotal != 19 {
 		t.Fatalf("progress = %+v", progress)
 	}
 	if progress.ElapsedSeconds == nil || *progress.ElapsedSeconds != 2580 || progress.EndedAt != nil {
@@ -200,9 +200,9 @@ func TestProgressSaysRunningWhileALaterSetupStillMeasures(t *testing.T) {
 	}
 	// Observed: provisioning 900 s and 900 s, warmups 60 s, turns 120 s, one
 	// answer check 60 s. Setup 2: 60 s left of its running turn, five turns,
-	// its answer check. Setup 3: provisioning, two warmups, seven turns, its
+	// its answer check. Setup 3: provisioning, two warmups, nine turns, its
 	// answer check.
-	want := (60.0 + 5*120 + 60) + (900 + 2*60 + 7*120 + 60)
+	want := (60.0 + 5*120 + 60) + (900 + 2*60 + 9*120 + 60)
 	if progress.ETA.State != ETAEstimated || progress.ETA.Basis != ETABasis || progress.ETA.RemainingSeconds == nil || math.Abs(*progress.ETA.RemainingSeconds-want) > 1e-6 {
 		t.Fatalf("eta = %+v, want %v seconds", progress.ETA, want)
 	}
@@ -222,7 +222,7 @@ func TestProgressLeavesTheETAUnknownUntilEveryStepWasTimed(t *testing.T) {
 	if progress.Stage != StageRunning || progress.ETA.State != ETAUnknown || progress.ETA.RemainingSeconds != nil || progress.ETA.CompletesAt != nil || progress.ETA.Reason != "waiting for the first setup to start serving" {
 		t.Fatalf("eta before any observation = %+v", progress.ETA)
 	}
-	if progress.TurnsTotal == nil || *progress.TurnsTotal != 10 || progress.TurnsDone != 0 {
+	if progress.TurnsTotal == nil || *progress.TurnsTotal != 13 || progress.TurnsDone != 0 {
 		t.Fatalf("turns before measuring = %v of %v", progress.TurnsDone, progress.TurnsTotal)
 	}
 

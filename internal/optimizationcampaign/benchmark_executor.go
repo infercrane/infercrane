@@ -206,7 +206,20 @@ func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, cand
 	if err != nil {
 		return MeasurementCheckpoint{}, err
 	}
-	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control}, nil
+	return MeasurementCheckpoint{Version: measurementCheckpointVersion, Method: MeasurementMethod, Identity: identity, InvocationBase: base, Control: control, Comparisons: campaignComparisons(campaign)}, nil
+}
+
+// campaignComparisons counts the candidates a campaign compares with its
+// control. The count comes from the proposal, not from how many candidates
+// survived to measurement, so a candidate that failed to start still widens
+// every other candidate's interval: the family of comparisons is fixed before
+// any result is seen.
+func campaignComparisons(campaign domain.OptimizationCampaign) int {
+	count := len(campaign.Candidates)
+	if _, found := CampaignControl(campaign); found {
+		count--
+	}
+	return max(1, count)
 }
 
 // directTarget selects the lowest-ordinal healthy ready replica of one exact

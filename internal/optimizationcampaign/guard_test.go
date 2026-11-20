@@ -79,7 +79,7 @@ func TestRankMeasuredCampaignHoldsBackACandidateThatFailedMoreRequests(t *testin
 	if check == nil || check.Basis != GuardBasisSameWindow || check.Control.Requests != 400 || check.Candidate.Failed != 9 || len(check.Guards) != 1 || check.Guards[0].Code != FailureErrorRateRegression {
 		t.Fatalf("the ranking did not persist the guard check: %+v", check)
 	}
-	if !strings.HasSuffix(result.Evaluation.AlgorithmVersion, "+"+RankingAlgorithmVersion) || RankingAlgorithmVersion != "campaign-control-noise-floor-v3" {
+	if !strings.HasSuffix(result.Evaluation.AlgorithmVersion, "+"+RankingAlgorithmVersion) || RankingAlgorithmVersion != "campaign-paired-control-v4" {
 		t.Fatalf("the ranking did not name the guarded algorithm: %q", result.Evaluation.AlgorithmVersion)
 	}
 }
