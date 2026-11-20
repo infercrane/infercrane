@@ -158,8 +158,8 @@ therefore compare with each other. Lab versions before `inference-lab-v4` hashed
 which gave every multi-run benchmark a workload of its own and kept it out of every ranking.
 
 Optimization campaigns use a stricter method than a single `infercrane benchmark` command: warmup,
-three runs per arm, the campaign control interleaved with each candidate, and a noise floor before
-a gain counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
+four candidate runs each paired with the campaign control runs around it, and an interval widened
+for the number of candidates before a gain counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
 
 InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects
 unknown units instead of silently mislabeling evidence. Percentiles reconstructed from those records

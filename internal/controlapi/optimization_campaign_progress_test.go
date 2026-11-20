@@ -149,7 +149,7 @@ func TestCampaignReadNamesSetupsAndReportsLiveProgressAndSpend(t *testing.T) {
 	if live == nil || live.TurnsPlanned != 7 || live.TurnsDone != 1 || live.Current == nil || live.Current.Turn != 2 || live.Current.Arm != "candidate" || read.Candidates[2].Measurement != nil {
 		t.Fatalf("live measurement = %+v", live)
 	}
-	if read.State != "ranked" || read.Progress.Stage != "running" || read.Progress.TurnsDone != 4 || read.Progress.TurnsTotal == nil || *read.Progress.TurnsTotal != 17 || read.Progress.ElapsedSeconds == nil || *read.Progress.ElapsedSeconds < 4790 {
+	if read.State != "ranked" || read.Progress.Stage != "running" || read.Progress.TurnsDone != 4 || read.Progress.TurnsTotal == nil || *read.Progress.TurnsTotal != 19 || read.Progress.ElapsedSeconds == nil || *read.Progress.ElapsedSeconds < 4790 {
 		t.Fatalf("progress = %+v", read.Progress)
 	}
 	if read.Progress.ETA.State != "estimated" || read.Progress.ETA.Basis != "observed_durations" || read.Progress.ETA.RemainingSeconds == nil || *read.Progress.ETA.RemainingSeconds <= 0 {

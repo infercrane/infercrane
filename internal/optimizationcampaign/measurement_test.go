@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -185,10 +186,10 @@ func measuredEvidence(t *testing.T, workload map[string]any) MeasuredEvidence {
 
 func TestBenchmarkExecutorInterleavesControlWithWarmupRepeatsAndUniqueSeeds(t *testing.T) {
 	fixture := newExecutorFixture(t, optimizer.Request{})
-	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101}
-	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129}
-	fixture.runner.ttft[controlEndpoint] = []float64{200, 202, 201, 200}
-	fixture.runner.ttft[candidateEndpoint] = []float64{150, 151, 149}
+	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101, 100}
+	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129, 130}
+	fixture.runner.ttft[controlEndpoint] = []float64{200, 202, 201, 200, 201}
+	fixture.runner.ttft[candidateEndpoint] = []float64{150, 151, 149, 150}
 	row, workload := fixture.run(t)
 
 	var endpoints []string
@@ -207,31 +208,31 @@ func TestBenchmarkExecutorInterleavesControlWithWarmupRepeatsAndUniqueSeeds(t *t
 			t.Fatalf("server metrics must follow each runtime contract: %+v", config)
 		}
 	}
-	want := "control.internal,candidate.internal,control.internal,candidate.internal,control.internal,candidate.internal,control.internal,candidate.internal,control.internal"
+	want := "control.internal,candidate.internal,control.internal,candidate.internal,control.internal,candidate.internal,control.internal,candidate.internal,control.internal,candidate.internal,control.internal"
 	if strings.Join(endpoints, ",") != want || len(seeds) != len(fixture.runner.configs) {
 		t.Fatalf("order=%v seeds=%v", endpoints, seeds)
 	}
-	if row.RequestCount != 3*fixture.profile.Requests || row.OutputTokenThroughput == nil || *row.OutputTokenThroughput != 130 || row.TTFTP95MS == nil || *row.TTFTP95MS != 150 || row.RevisionID != fixture.candidate.RevisionID {
+	if row.RequestCount != 4*fixture.profile.Requests || row.OutputTokenThroughput == nil || *row.OutputTokenThroughput != 130 || row.TTFTP95MS == nil || *row.TTFTP95MS != 150 || row.RevisionID != fixture.candidate.RevisionID {
 		t.Fatalf("candidate arm was not pooled from its own runs only: %+v", row)
 	}
-	if workload["measurement_method"] != MeasurementMethod || workload["profile_runs"] != float64(3) || workload["seed_policy"] != "unique_per_invocation" || workload["workload_source"] != "synthetic_profile" || workload["input_tokens"] != float64(fixture.profile.InputTokens) {
+	if workload["measurement_method"] != MeasurementMethod || workload["profile_runs"] != float64(4) || workload["seed_policy"] != "unique_per_invocation" || workload["workload_source"] != "synthetic_profile" || workload["input_tokens"] != float64(fixture.profile.InputTokens) {
 		t.Fatalf("workload identity=%v", workload)
 	}
 	confidence := workload["confidence_95"].(map[string]any)["output_token_throughput"].(map[string]any)
-	if confidence["samples"] != float64(3) || confidence["mean"] != float64(130) {
+	if confidence["samples"] != float64(4) || confidence["mean"] != float64(130) {
 		t.Fatalf("candidate confidence=%v", confidence)
 	}
 	evidence := measuredEvidence(t, workload)
-	if evidence.Control.Role != ControlRoleBracketed || evidence.Control.Runs != 4 || evidence.Control.CandidateID != "control" || evidence.Control.MaxDrift > maxControlDrift || evidence.Control.ServerMetrics || !evidence.ServerMetricsRequested || evidence.GPUTelemetry != "not_collected" {
+	if evidence.Control.Role != ControlRoleBracketed || evidence.Control.Runs != 5 || evidence.Control.CandidateID != "control" || evidence.Control.MaxDrift > maxControlDrift || evidence.Control.ServerMetrics || !evidence.ServerMetricsRequested || evidence.GPUTelemetry != "not_collected" {
 		t.Fatalf("control evidence=%+v", evidence)
 	}
-	if throughput := evidence.Comparison["output_token_throughput"]; throughput.Decision != DecisionImproved || throughput.ControlMean != 100.5 || throughput.Delta <= throughput.NoiseFloor {
+	if throughput := evidence.Comparison["output_token_throughput"]; throughput.Decision != DecisionImproved || math.Abs(throughput.ControlMean-100.4) > 1e-9 || throughput.Delta <= throughput.NoiseFloor || throughput.Method != ComparisonPaired || throughput.Pairs != 4 || throughput.Comparisons != 1 || throughput.Confidence != 0.95 {
 		t.Fatalf("throughput comparison=%+v", throughput)
 	}
 	if ttft := evidence.Comparison["ttft_p95_ms"]; ttft.Decision != DecisionImproved || ttft.Delta >= 0 {
 		t.Fatalf("latency comparison=%+v", ttft)
 	}
-	if len(evidence.Runs) != 7 || strings.Join(evidence.Order[:2], ",") != "warmup:control,warmup:candidate" {
+	if len(evidence.Runs) != 9 || strings.Join(evidence.Order[:2], ",") != "warmup:control,warmup:candidate" {
 		t.Fatalf("run audit=%+v order=%v", evidence.Runs, evidence.Order)
 	}
 }
@@ -242,10 +243,10 @@ func TestBenchmarkExecutorInterleavesControlWithWarmupRepeatsAndUniqueSeeds(t *t
 // control runs of its own window.
 func TestBenchmarkExecutorRecordsFailedRequestsAndAnswerLengthPerArm(t *testing.T) {
 	fixture := newExecutorFixture(t, optimizer.Request{})
-	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101}
-	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129}
-	fixture.runner.failed = map[string][]int{candidateEndpoint: {10, 12, 14}}
-	fixture.runner.answerTokens = map[string][]float64{controlEndpoint: {200, 202, 198, 200}, candidateEndpoint: {150, 152, 148}}
+	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101, 100}
+	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129, 130}
+	fixture.runner.failed = map[string][]int{candidateEndpoint: {10, 12, 14, 16}}
+	fixture.runner.answerTokens = map[string][]float64{controlEndpoint: {200, 202, 198, 200, 200}, candidateEndpoint: {150, 152, 148, 150}}
 	row, workload := fixture.run(t)
 	evidence := measuredEvidence(t, workload)
 	var arms []string
@@ -255,14 +256,14 @@ func TestBenchmarkExecutorRecordsFailedRequestsAndAnswerLengthPerArm(t *testing.
 			t.Fatalf("run %+v lost its answer length", run)
 		}
 	}
-	if strings.Join(arms, ",") != "control,candidate,control,candidate,control,candidate,control" || evidence.Runs[1].Failed != 10 || *evidence.Runs[1].OutputTokensPerRequest != 150 || *evidence.Runs[0].OutputTokensPerRequest != 200 {
+	if strings.Join(arms, ",") != "control,candidate,control,candidate,control,candidate,control,candidate,control" || evidence.Runs[1].Failed != 10 || *evidence.Runs[1].OutputTokensPerRequest != 150 || *evidence.Runs[0].OutputTokensPerRequest != 200 {
 		t.Fatalf("runs=%+v", evidence.Runs)
 	}
-	if row.Failed != 36 || row.RequestCount != 3*fixture.profile.Requests {
+	if row.Failed != 52 || row.RequestCount != 4*fixture.profile.Requests {
 		t.Fatalf("the candidate row did not pool its failed requests: %+v", row)
 	}
 	check, ok := CheckGuards(row, domain.BenchmarkResult{}, "control")
-	if !ok || check.Basis != GuardBasisSameWindow || check.Control.Requests != 4*fixture.profile.Requests || check.Control.Failed != 0 || check.Candidate.Failed != 36 || *check.Control.OutputTokensPerRequest != 200 || math.Round(*check.Candidate.OutputTokensPerRequest) != 150 {
+	if !ok || check.Basis != GuardBasisSameWindow || check.Control.Requests != 5*fixture.profile.Requests || check.Control.Failed != 0 || check.Candidate.Failed != 52 || *check.Control.OutputTokensPerRequest != 200 || math.Round(*check.Candidate.OutputTokensPerRequest) != 150 {
 		t.Fatalf("guard check=%+v ok=%v", check, ok)
 	}
 	if len(check.Guards) != 2 || check.Guards[0].Code != FailureErrorRateRegression || check.Guards[1].Code != FailureOutputLengthRegression {
@@ -270,25 +271,68 @@ func TestBenchmarkExecutorRecordsFailedRequestsAndAnswerLengthPerArm(t *testing.
 	}
 }
 
-func TestBenchmarkExecutorReportsGainInsideControlSpreadAsNoMeasurableDifference(t *testing.T) {
+func TestBenchmarkExecutorReportsGainInsideTheNoiseAsNoMeasurableDifference(t *testing.T) {
 	fixture := newExecutorFixture(t, optimizer.Request{})
-	fixture.runner.throughput[controlEndpoint] = []float64{100, 103, 98.5, 101}
-	fixture.runner.throughput[candidateEndpoint] = []float64{102, 101.5, 102.5}
+	fixture.runner.throughput[controlEndpoint] = []float64{100, 103, 98.5, 101, 100}
+	fixture.runner.throughput[candidateEndpoint] = []float64{102, 101.5, 102.5, 99}
 	_, workload := fixture.run(t)
 	evidence := measuredEvidence(t, workload)
 	comparison := evidence.Comparison["output_token_throughput"]
-	if evidence.Control.Role != ControlRoleBracketed || comparison.Decision != DecisionNoMeasurableDifference || comparison.Delta <= 0 || comparison.Delta > comparison.ControlSpread {
-		t.Fatalf("a gain inside the control-to-control spread was not reported as no measurable difference: %+v", comparison)
+	if evidence.Control.Role != ControlRoleBracketed || comparison.Decision != DecisionNoMeasurableDifference || comparison.Delta <= 0 || comparison.Delta > comparison.NoiseFloor {
+		t.Fatalf("a gain inside the paired interval was not reported as no measurable difference: %+v", comparison)
+	}
+}
+
+// A run plan that pairs each candidate run with the control runs around it
+// cancels a slow change both arms share: a steady 2% climb per run, which
+// v1's unpaired comparison read as noise, leaves a real 6% gain visible.
+func TestBenchmarkExecutorPairsAwayDriftBothArmsShare(t *testing.T) {
+	fixture := newExecutorFixture(t, optimizer.Request{})
+	var control, candidate []float64
+	for step := 0; step < 9; step++ {
+		level := 100 * (1 + 0.02*float64(step))
+		if step%2 == 0 {
+			control = append(control, level)
+		} else {
+			candidate = append(candidate, level*1.06)
+		}
+	}
+	fixture.runner.throughput[controlEndpoint], fixture.runner.throughput[candidateEndpoint] = control, candidate
+	_, workload := fixture.run(t)
+	comparison := measuredEvidence(t, workload).Comparison["output_token_throughput"]
+	if comparison.Decision != DecisionImproved || math.Abs(comparison.Delta-0.06) > 0.002 {
+		t.Fatalf("shared drift hid or inflated the gain: %+v", comparison)
+	}
+}
+
+// Every candidate in a campaign widens every other's interval, so a campaign
+// of several candidates does not find a winner more often by chance.
+func TestBenchmarkExecutorWidensTheIntervalForEachCandidateCompared(t *testing.T) {
+	measure := func(extra int) MetricComparison {
+		fixture := newExecutorFixture(t, optimizer.Request{})
+		for index := 0; index < extra; index++ {
+			other := fixture.candidate
+			other.ID, other.ProposalCandidateID = fmt.Sprintf("candidate-%d", index+2), fmt.Sprintf("proposal-candidate-%d", index+2)
+			fixture.campaign.Candidates = append(fixture.campaign.Candidates, other)
+		}
+		fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 99, 100, 101}
+		fixture.runner.throughput[candidateEndpoint] = []float64{104, 102, 105, 103}
+		_, workload := fixture.run(t)
+		return measuredEvidence(t, workload).Comparison["output_token_throughput"]
+	}
+	one, four := measure(0), measure(3)
+	if one.Comparisons != 1 || four.Comparisons != 4 || four.Confidence != 0.9875 || four.NoiseFloor <= one.NoiseFloor || math.Abs(four.Delta-one.Delta) > 1e-12 {
+		t.Fatalf("one candidate %+v, four candidates %+v", one, four)
 	}
 }
 
 func TestBenchmarkExecutorInvalidatesComparisonWhenControlDrifts(t *testing.T) {
 	drifting := newExecutorFixture(t, optimizer.Request{})
-	drifting.runner.throughput[controlEndpoint] = []float64{100, 110, 100, 110}
-	drifting.runner.throughput[candidateEndpoint] = []float64{150, 150, 150}
+	drifting.runner.throughput[controlEndpoint] = []float64{100, 120, 100, 120, 100}
+	drifting.runner.throughput[candidateEndpoint] = []float64{150, 150, 150, 150}
 	_, workload := drifting.run(t)
 	evidence := measuredEvidence(t, workload)
-	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || evidence.Control.MaxDrift < 0.09 || !strings.Contains(evidence.Control.Reason, "drifted") {
+	if evidence.Control.Role != ControlRoleInvalid || evidence.Comparison != nil || evidence.Control.MaxDrift < 0.19 || !strings.Contains(evidence.Control.Reason, "drifted") {
 		t.Fatalf("drifting control was used for a comparison: %+v", evidence)
 	}
 }
@@ -297,8 +341,8 @@ func TestBenchmarkExecutorMeasuresControlAloneOrWithoutAServingControl(t *testin
 	self := newExecutorFixture(t, optimizer.Request{})
 	self.candidate = self.control
 	_, workload := self.run(t)
-	if evidence := measuredEvidence(t, workload); evidence.Control.Role != ControlRoleCandidate || self.runner.calls[controlEndpoint] != 4 || self.runner.calls[candidateEndpoint] != 0 {
-		t.Fatalf("the control must be measured alone with warmup and three runs: %+v calls=%v", evidence, self.runner.calls)
+	if evidence := measuredEvidence(t, workload); evidence.Control.Role != ControlRoleCandidate || self.runner.calls[controlEndpoint] != 1+measurementRunsPerArm || self.runner.calls[candidateEndpoint] != 0 {
+		t.Fatalf("the control must be measured alone with warmup and %d runs: %+v calls=%v", measurementRunsPerArm, evidence, self.runner.calls)
 	}
 
 	cleaned := newExecutorFixture(t, optimizer.Request{})
@@ -329,7 +373,7 @@ func TestBenchmarkExecutorReplaysBoundTraceWithFreshPrefixNamespacePerInvocation
 	fixture := newExecutorFixture(t, optimizer.Request{WorkloadSource: optimizer.WorkloadSourceCustomerObserved, WorkloadFingerprint: "sha256:" + trace.ShapeDigest})
 	fixture.executor.Replays = replaySourceFixture{trace: trace}
 	row, workload := fixture.run(t)
-	if len(fixture.runner.configs) != 9 {
+	if len(fixture.runner.configs) != 11 {
 		t.Fatalf("invocations=%d", len(fixture.runner.configs))
 	}
 	seen := map[int]int{}
@@ -369,7 +413,7 @@ func TestBenchmarkExecutorReplaysBoundTraceWithFreshPrefixNamespacePerInvocation
 	// Two replays of the same bound trace are one workload for Lab.
 	second := newExecutorFixture(t, optimizer.Request{WorkloadSource: optimizer.WorkloadSourceCustomerObserved, WorkloadFingerprint: trace.ShapeDigest})
 	second.executor.Replays = replaySourceFixture{trace: trace}
-	second.runner.throughput[candidateEndpoint] = []float64{140, 141, 139}
+	second.runner.throughput[candidateEndpoint] = []float64{140, 141, 139, 140}
 	other, _ := second.run(t)
 	if lab.WorkloadDigest(row.WorkloadJSON) != lab.WorkloadDigest(other.WorkloadJSON) {
 		t.Fatal("two measurements of one bound trace produced different workload digests")
@@ -442,7 +486,7 @@ func TestBenchmarkExecutorNeverRepeatsSeedsOrPromptBlocksAcrossMeasurements(t *t
 			}
 		}
 	}
-	if len(fixture.runner.configs) != 4+9+9+9 {
+	if len(fixture.runner.configs) != 5+11+11+11 {
 		t.Fatalf("invocations=%d", len(fixture.runner.configs))
 	}
 }
