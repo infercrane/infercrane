@@ -1160,21 +1160,66 @@ func optimizationCandidateQualitySchema() map[string]any {
 		"block_limit_percent":   number,
 		"reference_revision_id": text,
 		"evidence_id":           text,
+		"tool_calls":            qualityToolCallScoresSchema(),
 		"reason":                text,
 		"command":               map[string]any{"type": "string", "description": "The exact command that unblocks a waiting step."},
 	}}
 }
 
+func qualityToolCallScoresSchema() map[string]any {
+	count := map[string]any{"type": "integer", "minimum": 0}
+	kinds := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"missing_call", "malformed_arguments", "wrong_function", "schema_invalid", "extra_calls", "unexpected_call"}, "description": "Tool cases by how their calls failed; a case can count under several kinds.", "properties": map[string]any{
+		"missing_call": count, "malformed_arguments": count, "wrong_function": count, "schema_invalid": count, "extra_calls": count, "unexpected_call": count,
+	}}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"cases", "score", "broken", "reference_invalid", "candidate", "reference"}, "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.", "properties": map[string]any{
+		"cases":             map[string]any{"type": "integer", "minimum": 1},
+		"score":             map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Mean over tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference."},
+		"broken":            map[string]any{"type": "integer", "minimum": 0, "description": "Cases where the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate."},
+		"reference_invalid": map[string]any{"type": "integer", "minimum": 0, "description": "Cases where the reference's own calls did not validate; they measure agreement only."},
+		"candidate":         kinds,
+		"reference":         map[string]any{"allOf": []any{kinds}, "description": "The reference's own failures; missing, extra, and unexpected calls stay 0."},
+	}}
+}
+
 func qualityEvalSetUploadSchema() map[string]any {
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema", "name", "version", "prompts"}, "description": "At most 512 KiB. Unknown fields are rejected, so expected answers are not accepted.", "properties": map[string]any{
-		"schema":     map[string]any{"type": "string", "const": "infercrane.dev/quality-eval-set/v1"},
+	toolCall := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "type", "function"}, "properties": map[string]any{
+		"id":       map[string]any{"type": "string", "minLength": 1, "maxLength": 64},
+		"type":     map[string]any{"type": "string", "const": "function"},
+		"function": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name", "arguments"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "arguments": map[string]any{"type": "string", "description": "JSON text."}}},
+	}}
+	message := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"role"}, "properties": map[string]any{
+		"role":         map[string]any{"type": "string", "enum": []string{"system", "user", "assistant", "tool"}},
+		"content":      map[string]any{"type": "string", "maxLength": 8192},
+		"tool_calls":   map[string]any{"type": "array", "items": toolCall, "description": "Earlier calls of an assistant turn, to declared functions."},
+		"tool_call_id": map[string]any{"type": "string", "description": "The earlier call a tool turn answers."},
+	}}
+	tool := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", "function"}, "properties": map[string]any{
+		"type": map[string]any{"type": "string", "const": "function"},
+		"function": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name"}, "properties": map[string]any{
+			"name":        map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+			"description": map[string]any{"type": "string", "maxLength": 8192},
+			"parameters":  map[string]any{"type": "object", "additionalProperties": true, "description": "JSON Schema (draft-07 or 2020-12) the call's arguments must validate against. Remote $ref is refused."},
+			"strict":      map[string]any{"type": "boolean"},
+		}},
+	}}
+	toolChoice := map[string]any{"oneOf": []any{
+		map[string]any{"type": "string", "enum": []string{"auto", "none", "required"}},
+		map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", "function"}, "properties": map[string]any{"type": map[string]any{"type": "string", "const": "function"}, "function": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name"}, "properties": map[string]any{"name": map[string]any{"type": "string"}}}}},
+	}}
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"schema", "name", "version", "prompts"}, "description": "At most 512 KiB. Unknown fields are rejected. Expected answers are accepted only in a graded set, which names its grading. Schema v2 adds conversations and function tools to a case; a case that declares tools is scored on its tool calls, and a graded set may not declare tools.", "properties": map[string]any{
+		"schema":     map[string]any{"type": "string", "enum": []string{"infercrane.dev/quality-eval-set/v1", "infercrane.dev/quality-eval-set/v2"}},
 		"name":       map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
 		"version":    map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
 		"max_tokens": map[string]any{"type": "integer", "minimum": 1, "maximum": 512, "default": 64},
-		"prompts": map[string]any{"type": "array", "minItems": 1, "maxItems": 200, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "prompt"}, "properties": map[string]any{
-			"id":     map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
-			"system": map[string]any{"type": "string", "maxLength": 8192},
-			"prompt": map[string]any{"type": "string", "minLength": 1, "maxLength": 8192},
+		"grading":    map[string]any{"type": "string", "enum": []string{"exact_match", "token_f1"}, "description": "Makes the set graded: every prompt is scored against its expected answers."},
+		"prompts": map[string]any{"type": "array", "minItems": 1, "maxItems": 200, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id"}, "description": "Either prompt (with an optional system) or, in v2, messages.", "properties": map[string]any{
+			"id":          map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+			"system":      map[string]any{"type": "string", "maxLength": 8192},
+			"prompt":      map[string]any{"type": "string", "minLength": 1, "maxLength": 8192},
+			"messages":    map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "items": message, "description": "v2: a conversation that ends with a user or tool turn."},
+			"tools":       map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "items": tool, "description": "v2: OpenAI function tools the model may call."},
+			"tool_choice": toolChoice,
+			"expected":    map[string]any{"type": "array", "minItems": 1, "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1, "maxLength": 8192}, "description": "Accepted answers; only in a graded set, where every prompt needs them."},
 		}}},
 	}}
 }

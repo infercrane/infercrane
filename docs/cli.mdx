@@ -433,17 +433,22 @@ infercrane evaluation set digest eval-set.json
 infercrane evaluation set upload eval-set.json
 infercrane evaluation set inspect sha256:DIGEST
 infercrane evaluation set delete sha256:DIGEST
+infercrane evaluation set stay-optimized DEPLOYMENT sha256:DIGEST|default
 ```
 
-`ingest` accepts the strict evaluator-result v1 interchange contract, rejects unknown content fields,
+`ingest` accepts the strict evaluator-result v2 interchange contract, rejects unknown content fields,
 binds it to one immutable revision, signs it, and optionally attaches it. Evidence is
 signature-verified and contains aggregate values only. The evaluator name `infercrane-builtin` is
 reserved for InferCrane's own answer check and is refused.
 
-`evaluation set` manages the prompt sets that replace the built-in prompts of an optimization run's
-answer check. `default` prints the built-in suite to copy and adapt, `digest` validates a file
-without uploading it, and `upload` prints the digest a run names with `--eval-set`. See
-[Semantic quality evidence](/features/semantic-quality#built-in-answer-check).
+`evaluation set` manages the test sets that replace the built-in prompts of an optimization run's
+answer check: single prompts, or (schema v2) conversations and cases that declare function tools,
+which are scored on their tool calls. `default` prints the built-in suite to copy and adapt, `digest`
+validates a file without uploading it, and `upload` prints the digest a run names with `--eval-set`.
+`stay-optimized` sets the eval set of the runs Stay optimized proposes for a deployment, or `default`
+for the built-in prompts; it checks that the eval set is uploaded and changes only that field of the
+saved policy. See
+[Semantic quality evidence](/features/semantic-quality#use-your-own-test-set).
 
 ### `mcp`
 

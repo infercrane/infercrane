@@ -13,6 +13,7 @@
 | [Kind](https://github.com/kubernetes-sigs/kind) | Disposable Kubernetes lifecycle qualification | Apache-2.0 | Downloaded development tool; never linked or redistributed |
 | [pgx](https://github.com/jackc/pgx) | PostgreSQL connectivity | MIT | Go driver |
 | [yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) | Deployment files | Apache-2.0 / MIT | Go library |
+| [jsonschema-go](https://github.com/google/jsonschema-go) | Validates tool-call arguments against the JSON Schema an eval set declares, in the built-in answer check | MIT | Go library; already in the module graph through the MCP Go SDK. Schemas come from the customer's eval set; remote `$ref` is refused, so validation never fetches anything |
 | [Cobra](https://github.com/spf13/cobra) | CLI command tree, help, suggestions, and completion | Apache-2.0 | Go library |
 | [Bubble Tea](https://github.com/charmbracelet/bubbletea) | Full-screen terminal views (`ui`, `optimize watch`) | MIT | Go library |
 | [Lip Gloss](https://github.com/charmbracelet/lipgloss) | Terminal styling, cards, and layout for human CLI output | MIT | Go library |

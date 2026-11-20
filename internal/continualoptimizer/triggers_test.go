@@ -160,6 +160,13 @@ func TestPolicyBoundsAutoRunAndInterval(t *testing.T) {
 	if ValidatePolicy(policy) == nil {
 		t.Fatal("a check every minute must be refused")
 	}
+	policy.CheckIntervalSeconds = 0
+	for value, valid := range map[string]bool{"sha256:" + strings.Repeat("a", 64): true, "sha256:" + strings.Repeat("A", 64): false, "support-v3": false, strings.Repeat("a", 64): false} {
+		policy.QualityEvalSet = value
+		if (ValidatePolicy(policy) == nil) != valid {
+			t.Errorf("eval set %q valid = %t, want %t", value, !valid, valid)
+		}
+	}
 	input := Input{Now: testNow, Policy: DefaultPolicy(), Current: workload(SourceCustomerObserved, 1000), Triggers: []Trigger{{Kind: TriggerTrafficDrift, Detail: "drift"}}}
 	if _, err := Evaluate(input); err == nil {
 		t.Fatal("Evaluate detects drift itself; an external drift trigger must be refused")
