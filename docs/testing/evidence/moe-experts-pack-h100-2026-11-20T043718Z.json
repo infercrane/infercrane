@@ -1,0 +1,162 @@
+{
+  "app_id": "ap-p84l7d3YPkLOdT8cpLQMJ2",
+  "billed_usd": {
+    "cpu": 0.00428058,
+    "egress": 5.94e-06,
+    "h100": 0.06583375,
+    "memory": 0.00228335,
+    "source": "modal billing report --for today --show-resources",
+    "total": 0.07240362
+  },
+  "comparison": {
+    "baseline": "vLLM 0.22.1 fused_experts (Triton), default arguments",
+    "note": "vLLM's default MoE backend for BF16 on H100 may not be its Triton experts; an end-to-end control uses whatever vLLM selects",
+    "shape": {
+      "dtype": "bfloat16",
+      "experts": 128,
+      "hidden": 2048,
+      "intermediate": 768,
+      "source": "Qwen3-30B-A3B expert shape",
+      "tokens": 4,
+      "top_k": 8
+    },
+    "timer": "triton.testing.do_bench median"
+  },
+  "evaluations": [
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": null,
+      "kernel": "correct",
+      "kernel_sha256": "sha256:ad9ca86ace96e3799ee9c20ab76c7f9094c5857385f808b680bd8d2115e1d458",
+      "result": {
+        "baseline_median_us": 234.32520640984413,
+        "candidate_median_us": 172.10927237839493,
+        "correctness": {
+          "determinism": true,
+          "edge_cases": true,
+          "numerical_stability": true,
+          "sanitizer": true,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "roofline_utilization": 0.5071114321990159
+      },
+      "seconds": 38.8,
+      "speedup_vs_vllm_fused_experts": 1.3615,
+      "verification_suite": false
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": null,
+      "kernel": "correct",
+      "kernel_sha256": "sha256:ad9ca86ace96e3799ee9c20ab76c7f9094c5857385f808b680bd8d2115e1d458",
+      "result": {
+        "baseline_median_us": 234.73150660730388,
+        "candidate_median_us": 170.7140051488635,
+        "correctness": {
+          "determinism": true,
+          "edge_cases": true,
+          "numerical_stability": true,
+          "sanitizer": true,
+          "shape_sweep": true,
+          "smoke": true
+        },
+        "cost_usd": 0.0,
+        "roofline_utilization": 0.5112561182922924
+      },
+      "seconds": 23.1,
+      "speedup_vs_vllm_fused_experts": 1.375,
+      "verification_suite": true
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": "smoke",
+      "kernel": "wrong_router_weight",
+      "kernel_sha256": "sha256:26987349fc8c80ae9448c36e8fd864d17bad6c341e6e278d5812d9ff05bdcba6",
+      "result": {
+        "baseline_median_us": 0.0,
+        "candidate_median_us": 0.0,
+        "correctness": {
+          "determinism": false,
+          "edge_cases": false,
+          "numerical_stability": false,
+          "sanitizer": false,
+          "shape_sweep": false,
+          "smoke": false
+        },
+        "cost_usd": 0.0,
+        "failed_stage": "smoke",
+        "roofline_utilization": 0.0
+      },
+      "seconds": 4.8,
+      "verification_suite": false
+    },
+    {
+      "as_expected": true,
+      "exit_code": 0,
+      "expected_failed_stage": "smoke",
+      "kernel": "wrong_gate_up_swapped",
+      "kernel_sha256": "sha256:f25dd48a59a8f9406adca8bdaf09bfbb38828e51a1ab05854ed5822ddce5b610",
+      "result": {
+        "baseline_median_us": 0.0,
+        "candidate_median_us": 0.0,
+        "correctness": {
+          "determinism": false,
+          "edge_cases": false,
+          "numerical_stability": false,
+          "sanitizer": false,
+          "shape_sweep": false,
+          "smoke": false
+        },
+        "cost_usd": 0.0,
+        "failed_stage": "smoke",
+        "roofline_utilization": 0.0
+      },
+      "seconds": 4.3,
+      "verification_suite": false
+    }
+  ],
+  "evidence_class": "real-gpu-evaluator-check",
+  "gpu_seconds": 77.9,
+  "hardware": {
+    "compute_sanitizer": "Copyright (c) 2020-2025 NVIDIA Corporation\nVersion 2025.3.1.0 (build 36400806) (public-release)",
+    "gpu_request": "H100!",
+    "nvidia_smi": "NVIDIA H100 80GB HBM3, 620.70.06, 81559",
+    "software": {
+      "compute_capability": "sm90",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "python": "3.12.13",
+      "torch": "2.11.0+cu130",
+      "torch_cuda": "13.0",
+      "triton": "3.6.0",
+      "vllm": "0.22.1"
+    }
+  },
+  "image_additions": [
+    "cuda-sanitizer-13-0 (apt, test tool only)"
+  ],
+  "pack": "moe-experts",
+  "pack_files": {
+    "evaluate.py": "sha256:8b2a2d69ff0de8274bbcff5a0467555260cbf57fb9369db852e2850ff4b3ca2e",
+    "pack.json": "sha256:df79dceb05f56355b37891db237bf5c87bb0cd9953b37c4def796bc6655a7780"
+  },
+  "qualification_boundary": "evaluator check with the pack's own reference kernel; no generated kernel, no serving, no end-to-end change",
+  "recorded_at": "2026-11-20T04:37:18Z",
+  "runner": "tools/modal-kernel-poc/moe_pack_modal.py",
+  "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+  "sanitizer_self_test": {
+    "exit_code": 0,
+    "output_tail": "========= COMPUTE-SANITIZER\n8192.0\n========= ERROR SUMMARY: 0 errors",
+    "passed": true,
+    "seconds": 3.2
+  },
+  "schema_version": "infercrane.kernel-pack-gpu-check/v1",
+  "verdict": {
+    "evaluator_behaves": true,
+    "sanitizer": "passed"
+  }
+}

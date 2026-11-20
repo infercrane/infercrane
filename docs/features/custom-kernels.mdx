@@ -39,7 +39,8 @@ Reviewed packs today:
 | Normalization | fused residual-add + RMSNorm, Triton | NVIDIA | vLLM 0.22.1 | vLLM's `fused_add_rms_norm` |
 | Mixture-of-experts experts | fused routed experts: gate and up, SiLU, down, weighted sum, Triton | NVIDIA | vLLM 0.22.1 | BF16 expert weights with SiLU and no expert map, bias, or LoRA, under `--moe-backend triton`; other calls keep vLLM's kernel |
 
-Neither pack has been qualified on a GPU yet. The mixture-of-experts pack comes first because published
+Neither pack has qualified a kernel end to end yet. The mixture-of-experts pack's hidden suite has been
+checked on an H100 (see [Evidence so far](#evidence-so-far)). It comes first because published
 measurements put routed experts at 35–46% of decode kernel time for DeepSeek-V3 on one node (H200 and
 MI300X) and the engine's own Triton experts at 10–20% of HBM bandwidth at batch 1 on an H200. In wide
 expert-parallel decode at large batches, communication and attention dominate instead, so a kernel is
@@ -116,6 +117,20 @@ planned with a kernel cannot be created or approved on a control plane that has 
   unknown.
 
 ## Evidence so far
+
+The mixture-of-experts pack on an NVIDIA H100, inside the pinned vLLM 0.22.1 image (Triton 3.6.0, with
+`compute-sanitizer` added as a test tool):
+
+- **The hidden suite catches wrong kernels.** The pack's own correct kernel passed all six stages on both
+  the visible and the hidden verification shapes, with the memory sanitizer reporting no errors. A
+  kernel that ignores the router weights and one that swaps gate and up both failed at the first stage.
+- **vLLM's Triton experts leave room at small batches.** At four tokens on Qwen3-30B-A3B's expert
+  shape (128 experts, hidden 2048, intermediate 768, top-8, BF16), vLLM's `fused_experts` took 234 µs,
+  about 37% of what the H100's memory bandwidth allows. The pack's correct kernel took 171–172 µs,
+  about 51%. This is one shape in a microbenchmark, with a kernel written by hand, not generated. It
+  is not an end-to-end change, and vLLM's default backend for these weights on an H100 may not be its
+  Triton experts.
+  [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-pack-h100-2026-11-20T043718Z.json).
 
 Two kernel screens of Qwen3.8 on an NVIDIA H200 (compute capability 9.0, SGLang source, Triton 3.7.1):
 

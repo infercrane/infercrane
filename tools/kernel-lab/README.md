@@ -161,3 +161,6 @@ docker run --rm --gpus all -v "$PWD/tools/kernel-lab/packs/moe-experts:/pack:ro"
 
 The correct kernel must pass every stage but the sanitizer when `compute-sanitizer` is absent from the
 image; both wrong kernels must fail at `smoke`.
+
+Without a local GPU, run the same check on one Modal H100 with `compute-sanitizer` added; see
+[Modal GPU proof](../modal-kernel-poc/README.md).

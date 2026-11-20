@@ -58,6 +58,19 @@ the vLLM vendor operator:
 modal run tools/modal-kernel-poc/kernel_modal.py --gpu cuda-h100
 ```
 
+Check the mixture-of-experts experts pack's hidden evaluator on one H100, inside
+the pinned vLLM 0.22.1 image with `compute-sanitizer` added:
+
+```bash
+modal run tools/modal-kernel-poc/moe_pack_modal.py --out moe-pack-h100.json
+```
+
+The pack's reference kernel must pass every stage and both wrong kernels must
+fail at `smoke`. It also times the reference kernel against vLLM's own
+`fused_experts`. It loads no model and generates no kernel. The function stops
+after 30 minutes. If `compute-sanitizer` cannot run a known-good program on the
+host, the sanitizer stage is recorded as not run, never as passed.
+
 Run the paired eager-versus-compiled end-to-end campaign:
 
 ```bash
