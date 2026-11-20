@@ -4944,6 +4944,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if notificationService != nil {
 		go notification.Notifier{Service: *notificationService, Store: s, Reports: s, Logger: logger}.Run(ctx)
 	}
+	// Stay optimized checks run off the inference path. They propose runs
+	// that wait for approval; a lease keeps one check per endpoint at a time.
+	go controlapi.StayOptimized{API: controlAPI, Owner: cfg.InstanceID, Logger: logger}.Run(ctx)
 	if controlAPI.ManagedDeployments.Enabled {
 		go runManagedDeploymentExpiry(ctx, s, time.Minute, logger)
 	}

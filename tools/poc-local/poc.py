@@ -658,8 +658,14 @@ def try_inspect(campaign: str) -> dict | None:
     env = dict(os.environ, INFERCRANE_URL=f"http://127.0.0.1:{API_PORT}", INFERCRANE_API_KEY=current["api_key"], INFERCRANE_CONTEXT="")
     try:
         completed = subprocess.run([cli_binary(), "optimize", "inspect", campaign, "--output", "json"], capture_output=True, text=True, env=env, timeout=150)
+    except subprocess.TimeoutExpired:
+        return None
+    if completed.returncode != 0 and '"code":"not_found"' in completed.stderr.replace(" ", ""):
+        # An answer, not an outage: waiting will not bring the campaign back.
+        fail(f"the control plane no longer has campaign {campaign} (its database was reset); start a fresh run with: make poc-local-down && make poc-local")
+    try:
         return json.loads(completed.stdout) if completed.returncode == 0 else None
-    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+    except json.JSONDecodeError:
         return None
 
 

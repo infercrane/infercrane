@@ -956,12 +956,15 @@ type OptimizationCampaign struct {
 	ID, TenantID, IdempotencyKey, InputDigest, ModelIdentity, Objective string
 	Source, Intent, TargetDeployment, State, ProposalJSON               string
 	ApprovedBy, FailureCode                                             string
-	MaxCandidates                                                       int
-	ApprovedMaxCostUSD                                                  *float64
-	ApprovalExpiresAt, ApprovedAt                                       *time.Time
-	CancelRequested                                                     bool
-	CreatedAt, UpdatedAt                                                time.Time
-	Candidates                                                          []OptimizationCandidateRun `json:"candidates,omitempty"`
+	// OriginJSON is continualoptimizer.Origin for a run a Stay optimized
+	// check proposed; empty for a run a person created.
+	OriginJSON                    string
+	MaxCandidates                 int
+	ApprovedMaxCostUSD            *float64
+	ApprovalExpiresAt, ApprovedAt *time.Time
+	CancelRequested               bool
+	CreatedAt, UpdatedAt          time.Time
+	Candidates                    []OptimizationCandidateRun `json:"candidates,omitempty"`
 }
 
 // OptimizationCampaignTransition records one change of a campaign's aggregate
@@ -1039,8 +1042,30 @@ type ContinualOptimizationState struct {
 	BaselineJSON, BaselineDigest           string
 	LatestDecisionID                       string
 	LastExperimentAt                       *time.Time
-	Generation                             int64
-	CreatedAt, UpdatedAt                   time.Time
+	// NextCheckAt and LastCheckAt schedule Stay optimized checks; ObservedJSON
+	// is continualoptimizer.Observed from the last check.
+	NextCheckAt, LastCheckAt     *time.Time
+	LastCheckError, ObservedJSON string
+	Generation                   int64
+	CreatedAt, UpdatedAt         time.Time
+}
+
+// StayOptimizedCheck is one endpoint check a control-plane instance holds the
+// lease for.
+type StayOptimizedCheck struct {
+	TenantID, DeploymentID, DeploymentName string
+	ObservedJSON, LeaseOwner               string
+	LeaseExpiresAt                         time.Time
+}
+
+// EndpointCustomKernel is a custom kernel qualified for, or serving on, one
+// deployment, pinned to the engine release it was qualified on.
+type EndpointCustomKernel struct {
+	ID, TenantID, DeploymentID              string
+	Operator, Family, Engine, EngineVersion string
+	ImageDigest, State, StateReason         string
+	SourceCampaignID                        string
+	CreatedAt, UpdatedAt                    time.Time
 }
 
 type ContinualOptimizationDecisionRecord struct {

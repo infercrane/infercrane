@@ -11,6 +11,18 @@ metadata:
 stringData:
   password: infercrane-poc
 ---
+# The database lives on a volume (kind's local-path storage on the node), not in the
+# container's own filesystem. A Postgres container restarted by memory or disk pressure
+# then keeps the campaign; deleting the cluster still deletes everything.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: infercrane-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 2Gi}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,6 +30,8 @@ metadata:
   namespace: infercrane-system
 spec:
   replicas: 1
+  # One pod at a time: the volume can be mounted by a single pod.
+  strategy: {type: Recreate}
   selector:
     matchLabels: {app: poc-postgres}
   template:
@@ -32,13 +46,18 @@ spec:
             - {name: POSTGRES_USER, value: infercrane}
             - name: POSTGRES_PASSWORD
               valueFrom: {secretKeyRef: {name: poc-postgres, key: password}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
           ports: [{containerPort: 5432}]
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
           # A CPU request gives the database scheduling weight over the model servers,
           # which run without requests and can saturate a laptop during measurement.
           resources: {requests: {cpu: 250m, memory: 256Mi}}
           readinessProbe:
             exec: {command: ["pg_isready", "-U", "infercrane", "-d", "infercrane"]}
             periodSeconds: 2
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: postgres-data}
 ---
 apiVersion: v1
 kind: Service
