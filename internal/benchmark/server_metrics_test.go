@@ -37,7 +37,7 @@ func (r *serverMetricsRunner) Run(ctx context.Context, name string, args ...stri
 
 func TestRunKeepsServerMetricsOffUnlessRequested(t *testing.T) {
 	runner := &serverMetricsRunner{}
-	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1}, runner)
+	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1}, runner, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRunSummarizesRequestedServerMetrics(t *testing.T) {
 		"vllm:num_requests_waiting":{"type":"gauge","series":[]}
 	}}`
 	runner := &serverMetricsRunner{export: export}
-	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ServerMetrics: true}, runner)
+	result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ServerMetrics: true}, runner, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRunSummarizesRequestedServerMetrics(t *testing.T) {
 func TestRunReportsMissingOrUnrecognizedServerMetricsAsUnknown(t *testing.T) {
 	for name, export := range map[string]string{"missing": "", "unrecognized": `[1,2,3]`, "irrelevant": `{"metrics":{"process_cpu_seconds":{"series":[{"stats":{"total":4}}]}}}`} {
 		t.Run(name, func(t *testing.T) {
-			result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ServerMetrics: true}, &serverMetricsRunner{export: export})
+			result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ServerMetrics: true}, &serverMetricsRunner{export: export}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -31,6 +31,10 @@ metrics. A built-in vLLM or SGLang candidate with no workload of its own is read
 default contract, the one it is provisioned with, so its metrics are scraped on every provider. GPU telemetry stays off because benchmarks have no DCGM exporter; it is recorded as
 `not_collected`.
 
+After each of those runs, the campaign also measures how long the engine keeps generating for a
+streaming client that disconnected. See
+[how fast a disconnect frees the engine](/features/benchmarking#how-fast-a-disconnect-frees-the-engine).
+
 <Card title="Benchmarking" icon="gauge" href="/features/benchmarking">
   Understand measurements, persisted reproduction metadata, and evidence limits.
 </Card>
