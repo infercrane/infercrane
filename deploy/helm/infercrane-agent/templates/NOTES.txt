@@ -1,0 +1,21 @@
+The InferCrane agent dials {{ .Values.controlPlane.url }} and opens no port to it.
+{{- if .Values.dataPlane.enabled }}
+
+Agent-managed endpoints are served inside this cluster at:
+
+  http://{{ include "infercrane-agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.dataPlane.service.port }}/v1
+
+Call it with an InferCrane API key. Make an endpoint agent-managed once its server is connected:
+
+  curl -X PUT "$INFERCRANE_URL/api/v1/adoptions/endpoints/ENDPOINT/ownership" \
+    -H "Authorization: Bearer $INFERCRANE_API_KEY" -d '{"ownership_mode":"agent-managed"}'
+{{- end }}
+{{- if .Values.executor.enabled }}
+
+Candidate runs start in namespace {{ include "infercrane-agent.executorNamespace" . }} with images from:
+{{- range .Values.executor.allowedImages }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+
+What leaves this cluster: https://docs.infercrane.com/architecture/agent#what-leaves-your-cloud

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -60,6 +61,8 @@ func Handler(options Options) http.Handler {
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
+			// Load generators count tokens from the server's usage report.
+			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-fake\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":3,\"total_tokens\":%d}}\n\n", body["model"], promptTokens(body), promptTokens(body)+3)
 			fmt.Fprint(w, "data: [DONE]\n\n")
 			return
 		}
@@ -71,7 +74,7 @@ func Handler(options Options) http.Handler {
 			write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": `{"answer":"ok"}`}, "finish_reason": "stop"}}})
 			return
 		}
-		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + options.Worker}, "finish_reason": "stop"}}})
+		write(w, map[string]any{"id": "chatcmpl-fake", "object": "chat.completion", "model": body["model"], "choices": []any{map[string]any{"index": 0, "message": map[string]string{"role": "assistant", "content": "response from " + options.Worker}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": promptTokens(body), "completion_tokens": 3, "total_tokens": promptTokens(body) + 3}})
 	})
 	mux.HandleFunc("POST /v1/completions", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -99,4 +102,22 @@ func Handler(options Options) http.Handler {
 func write(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// promptTokens approximates a prompt's token count by its words, so a fake
+// usage report scales with the request.
+func promptTokens(body map[string]any) int {
+	count := 0
+	messages, _ := body["messages"].([]any)
+	for _, raw := range messages {
+		if message, ok := raw.(map[string]any); ok {
+			if text, ok := message["content"].(string); ok {
+				count += len(strings.Fields(text))
+			}
+		}
+	}
+	if count == 0 {
+		count = 1
+	}
+	return count
 }

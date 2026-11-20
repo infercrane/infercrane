@@ -639,6 +639,15 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/agents/{id}", a.auth(authz.Deploy, a.revokeAgent))
 	mux.HandleFunc("POST /api/v1/agent/sync", a.agentAuth(a.agentSync))
 	mux.HandleFunc("POST /api/v1/agent/servers", a.agentAuth(a.agentRegisterServer))
+	mux.HandleFunc("GET /api/v1/agent/data-plane", a.agentAuth(a.agentDataPlane))
+	mux.HandleFunc("POST /api/v1/agent/quota-leases", a.agentAuth(a.agentQuotaLease))
+	mux.HandleFunc("GET /api/v1/agent/commands", a.agentAuth(a.agentCommands))
+	mux.HandleFunc("POST /api/v1/agent/commands/{id}", a.agentAuth(a.agentCommandUpdate))
+	mux.HandleFunc("POST /api/v1/agents/{id}/candidate-runs", a.auth(authz.Deploy, a.createCandidateRun))
+	mux.HandleFunc("GET /api/v1/agents/{id}/candidate-runs", a.auth(authz.Read, a.listCandidateRuns))
+	mux.HandleFunc("GET /api/v1/agents/{id}/candidate-runs/{run}", a.auth(authz.Read, a.getCandidateRun))
+	mux.HandleFunc("DELETE /api/v1/agents/{id}/candidate-runs/{run}", a.auth(authz.Deploy, a.cancelCandidateRun))
+	mux.HandleFunc("PUT /api/v1/endpoints/{name}/residency", a.auth(authz.Deploy, a.setEndpointResidency))
 	mux.HandleFunc("POST /api/v1/adoptions/endpoints", a.auth(authz.Deploy, a.adoptEndpoint))
 	mux.HandleFunc("PUT /api/v1/adoptions/endpoints/{name}/ownership", a.auth(authz.Deploy, a.promoteAdoptionOwnership))
 	mux.HandleFunc("GET /api/v1/requests/{id}", a.auth(authz.Read, a.requestInspection))
@@ -2696,6 +2705,9 @@ func (a API) submitAsyncInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	if a.refuseCustomerCloudContent(w, r, actor.TenantID, r.PathValue("name")) {
+		return
+	}
 	now := time.Now().UTC()
 	job, created, err := a.AsyncInference.Submit(r.Context(), asyncinference.SubmitRequest{Tenant: actor.TenantID, Endpoint: r.PathValue("name"), Protocol: request.Protocol, IdempotencyKey: request.IdempotencyKey, Payload: request.Input, Priority: request.Priority, ExecutionDeadline: now.Add(time.Duration(request.ExecutionDeadlineSeconds) * time.Second), ExpiresAt: now.Add(time.Duration(request.RetentionSeconds) * time.Second), WebhookURL: request.WebhookURL, WebhookSecretReferenceID: request.WebhookSecretReferenceID})
 	if writeEndpointMutationError(w, err) {
@@ -3566,7 +3578,11 @@ func logicalModelResponse(item domain.LogicalModel) map[string]any {
 }
 
 func endpointResponse(item domain.Endpoint) map[string]any {
-	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "logical_model_id": item.LogicalModelID, "environment_id": item.EnvironmentID, "name": item.Name, "desired_state": item.DesiredState, "observed_state": item.ObservedState, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
+	residency := item.Residency
+	if residency == "" {
+		residency = "any"
+	}
+	return map[string]any{"id": item.ID, "tenant_id": item.TenantID, "logical_model_id": item.LogicalModelID, "environment_id": item.EnvironmentID, "name": item.Name, "desired_state": item.DesiredState, "observed_state": item.ObservedState, "active_serving_plan_id": item.ActiveServingPlanID, "candidate_serving_plan_id": item.CandidateServingPlanID, "residency": residency, "created_at": item.CreatedAt, "updated_at": item.UpdatedAt}
 }
 
 func bindingResponse(item domain.BackendBinding) map[string]any {

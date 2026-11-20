@@ -1,0 +1,101 @@
+# The InferCrane agent dials out only. Nothing here opens a port to InferCrane;
+# the data plane Service is for applications inside your cluster.
+
+image:
+  # The InferCrane release image (it carries the infercrane CLI, kubectl, and AIPerf).
+  repository: ghcr.io/infercrane/infercrane
+  tag: ""          # defaults to the chart's appVersion
+  digest: ""       # sha256:... pins the image; preferred in production
+  pullPolicy: IfNotPresent
+
+controlPlane:
+  # The InferCrane control plane the agent dials. HTTPS is required unless it is
+  # on the same machine.
+  url: ""
+  # PEM bundle of a private CA that signs the control plane's certificate.
+  caBundle: ""
+
+agent:
+  # Secret holding the agent key (infercrane agent create NAME, or the dashboard).
+  keySecret:
+    name: infercrane-agent-key
+    key: key
+  # Secret holding the 64-hex-character key the agent hashes system prompts and
+  # session IDs with. Created with a random value when name is empty. It never
+  # leaves this cluster.
+  hashKeySecret:
+    name: ""
+    key: hash-key
+  # Model servers the agent observes and, once agent-managed, serves. Use
+  # in-cluster Service URLs. Nothing is auto-detected inside a cluster.
+  servers: []
+  #  - http://vllm.models.svc:8000
+  # Optional bearer token of those servers. Sent only to them.
+  serverTokenSecret:
+    name: ""
+    key: token
+  # Endpoint name and model when one server is observed.
+  endpointName: ""
+  model: ""
+  extraArgs: []
+
+dataPlane:
+  # Serve agent-managed endpoints here. Applications in the cluster call
+  # http://<release>-infercrane-agent.<namespace>.svc:<port>/v1 with an
+  # InferCrane API key.
+  enabled: true
+  port: 8080
+  service:
+    type: ClusterIP
+    port: 8080
+
+executor:
+  # Run candidate setups the control plane queues, in this namespace only.
+  enabled: false
+  # Namespace candidates start in; empty means the release namespace. The
+  # agent's Role is created there.
+  namespace: ""
+  # Service account of candidate pods. Created when create is true.
+  runtimeServiceAccount:
+    name: infercrane-runtime
+    create: true
+  # Secret mounted into candidate pods as their API key. Created with a random
+  # value when name is empty.
+  workerSecret:
+    name: ""
+    key: api-key
+  # Device-plugin resource and node label of your accelerators.
+  gpuResource: nvidia.com/gpu
+  gpuProductLabel: nvidia.com/gpu.product
+  # Image repositories candidates may use. Required: nothing else runs.
+  allowedImages: []
+  #  - vllm/vllm-openai
+  #  - docker.io/lmsysorg/sglang
+  # Accelerator names candidates may request; empty means any.
+  allowedAccelerators: []
+  # Your own eval sets for the answer check, by name: name -> eval set JSON.
+  # Their prompts and every answer stay in this cluster.
+  evalSets: {}
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podSecurityContext:
+  runAsUser: 10001
+  runAsGroup: 10001
+
+podAnnotations: {}
+podLabels: {}
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+nodeSelector: {}
+tolerations: []
+affinity: {}

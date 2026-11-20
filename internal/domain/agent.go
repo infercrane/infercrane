@@ -54,3 +54,33 @@ type AdoptedCredential struct {
 	TenantID, EndpointName, TargetID string
 	Sealed                           SealedCredential
 }
+
+// AgentDataPlaneBinding is one active-plan binding of an agent-managed
+// endpoint, with the identities a request record needs. The agent resolves
+// ServerKey to an address it found itself.
+type AgentDataPlaneBinding struct {
+	EndpointID, EndpointName, LogicalModelID, EnvironmentID string
+	ServingPlanID, RoutingPolicy                            string
+	BindingID, TargetID, ServerKey, UpstreamModel, Runtime  string
+	Health                                                  string
+	Priority, Weight                                        int
+}
+
+// AgentCommand is work queued for one agent and its content-free outcome.
+type AgentCommand struct {
+	ID, TenantID, AgentID, Kind, State, Phase string
+	SpecJSON, ResultJSON                      string
+	FailureCode, FailureDetail                string
+	Attempts                                  int
+	LeaseExpiresAt                            *time.Time
+	DeadlineAt                                time.Time
+	CreatedBy                                 string
+	CreatedAt, UpdatedAt                      time.Time
+	StartedAt, FinishedAt                     *time.Time
+}
+
+// AgentCommandUpdate is an agent's report on one leased command.
+type AgentCommandUpdate struct {
+	State, Phase, FailureCode, FailureDetail, ResultJSON string
+	Lease                                                time.Duration
+}

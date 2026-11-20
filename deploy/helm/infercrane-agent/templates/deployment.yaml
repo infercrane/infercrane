@@ -1,0 +1,187 @@
+{{- if not .Values.controlPlane.url }}
+{{- fail "controlPlane.url is required" }}
+{{- end }}
+{{- if and .Values.executor.enabled (not .Values.executor.allowedImages) }}
+{{- fail "executor.allowedImages must list the image repositories candidates may use" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "infercrane-agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "infercrane-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "infercrane-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "infercrane-agent.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "infercrane-agent.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.executor.enabled }}
+      securityContext:
+        runAsNonRoot: true
+        # The release image's user (app) as a number, so the kubelet can
+        # verify it is not root.
+        runAsUser: {{ .Values.podSecurityContext.runAsUser }}
+        runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+        fsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ include "infercrane-agent.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["infercrane"]
+          args:
+            - agent
+            - run
+            - --no-detect
+            {{- range .Values.agent.servers }}
+            - --server={{ . }}
+            {{- end }}
+            {{- if .Values.agent.serverTokenSecret.name }}
+            - --token-env=INFERCRANE_SERVER_TOKEN
+            {{- end }}
+            {{- with .Values.agent.endpointName }}
+            - --as={{ . }}
+            {{- end }}
+            {{- with .Values.agent.model }}
+            - --model={{ . }}
+            {{- end }}
+            {{- if .Values.dataPlane.enabled }}
+            - --serve=0.0.0.0:{{ .Values.dataPlane.port }}
+            {{- end }}
+            {{- if .Values.executor.enabled }}
+            - --executor=kubernetes
+            - --kubernetes-namespace={{ include "infercrane-agent.executorNamespace" . }}
+            - --runtime-service-account={{ .Values.executor.runtimeServiceAccount.name }}
+            - --worker-secret={{ include "infercrane-agent.workerSecret" . }}/{{ .Values.executor.workerSecret.key }}
+            - --worker-key-env=INFERCRANE_WORKER_KEY
+            - --gpu-resource={{ .Values.executor.gpuResource }}
+            - --gpu-product-label={{ .Values.executor.gpuProductLabel }}
+            {{- range .Values.executor.allowedImages }}
+            - --allow-image={{ . }}
+            {{- end }}
+            {{- range .Values.executor.allowedAccelerators }}
+            - --allow-accelerator={{ . }}
+            {{- end }}
+            {{- range $name, $body := .Values.executor.evalSets }}
+            - --eval-set={{ $name }}=/etc/infercrane/eval-sets/{{ $name }}.json
+            {{- end }}
+            {{- end }}
+            {{- range .Values.agent.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: INFERCRANE_URL
+              value: {{ .Values.controlPlane.url | quote }}
+            - name: INFERCRANE_AGENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.agent.keySecret.name }}
+                  key: {{ .Values.agent.keySecret.key }}
+            - name: INFERCRANE_AGENT_HASH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "infercrane-agent.hashKeySecret" . }}
+                  key: {{ .Values.agent.hashKeySecret.key }}
+            {{- if .Values.agent.serverTokenSecret.name }}
+            - name: INFERCRANE_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.agent.serverTokenSecret.name }}
+                  key: {{ .Values.agent.serverTokenSecret.key }}
+            {{- end }}
+            {{- if .Values.executor.enabled }}
+            - name: INFERCRANE_WORKER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "infercrane-agent.workerSecret" . }}
+                  key: {{ .Values.executor.workerSecret.key }}
+            {{- end }}
+            {{- if .Values.controlPlane.caBundle }}
+            - name: INFERCRANE_CLIENT_TLS_CA_FILE
+              value: /etc/infercrane/ca/ca.crt
+            {{- end }}
+            - name: HOME
+              value: /var/lib/infercrane
+            - name: TMPDIR
+              value: /tmp
+          {{- if .Values.dataPlane.enabled }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dataPlane.port }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 6
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: home
+              mountPath: /var/lib/infercrane
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.controlPlane.caBundle }}
+            - name: ca
+              mountPath: /etc/infercrane/ca
+              readOnly: true
+            {{- end }}
+            {{- if .Values.executor.evalSets }}
+            - name: eval-sets
+              mountPath: /etc/infercrane/eval-sets
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.controlPlane.caBundle }}
+        - name: ca
+          configMap:
+            name: {{ include "infercrane-agent.fullname" . }}-ca
+        {{- end }}
+        {{- if .Values.executor.evalSets }}
+        - name: eval-sets
+          configMap:
+            name: {{ include "infercrane-agent.fullname" . }}-eval-sets
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

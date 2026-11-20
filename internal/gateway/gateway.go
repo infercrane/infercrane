@@ -81,6 +81,10 @@ type Gateway struct {
 	Authenticator          interface {
 		AuthenticatePrincipal(context.Context, string) (domain.Principal, error)
 	}
+	// HashKey keys the session and system-prompt hashes in request records.
+	// Empty means APIKey. The InferCrane agent sets a key that never leaves
+	// its machine.
+	HashKey []byte
 }
 type principalKey struct{}
 
@@ -257,6 +261,13 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 	alias := publicAlias
+	if g.Routes.ResidentForTenant(principal.TenantID, alias) {
+		// The endpoint is served inside the customer's cloud by an InferCrane
+		// agent. Its prompts must not be forwarded anywhere from here, not
+		// even to another supply.
+		openAIError(w, "Endpoint '"+alias+"' is served inside your cloud by an InferCrane agent; send this request to the agent's gateway in your cluster", http.StatusForbidden, "residency_error")
+		return
+	}
 	replay := g.replayShape(payload, r.Header)
 	passportID := strings.TrimSpace(r.Header.Get("X-InferCrane-Context-Passport"))
 	preferredBinding, preferredTarget := "", ""
@@ -681,7 +692,11 @@ func (g *Gateway) replayShape(payload map[string]any, headers http.Header) repla
 		if len(value) == 0 {
 			return ""
 		}
-		mac := hmac.New(sha256.New, []byte(g.APIKey))
+		key := g.HashKey
+		if len(key) == 0 {
+			key = []byte(g.APIKey)
+		}
+		mac := hmac.New(sha256.New, key)
 		_, _ = mac.Write(value)
 		return hex.EncodeToString(mac.Sum(nil))
 	}

@@ -32,6 +32,13 @@ type Config struct {
 	// empty turns it off. GatewayServer picks the server by URL or key when
 	// several are observed.
 	Gateway, GatewayServer string
+	// Serve is the listen address of the data plane: the agent serves its
+	// agent-managed endpoints there with InferCrane API keys, routes,
+	// admission, and quota pulled from the control plane. Empty turns it off.
+	Serve string
+	// Executor runs candidate runs the control plane queues for this agent.
+	// Nil means the agent takes no commands.
+	Executor CandidateExecutor
 	// Once runs one detect, register, and sync pass and returns.
 	Once           bool
 	Detector       Detector
@@ -67,6 +74,7 @@ type Status struct {
 	Hardware  agentprotocol.Hardware `json:"hardware"`
 	Servers   []ServerStatus         `json:"servers"`
 	Gateway   string                 `json:"gateway,omitempty"`
+	DataPlane *DataPlaneStatus       `json:"data_plane,omitempty"`
 	Upgrade   agentprotocol.Upgrade  `json:"upgrade"`
 	Sent      []string               `json:"sent"`
 }
@@ -85,6 +93,8 @@ type Agent struct {
 	upgrade    agentprotocol.Upgrade
 	gatewayKey string
 	poll       time.Duration
+	dataPlane  *DataPlane
+	serving    string
 }
 
 // New prepares an agent.
@@ -142,6 +152,18 @@ func Sent(gateway bool) []string {
 	return sent
 }
 
+// SentWith lists what leaves the machine for a full agent configuration.
+func SentWith(gateway, dataPlane, commands bool) []string {
+	sent := Sent(gateway || dataPlane)
+	if dataPlane {
+		sent = append(sent, "for the data plane: quota lease requests (a count per minute), and the endpoint, binding, queue time, and retry count of each request (no request ID, header, prompt, or completion)")
+	}
+	if commands {
+		sent = append(sent, "for candidate runs: progress phases, AIPerf timings and throughput, and answer-check scores and digests (no prompt, answer, or engine log)")
+	}
+	return sent
+}
+
 // Start runs the first pass: inventory, detection, a sync that learns the
 // agent's name, registration, the optional gateway, and a sync with evidence.
 // The gateway lives until ctx ends; its serve errors arrive on the returned
@@ -160,13 +182,46 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 	if err := a.register(ctx); err != nil {
 		return nil, err
 	}
-	gatewayErrors := make(chan error, 1)
+	gatewayErrors := make(chan error, 2)
 	if a.config.Gateway != "" {
 		if err := a.startGateway(ctx, gatewayErrors); err != nil {
 			return nil, err
 		}
 	}
+	if a.config.Serve != "" {
+		dataPlane := newDataPlane(a)
+		a.mu.Lock()
+		a.dataPlane = dataPlane
+		a.mu.Unlock()
+		if err := a.dataPlane.Refresh(ctx); fatal(err) {
+			return nil, err
+		} else if err != nil {
+			a.emit(Event{Kind: "retrying", Message: fmt.Sprintf("data plane snapshot: %v", err)})
+		}
+		if err := a.startDataPlane(ctx, gatewayErrors); err != nil {
+			return nil, err
+		}
+	}
 	return gatewayErrors, a.sync(ctx, true)
+}
+
+func (a *Agent) refreshDataPlane(ctx context.Context) error {
+	a.mu.Lock()
+	dp := a.dataPlane
+	a.mu.Unlock()
+	if dp == nil {
+		return nil
+	}
+	return dp.Refresh(ctx)
+}
+
+func (a *Agent) compileDataPlane() {
+	a.mu.Lock()
+	dp := a.dataPlane
+	a.mu.Unlock()
+	if dp != nil {
+		dp.Compile()
+	}
 }
 
 // firstSync tolerates a just-minted key: each control-plane replica learns
@@ -187,12 +242,17 @@ func (a *Agent) firstSync(ctx context.Context) error {
 	}
 }
 
-// Step probes every server, registers new ones, and syncs once.
+// Step probes every server, registers new ones, refreshes the data plane,
+// and syncs once.
 func (a *Agent) Step(ctx context.Context) error {
 	a.Probe(ctx)
 	if err := a.register(ctx); err != nil && fatal(err) {
 		return err
 	}
+	if err := a.refreshDataPlane(ctx); fatal(err) {
+		return err
+	}
+	a.compileDataPlane()
 	return a.sync(ctx, true)
 }
 
@@ -211,6 +271,10 @@ func (a *Agent) Run(ctx context.Context) (Status, error) {
 	defer hardwareTicker.Stop()
 	syncTimer := time.NewTimer(a.pollInterval())
 	defer syncTimer.Stop()
+	commandErrors := make(chan error, 1)
+	if a.config.Executor != nil {
+		go func() { commandErrors <- a.runCommands(ctx) }()
+	}
 	failures := 0
 	for {
 		select {
@@ -218,6 +282,10 @@ func (a *Agent) Run(ctx context.Context) (Status, error) {
 			return a.Status(), nil
 		case err := <-gatewayErrors:
 			return a.Status(), fmt.Errorf("local gateway stopped: %w", err)
+		case err := <-commandErrors:
+			if fatal(err) {
+				return a.Status(), err
+			}
 		case <-hardwareTicker.C:
 			a.setHardware(a.config.Hardware.Inventory(ctx))
 		case <-probeTicker.C:
@@ -225,7 +293,13 @@ func (a *Agent) Run(ctx context.Context) (Status, error) {
 			if err := a.register(ctx); err != nil && fatal(err) {
 				return a.Status(), err
 			}
+			a.compileDataPlane()
 		case <-syncTimer.C:
+			if err := a.refreshDataPlane(ctx); fatal(err) {
+				return a.Status(), err
+			} else if err != nil {
+				a.emit(Event{Kind: "retrying", Message: fmt.Sprintf("data plane snapshot: %v", err)})
+			}
 			err := a.sync(ctx, true)
 			if fatal(err) {
 				return a.Status(), err
@@ -457,6 +531,8 @@ func (a *Agent) syncRequest() (agentprotocol.SyncRequest, map[string]time.Time, 
 	var shapes []agentprotocol.TrafficShape
 	if gatewayKey != "" {
 		request.Gateway = &agentprotocol.Gateway{Listen: a.config.Gateway, ServerKey: gatewayKey}
+	}
+	if gatewayKey != "" || a.config.Serve != "" {
 		shapes = a.shapes.take(agentprotocol.MaxTrafficShapes)
 		request.Traffic = shapes
 	}
@@ -564,9 +640,16 @@ func withinBudget(relays []agentprotocol.MetricRelay, relayed map[string]time.Ti
 func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := Status{AgentID: a.agentID, AgentName: a.agentName, Hardware: a.hardware, Servers: []ServerStatus{}, Upgrade: a.upgrade, Sent: Sent(a.gatewayKey != "")}
+	out := Status{AgentID: a.agentID, AgentName: a.agentName, Hardware: a.hardware, Servers: []ServerStatus{}, Upgrade: a.upgrade, Sent: SentWith(a.gatewayKey != "", a.config.Serve != "", a.config.Executor != nil)}
 	if a.gatewayKey != "" {
 		out.Gateway = a.config.Gateway
+	}
+	if a.dataPlane != nil {
+		dp, listen := a.dataPlane, a.serving
+		a.mu.Unlock()
+		status := dp.status(listen)
+		a.mu.Lock()
+		out.DataPlane = &status
 	}
 	for _, status := range a.status {
 		item := *status
