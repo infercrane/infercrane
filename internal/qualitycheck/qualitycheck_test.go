@@ -98,14 +98,14 @@ type scriptedCompleter struct {
 	fail    string
 }
 
-func (c *scriptedCompleter) Complete(_ context.Context, target Target, _ EvalSet, prompt Prompt) (string, error) {
+func (c *scriptedCompleter) Complete(_ context.Context, target Target, _ EvalSet, prompt Prompt) (Answer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls = append(c.calls, target.SubjectID+"/"+prompt.ID)
 	if c.fail == target.SubjectID {
-		return "", errors.New("unreachable")
+		return Answer{}, errors.New("unreachable")
 	}
-	return c.answers[target.SubjectID][prompt.ID], nil
+	return Answer{Content: c.answers[target.SubjectID][prompt.ID]}, nil
 }
 
 func testSet(t *testing.T) EvalSet {
@@ -190,7 +190,7 @@ func TestHTTPCompleterSendsGreedyBoundedRequest(t *testing.T) {
 	defer server.Close()
 	set := testSet(t)
 	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, APIKey: "worker-key", Model: "qwen", SubjectID: "r"}, set, Prompt{ID: "a", System: "be brief", Prompt: "What is 487 + 356?"})
-	if err != nil || answer != "843" {
+	if err != nil || answer.Content != "843" || answer.ToolCalls != nil {
 		t.Fatalf("answer = %q, %v", answer, err)
 	}
 	if seen["temperature"] != float64(0) || seen["top_p"] != float64(1) || seen["seed"] != float64(Seed) || seen["max_tokens"] != float64(64) || seen["stream"] != false || seen["model"] != "qwen" {
@@ -198,6 +198,9 @@ func TestHTTPCompleterSendsGreedyBoundedRequest(t *testing.T) {
 	}
 	if messages, _ := seen["messages"].([]any); len(messages) != 2 {
 		t.Fatalf("messages = %v", seen["messages"])
+	}
+	if _, sent := seen["tools"]; sent {
+		t.Fatalf("a case without tools sent tools: %v", seen)
 	}
 	if kwargs, _ := seen["chat_template_kwargs"].(map[string]any); kwargs["enable_thinking"] != false {
 		t.Fatalf("chat_template_kwargs = %v, want reasoning turned off", seen["chat_template_kwargs"])
@@ -210,7 +213,7 @@ func TestHTTPCompleterReturnsNoTextWhenOnlyReasoningCameBack(t *testing.T) {
 	}))
 	defer server.Close()
 	answer, err := HTTPCompleter{}.Complete(context.Background(), Target{Endpoint: server.URL, SubjectID: "r"}, testSet(t), Prompt{ID: "a", Prompt: "x"})
-	if err != nil || answer != "" {
+	if err != nil || answer.Content != "" || answer.answered() {
 		t.Fatalf("answer = %q, %v; want no text and no error", answer, err)
 	}
 }

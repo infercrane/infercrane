@@ -11070,6 +11070,124 @@
           "suite_version": {
             "type": "string"
           },
+          "tool_calls": {
+            "additionalProperties": false,
+            "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.",
+            "properties": {
+              "broken": {
+                "description": "Cases where the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "candidate": {
+                "additionalProperties": false,
+                "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                "properties": {
+                  "extra_calls": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "malformed_arguments": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "missing_call": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "schema_invalid": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "unexpected_call": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "wrong_function": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "missing_call",
+                  "malformed_arguments",
+                  "wrong_function",
+                  "schema_invalid",
+                  "extra_calls",
+                  "unexpected_call"
+                ],
+                "type": "object"
+              },
+              "cases": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "reference": {
+                "allOf": [
+                  {
+                    "additionalProperties": false,
+                    "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                    "properties": {
+                      "extra_calls": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "malformed_arguments": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "missing_call": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "schema_invalid": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "unexpected_call": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "wrong_function": {
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "missing_call",
+                      "malformed_arguments",
+                      "wrong_function",
+                      "schema_invalid",
+                      "extra_calls",
+                      "unexpected_call"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "description": "The reference's own failures; missing, extra, and unexpected calls stay 0."
+              },
+              "reference_invalid": {
+                "description": "Cases where the reference's own calls did not validate; they measure agreement only.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "score": {
+                "description": "Mean over tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference.",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "cases",
+              "score",
+              "broken",
+              "reference_invalid",
+              "candidate",
+              "reference"
+            ],
+            "type": "object"
+          },
           "watch_limit_percent": {
             "type": "number"
           }
@@ -11918,8 +12036,16 @@
       },
       "QualityEvalSetUpload": {
         "additionalProperties": false,
-        "description": "At most 512 KiB. Unknown fields are rejected, so expected answers are not accepted.",
+        "description": "At most 512 KiB. Unknown fields are rejected. Expected answers are accepted only in a graded set, which names its grading. Schema v2 adds conversations and function tools to a case; a case that declares tools is scored on its tool calls, and a graded set may not declare tools.",
         "properties": {
+          "grading": {
+            "description": "Makes the set graded: every prompt is scored against its expected answers.",
+            "enum": [
+              "exact_match",
+              "token_f1"
+            ],
+            "type": "string"
+          },
           "max_tokens": {
             "default": 64,
             "maximum": 512,
@@ -11934,10 +12060,95 @@
           "prompts": {
             "items": {
               "additionalProperties": false,
+              "description": "Either prompt (with an optional system) or, in v2, messages.",
               "properties": {
+                "expected": {
+                  "description": "Accepted answers; only in a graded set, where every prompt needs them.",
+                  "items": {
+                    "maxLength": 8192,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxItems": 8,
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "id": {
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
                   "type": "string"
+                },
+                "messages": {
+                  "description": "v2: a conversation that ends with a user or tool turn.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "content": {
+                        "maxLength": 8192,
+                        "type": "string"
+                      },
+                      "role": {
+                        "enum": [
+                          "system",
+                          "user",
+                          "assistant",
+                          "tool"
+                        ],
+                        "type": "string"
+                      },
+                      "tool_call_id": {
+                        "description": "The earlier call a tool turn answers.",
+                        "type": "string"
+                      },
+                      "tool_calls": {
+                        "description": "Earlier calls of an assistant turn, to declared functions.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "function": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "arguments": {
+                                  "description": "JSON text.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "arguments"
+                              ],
+                              "type": "object"
+                            },
+                            "id": {
+                              "maxLength": 64,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": {
+                              "const": "function",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "function"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 64,
+                  "minItems": 1,
+                  "type": "array"
                 },
                 "prompt": {
                   "maxLength": 8192,
@@ -11947,11 +12158,93 @@
                 "system": {
                   "maxLength": 8192,
                   "type": "string"
+                },
+                "tool_choice": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "auto",
+                        "none",
+                        "required"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "function": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        "type": {
+                          "const": "function",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "function"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "tools": {
+                  "description": "v2: OpenAI function tools the model may call.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "function": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "description": {
+                            "maxLength": 8192,
+                            "type": "string"
+                          },
+                          "name": {
+                            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                            "type": "string"
+                          },
+                          "parameters": {
+                            "additionalProperties": true,
+                            "description": "JSON Schema (draft-07 or 2020-12) the call's arguments must validate against. Remote $ref is refused.",
+                            "type": "object"
+                          },
+                          "strict": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name"
+                        ],
+                        "type": "object"
+                      },
+                      "type": {
+                        "const": "function",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "function"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 64,
+                  "minItems": 1,
+                  "type": "array"
                 }
               },
               "required": [
-                "id",
-                "prompt"
+                "id"
               ],
               "type": "object"
             },
@@ -11960,7 +12253,10 @@
             "type": "array"
           },
           "schema": {
-            "const": "infercrane.dev/quality-eval-set/v1",
+            "enum": [
+              "infercrane.dev/quality-eval-set/v1",
+              "infercrane.dev/quality-eval-set/v2"
+            ],
             "type": "string"
           },
           "version": {

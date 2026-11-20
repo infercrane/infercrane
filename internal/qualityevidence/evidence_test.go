@@ -2,6 +2,7 @@ package qualityevidence
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -147,5 +148,43 @@ func TestRecordCopiesTheVerifiedEnvelopeWithoutChoosingASource(t *testing.T) {
 	payload.Distribution = nil
 	if row, err = Record(payload, envelope); err != nil || row.DistributionJSON != "{}" {
 		t.Fatalf("row without distribution = %+v err=%v", row, err)
+	}
+}
+
+func TestToolCallScoresAreBoundedAndReservedForTheBuiltinCheck(t *testing.T) {
+	payload := Payload{Schema: Schema, Deployment: "prod", RevisionID: "rev", Suite: "suite", SuiteVersion: "v1", Evaluator: "infercrane-builtin", EvaluatorVersion: "3", Score: .95, Passed: false, SampleCount: 3, Distribution: &Distribution{Schema: DistributionSchema, Kind: "paired_scores", PairingDigest: "sha256:" + strings.Repeat("f", 64), Scores: []float64{1, 1, 0}, ToolCalls: &ToolCallScores{Cases: 1, Score: 0, Broken: 1, Candidate: ToolCallFailures{MissingCall: 1}, Reference: ToolCallFailures{SchemaInvalid: 0}}}, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), EvaluatedAt: time.Now().UTC()}
+	if err := payload.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, calls := range map[string]ToolCallScores{
+		"no cases":          {Cases: 0},
+		"more than samples": {Cases: 4},
+		"score above one":   {Cases: 1, Score: 1.5},
+		"more broken":       {Cases: 1, Broken: 2},
+		"negative broken":   {Cases: 1, Broken: -1},
+		"more invalid":      {Cases: 1, ReferenceInvalid: 2},
+		"kind above cases":  {Cases: 1, Candidate: ToolCallFailures{WrongFunction: 2}},
+		"negative kind":     {Cases: 1, Candidate: ToolCallFailures{SchemaInvalid: -1}},
+		"reference missing": {Cases: 1, Reference: ToolCallFailures{MissingCall: 1}},
+	} {
+		payload.Distribution.ToolCalls = &calls
+		if err := payload.Validate(); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	// A customer's evaluator result cannot claim the built-in tool-call score.
+	result := Result{Schema: ResultSchema, Suite: "suite", SuiteVersion: "v1", Evaluator: "ragas", EvaluatorVersion: "1", Score: .9, Passed: true, SampleCount: 3, Distribution: &Distribution{Schema: DistributionSchema, Kind: "paired_scores", PairingDigest: "sha256:" + strings.Repeat("f", 64), Scores: []float64{1, 1, .7}, ToolCalls: &ToolCallScores{Cases: 1, Score: 1}}, ArtifactDigest: "sha256:" + strings.Repeat("a", 64), EvaluatedAt: time.Now().UTC()}
+	if err := result.Validate(); err == nil || !strings.Contains(err.Error(), "built-in answer check") {
+		t.Fatalf("customer tool_calls accepted: %v", err)
+	}
+}
+
+func TestExampleEvaluatorResultDecodes(t *testing.T) {
+	body, err := os.ReadFile("../../examples/evaluation/evaluator-result.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = DecodeResult(body); err != nil {
+		t.Fatalf("the documented example is stale: %v", err)
 	}
 }

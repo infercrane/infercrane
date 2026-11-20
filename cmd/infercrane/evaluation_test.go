@@ -118,3 +118,67 @@ func TestEvaluationIngestPreservesSignedEvidenceWhenAttachmentFails(t *testing.T
 		t.Fatalf("retryable evidence missing or invalid: %v", verifyErr)
 	}
 }
+
+func TestEvaluationSetStayOptimizedChangesOnlyTheEvalSet(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("e", 64)
+	policy := map[string]any{"enabled": true, "minimum_observed_requests": 500, "auto_run": true, "monthly_auto_run_cap_usd": 250}
+	var puts []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/quality/eval-sets/"+digest:
+			_, _ = io.WriteString(w, `{"eval_set":{"digest":"`+digest+`"}}`)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/quality/eval-sets/"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"eval set was not found"}}`)
+		case r.URL.Path == "/api/v1/deployments/missing/continual-optimization/policy":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"no policy"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/deployments/chat/continual-optimization/policy":
+			_ = json.NewEncoder(w).Encode(map[string]any{"policy": policy})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/deployments/chat/continual-optimization/policy":
+			var saved map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&saved)
+			puts, policy = append(puts, saved), saved
+			_ = json.NewEncoder(w).Encode(map[string]any{"policy": saved})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("INFERCRANE_URL", server.URL)
+	t.Setenv("INFERCRANE_API_KEY", "test-secret")
+	t.Setenv("INFERCRANE_CONFIG", filepath.Join(t.TempDir(), "missing-client.json"))
+	run := func(args ...string) (string, error) {
+		return captureStdout(t, func() error {
+			return evaluationSetCommand(context.Background(), append([]string{"stay-optimized"}, args...))
+		})
+	}
+
+	output, err := run("chat", digest)
+	if err != nil || !strings.Contains(output, "with eval set "+digest) || len(puts) != 1 {
+		t.Fatalf("output=%q err=%v puts=%v", output, err, puts)
+	}
+	// Every other setting goes back as it was saved.
+	if puts[0]["quality_eval_set"] != digest || puts[0]["auto_run"] != true || puts[0]["monthly_auto_run_cap_usd"] != float64(250) || puts[0]["minimum_observed_requests"] != float64(500) {
+		t.Fatalf("saved policy = %v", puts[0])
+	}
+	if output, err = run("chat", "default"); err != nil || !strings.Contains(output, "built-in prompts") {
+		t.Fatalf("default: output=%q err=%v", output, err)
+	}
+	if _, set := puts[1]["quality_eval_set"]; set || puts[1]["auto_run"] != true {
+		t.Fatalf("default kept the eval set: %v", puts[1])
+	}
+	for name, args := range map[string][]string{
+		"not a digest": {"chat", "support-v3"},
+		"not uploaded": {"chat", "sha256:" + strings.Repeat("f", 64)},
+		"no policy":    {"missing", digest},
+	} {
+		if _, err = run(args...); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if len(puts) != 2 {
+		t.Fatalf("a refused change was saved: %v", puts)
+	}
+}
