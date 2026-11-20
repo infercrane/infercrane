@@ -23,10 +23,33 @@ const (
 	requestTimeout   = 3 * time.Minute
 )
 
-// Target is one exact revision's directly addressed OpenAI-compatible server.
+// Target is one directly addressed OpenAI-compatible server. SubjectID names
+// exactly what answers: a deployment revision ID, or binding:<id> for a closed
+// API behind an endpoint's external binding. Dialect says how it reads a
+// chat request.
 type Target struct {
-	Endpoint, APIKey, Model, RevisionID string
+	Endpoint, APIKey, Model, SubjectID string
+	Dialect                            Dialect
 }
+
+// Dialect is how a target reads a chat completion request.
+type Dialect string
+
+const (
+	// DialectModelServer is a model server InferCrane runs (vLLM, SGLang,
+	// llama.cpp): max_tokens, and chat_template_kwargs to turn hybrid
+	// reasoning off.
+	DialectModelServer Dialect = ""
+	// DialectOpenAI is OpenAI's API: max_completion_tokens, and no
+	// chat_template_kwargs, which it rejects.
+	DialectOpenAI Dialect = "openai"
+	// DialectOpenAICompatible is another closed OpenAI-compatible API:
+	// max_tokens, and no chat_template_kwargs.
+	DialectOpenAICompatible Dialect = "openai-compatible"
+)
+
+// BindingSubject is the SubjectID of a closed API behind an external binding.
+func BindingSubject(bindingID string) string { return "binding:" + bindingID }
 
 // Completer returns one greedy answer for one prompt.
 type Completer interface {
@@ -49,14 +72,7 @@ func (c HTTPCompleter) Complete(ctx context.Context, target Target, set EvalSet,
 		messages = append(messages, map[string]string{"role": "system", "content": prompt.System})
 	}
 	messages = append(messages, map[string]string{"role": "user", "content": prompt.Prompt})
-	body, err := json.Marshal(map[string]any{
-		"model": target.Model, "messages": messages, "temperature": 0, "top_p": 1,
-		"seed": Seed, "max_tokens": set.MaxTokens, "n": 1, "stream": false,
-		// Hybrid reasoning models (Qwen3, GLM) answer directly when their chat
-		// template supports this switch; templates without it ignore it. A
-		// reasoning trace rarely finishes inside the check's token limit.
-		"chat_template_kwargs": map[string]any{"enable_thinking": false},
-	})
+	body, err := json.Marshal(requestBody(target, set, messages))
 	if err != nil {
 		return "", err
 	}
@@ -102,6 +118,26 @@ func (c HTTPCompleter) Complete(ctx context.Context, target Target, set EvalSet,
 		return "", nil
 	}
 	return strings.TrimSpace(*decoded.Choices[0].Message.Content), nil
+}
+
+func requestBody(target Target, set EvalSet, messages []map[string]string) map[string]any {
+	body := map[string]any{
+		"model": target.Model, "messages": messages, "temperature": 0, "top_p": 1,
+		"seed": Seed, "n": 1, "stream": false,
+	}
+	switch target.Dialect {
+	case DialectOpenAI:
+		body["max_completion_tokens"] = set.MaxTokens
+	case DialectOpenAICompatible:
+		body["max_tokens"] = set.MaxTokens
+	default:
+		body["max_tokens"] = set.MaxTokens
+		// Hybrid reasoning models (Qwen3, GLM) answer directly when their chat
+		// template supports this switch; templates without it ignore it. A
+		// reasoning trace rarely finishes inside the check's token limit.
+		body["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
+	}
+	return body
 }
 
 func (c HTTPCompleter) client() *http.Client {

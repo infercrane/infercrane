@@ -31,3 +31,32 @@ func TestInspectRejectsRedirectedReadinessWithoutForwardingCredential(t *testing
 		t.Fatalf("redirected readiness was accepted: ready=%t redirected=%t", ready, redirected)
 	}
 }
+
+// A hosted OpenAI-compatible API has no /health route; its model list is the
+// probe. A failing /health still fails.
+func TestInspectAcceptsAHostedAPIWithoutAHealthRoute(t *testing.T) {
+	for _, test := range []struct {
+		health int
+		ready  bool
+	}{{http.StatusNotFound, true}, {http.StatusOK, true}, {http.StatusServiceUnavailable, false}, {http.StatusUnauthorized, false}} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer sk-closed" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			switch r.URL.Path {
+			case "/health":
+				w.WriteHeader(test.health)
+			case "/v1/models":
+				_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4.1-mini"}]}`))
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		ready, models := OpenAI{}.InspectWithCredential(context.Background(), server.URL, "sk-closed")
+		server.Close()
+		if _, listed := models["gpt-4.1-mini"]; ready != test.ready || ready && !listed {
+			t.Fatalf("health %d: ready=%v models=%v", test.health, ready, models)
+		}
+	}
+}

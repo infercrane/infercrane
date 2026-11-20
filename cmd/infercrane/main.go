@@ -254,7 +254,11 @@ func writeCLIError(w io.Writer, args []string, err error) {
 		}
 	}
 	if !jsonOutput {
-		fmt.Fprintln(w, "Error:", err)
+		t := plainTheme
+		if file, ok := w.(*os.File); ok {
+			t = themeFor(file, "")
+		}
+		renderHumanError(w, t, err)
 		return
 	}
 	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or inspect current durable state before retrying."}
@@ -441,6 +445,8 @@ func runLegacy(ctx context.Context, args []string) error {
 		return benchmarkCommand(ctx, cfg, args[1:])
 	case "replay":
 		return replayCommand(ctx, cfg, args[1:])
+	case "migrate":
+		return migrateCommand(ctx, cfg, args[1:])
 	case "capacity":
 		return capacityCommand(ctx, cfg, args[1:])
 	case "artifact":
@@ -4987,7 +4993,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		return err
 	}
 	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Replays: s}
+	migrationCheck := optimizationcampaign.MigrationQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Credentials: closedAPICredentials{upstreamCredentials}, Signer: qualitySigner}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}

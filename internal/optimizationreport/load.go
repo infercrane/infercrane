@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/infercrane/infercrane/internal/apibaseline"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/optimizer"
 )
@@ -69,7 +71,55 @@ func Load(ctx context.Context, store Store, tenant, campaignID string) (Report, 
 			}
 		}
 	}
+	if migration := campaignMigration(campaign); migration != nil {
+		current, currentErr := loadCurrentAPI(ctx, store, tenant, campaign, *migration)
+		if currentErr != nil {
+			return Report{}, currentErr
+		}
+		evidence.CurrentAPI = &current
+	}
 	return Assemble(evidence), nil
+}
+
+// CurrentAPIStore reads the closed API of a migration campaign. A store
+// without it reports the current API as unknown.
+type CurrentAPIStore interface {
+	ExternalBindingTarget(context.Context, string, string, string) (domain.ResolvedEndpoint, domain.BackendBinding, domain.Target, error)
+	BindingRateCard(context.Context, string, string) (*apibaseline.RateCard, error)
+	MigrationVerdictsForCampaign(context.Context, string, string) ([]domain.MigrationQualityVerdict, error)
+}
+
+func campaignMigration(campaign domain.OptimizationCampaign) *optimizer.MigrationBaseline {
+	var proposal optimizer.Proposal
+	if json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) != nil {
+		return nil
+	}
+	return proposal.Input.Migration
+}
+
+func loadCurrentAPI(ctx context.Context, store Store, tenant string, campaign domain.OptimizationCampaign, migration optimizer.MigrationBaseline) (CurrentAPIEvidence, error) {
+	current := CurrentAPIEvidence{Endpoint: migration.Endpoint, Binding: migration.Binding, Now: time.Now().UTC()}
+	reader, ok := store.(CurrentAPIStore)
+	if !ok {
+		current.Reason = "the current API's evidence is not readable here"
+		return current, nil
+	}
+	_, binding, target, err := reader.ExternalBindingTarget(ctx, tenant, migration.Endpoint, migration.Binding)
+	if errors.Is(err, domain.ErrNotFound) {
+		current.Reason = "the current API's binding no longer exists"
+		return current, nil
+	}
+	if err != nil {
+		return current, fmt.Errorf("read the current API: %w", err)
+	}
+	current.BindingID, current.Model = binding.ID, target.UpstreamModel
+	if current.RateCard, err = reader.BindingRateCard(ctx, tenant, binding.ID); err != nil {
+		return current, fmt.Errorf("read the current API's rate card: %w", err)
+	}
+	if current.Verdicts, err = reader.MigrationVerdictsForCampaign(ctx, tenant, campaign.ID); err != nil {
+		return current, fmt.Errorf("read the migration verdicts: %w", err)
+	}
+	return current, nil
 }
 
 // replayDigest returns the Replay shape digest a customer-observed campaign

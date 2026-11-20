@@ -76,6 +76,11 @@ footer p{margin:0 0 6px}
 </div>
 {{end}}</section>
 
+{{if .CurrentAPI}}<h2>Your current API</h2>
+<div class="panel"><dl>
+{{range .CurrentAPI}}<dt>{{.Name}}</dt><dd>{{.Value}}</dd>
+{{end}}</dl></div>{{end}}
+
 <h2>How it was measured</h2>
 <div class="panel">
 {{range .Measurement}}<p>{{.}}</p>

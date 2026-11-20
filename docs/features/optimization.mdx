@@ -836,6 +836,15 @@ Agreement with the control is not task accuracy: it shows the candidate answers 
 setup does, on general short prompts. For an accuracy claim on your own tasks, upload an eval set of
 your prompts, or attach your own evaluator's signed results.
 
+A **migration** run (`--migrate-from ENDPOINT/BINDING`) replaces a closed API instead of improving an
+owned setup. Its baseline is the closed API: candidates are measured in turns with the run's control
+as usual, but answer quality is graded against expected answers for both the closed API and each
+candidate, and the two score lists are compared with a paired bootstrap into a signed verdict.
+`PASS` qualifies a candidate, `BLOCK` rejects it with `quality_gate_rejected`, and an undecided
+comparison ends it `inconclusive` with `quality_migration_inconclusive`. Activating the winner starts
+a 5% canary on the closed API's endpoint rather than publishing a new endpoint. See
+[Migrate from a closed API](/features/migration).
+
 ### When a quantized setup can win
 
 A quantized setup, such as a publisher's FP8 or NVFP4 checkpoint, serves different model files than

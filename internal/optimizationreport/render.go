@@ -64,9 +64,12 @@ type View struct {
 	Signals                           []ViewSignal
 	Winner, Baseline                  []ViewField
 	WinnerTitle, BaselineTitle        string
-	Evidence                          []ViewField
-	Unknown                           []ViewField
-	Digest                            string
+	// CurrentAPI is the closed API a migration campaign compares with; empty
+	// for any other campaign.
+	CurrentAPI []ViewField
+	Evidence   []ViewField
+	Unknown    []ViewField
+	Digest     string
 	// Signature says who signed the report and how to verify it, or why it
 	// is not signed.
 	Signature string
@@ -127,6 +130,9 @@ func NewView(d Document) View {
 		v.Rows[index].lead(chosen)
 	}
 	v.Measurement = measurementLines(r)
+	if r.CurrentAPI != nil {
+		v.CurrentAPI = currentAPIFields(*r.CurrentAPI)
+	}
 	for _, candidate := range r.Candidates {
 		v.Candidates = append(v.Candidates, candidateView(candidate))
 	}
@@ -471,6 +477,12 @@ func unknownReason(r Report, field string) string {
 		return "Monthly cost: " + emptyAs(r.Monthly.Reason, "missing input")
 	case field == "bottleneck":
 		return "Bottleneck signals: " + emptyAs(r.Bottleneck.Reason, "missing input")
+	case strings.HasPrefix(field, "current_api.cost") && r.CurrentAPI != nil:
+		return "Your current API's cost: " + emptyAs(r.CurrentAPI.Cost.Reason, "missing input")
+	case field == "current_api.latency" && r.CurrentAPI != nil:
+		return "Your current API's latency: " + emptyAs(r.CurrentAPI.Latency.Reason, "missing input")
+	case field == "current_api.quality" && r.CurrentAPI != nil:
+		return "Answer quality against your current API: " + emptyAs(r.CurrentAPI.Quality.Reason, "missing input")
 	}
 	return "missing input"
 }
@@ -694,6 +706,12 @@ func Text(d Document) string {
 		b.WriteString(strings.TrimRight(columns(row.Label, row.Baseline, row.Winner, row.Change, rest), " ") + "\n")
 		if row.Reason != "" && row.Tone == "unknown" {
 			b.WriteString(pad("", labelWidth) + "  └ " + row.Reason + "\n")
+		}
+	}
+	if len(v.CurrentAPI) > 0 {
+		b.WriteString("\nYour current API\n")
+		for _, field := range v.CurrentAPI {
+			b.WriteString("  " + field.Name + ": " + field.Value + "\n")
 		}
 	}
 	b.WriteString("\nHow it was measured\n")

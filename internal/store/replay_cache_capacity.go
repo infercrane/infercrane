@@ -14,11 +14,8 @@ import (
 )
 
 func (s *Store) CaptureReplayTrace(ctx context.Context, tenant, deploymentName string, window time.Duration, limit int) (domain.ReplayTrace, error) {
-	if window <= 0 || window > 30*24*time.Hour {
-		return domain.ReplayTrace{}, errors.New("replay window must be positive and at most 30 days")
-	}
-	if limit < 1 || limit > 10000 {
-		limit = 1000
+	if err := validReplayWindow(window); err != nil {
+		return domain.ReplayTrace{}, err
 	}
 	resolved, err := s.ResolveForTenant(ctx, tenant, deploymentName)
 	if err != nil {
@@ -26,54 +23,126 @@ func (s *Store) CaptureReplayTrace(ctx context.Context, tenant, deploymentName s
 	}
 	end := time.Now().UTC()
 	start := end.Add(-window)
-	// One row past the limit says whether the window held more requests than
-	// were kept. The query is newest first, so the extra row is the oldest.
-	rows, err := s.QueryContext(ctx, `SELECT started_at,latency_ms,input_tokens,output_tokens,operation_name,streaming,COALESCE(session_id_hash,''),COALESCE(parent_session_id_hash,''),COALESCE(shared_prefix_hash,''),tool_pause_ms FROM request_records WHERE tenant_id=? AND deployment_id=? AND started_at>=? AND started_at<=? ORDER BY started_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, start, end, limit+1)
+	observations, limitReached, err := s.replayObservations(ctx, `tenant_id=? AND deployment_id=?`, []any{tenant, resolved.Deployment.ID}, start, end, limit)
 	if err != nil {
 		return domain.ReplayTrace{}, err
+	}
+	trace, err := replay.Build(resolved.Deployment.ID, deploymentName, resolved.Deployment.ActiveRevisionID, start, end, observations)
+	if err != nil {
+		return trace, err
+	}
+	return s.insertReplayTrace(ctx, tenant, trace, limitReached)
+}
+
+// CaptureEndpointReplayTrace builds a trace from one endpoint's requests, or
+// from one binding of it when bindingName is set. It is how a closed API
+// adopted as an external binding, which has no deployment, gets a measured
+// workload: the requests it served through the gateway, content-free.
+func (s *Store) CaptureEndpointReplayTrace(ctx context.Context, tenant, endpointName, bindingName string, window time.Duration, limit int) (domain.ReplayTrace, error) {
+	if err := validReplayWindow(window); err != nil {
+		return domain.ReplayTrace{}, err
+	}
+	resolved, err := s.ResolveEndpointForTenant(ctx, tenant, endpointName)
+	if err != nil {
+		return domain.ReplayTrace{}, err
+	}
+	filter, args := `tenant_id=? AND endpoint_id=?`, []any{tenant, resolved.Endpoint.ID}
+	bindingID := ""
+	if bindingName != "" {
+		binding, found := endpointBinding(resolved, bindingName)
+		if !found {
+			return domain.ReplayTrace{}, domain.ErrNotFound
+		}
+		bindingID = binding.ID
+		filter, args = `tenant_id=? AND binding_id=?`, []any{tenant, bindingID}
+	}
+	end := time.Now().UTC()
+	start := end.Add(-window)
+	observations, limitReached, err := s.replayObservations(ctx, filter, args, start, end, limit)
+	if err != nil {
+		return domain.ReplayTrace{}, err
+	}
+	trace, err := replay.Build("", "", "", start, end, observations)
+	if err != nil {
+		return trace, err
+	}
+	trace.EndpointID, trace.EndpointName, trace.BindingID = resolved.Endpoint.ID, resolved.Endpoint.Name, bindingID
+	return s.insertReplayTrace(ctx, tenant, trace, limitReached)
+}
+
+// endpointBinding finds a binding of the endpoint by name or ID.
+func endpointBinding(resolved domain.ResolvedEndpoint, nameOrID string) (domain.BackendBinding, bool) {
+	for _, binding := range resolved.Bindings {
+		if binding.Name == nameOrID || binding.ID == nameOrID {
+			return binding, true
+		}
+	}
+	return domain.BackendBinding{}, false
+}
+
+func validReplayWindow(window time.Duration) error {
+	if window <= 0 || window > 30*24*time.Hour {
+		return errors.New("replay window must be positive and at most 30 days")
+	}
+	return nil
+}
+
+// replayObservations reads the newest requests matching filter in the window,
+// up to limit. One row past the limit says whether the window held more
+// requests than were kept. The query is newest first, so the extra row is the
+// oldest.
+func (s *Store) replayObservations(ctx context.Context, filter string, args []any, start, end time.Time, limit int) ([]replay.Observation, bool, error) {
+	if limit < 1 || limit > 10000 {
+		limit = 1000
+	}
+	query := `SELECT started_at,latency_ms,ttft_ms,input_tokens,output_tokens,cached_input_tokens,operation_name,streaming,COALESCE(session_id_hash,''),COALESCE(parent_session_id_hash,''),COALESCE(shared_prefix_hash,''),tool_pause_ms FROM request_records WHERE ` + filter + ` AND started_at>=? AND started_at<=? ORDER BY started_at DESC LIMIT ?`
+	rows, err := s.QueryContext(ctx, query, append(args, start, end, limit+1)...)
+	if err != nil {
+		return nil, false, err
 	}
 	defer rows.Close()
 	var observations []replay.Observation
 	for rows.Next() {
 		var o replay.Observation
 		var started string
-		if err = rows.Scan(&started, &o.DurationMS, &o.InputTokens, &o.OutputTokens, &o.Operation, &o.Streaming, &o.SessionIDHash, &o.ParentSessionIDHash, &o.SharedPrefixHash, &o.ToolPauseMS); err != nil {
-			return domain.ReplayTrace{}, err
+		if err = rows.Scan(&started, &o.DurationMS, &o.TTFTMS, &o.InputTokens, &o.OutputTokens, &o.CachedInputTokens, &o.Operation, &o.Streaming, &o.SessionIDHash, &o.ParentSessionIDHash, &o.SharedPrefixHash, &o.ToolPauseMS); err != nil {
+			return nil, false, err
 		}
 		o.StartedAt = parseTime(started)
 		observations = append(observations, o)
 	}
 	if err = rows.Err(); err != nil {
-		return domain.ReplayTrace{}, err
+		return nil, false, err
 	}
 	limitReached := len(observations) > limit
 	if limitReached {
 		observations = observations[:limit]
 	}
-	trace, err := replay.Build(resolved.Deployment.ID, deploymentName, resolved.Deployment.ActiveRevisionID, start, end, observations)
-	if err != nil {
-		return trace, err
-	}
+	return observations, limitReached, nil
+}
+
+func (s *Store) insertReplayTrace(ctx context.Context, tenant string, trace domain.ReplayTrace, limitReached bool) (domain.ReplayTrace, error) {
 	trace.RequestLimitReached = &limitReached
+	var err error
 	trace.ID, err = newID()
 	if err != nil {
 		return trace, err
 	}
 	stamp := now()
-	_, err = s.ExecContext(ctx, `INSERT INTO replay_traces(id,tenant_id,deployment_id,deployment_name,revision_id,schema_version,window_start,window_end,request_count,shape_json,summary_json,shape_digest,created_at,request_limit_reached) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?)`, trace.ID, tenant, trace.DeploymentID, trace.DeploymentName, null(trace.RevisionID), trace.SchemaVersion, trace.WindowStart, trace.WindowEnd, trace.RequestCount, trace.ShapeJSON, trace.SummaryJSON, trace.ShapeDigest, stamp, limitReached)
+	_, err = s.ExecContext(ctx, `INSERT INTO replay_traces(id,tenant_id,deployment_id,deployment_name,endpoint_id,endpoint_name,binding_id,revision_id,schema_version,window_start,window_end,request_count,shape_json,summary_json,shape_digest,created_at,request_limit_reached) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?::jsonb,?,?,?)`, trace.ID, tenant, null(trace.DeploymentID), null(trace.DeploymentName), null(trace.EndpointID), null(trace.EndpointName), null(trace.BindingID), null(trace.RevisionID), trace.SchemaVersion, trace.WindowStart, trace.WindowEnd, trace.RequestCount, trace.ShapeJSON, trace.SummaryJSON, trace.ShapeDigest, stamp, limitReached)
 	trace.TenantID = tenant
 	trace.CreatedAt = parseTime(stamp)
 	return trace, err
 }
 
 // replayTraceColumns are read by scanReplayTrace, in its order.
-const replayTraceColumns = `id,tenant_id,deployment_id,deployment_name,COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at,request_limit_reached`
+const replayTraceColumns = `id,tenant_id,COALESCE(deployment_id,''),COALESCE(deployment_name,''),COALESCE(endpoint_id,''),COALESCE(endpoint_name,''),COALESCE(binding_id,''),COALESCE(revision_id,''),schema_version,window_start,window_end,request_count,shape_json::text,summary_json::text,shape_digest,created_at,request_limit_reached`
 
 func scanReplayTrace(row interface{ Scan(...any) error }) (domain.ReplayTrace, error) {
 	var trace domain.ReplayTrace
 	var start, end, created string
 	var limitReached sql.NullBool
-	if err := row.Scan(&trace.ID, &trace.TenantID, &trace.DeploymentID, &trace.DeploymentName, &trace.RevisionID, &trace.SchemaVersion, &start, &end, &trace.RequestCount, &trace.ShapeJSON, &trace.SummaryJSON, &trace.ShapeDigest, &created, &limitReached); err != nil {
+	if err := row.Scan(&trace.ID, &trace.TenantID, &trace.DeploymentID, &trace.DeploymentName, &trace.EndpointID, &trace.EndpointName, &trace.BindingID, &trace.RevisionID, &trace.SchemaVersion, &start, &end, &trace.RequestCount, &trace.ShapeJSON, &trace.SummaryJSON, &trace.ShapeDigest, &created, &limitReached); err != nil {
 		return trace, err
 	}
 	trace.WindowStart, trace.WindowEnd, trace.CreatedAt = parseTime(start), parseTime(end), parseTime(created)
@@ -112,6 +181,32 @@ func (s *Store) ReplayTraces(ctx context.Context, tenant, deploymentName string,
 		return nil, err
 	}
 	rows, err := s.QueryContext(ctx, `SELECT `+replayTraceColumns+` FROM replay_traces WHERE tenant_id=? AND deployment_id=? ORDER BY created_at DESC LIMIT ?`, tenant, resolved.Deployment.ID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.ReplayTrace, 0)
+	for rows.Next() {
+		row, scanErr := scanReplayTrace(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// EndpointReplayTraces lists the traces captured from an endpoint's requests,
+// newest first.
+func (s *Store) EndpointReplayTraces(ctx context.Context, tenant, endpointName string, limit int) ([]domain.ReplayTrace, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	resolved, err := s.ResolveEndpointForTenant(ctx, tenant, endpointName)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.QueryContext(ctx, `SELECT `+replayTraceColumns+` FROM replay_traces WHERE tenant_id=? AND endpoint_id=? ORDER BY created_at DESC LIMIT ?`, tenant, resolved.Endpoint.ID, limit)
 	if err != nil {
 		return nil, err
 	}
