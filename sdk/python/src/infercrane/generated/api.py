@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
-from .models import DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope, QualityEvidenceList
+from .models import AuditEventList, DeploymentList, DeploymentOperationEnvelope, DeploymentView, IntentPlanEnvelope, ObjectList, OperationData, OperationEnvelope, QualityEvidenceList
 
 
 class Transport(Protocol):
@@ -875,9 +875,9 @@ class ControlAPI:
         request_path = "/orphans"
         return cast(ObjectList, self._transport.request("GET", request_path))
 
-    def list_audit_events(self) -> dict[str, Any]:
+    def list_audit_events(self) -> AuditEventList:
         request_path = "/audit-events"
-        return cast(dict[str, Any], self._transport.request("GET", request_path))
+        return cast(AuditEventList, self._transport.request("GET", request_path))
 
     def set_tenant_quota(self, *, body: dict[str, Any]) -> None:
         request_path = "/tenant/quota"

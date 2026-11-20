@@ -95,6 +95,15 @@ class DeploymentView(DeploymentViewRequired, total=False):
 class ObjectList(TypedDict):
     data: list[dict[str, Any]]
 
+class AuditEventCursor(TypedDict):
+    before: str
+    before_id: str
+
+class AuditEventList(TypedDict):
+    data: list[dict[str, Any]]
+    limit: int
+    next: AuditEventCursor | None
+
 class QualityEvidenceList(TypedDict):
     data: list[dict[str, Any]]
     verdicts: dict[str, Any]
