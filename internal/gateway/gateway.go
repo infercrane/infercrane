@@ -363,10 +363,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			return
 		}
 	}
-	client := g.Client
-	if client == nil {
-		client = &http.Client{Transport: &http.Transport{MaxIdleConns: 512, MaxIdleConnsPerHost: 128, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Minute}}
-	}
+	client := g.upstreamClient()
 	call := upstreamCall{tenantID: principal.TenantID, requestID: requestID, traceParent: traceParent, resource: resource, started: started, client: client}
 	attempt, refused := g.forward(r, call, route, body, retryBudget, 0)
 	if refused != nil {
