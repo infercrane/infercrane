@@ -339,7 +339,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 				w.Header().Set("Retry-After", "1")
 			}
 			queueMS := float64(time.Since(admissionStarted).Microseconds()) / 1000
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0)
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, "")
 			openAIError(w, admissionErr.Error(), status, errorType)
 			return
 		}
@@ -358,119 +358,73 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if g.RequestAuthorizer != nil {
 		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
 			w.Header().Set("Retry-After", "1")
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0)
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, "")
 			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
-	}
-	evidenceResult := g.observeCapacity(r.Context(), route, started)
-	billingAuthorization := domain.ManagedUsageAuthorization{}
-	if route.ExternalPolicyID != "" {
-		if g.ManagedBilling != nil {
-			// Public request IDs are caller-controlled observability values. Billing
-			// reservations use a fresh internal identity so replaying X-Request-ID
-			// cannot reuse a settled charge for another supplier transmission.
-			billingRequestID := "usage_" + randomID()
-			billingAuthorization, err = g.ManagedBilling.AuthorizeManagedUsage(r.Context(), principal.TenantID, route.ExternalPolicyID, billingRequestID, route.Provider, route.UpstreamModel)
-			if err != nil {
-				g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusPaymentRequired, "prepaid_balance_insufficient", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
-				openAIError(w, "Prepaid managed Model API balance is insufficient", http.StatusPaymentRequired, "billing_error")
-				return
-			}
-		}
-		if g.ExternalAuthorizer == nil {
-			g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "external budget unavailable before supplier transmission")
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
-			openAIError(w, "External fallback budget is unavailable", http.StatusTooManyRequests, "rate_limit_error")
-			return
-		}
-		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
-			g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "external hard budget exhausted before supplier transmission")
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "external_budget_exhausted", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, 0)
-			openAIError(w, "External fallback hard budget is exhausted", http.StatusTooManyRequests, "rate_limit_error")
-			return
-		}
-	}
-	if route.ComputeMode == "serverless" && g.CapacityObservers[route.Provider] == nil && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
-		age := started.Sub(route.ProviderObservedAt)
-		if age >= 0 && age <= 30*time.Second {
-			workers := *route.ProviderWorkers
-			cold := workers == 0
-			observedAt := route.ProviderObservedAt
-			evidenceResult = resolvedCapacityEvidence(capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt})
-			if cold {
-				invalidated := route
-				invalidated.ProviderWorkers, invalidated.ProviderObservedAt = nil, time.Time{}
-				g.Routes.Put(invalidated)
-			}
-		}
-	}
-	target, err := openaicompat.Endpoint(route.RouterURL, resource)
-	if err != nil {
-		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "invalid supplier endpoint before transmission")
-		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
-		return
 	}
 	client := g.Client
 	if client == nil {
 		client = &http.Client{Transport: &http.Transport{MaxIdleConns: 512, MaxIdleConnsPerHost: 128, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Minute}}
 	}
-	var resp *http.Response
-	attemptCount := 0
-	for attempt := 0; attempt <= retryBudget; attempt++ {
-		attemptCount++
-		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
-		if requestErr != nil {
-			err = requestErr
-			break
+	call := upstreamCall{tenantID: principal.TenantID, requestID: requestID, traceParent: traceParent, resource: resource, started: started, client: client}
+	attempt, refused := g.forward(r, call, route, body, retryBudget, 0)
+	if refused != nil {
+		if refused.errorType != "" {
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, refused.status, refused.errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, 0, "")
 		}
-		copyHeaders(req.Header, r.Header)
-		// Compression is negotiated independently on each side of the gateway.
-		// Forwarding the caller's Accept-Encoding makes the upstream transport
-		// treat the encoding as caller-managed, so it will not transparently
-		// decode the response. Some provider proxies then strip Content-Encoding,
-		// leaving clients with opaque gzip bytes. Request identity here so request
-		// evidence, SSE framing, and the downstream response remain observable.
-		req.Header.Set("Accept-Encoding", "identity")
-		if route.UpstreamAPIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Request-ID", requestID)
-		req.Header.Set("traceparent", traceParent)
-		req.Header.Set("X-InferCrane-Attempt", strconv.Itoa(attempt+1))
-		resp, err = client.Do(req)
-		if err == nil && (resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout) {
-			break
-		}
-		if resp != nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-			_ = resp.Body.Close()
-			resp = nil
-		}
-		if attempt < retryBudget {
-			select {
-			case <-r.Context().Done():
-				err = r.Context().Err()
-				attempt = retryBudget
-			case <-time.After(time.Duration(attempt+1) * 25 * time.Millisecond):
-			}
-		}
-	}
-	if err != nil {
-		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "supplier connection failed before a response")
-		status, errorType, message := http.StatusServiceUnavailable, "upstream_unavailable", "Inference upstream is unavailable"
-		if errors.Is(err, context.DeadlineExceeded) {
-			status, errorType, message = http.StatusGatewayTimeout, "request_deadline_exceeded", "Inference request exceeded its endpoint deadline"
-		}
-		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
-		openAIError(w, message, status, "server_error")
+		openAIError(w, refused.message, refused.status, refused.publicType)
 		return
 	}
+	// A buffered request that no route answered fails over, once per route and
+	// at most maxFailoverRoutes times, to the next route of a primary-fallback
+	// endpoint. Only the first route spends the endpoint's retry budget; the
+	// router behind a route has already retried its own workers. A paid
+	// external route is never left for another, as it is never retried: the
+	// supplier may have charged for the attempt.
+	retries, attempts, fallbackReason := 0, attempt.attempts, ""
+	tried := []routes.Snapshot{route}
+	for hop := 0; hop < maxFailoverRoutes && !streaming && route.ExternalPolicyID == "" && attempt.mayFailOver(r.Context()); hop++ {
+		next, releaseNext, found := g.Routes.AcquireFallbackForTenant(principal.TenantID, alias, tried)
+		if !found {
+			break
+		}
+		defer releaseNext()
+		tried = append(tried, next)
+		if !next.ProtocolCapabilities.Supports(operation) && !(operation == "chat" && next.ProtocolCapabilities == (runtimecontract.ProtocolCapabilities{})) {
+			continue
+		}
+		payload["model"] = next.UpstreamModel
+		nextBody, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			continue
+		}
+		nextAttempt, nextRefused := g.forward(r, call, next, nextBody, 0, attempts)
+		if nextRefused != nil {
+			// A fallback that turns the request away before sending it, such as
+			// an exhausted external budget, is skipped; the caller gets the
+			// failure of the route that was actually tried.
+			continue
+		}
+		if fallbackReason == "" {
+			fallbackReason = attempt.failoverReason()
+		}
+		retries += attempt.attempts - 1
+		attempts += nextAttempt.attempts
+		attempt, route = nextAttempt, next
+	}
+	retries += attempt.attempts - 1
+	if passportID != "" && fallbackReason != "" {
+		w.Header().Set("X-InferCrane-Affinity", "fallback")
+	}
+	resp := attempt.resp
 	if resp == nil {
-		g.releaseManagedBilling(r.Context(), principal.TenantID, billingAuthorization, "supplier returned no response")
-		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusServiceUnavailable, "upstream_unavailable", streaming, responseObservation{}, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
-		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
+		status, errorType, message := http.StatusServiceUnavailable, "upstream_unavailable", "Inference upstream is unavailable"
+		if errors.Is(attempt.err, context.DeadlineExceeded) {
+			status, errorType, message = http.StatusGatewayTimeout, "request_deadline_exceeded", "Inference request exceeded its endpoint deadline"
+		}
+		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, retries, fallbackReason)
+		openAIError(w, message, status, "server_error")
 		return
 	}
 	defer resp.Body.Close()
@@ -490,19 +444,168 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			errorType = "upstream_disconnect"
 		}
 	}
-	if billingAuthorization.Required && g.ManagedBilling != nil {
+	if attempt.billing.Required && g.ManagedBilling != nil {
 		usage := observation.usage()
 		inputTokens, outputTokens := usage.inputTokens, usage.outputTokens
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-		if _, settleErr := g.ManagedBilling.SettleManagedUsage(settleCtx, principal.TenantID, billingAuthorization.ReservationID, domain.ManagedUsageSettlement{StatusCode: resp.StatusCode, InputTokens: inputTokens, OutputTokens: outputTokens}); settleErr != nil && g.Logger != nil {
+		if _, settleErr := g.ManagedBilling.SettleManagedUsage(settleCtx, principal.TenantID, attempt.billing.ReservationID, domain.ManagedUsageSettlement{StatusCode: resp.StatusCode, InputTokens: inputTokens, OutputTokens: outputTokens}); settleErr != nil && g.Logger != nil {
 			g.Logger.Error("settle managed model API usage", "error", settleErr, "request_id", requestID, "tenant_id", principal.TenantID)
 		}
 		cancel()
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-evidenceResult, replay, &queueMS, max(0, attemptCount-1))
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-attempt.evidence, replay, &queueMS, retries, fallbackReason)
 	if g.Logger != nil {
-		g.Logger.Info("inference request", "request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds())/1000)
+		attributes := []any{"request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds()) / 1000}
+		if fallbackReason != "" {
+			attributes = append(attributes, "binding_id", route.BindingID, "fallback_reason", fallbackReason)
+		}
+		g.Logger.Info("inference request", attributes...)
 	}
+}
+
+// maxFailoverRoutes bounds how many further routes of a primary-fallback
+// endpoint one request may try after its first route failed. A route skipped
+// before anything was sent to it, such as one out of budget, counts too.
+const maxFailoverRoutes = 2
+
+// upstreamCall is what stays the same for a request whichever route serves it.
+type upstreamCall struct {
+	tenantID, requestID, traceParent, resource string
+	started                                    time.Time
+	client                                     *http.Client
+}
+
+// routeAttempt is what one route did with a request. resp is nil when the
+// route gave no usable response: err then holds the last transport or
+// context error, or lastStatus the last 502, 503 or 504 the route answered.
+type routeAttempt struct {
+	resp       *http.Response
+	err        error
+	lastStatus int
+	attempts   int
+	billing    domain.ManagedUsageAuthorization
+	evidence   <-chan capacityEvidence
+}
+
+// mayFailOver reports whether the request may move to another route: no
+// response byte came back, and the caller has neither gone nor run out of
+// time. A timeout does not move, since the route may still be working.
+func (a routeAttempt) mayFailOver(ctx context.Context) bool {
+	return a.resp == nil && ctx.Err() == nil && !errors.Is(a.err, context.DeadlineExceeded) && !errors.Is(a.err, context.Canceled)
+}
+
+// failoverReason is recorded as request_records.fallback_reason on the
+// request a later route served.
+func (a routeAttempt) failoverReason() string {
+	if a.err != nil || a.lastStatus == 0 {
+		return "upstream_connection_failed"
+	}
+	return "upstream_" + strconv.Itoa(a.lastStatus)
+}
+
+// refusal is a route turning a request away before anything was sent to it.
+// errorType is the recorded error; empty means the refusal is not recorded.
+type refusal struct {
+	status                         int
+	errorType, message, publicType string
+}
+
+// forward sends the request to one route: it reserves managed billing and
+// external budget first, then makes up to 1+retryBudget attempts. A failed
+// route's reservation is released before forward returns; a response's
+// reservation is settled by the caller.
+func (g *Gateway) forward(r *http.Request, call upstreamCall, route routes.Snapshot, body []byte, retryBudget, priorAttempts int) (routeAttempt, *refusal) {
+	result := routeAttempt{evidence: g.observeCapacity(r.Context(), route, call.started)}
+	var err error
+	if route.ExternalPolicyID != "" {
+		if g.ManagedBilling != nil {
+			// Public request IDs are caller-controlled observability values. Billing
+			// reservations use a fresh internal identity so replaying X-Request-ID
+			// cannot reuse a settled charge for another supplier transmission.
+			billingRequestID := "usage_" + randomID()
+			result.billing, err = g.ManagedBilling.AuthorizeManagedUsage(r.Context(), call.tenantID, route.ExternalPolicyID, billingRequestID, route.Provider, route.UpstreamModel)
+			if err != nil {
+				return result, &refusal{status: http.StatusPaymentRequired, errorType: "prepaid_balance_insufficient", message: "Prepaid managed Model API balance is insufficient", publicType: "billing_error"}
+			}
+		}
+		if g.ExternalAuthorizer == nil {
+			g.releaseManagedBilling(r.Context(), call.tenantID, result.billing, "external budget unavailable before supplier transmission")
+			return result, &refusal{status: http.StatusTooManyRequests, errorType: "external_budget_unavailable", message: "External fallback budget is unavailable", publicType: "rate_limit_error"}
+		}
+		if _, err := g.ExternalAuthorizer.Authorize(route.ExternalPolicyID); err != nil {
+			g.releaseManagedBilling(r.Context(), call.tenantID, result.billing, "external hard budget exhausted before supplier transmission")
+			return result, &refusal{status: http.StatusTooManyRequests, errorType: "external_budget_exhausted", message: "External fallback hard budget is exhausted", publicType: "rate_limit_error"}
+		}
+	}
+	if route.ComputeMode == "serverless" && g.CapacityObservers[route.Provider] == nil && route.ProviderWorkers != nil && !route.ProviderObservedAt.IsZero() {
+		age := call.started.Sub(route.ProviderObservedAt)
+		if age >= 0 && age <= 30*time.Second {
+			workers := *route.ProviderWorkers
+			cold := workers == 0
+			observedAt := route.ProviderObservedAt
+			result.evidence = resolvedCapacityEvidence(capacityEvidence{coldStart: &cold, workers: &workers, observedAt: &observedAt})
+			if cold {
+				invalidated := route
+				invalidated.ProviderWorkers, invalidated.ProviderObservedAt = nil, time.Time{}
+				g.Routes.Put(invalidated)
+			}
+		}
+	}
+	target, err := openaicompat.Endpoint(route.RouterURL, call.resource)
+	if err != nil {
+		g.releaseManagedBilling(r.Context(), call.tenantID, result.billing, "invalid supplier endpoint before transmission")
+		return result, &refusal{status: http.StatusServiceUnavailable, message: "Inference upstream is unavailable", publicType: "server_error"}
+	}
+	for attempt := 0; attempt <= retryBudget; attempt++ {
+		result.attempts++
+		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(body))
+		if requestErr != nil {
+			result.err = requestErr
+			break
+		}
+		copyHeaders(req.Header, r.Header)
+		// Compression is negotiated independently on each side of the gateway.
+		// Forwarding the caller's Accept-Encoding makes the upstream transport
+		// treat the encoding as caller-managed, so it will not transparently
+		// decode the response. Some provider proxies then strip Content-Encoding,
+		// leaving clients with opaque gzip bytes. Request identity here so request
+		// evidence, SSE framing, and the downstream response remain observable.
+		req.Header.Set("Accept-Encoding", "identity")
+		if route.UpstreamAPIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+route.UpstreamAPIKey)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", call.requestID)
+		req.Header.Set("traceparent", call.traceParent)
+		req.Header.Set("X-InferCrane-Attempt", strconv.Itoa(priorAttempts+attempt+1))
+		resp, doErr := call.client.Do(req)
+		result.err = doErr
+		if doErr == nil && (resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != http.StatusGatewayTimeout) {
+			result.resp = resp
+			break
+		}
+		if resp != nil {
+			result.lastStatus = resp.StatusCode
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+			_ = resp.Body.Close()
+		}
+		if attempt < retryBudget {
+			select {
+			case <-r.Context().Done():
+				result.err = r.Context().Err()
+				attempt = retryBudget
+			case <-time.After(time.Duration(attempt+1) * 25 * time.Millisecond):
+			}
+		}
+	}
+	if result.resp == nil {
+		reason := "supplier returned no response"
+		if result.err != nil {
+			reason = "supplier connection failed before a response"
+		}
+		g.releaseManagedBilling(r.Context(), call.tenantID, result.billing, reason)
+	}
+	return result, nil
 }
 
 func (g *Gateway) hostedProductID(publicAlias string) string {
@@ -620,7 +723,7 @@ func (g *Gateway) replayShape(payload map[string]any, headers http.Header) repla
 	return shape
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape, queueMS *float64, retryCount int) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape, queueMS *float64, retryCount int, fallbackReason string) {
 	if g.Recorder == nil {
 		return
 	}
@@ -638,7 +741,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 			generationMS = &value
 		}
 	}
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: usage.model, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: usage.inputTokens, OutputTokens: usage.outputTokens, CachedInputTokens: usage.cachedInput, Streaming: streaming, RetryCount: retryCount, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: usage.model, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: usage.inputTokens, OutputTokens: usage.outputTokens, CachedInputTokens: usage.cachedInput, Streaming: streaming, RetryCount: retryCount, FallbackReason: fallbackReason, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}

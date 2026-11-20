@@ -37,7 +37,7 @@ The adapter must discover and adopt the deterministic provider identity before a
 
 | Request type | Recovery contract |
 | --- | --- |
-| Buffered, InferCrane-managed capacity | Only connection failure or final `502`, `503`, `504` may retry, within endpoint admission `retry_budget`; one request ID and attempt counter are retained. |
+| Buffered, InferCrane-managed capacity | Only connection failure or final `502`, `503`, `504` may retry, within endpoint admission `retry_budget`; one request ID and attempt counter are retained. On a `primary-fallback` endpoint the request then moves to the next binding, once per binding and at most twice, and the record's `fallback_reason` says why. |
 | Streaming | Never replay automatically. Once bytes may have been sent, final outcome is uncertain unless the client observed terminal `[DONE]`. |
 | External paid binding | Never retry automatically; a reservation and provider transmission may already exist. |
 | Durable async, still queued | Cancellation prevents provider submission. |

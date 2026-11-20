@@ -88,8 +88,42 @@ routable bindings alone.
 | Policy | Behavior |
 |---|---|
 | `manual` | Exactly one selected binding. |
-| `primary-fallback` | First available binding in declared priority order. InferCrane does not replay an accepted stream. |
-| `weighted` | Deterministic bounded weighted selection among currently available bindings. |
+| `primary-fallback` | First available binding in declared priority order. A buffered request the first binding cannot answer moves to the next one (see below). InferCrane does not replay an accepted stream. |
+| `weighted` | Deterministic smooth weighted round-robin among currently available bindings. |
+
+### Weighted plans interleave
+
+A weighted plan interleaves its bindings, so a short window of requests already sees the
+configured share. With weights `9000:1000`, every run of ten requests sends one to the second
+binding; `9500:500` sends one in every twenty. Any weights work, so a canary can use the share it
+needs. The order restarts only when the available bindings or their weights change: a binding
+that becomes unhealthy, recovers, or gets a new weight. The reconciler republishing the same plan
+does not restart it. Each gateway process keeps its own order in memory.
+
+### When the primary fails mid-request
+
+On a `primary-fallback` plan, the reconciler drops a binding that turned unhealthy at its next
+routing pass. Until then, the gateway itself moves a request on when all of these hold:
+
+- the request is buffered, not streamed;
+- the binding gave no response byte: the connection failed, or it answered `502`, `503` or `504`;
+- the caller is still waiting and the endpoint's `request_timeout_ms` has not passed;
+- the failed binding is not a paid external binding (one with an external budget policy). Those
+  are never retried, because the supplier may already have charged for the attempt.
+
+The request goes to the next published binding in priority order that it has not tried, with that
+binding's model name and credentials. It tries at most two more bindings, and each gets one
+attempt. The endpoint's admission `retry_budget` is spent only on the first binding, and the router
+behind a deployment has already retried its own workers, so retries are not stacked. A paid
+external fallback still reserves its budget before anything is sent; if it cannot, it is skipped
+and the caller gets the first binding's error.
+
+Request telemetry keeps one record per request, attributed to the binding that answered, with
+`fallback_reason` saying why the request left the earlier binding: `upstream_connection_failed`,
+`upstream_502`, `upstream_503` or `upstream_504`. `retry_count` counts retries on the same
+binding only. The failed attempt is not recorded on the binding it left, so Release Guard and
+release monitoring do not count it as that revision's error. Endpoint monitoring's `fallbacks`
+count shows how often that happens, per binding on the binding that answered.
 
 Serving plans are immutable and SHA-256 identified. Promotion changes only future route
 acquisitions. A buffered or streaming request remains pinned to the route generation it acquired

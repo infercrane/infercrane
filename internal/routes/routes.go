@@ -2,6 +2,8 @@ package routes
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,14 +46,14 @@ type EndpointRoute struct {
 
 // Directory is an atomic in-memory data-plane snapshot. Reads never touch the database.
 type Directory struct {
-	mu         sync.RWMutex
-	items      map[string]Snapshot
-	endpoints  map[string]EndpointRoute
-	selections map[string]uint64
-	blocked    map[string]bool
-	inflight   map[string]int
-	retired    map[string]Snapshot
-	health     map[string]overflow.State
+	mu        sync.RWMutex
+	items     map[string]Snapshot
+	endpoints map[string]EndpointRoute
+	smooth    map[string]*smoothState
+	blocked   map[string]bool
+	inflight  map[string]int
+	retired   map[string]Snapshot
+	health    map[string]overflow.State
 	// resident marks endpoints whose traffic is served inside a customer's
 	// cloud by an InferCrane agent. They never have a route here, and the
 	// gateway must refuse them instead of trying any other supply.
@@ -59,8 +61,17 @@ type Directory struct {
 	now      func() time.Time
 }
 
+// smoothState is where a weighted endpoint is in its smooth weighted
+// round-robin: the running weight of each published route, in route order.
+// signature names the routes and weights it was built for, so republishing
+// the same routes keeps the interleaving going and any change starts over.
+type smoothState struct {
+	signature string
+	current   []int
+}
+
 func New() *Directory {
-	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), selections: make(map[string]uint64), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot), health: make(map[string]overflow.State), resident: make(map[string]bool), now: time.Now}
+	return &Directory{items: make(map[string]Snapshot), endpoints: make(map[string]EndpointRoute), smooth: make(map[string]*smoothState), blocked: make(map[string]bool), inflight: make(map[string]int), retired: make(map[string]Snapshot), health: make(map[string]overflow.State), resident: make(map[string]bool), now: time.Now}
 }
 
 // SetResidentForTenant marks or clears an endpoint whose request content
@@ -165,11 +176,51 @@ func (d *Directory) AcquirePreferredForTenant(tenant, alias, bindingID, targetID
 		d.mu.Unlock()
 		return Snapshot{}, func() {}, false
 	}
+	release := d.pinLocked(route)
+	d.mu.Unlock()
+	return route, release, true
+}
+
+// AcquireFallbackForTenant pins the route a primary-fallback endpoint serves
+// once every route in tried has failed the request: the first route of the
+// current publication, in priority order, that the request has not tried. A
+// route counts as tried when it is the same router generation or the same
+// binding, so a republished generation of a failed binding is not tried
+// again. It reports false for any other routing policy, a removed endpoint,
+// or when no untried route is left. Like every acquisition it reads only the
+// in-memory snapshot.
+func (d *Directory) AcquireFallbackForTenant(tenant, alias string, tried []Snapshot) (Snapshot, func(), bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := tenant + "\x00" + alias
+	endpoint, exists := d.endpoints[key]
+	if d.blocked[key] || !exists || endpoint.RoutingPolicy != "primary-fallback" {
+		return Snapshot{}, func() {}, false
+	}
+	for _, candidate := range endpoint.Routes {
+		if !triedRoute(candidate, tried) {
+			return candidate, d.pinLocked(candidate), true
+		}
+	}
+	return Snapshot{}, func() {}, false
+}
+
+func triedRoute(route Snapshot, tried []Snapshot) bool {
+	for _, previous := range tried {
+		if routeID(previous) == routeID(route) || (route.BindingID != "" && previous.BindingID == route.BindingID) {
+			return true
+		}
+	}
+	return false
+}
+
+// pinLocked counts a request against the route's generation until the
+// returned release runs; retirement waits for that count to reach zero.
+func (d *Directory) pinLocked(route Snapshot) func() {
 	id := routeID(route)
 	d.inflight[id]++
-	d.mu.Unlock()
 	var once sync.Once
-	return route, func() {
+	return func() {
 		once.Do(func() {
 			d.mu.Lock()
 			if d.inflight[id] <= 1 {
@@ -179,7 +230,7 @@ func (d *Directory) AcquirePreferredForTenant(tenant, alias, bindingID, targetID
 			}
 			d.mu.Unlock()
 		})
-	}, true
+	}
 }
 
 func (d *Directory) selectLocked(key string) (Snapshot, bool) {
@@ -194,25 +245,47 @@ func (d *Directory) selectLocked(key string) (Snapshot, bool) {
 	if endpoint.RoutingPolicy != "weighted" || len(endpoint.Routes) == 1 {
 		return endpoint.Routes[0], true
 	}
-	// Plan compilation expands each binding by its bounded weight. Selection is
-	// stable across processes for a given acquisition ordinal and requires no
-	// request-path database or network lookup.
-	total := uint64(0)
-	for _, route := range endpoint.Routes {
+	// Smooth weighted round-robin: every route gains its weight, the route
+	// with the most running weight serves and gives back the total. Picks
+	// interleave, so any window of requests sees close to the configured
+	// share (9000:1000 sends one request in every ten to the smaller binding)
+	// instead of a run of thousands. The sequence after a publication is the
+	// same in every process and needs no request-path database or network
+	// lookup.
+	state := d.smooth[key]
+	if state == nil || len(state.current) != len(endpoint.Routes) {
+		state = &smoothState{signature: weightSignature(endpoint.Routes), current: make([]int, len(endpoint.Routes))}
+		d.smooth[key] = state
+	}
+	total, best := 0, 0
+	for index, route := range endpoint.Routes {
 		weight := routeWeight(route)
-		total += uint64(weight)
-	}
-	ordinal := d.selections[key]
-	d.selections[key] = ordinal + 1
-	point := ordinal % total
-	for _, route := range endpoint.Routes {
-		weight := uint64(routeWeight(route))
-		if point < weight {
-			return route, true
+		total += weight
+		state.current[index] += weight
+		if state.current[index] > state.current[best] {
+			best = index
 		}
-		point -= weight
 	}
-	return endpoint.Routes[0], true
+	state.current[best] -= total
+	return endpoint.Routes[best], true
+}
+
+// weightSignature identifies the routes a weighted endpoint selects among and
+// their weights, ignoring router generations: a binding republished with a
+// new router keeps its place in the interleaving.
+func weightSignature(routes []Snapshot) string {
+	var signature strings.Builder
+	for _, route := range routes {
+		identity := route.BindingID
+		if identity == "" {
+			identity = routeID(route)
+		}
+		signature.WriteString(identity)
+		signature.WriteByte(0)
+		signature.WriteString(strconv.Itoa(routeWeight(route)))
+		signature.WriteByte(1)
+	}
+	return signature.String()
 }
 
 func routeWeight(route Snapshot) int {
@@ -233,6 +306,12 @@ func (d *Directory) PublishEndpoint(endpoint EndpointRoute) int {
 	defer d.mu.Unlock()
 	if endpoint.RoutingPolicy == "weighted" {
 		endpoint.Routes = d.applyHealthDecayLocked(key, endpoint)
+		signature := weightSignature(endpoint.Routes)
+		if state := d.smooth[key]; state == nil || state.signature != signature {
+			d.smooth[key] = &smoothState{signature: signature, current: make([]int, len(endpoint.Routes))}
+		}
+	} else {
+		delete(d.smooth, key)
 	}
 	if previous, ok := d.endpoints[key]; ok {
 		d.retireEndpointRoutesLocked(previous.Routes, endpoint.Routes)
@@ -289,7 +368,7 @@ func (d *Directory) RemoveEndpointForTenant(tenant, alias string) {
 		d.retireEndpointRoutesLocked(previous.Routes, nil)
 	}
 	delete(d.endpoints, key)
-	delete(d.selections, key)
+	delete(d.smooth, key)
 	for stateKey := range d.health {
 		if len(stateKey) > len(key) && stateKey[:len(key)+1] == key+"\x00" {
 			delete(d.health, stateKey)
