@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -83,6 +84,84 @@ class AllowlistTest(unittest.TestCase):
     def test_other_models_are_refused(self) -> None:
         with self.assertRaises(ValueError):
             modal_gpu.check_args(["--served-model-name", "other/model"], "other/model")
+
+
+class _Store(dict):
+    def put(self, key, value):
+        self[key] = value
+
+
+class _Call:
+    count = 0
+
+    def __init__(self) -> None:
+        _Call.count += 1
+        self.object_id = f"call-{_Call.count}"
+
+
+class DriverPinTest(unittest.TestCase):
+    """Every setup of a run serves on one NVIDIA driver; a container on another driver
+    stops before loading the model and the lease starts again, still billed."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.saved = (modal_gpu.leases, modal_gpu.serve_h100)
+        modal_gpu.leases, modal_gpu.serve_h100 = _Store(), types.SimpleNamespace(spawn=lambda *a: _Call())
+        self.broker = broker.Broker("token", 30.0, 3, 6, Path(self.dir.name) / "ledger.json", dry=False)
+
+    def tearDown(self) -> None:
+        modal_gpu.leases, modal_gpu.serve_h100 = self.saved
+        self.dir.cleanup()
+
+    def lease(self) -> dict:
+        code, body = self.broker.create("pod", modal_gpu.MODEL_ID, ["--served-model-name", modal_gpu.MODEL_ID])
+        self.assertEqual(code, 201, body)
+        return self.broker.leases[body["lease_id"]]
+
+    def report(self, lease: dict, **remote) -> None:
+        modal_gpu.leases.put(f"st:{lease['lease_id']}", remote)
+        lease["refreshed_at"] = 0
+        self.broker.refresh(lease)
+
+    def test_first_host_pins_the_driver_for_later_leases(self) -> None:
+        first = self.lease()
+        self.report(first, state="ready", gpu_facts={"driver": "620.70.06"})
+        self.assertEqual(self.broker.required_driver, "620.70.06")
+        second = self.lease()
+        self.assertEqual(modal_gpu.leases[f"ctl:{second['lease_id']}"]["required_driver"], "620.70.06")
+
+    def test_a_refused_host_never_pins(self) -> None:
+        self.broker.required_driver = None
+        lease = self.lease()
+        self.report(lease, state="failed", reason="error", gpu_facts={"driver": "610.57.04"})
+        self.assertIsNone(self.broker.required_driver)
+
+    def test_mismatched_host_starts_the_lease_again_and_stays_billed(self) -> None:
+        self.broker.required_driver = "620.70.06"
+        lease = self.lease()
+        lease["requested_at"] -= 300  # the refused container ran for five minutes
+        first_call = lease["call_id"]
+        self.report(lease, state="failed", reason="driver_mismatch", error="NVIDIA driver 610.57.04 differs")
+        self.assertEqual(lease["state"], "starting")
+        self.assertEqual(lease["driver_retries"], 1)
+        self.assertNotEqual(lease["call_id"], first_call)
+        self.assertGreaterEqual(lease["prior_seconds"], 300)
+        self.assertGreaterEqual(self.broker.lease_seconds(lease, time.time()), 300)
+        self.assertEqual(modal_gpu.leases[f"st:{lease['lease_id']}"], {"state": "requested"})
+
+    def test_retries_are_bounded(self) -> None:
+        self.broker.required_driver = "620.70.06"
+        lease = self.lease()
+        for _ in range(broker.MAX_DRIVER_RETRIES):
+            self.report(lease, state="failed", reason="driver_mismatch", error="mismatch")
+        self.assertEqual(lease["state"], "starting")
+        self.report(lease, state="failed", reason="driver_mismatch", error="mismatch")
+        self.assertEqual(lease["state"], "failed")
+
+    def test_container_check(self) -> None:
+        self.assertEqual(modal_gpu.driver_mismatch({"driver": "620.70.06"}, {}), "")
+        self.assertEqual(modal_gpu.driver_mismatch({"driver": "620.70.06"}, {"required_driver": "620.70.06"}), "")
+        self.assertIn("610.57.04", modal_gpu.driver_mismatch({"driver": "610.57.04"}, {"required_driver": "620.70.06"}))
 
 
 if __name__ == "__main__":
