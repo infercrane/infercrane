@@ -37,10 +37,14 @@ Reviewed packs today:
 | Operator | Kernel | Vendor | Engine | Serving scope |
 |---|---|---|---|---|
 | Normalization | fused residual-add + RMSNorm, Triton | NVIDIA | vLLM 0.22.1 | vLLM's `fused_add_rms_norm` |
-| Mixture-of-experts experts | fused routed experts: gate and up, SiLU, down, weighted sum, Triton | NVIDIA | vLLM 0.22.1 | BF16 expert weights with SiLU and no expert map, bias, or LoRA, under `--moe-backend triton`; other calls keep vLLM's kernel |
+| Mixture-of-experts experts | fused routed experts: gate and up, SiLU, down, weighted sum, Triton | NVIDIA | vLLM 0.22.1 | BF16 expert weights with SiLU and no expert map, bias, or LoRA, under `--moe-backend triton`, which the candidate sets; other calls keep vLLM's kernel |
 
-Neither pack has qualified a kernel end to end yet. The mixture-of-experts pack's hidden suite has been
-checked on an H100 (see [Evidence so far](#evidence-so-far)). It comes first because published
+Because the mixture-of-experts candidate sets `--moe-backend triton`, it is measured against whatever
+backend the starting setup uses. On an H100, vLLM 0.22.1 picks FlashInfer CUTLASS for BF16 experts by
+default, so a kernel has to beat that, not only vLLM's Triton experts.
+
+Neither pack has qualified a kernel. The mixture-of-experts pack's own reference kernel has been measured
+end to end on an H100 and would not qualify (see [Evidence so far](#evidence-so-far)). It comes first because published
 measurements put routed experts at 35–46% of decode kernel time for DeepSeek-V3 on one node (H200 and
 MI300X) and the engine's own Triton experts at 10–20% of HBM bandwidth at batch 1 on an H200. In wide
 expert-parallel decode at large batches, communication and attention dominate instead, so a kernel is
@@ -124,13 +128,30 @@ The mixture-of-experts pack on an NVIDIA H100, inside the pinned vLLM 0.22.1 ima
 - **The hidden suite catches wrong kernels.** The pack's own correct kernel passed all six stages on both
   the visible and the hidden verification shapes, with the memory sanitizer reporting no errors. A
   kernel that ignores the router weights and one that swaps gate and up both failed at the first stage.
-- **vLLM's Triton experts leave room at small batches.** At four tokens on Qwen3-30B-A3B's expert
-  shape (128 experts, hidden 2048, intermediate 768, top-8, BF16), vLLM's `fused_experts` took 234 µs,
-  about 37% of what the H100's memory bandwidth allows. The pack's correct kernel took 171–172 µs,
-  about 51%. This is one shape in a microbenchmark, with a kernel written by hand, not generated. It
-  is not an end-to-end change, and vLLM's default backend for these weights on an H100 may not be its
-  Triton experts.
+- **The microbenchmark favored the kernel; serving did not.** At four tokens on Qwen3-30B-A3B's expert
+  shape (128 experts, hidden 2048, intermediate 768, top-8, BF16), the evaluator timed vLLM's
+  `fused_experts` at 234 µs and the pack's reference kernel at 171–172 µs, ×1.36.
   [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-pack-h100-2026-11-20T043718Z.json).
+- **End to end, the same kernel was correct but slower.** Qwen3-30B-A3B-Instruct-2507 in BF16 on one
+  H100, 512 tokens in and 128 out, three runs per arm at 1, 4, and 16 concurrent requests, with the
+  default setup measured before and after (drift under 0.5%):
+
+  | Arm | Output tokens/s at 1 / 4 / 16 | Change against the default setup | Answer check |
+  |---|---|---|---|
+  | Default setup (FlashInfer CUTLASS experts) | 187 / 502 / 1,331 | — | reference |
+  | vLLM's Triton experts | 195 / 478 / 1,136 | +4.4% / −4.6% / −14.6% | 24 of 24 identical |
+  | Pack kernel for every call | 105 / 370 / 826 | −43.8% / −26.2% / −37.9% | 24 of 24 identical |
+  | Pack kernel up to 64 tokens, vLLM's Triton above | 110 / 395 / 849 | −41.3% / −21.2% / −36.2% | 24 of 24 identical |
+
+  The kernel's marker confirmed it ran in both kernel arms. Sending prefill to vLLM's Triton experts
+  brought time to first token at one request back from 90 ms to 29 ms, but each decode step still took
+  8.9 ms against 5.2 ms. The lane would mark this kernel not qualified.
+  [Evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/moe-experts-e2e-h100-2026-11-20T115713Z.json).
+- **Why they disagree, most likely.** The evaluator timed each call on its own, launch by launch, while
+  vLLM replays decode steps from CUDA graphs. With 48 expert layers, 234 µs each would be 11.2 ms per
+  token, more than the 8.1 ms a whole decode step took on vLLM's Triton experts at four requests, so the
+  microbenchmark measured launch overhead rather than the GPU time serving pays. A kernel speedup counts
+  only when it is timed the way the engine runs it, and only the end-to-end change is a result.
 
 Two kernel screens of Qwen3.8 on an NVIDIA H200 (compute capability 9.0, SGLang source, Triton 3.7.1):
 
@@ -146,7 +167,8 @@ Two kernel screens of Qwen3.8 on an NVIDIA H200 (compute capability 9.0, SGLang 
 An earlier handwritten CUDA residual-add + RMSNorm kernel for Qwen3-0.6B on an H100 was correct on every
 shape but slower than both the Triton candidate and vLLM's own kernel, and was rejected
 ([evidence](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/qwen3-0.6b-cuda-h100-2026-09-20.json)).
-No custom kernel has yet been measured end to end on serving traffic.
+The mixture-of-experts reference kernel above is the only custom kernel measured end to end so far, on
+synthetic traffic rather than a recorded replay.
 
 ## Next
 

@@ -71,6 +71,26 @@ fail at `smoke`. It also times the reference kernel against vLLM's own
 after 30 minutes. If `compute-sanitizer` cannot run a known-good program on the
 host, the sanitizer stage is recorded as not run, never as passed.
 
+Serve Qwen3-30B-A3B-Instruct-2507 with and without the pack's kernel:
+
+```bash
+modal run tools/modal-kernel-poc/moe_e2e_modal.py --out moe-e2e-h100.json
+```
+
+It downloads the weights (61 GB) into the Modal volume
+`infercrane-moe-e2e-weights` on a CPU-only function, then serves five arms on one
+H100 from the pinned vLLM 0.22.1 image: vLLM's defaults, vLLM's Triton experts,
+the pack's kernel for every call, the pack's kernel for calls up to 64 tokens,
+and vLLM's defaults again. Each arm runs the same AIPerf load and InferCrane's
+built-in answer check. A kernel arm whose marker file is missing did not run the
+kernel. Results are written to the volume after every arm.
+
+A function's timeout counts only time spent running, and Modal retries a
+container that fails while starting without limit, even with `retries=0`. The
+runner therefore cancels each call after its limit plus five minutes of wall
+clock. Keep that guard in any new runner. Delete the volume when you no longer
+need the weights.
+
 Run the paired eager-versus-compiled end-to-end campaign:
 
 ```bash

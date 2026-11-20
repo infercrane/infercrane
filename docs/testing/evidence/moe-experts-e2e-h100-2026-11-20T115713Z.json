@@ -1,0 +1,1035 @@
+{
+  "answer_check": {
+    "block_below": 0.9,
+    "scoring": "token F1 against the first control, greedy, seed 17, reasoning off",
+    "suite": "infercrane-default@1",
+    "watch_below": 0.95
+  },
+  "app_id": "ap-qzhJpzaQPmxJ9oNUNZd06D",
+  "arms": [
+    {
+      "arm": "control",
+      "kernel": null,
+      "load": [
+        {
+          "concurrency": 1,
+          "failed": 0,
+          "itl_p50_ms": 5.176181821522309,
+          "itl_p95_ms": 5.190946829396325,
+          "output_token_throughput": 186.78480414982664,
+          "profile_runs": 3,
+          "requests_per_run": 10,
+          "runs": [
+            {
+              "duration_seconds": 7.035226509,
+              "failed": 0,
+              "itl_p50_ms": 5.186407015748031,
+              "itl_p95_ms": 5.189529236220472,
+              "output_token_throughput": 181.94154777568656,
+              "succeeded": 10,
+              "ttft_p50_ms": 43.272009999999995,
+              "ttft_p95_ms": 44.124164
+            },
+            {
+              "duration_seconds": 6.763745953,
+              "failed": 0,
+              "itl_p50_ms": 5.17080653543307,
+              "itl_p95_ms": 5.190226692913386,
+              "output_token_throughput": 189.2442455548271,
+              "succeeded": 10,
+              "ttft_p50_ms": 17.550921,
+              "ttft_p95_ms": 22.506448
+            },
+            {
+              "duration_seconds": 6.766449985,
+              "failed": 0,
+              "itl_p50_ms": 5.171331913385827,
+              "itl_p95_ms": 5.193084559055118,
+              "output_token_throughput": 189.16861911896626,
+              "succeeded": 10,
+              "ttft_p50_ms": 17.6668,
+              "ttft_p95_ms": 22.809893
+            }
+          ],
+          "ttft_p50_ms": 26.163243666666663,
+          "ttft_p95_ms": 29.813501666666667
+        },
+        {
+          "concurrency": 4,
+          "failed": 0,
+          "itl_p50_ms": 7.654886010498687,
+          "itl_p95_ms": 7.8926932598425195,
+          "output_token_throughput": 502.92846844449724,
+          "profile_runs": 3,
+          "requests_per_run": 16,
+          "runs": [
+            {
+              "duration_seconds": 4.156079665,
+              "failed": 0,
+              "itl_p50_ms": 7.699588023622047,
+              "itl_p95_ms": 8.088917700787402,
+              "output_token_throughput": 492.772074906798,
+              "succeeded": 16,
+              "ttft_p50_ms": 38.507805,
+              "ttft_p95_ms": 81.64678099999999
+            },
+            {
+              "duration_seconds": 4.006297067,
+              "failed": 0,
+              "itl_p50_ms": 7.596253559055118,
+              "itl_p95_ms": 7.75578922047244,
+              "output_token_throughput": 511.195242327246,
+              "succeeded": 16,
+              "ttft_p50_ms": 31.994536,
+              "ttft_p95_ms": 42.57577
+            },
+            {
+              "duration_seconds": 4.05690693,
+              "failed": 0,
+              "itl_p50_ms": 7.668816448818897,
+              "itl_p95_ms": 7.833372858267715,
+              "output_token_throughput": 504.8180880994477,
+              "succeeded": 16,
+              "ttft_p50_ms": 30.559687999999998,
+              "ttft_p95_ms": 42.78797
+            }
+          ],
+          "ttft_p50_ms": 33.687343,
+          "ttft_p95_ms": 55.67017366666666
+        },
+        {
+          "concurrency": 16,
+          "failed": 0,
+          "itl_p50_ms": 11.14378508136483,
+          "itl_p95_ms": 11.209988866141734,
+          "output_token_throughput": 1328.8294198376814,
+          "profile_runs": 3,
+          "requests_per_run": 32,
+          "runs": [
+            {
+              "duration_seconds": 3.257661491,
+              "failed": 0,
+              "itl_p50_ms": 11.128104204724409,
+              "itl_p95_ms": 11.19294490551181,
+              "output_token_throughput": 1257.0366845399162,
+              "succeeded": 32,
+              "ttft_p50_ms": 90.010031,
+              "ttft_p95_ms": 331.264394
+            },
+            {
+              "duration_seconds": 3.019714268,
+              "failed": 0,
+              "itl_p50_ms": 11.233617677165354,
+              "itl_p95_ms": 11.330645881889764,
+              "output_token_throughput": 1356.4197260003807,
+              "succeeded": 32,
+              "ttft_p50_ms": 70.93941,
+              "ttft_p95_ms": 97.473221
+            },
+            {
+              "duration_seconds": 2.984635792,
+              "failed": 0,
+              "itl_p50_ms": 11.069633362204724,
+              "itl_p95_ms": 11.106375811023621,
+              "output_token_throughput": 1373.0318489727472,
+              "succeeded": 32,
+              "ttft_p50_ms": 75.826797,
+              "ttft_p95_ms": 90.053516
+            }
+          ],
+          "ttft_p50_ms": 78.92541266666666,
+          "ttft_p95_ms": 172.930377
+        }
+      ],
+      "moe_log_lines": [
+        "(EngineCore pid=63) INFO 11-20 11:39:08 [unquantized.py:285] Using FlashInfer CUTLASS Unquantized MoE backend out of potential backends: ['FlashInfer TRTLLM', 'FlashInfer CUTLASS', 'TRITON', 'BATCHED_TRITON'].",
+        "(EngineCore pid=63) INFO 11-20 11:39:43 [unquantized.py:341] Using MoEPrepareAndFinalizeNoDPEPModular",
+        "_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='auto', linear_backend='auto')"
+      ],
+      "seconds": 260.1,
+      "server_args": [],
+      "startup_seconds": 126.1
+    },
+    {
+      "answer_check": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "arm": "triton",
+      "kernel": null,
+      "load": [
+        {
+          "concurrency": 1,
+          "failed": 0,
+          "itl_p50_ms": 4.944140443569554,
+          "itl_p95_ms": 4.954558687664041,
+          "output_token_throughput": 195.08791091413084,
+          "profile_runs": 3,
+          "requests_per_run": 10,
+          "runs": [
+            {
+              "duration_seconds": 6.754765219,
+              "failed": 0,
+              "itl_p50_ms": 4.94714174015748,
+              "itl_p95_ms": 4.9497440787401565,
+              "output_token_throughput": 189.49585344573913,
+              "succeeded": 10,
+              "ttft_p50_ms": 45.730154999999996,
+              "ttft_p95_ms": 47.300883
+            },
+            {
+              "duration_seconds": 6.466325658,
+              "failed": 0,
+              "itl_p50_ms": 4.941754921259842,
+              "itl_p95_ms": 4.955013370078739,
+              "output_token_throughput": 197.94858281169482,
+              "succeeded": 10,
+              "ttft_p50_ms": 16.931468,
+              "ttft_p95_ms": 21.974107999999998
+            },
+            {
+              "duration_seconds": 6.470551775,
+              "failed": 0,
+              "itl_p50_ms": 4.943524669291339,
+              "itl_p95_ms": 4.9589186141732275,
+              "output_token_throughput": 197.81929648495858,
+              "succeeded": 10,
+              "ttft_p50_ms": 16.886157,
+              "ttft_p95_ms": 22.416842
+            }
+          ],
+          "ttft_p50_ms": 26.51592666666666,
+          "ttft_p95_ms": 30.563944333333335
+        },
+        {
+          "concurrency": 4,
+          "failed": 0,
+          "itl_p50_ms": 8.092812286360038,
+          "itl_p95_ms": 8.195849608923885,
+          "output_token_throughput": 478.4167312164275,
+          "profile_runs": 3,
+          "requests_per_run": 16,
+          "runs": [
+            {
+              "duration_seconds": 4.365820151,
+              "failed": 0,
+              "itl_p50_ms": 8.164068251968503,
+              "itl_p95_ms": 8.36264011023622,
+              "output_token_throughput": 469.0985723566513,
+              "succeeded": 16,
+              "ttft_p50_ms": 36.425450999999995,
+              "ttft_p95_ms": 63.629942
+            },
+            {
+              "duration_seconds": 4.252472999,
+              "failed": 0,
+              "itl_p50_ms": 8.084988103174604,
+              "itl_p95_ms": 8.120891834645668,
+              "output_token_throughput": 481.36695999748076,
+              "succeeded": 16,
+              "ttft_p50_ms": 31.393724,
+              "ttft_p95_ms": 42.602464999999995
+            },
+            {
+              "duration_seconds": 4.224556104,
+              "failed": 0,
+              "itl_p50_ms": 8.029380503937007,
+              "itl_p95_ms": 8.104016881889764,
+              "output_token_throughput": 484.78466129515033,
+              "succeeded": 16,
+              "ttft_p50_ms": 30.891513999999997,
+              "ttft_p95_ms": 42.483512999999995
+            }
+          ],
+          "ttft_p50_ms": 32.903563,
+          "ttft_p95_ms": 49.571973333333325
+        },
+        {
+          "concurrency": 16,
+          "failed": 0,
+          "itl_p50_ms": 11.042801005061866,
+          "itl_p95_ms": 11.296598034120734,
+          "output_token_throughput": 1135.8459233299338,
+          "profile_runs": 3,
+          "requests_per_run": 32,
+          "runs": [
+            {
+              "duration_seconds": 3.756937302,
+              "failed": 0,
+              "itl_p50_ms": 11.048543803149606,
+              "itl_p95_ms": 11.502186669291337,
+              "output_token_throughput": 1090.2497621718362,
+              "succeeded": 32,
+              "ttft_p50_ms": 202.72994799999998,
+              "ttft_p95_ms": 755.397472
+            },
+            {
+              "duration_seconds": 3.531478482,
+              "failed": 0,
+              "itl_p50_ms": 11.012543283464566,
+              "itl_p95_ms": 11.167398803149606,
+              "output_token_throughput": 1160.1373251691812,
+              "succeeded": 32,
+              "ttft_p50_ms": 68.3194,
+              "ttft_p95_ms": 650.7676789999999
+            },
+            {
+              "duration_seconds": 3.539729148,
+              "failed": 0,
+              "itl_p50_ms": 11.067315928571428,
+              "itl_p95_ms": 11.22020862992126,
+              "output_token_throughput": 1157.1506826487844,
+              "succeeded": 32,
+              "ttft_p50_ms": 69.775848,
+              "ttft_p95_ms": 658.7693059999999
+            }
+          ],
+          "ttft_p50_ms": 113.60839866666667,
+          "ttft_p95_ms": 688.3114856666666
+        }
+      ],
+      "moe_log_lines": [
+        "(EngineCore pid=2092) INFO 11-20 11:43:11 [unquantized.py:212] Using TRITON Unquantized MoE backend out of potential backends: ['FlashInfer TRTLLM', 'FlashInfer CUTLASS', 'TRITON', 'BATCHED_TRITON'].",
+        "(EngineCore pid=2092) INFO 11-20 11:43:26 [unquantized.py:341] Using MoEPrepareAndFinalizeNoDPEPModular",
+        ": '127.0.0.1', 'model': '/weights/qwen3-30b-a3b-instruct-2507', 'dtype': 'bfloat16', 'max_model_len': 4096, 'served_model_name': ['Qwen/Qwen3-30B-A3B-Instruct-2507'], 'generation_config': 'vllm', 'max_num_seqs': 32, 'moe_backend': 'triton'}",
+        "[fused_moe.py:1073] Using default MoE config. Performance might be sub-optimal! Config file not found at /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=128,N=768,device_name=NVIDIA_H100_80GB_HBM3.json",
+        "old_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='triton', linear_backend='auto')"
+      ],
+      "seconds": 214.9,
+      "server_args": [
+        "--moe-backend",
+        "triton"
+      ],
+      "startup_seconds": 80.0
+    },
+    {
+      "answer_check": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "arm": "kernel",
+      "kernel": "all",
+      "kernel_invoked": true,
+      "load": [
+        {
+          "concurrency": 1,
+          "failed": 0,
+          "itl_p50_ms": 8.94197346456693,
+          "itl_p95_ms": 8.946503162729657,
+          "output_token_throughput": 104.99326371268411,
+          "profile_runs": 3,
+          "requests_per_run": 10,
+          "runs": [
+            {
+              "duration_seconds": 13.691517173,
+              "failed": 0,
+              "itl_p50_ms": 8.95111377952756,
+              "itl_p95_ms": 8.955728913385826,
+              "output_token_throughput": 93.56158151166495,
+              "succeeded": 10,
+              "ttft_p50_ms": 230.719767,
+              "ttft_p95_ms": 231.91387999999998
+            },
+            {
+              "duration_seconds": 11.565047796,
+              "failed": 0,
+              "itl_p50_ms": 8.936337811023622,
+              "itl_p95_ms": 8.941853488188976,
+              "output_token_throughput": 110.67831474442443,
+              "succeeded": 10,
+              "ttft_p50_ms": 19.505547,
+              "ttft_p95_ms": 24.170201
+            },
+            {
+              "duration_seconds": 11.558616715,
+              "failed": 0,
+              "itl_p50_ms": 8.938468803149606,
+              "itl_p95_ms": 8.941927086614173,
+              "output_token_throughput": 110.73989488196297,
+              "succeeded": 10,
+              "ttft_p50_ms": 18.787888,
+              "ttft_p95_ms": 23.714858
+            }
+          ],
+          "ttft_p50_ms": 89.67106733333333,
+          "ttft_p95_ms": 93.26631299999998
+        },
+        {
+          "concurrency": 4,
+          "failed": 0,
+          "itl_p50_ms": 9.764323797900262,
+          "itl_p95_ms": 11.606774727034121,
+          "output_token_throughput": 370.3621514311482,
+          "profile_runs": 3,
+          "requests_per_run": 16,
+          "runs": [
+            {
+              "duration_seconds": 6.454056736,
+              "failed": 0,
+              "itl_p50_ms": 9.771836031496063,
+              "itl_p95_ms": 15.081537393700787,
+              "output_token_throughput": 317.3198011378622,
+              "succeeded": 16,
+              "ttft_p50_ms": 50.834177,
+              "ttft_p95_ms": 895.494654
+            },
+            {
+              "duration_seconds": 5.152395887,
+              "failed": 0,
+              "itl_p50_ms": 9.753283078740157,
+              "itl_p95_ms": 9.861008472440945,
+              "output_token_throughput": 397.48498463934123,
+              "succeeded": 16,
+              "ttft_p50_ms": 48.458493999999995,
+              "ttft_p95_ms": 53.010782
+            },
+            {
+              "duration_seconds": 5.168041226,
+              "failed": 0,
+              "itl_p50_ms": 9.767852283464567,
+              "itl_p95_ms": 9.87777831496063,
+              "output_token_throughput": 396.2816685162411,
+              "succeeded": 16,
+              "ttft_p50_ms": 48.145894999999996,
+              "ttft_p95_ms": 53.964261
+            }
+          ],
+          "ttft_p50_ms": 49.14618866666666,
+          "ttft_p95_ms": 334.15656566666667
+        },
+        {
+          "concurrency": 16,
+          "failed": 0,
+          "itl_p50_ms": 15.678342643044617,
+          "itl_p95_ms": 15.866751047244094,
+          "output_token_throughput": 826.453584482043,
+          "profile_runs": 3,
+          "requests_per_run": 32,
+          "runs": [
+            {
+              "duration_seconds": 7.757153669,
+              "failed": 0,
+              "itl_p50_ms": 15.637111118110235,
+              "itl_p95_ms": 15.88210448031496,
+              "output_token_throughput": 528.0287299668809,
+              "succeeded": 32,
+              "ttft_p50_ms": 109.69352599999999,
+              "ttft_p95_ms": 3675.832306
+            },
+            {
+              "duration_seconds": 4.191328361,
+              "failed": 0,
+              "itl_p50_ms": 15.622732566929132,
+              "itl_p95_ms": 15.710934881889763,
+              "output_token_throughput": 977.2558118120681,
+              "succeeded": 32,
+              "ttft_p50_ms": 106.33285699999999,
+              "ttft_p95_ms": 114.865291
+            },
+            {
+              "duration_seconds": 4.207063011,
+              "failed": 0,
+              "itl_p50_ms": 15.775184244094486,
+              "itl_p95_ms": 16.00721377952756,
+              "output_token_throughput": 974.0762116671801,
+              "succeeded": 32,
+              "ttft_p50_ms": 106.111879,
+              "ttft_p95_ms": 121.504499
+            }
+          ],
+          "ttft_p50_ms": 107.37942066666666,
+          "ttft_p95_ms": 1304.0673653333333
+        }
+      ],
+      "moe_log_lines": [
+        "(EngineCore pid=4134) INFO 11-20 11:46:53 [unquantized.py:212] Using TRITON Unquantized MoE backend out of potential backends: ['FlashInfer TRTLLM', 'FlashInfer CUTLASS', 'TRITON', 'BATCHED_TRITON'].",
+        "(EngineCore pid=4134) INFO 11-20 11:47:09 [unquantized.py:341] Using MoEPrepareAndFinalizeNoDPEPModular",
+        ": '127.0.0.1', 'model': '/weights/qwen3-30b-a3b-instruct-2507', 'dtype': 'bfloat16', 'max_model_len': 4096, 'served_model_name': ['Qwen/Qwen3-30B-A3B-Instruct-2507'], 'generation_config': 'vllm', 'max_num_seqs': 32, 'moe_backend': 'triton'}",
+        "old_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='triton', linear_backend='auto')"
+      ],
+      "seconds": 231.7,
+      "server_args": [
+        "--moe-backend",
+        "triton"
+      ],
+      "startup_seconds": 64.0
+    },
+    {
+      "answer_check": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "arm": "kernel-small-batches",
+      "kernel": "small",
+      "kernel_invoked": true,
+      "load": [
+        {
+          "concurrency": 1,
+          "failed": 0,
+          "itl_p50_ms": 8.951940131233597,
+          "itl_p95_ms": 8.957112482939634,
+          "output_token_throughput": 109.62205506476056,
+          "profile_runs": 3,
+          "requests_per_run": 10,
+          "runs": [
+            {
+              "duration_seconds": 11.856773496,
+              "failed": 0,
+              "itl_p50_ms": 8.942498070866142,
+              "itl_p95_ms": 8.94578225984252,
+              "output_token_throughput": 108.0395101105843,
+              "succeeded": 10,
+              "ttft_p50_ms": 48.394768,
+              "ttft_p95_ms": 49.791793
+            },
+            {
+              "duration_seconds": 11.591865883,
+              "failed": 0,
+              "itl_p50_ms": 8.957566842519686,
+              "itl_p95_ms": 8.962320566929133,
+              "output_token_throughput": 110.42225754847443,
+              "succeeded": 10,
+              "ttft_p50_ms": 19.502098999999998,
+              "ttft_p95_ms": 23.744542
+            },
+            {
+              "duration_seconds": 11.593741088,
+              "failed": 0,
+              "itl_p50_ms": 8.955755480314961,
+              "itl_p95_ms": 8.963234622047244,
+              "output_token_throughput": 110.40439753522293,
+              "succeeded": 10,
+              "ttft_p50_ms": 19.76201,
+              "ttft_p95_ms": 24.034686999999998
+            }
+          ],
+          "ttft_p50_ms": 29.219625666666662,
+          "ttft_p95_ms": 32.523674
+        },
+        {
+          "concurrency": 4,
+          "failed": 0,
+          "itl_p50_ms": 9.786478792650918,
+          "itl_p95_ms": 9.938843784776902,
+          "output_token_throughput": 395.2090637331741,
+          "profile_runs": 3,
+          "requests_per_run": 16,
+          "runs": [
+            {
+              "duration_seconds": 5.241299311,
+              "failed": 0,
+              "itl_p50_ms": 9.840748417322834,
+              "itl_p95_ms": 10.07055546456693,
+              "output_token_throughput": 390.74280602556496,
+              "succeeded": 16,
+              "ttft_p50_ms": 50.387302,
+              "ttft_p95_ms": 70.63439699999999
+            },
+            {
+              "duration_seconds": 5.150754472,
+              "failed": 0,
+              "itl_p50_ms": 9.764017614173227,
+              "itl_p95_ms": 9.877352086614172,
+              "output_token_throughput": 397.4175067221104,
+              "succeeded": 16,
+              "ttft_p50_ms": 48.530812999999995,
+              "ttft_p95_ms": 53.462623
+            },
+            {
+              "duration_seconds": 5.152630599,
+              "failed": 0,
+              "itl_p50_ms": 9.754670346456694,
+              "itl_p95_ms": 9.868623803149607,
+              "output_token_throughput": 397.46687845184687,
+              "succeeded": 16,
+              "ttft_p50_ms": 48.703727,
+              "ttft_p95_ms": 54.354748
+            }
+          ],
+          "ttft_p50_ms": 49.20728066666666,
+          "ttft_p95_ms": 59.483922666666665
+        },
+        {
+          "concurrency": 16,
+          "failed": 0,
+          "itl_p50_ms": 15.958375320209973,
+          "itl_p95_ms": 16.2335166167979,
+          "output_token_throughput": 849.0495272571364,
+          "profile_runs": 3,
+          "requests_per_run": 32,
+          "runs": [
+            {
+              "duration_seconds": 4.824438147,
+              "failed": 0,
+              "itl_p50_ms": 15.693290023622046,
+              "itl_p95_ms": 16.210161582677163,
+              "output_token_throughput": 849.0107811926312,
+              "succeeded": 32,
+              "ttft_p50_ms": 204.705176,
+              "ttft_p95_ms": 630.169003
+            },
+            {
+              "duration_seconds": 4.838253383,
+              "failed": 0,
+              "itl_p50_ms": 16.433128929133858,
+              "itl_p95_ms": 16.591467976377952,
+              "output_token_throughput": 846.5865004904396,
+              "succeeded": 32,
+              "ttft_p50_ms": 89.102559,
+              "ttft_p95_ms": 671.944383
+            },
+            {
+              "duration_seconds": 4.810044914,
+              "failed": 0,
+              "itl_p50_ms": 15.748707007874016,
+              "itl_p95_ms": 15.898920291338582,
+              "output_token_throughput": 851.5513000883385,
+              "succeeded": 32,
+              "ttft_p50_ms": 73.91811,
+              "ttft_p95_ms": 734.096696
+            }
+          ],
+          "ttft_p50_ms": 122.57528166666667,
+          "ttft_p95_ms": 678.736694
+        }
+      ],
+      "moe_log_lines": [
+        "(EngineCore pid=6150) INFO 11-20 11:50:51 [unquantized.py:212] Using TRITON Unquantized MoE backend out of potential backends: ['FlashInfer TRTLLM', 'FlashInfer CUTLASS', 'TRITON', 'BATCHED_TRITON'].",
+        "(EngineCore pid=6150) INFO 11-20 11:51:05 [unquantized.py:341] Using MoEPrepareAndFinalizeNoDPEPModular",
+        ": '127.0.0.1', 'model': '/weights/qwen3-30b-a3b-instruct-2507', 'dtype': 'bfloat16', 'max_model_len': 4096, 'served_model_name': ['Qwen/Qwen3-30B-A3B-Instruct-2507'], 'generation_config': 'vllm', 'max_num_seqs': 32, 'moe_backend': 'triton'}",
+        "[fused_moe.py:1073] Using default MoE config. Performance might be sub-optimal! Config file not found at /usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=128,N=768,device_name=NVIDIA_H100_80GB_HBM3.json",
+        "old_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='triton', linear_backend='auto')"
+      ],
+      "seconds": 209.0,
+      "server_args": [
+        "--moe-backend",
+        "triton"
+      ],
+      "small_batch_path_invoked": true,
+      "startup_seconds": 50.0
+    },
+    {
+      "answer_check": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "arm": "control-again",
+      "kernel": null,
+      "load": [
+        {
+          "concurrency": 1,
+          "failed": 0,
+          "itl_p50_ms": 5.168338296587927,
+          "itl_p95_ms": 5.181822170603675,
+          "output_token_throughput": 186.95039611413665,
+          "profile_runs": 3,
+          "requests_per_run": 10,
+          "runs": [
+            {
+              "duration_seconds": 7.021476786,
+              "failed": 0,
+              "itl_p50_ms": 5.177978535433071,
+              "itl_p95_ms": 5.181046496062992,
+              "output_token_throughput": 182.29783263716968,
+              "succeeded": 10,
+              "ttft_p50_ms": 42.828300999999996,
+              "ttft_p95_ms": 44.567087
+            },
+            {
+              "duration_seconds": 6.765496904,
+              "failed": 0,
+              "itl_p50_ms": 5.163084425196851,
+              "itl_p95_ms": 5.183722157480315,
+              "output_token_throughput": 189.1952680139753,
+              "succeeded": 10,
+              "ttft_p50_ms": 18.119097,
+              "ttft_p95_ms": 23.343705
+            },
+            {
+              "duration_seconds": 6.759679587,
+              "failed": 0,
+              "itl_p50_ms": 5.163951929133859,
+              "itl_p95_ms": 5.180697858267716,
+              "output_token_throughput": 189.358087691265,
+              "succeeded": 10,
+              "ttft_p50_ms": 17.525878,
+              "ttft_p95_ms": 22.575857
+            }
+          ],
+          "ttft_p50_ms": 26.157758666666666,
+          "ttft_p95_ms": 30.162216333333333
+        },
+        {
+          "concurrency": 4,
+          "failed": 0,
+          "itl_p50_ms": 7.695097979002624,
+          "itl_p95_ms": 7.794236653543307,
+          "output_token_throughput": 500.45708706862234,
+          "profile_runs": 3,
+          "requests_per_run": 16,
+          "runs": [
+            {
+              "duration_seconds": 4.145948391,
+              "failed": 0,
+              "itl_p50_ms": 7.667863047244094,
+              "itl_p95_ms": 7.701521700787401,
+              "output_token_throughput": 493.7350412859975,
+              "succeeded": 16,
+              "ttft_p50_ms": 38.145824,
+              "ttft_p95_ms": 96.837552
+            },
+            {
+              "duration_seconds": 4.076701775,
+              "failed": 0,
+              "itl_p50_ms": 7.728840669291339,
+              "itl_p95_ms": 7.888034960629921,
+              "output_token_throughput": 502.3668919220857,
+              "succeeded": 16,
+              "ttft_p50_ms": 30.187362999999998,
+              "ttft_p95_ms": 45.724339
+            },
+            {
+              "duration_seconds": 4.053283836,
+              "failed": 0,
+              "itl_p50_ms": 7.688590220472441,
+              "itl_p95_ms": 7.793153299212598,
+              "output_token_throughput": 505.26932799778393,
+              "succeeded": 16,
+              "ttft_p50_ms": 32.809304,
+              "ttft_p95_ms": 44.940172
+            }
+          ],
+          "ttft_p50_ms": 33.714163666666664,
+          "ttft_p95_ms": 62.500687666666664
+        },
+        {
+          "concurrency": 16,
+          "failed": 0,
+          "itl_p50_ms": 11.22136965406824,
+          "itl_p95_ms": 11.349413242907138,
+          "output_token_throughput": 1332.2713522479223,
+          "profile_runs": 3,
+          "requests_per_run": 32,
+          "runs": [
+            {
+              "duration_seconds": 3.188065785,
+              "failed": 0,
+              "itl_p50_ms": 11.100519599999998,
+              "itl_p95_ms": 11.217901547619048,
+              "output_token_throughput": 1284.1642162035876,
+              "succeeded": 32,
+              "ttft_p50_ms": 94.12857199999999,
+              "ttft_p95_ms": 270.266626
+            },
+            {
+              "duration_seconds": 3.013080686,
+              "failed": 0,
+              "itl_p50_ms": 11.289741338582678,
+              "itl_p95_ms": 11.345219401574804,
+              "output_token_throughput": 1359.4060122689991,
+              "succeeded": 32,
+              "ttft_p50_ms": 73.864915,
+              "ttft_p95_ms": 87.645522
+            },
+            {
+              "duration_seconds": 3.026801168,
+              "failed": 0,
+              "itl_p50_ms": 11.273848023622048,
+              "itl_p95_ms": 11.485118779527559,
+              "output_token_throughput": 1353.2438282711803,
+              "succeeded": 32,
+              "ttft_p50_ms": 67.086798,
+              "ttft_p95_ms": 106.637312
+            }
+          ],
+          "ttft_p50_ms": 78.360095,
+          "ttft_p95_ms": 154.84982
+        }
+      ],
+      "moe_log_lines": [
+        "(EngineCore pid=8160) INFO 11-20 11:54:24 [unquantized.py:285] Using FlashInfer CUTLASS Unquantized MoE backend out of potential backends: ['FlashInfer TRTLLM', 'FlashInfer CUTLASS', 'TRITON', 'BATCHED_TRITON'].",
+        "(EngineCore pid=8160) INFO 11-20 11:54:39 [unquantized.py:341] Using MoEPrepareAndFinalizeNoDPEPModular",
+        "_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='auto', linear_backend='auto')"
+      ],
+      "seconds": 184.6,
+      "server_args": [],
+      "startup_seconds": 52.0
+    }
+  ],
+  "billed_usd": {
+    "cpu": 0.13662357,
+    "h100": 1.24878355,
+    "memory": 0.17018765,
+    "network_egress": 0.03585023,
+    "source": "modal billing report --for today --show-resources, 2026-11-20 12:58 CET; weight download included",
+    "total": 1.591445
+  },
+  "evidence_class": "real-gpu-serving-comparison",
+  "gpu_seconds": 1132.0,
+  "hardware": {
+    "aiperf": "0.12.0",
+    "gpu_request": "H100!",
+    "nvidia_smi": "NVIDIA H100 80GB HBM3, 610.57.04, 81559",
+    "software": {
+      "compute_capability": "sm90",
+      "gpu": "NVIDIA H100 80GB HBM3",
+      "torch": "2.11.0+cu130",
+      "triton": "3.6.0",
+      "vllm": "0.22.1"
+    }
+  },
+  "kernel_source": "tools/kernel-lab/packs/moe-experts/testdata/correct.py (the pack's hand-written reference kernel)",
+  "model": {
+    "dtype": "bfloat16",
+    "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+    "revision": "0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe"
+  },
+  "recorded_at": "2026-11-20T11:57:13Z",
+  "run_id": "20261120T113816Z",
+  "runner": "tools/modal-kernel-poc/moe_e2e_modal.py",
+  "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+  "schema_version": "infercrane.kernel-e2e-check/v1",
+  "small_batch_tokens": 64,
+  "summary": {
+    "answer_check": {
+      "control-again": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "kernel": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "kernel-small-batches": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      },
+      "triton": {
+        "exact": 24,
+        "prompts": 24,
+        "score": 1.0
+      }
+    },
+    "baseline": "mean of control and control-again (vLLM defaults: FlashInfer CUTLASS experts)",
+    "by_concurrency": [
+      {
+        "arms": {
+          "control": {
+            "itl_p50_ms": 5.18,
+            "output_tokens_per_second": 186.8,
+            "per_run_range": [
+              181.9,
+              189.2
+            ],
+            "throughput_change_vs_control": "-0.0%",
+            "ttft_p50_ms": 26.2,
+            "ttft_p95_ms": 29.8
+          },
+          "control-again": {
+            "itl_p50_ms": 5.17,
+            "output_tokens_per_second": 187.0,
+            "per_run_range": [
+              182.3,
+              189.4
+            ],
+            "throughput_change_vs_control": "+0.0%",
+            "ttft_p50_ms": 26.2,
+            "ttft_p95_ms": 30.2
+          },
+          "kernel": {
+            "itl_p50_ms": 8.94,
+            "output_tokens_per_second": 105.0,
+            "per_run_range": [
+              93.6,
+              110.7
+            ],
+            "throughput_change_vs_control": "-43.8%",
+            "ttft_p50_ms": 89.7,
+            "ttft_p95_ms": 93.3
+          },
+          "kernel-small-batches": {
+            "itl_p50_ms": 8.95,
+            "output_tokens_per_second": 109.6,
+            "per_run_range": [
+              108.0,
+              110.4
+            ],
+            "throughput_change_vs_control": "-41.3%",
+            "ttft_p50_ms": 29.2,
+            "ttft_p95_ms": 32.5
+          },
+          "triton": {
+            "itl_p50_ms": 4.94,
+            "output_tokens_per_second": 195.1,
+            "per_run_range": [
+              189.5,
+              197.9
+            ],
+            "throughput_change_vs_control": "+4.4%",
+            "ttft_p50_ms": 26.5,
+            "ttft_p95_ms": 30.6
+          }
+        },
+        "concurrency": 1,
+        "control_itl_p50_ms": 5.17,
+        "control_output_tokens_per_second": 186.9
+      },
+      {
+        "arms": {
+          "control": {
+            "itl_p50_ms": 7.65,
+            "output_tokens_per_second": 502.9,
+            "per_run_range": [
+              492.8,
+              511.2
+            ],
+            "throughput_change_vs_control": "+0.2%",
+            "ttft_p50_ms": 33.7,
+            "ttft_p95_ms": 55.7
+          },
+          "control-again": {
+            "itl_p50_ms": 7.7,
+            "output_tokens_per_second": 500.5,
+            "per_run_range": [
+              493.7,
+              505.3
+            ],
+            "throughput_change_vs_control": "-0.2%",
+            "ttft_p50_ms": 33.7,
+            "ttft_p95_ms": 62.5
+          },
+          "kernel": {
+            "itl_p50_ms": 9.76,
+            "output_tokens_per_second": 370.4,
+            "per_run_range": [
+              317.3,
+              397.5
+            ],
+            "throughput_change_vs_control": "-26.2%",
+            "ttft_p50_ms": 49.1,
+            "ttft_p95_ms": 334.2
+          },
+          "kernel-small-batches": {
+            "itl_p50_ms": 9.79,
+            "output_tokens_per_second": 395.2,
+            "per_run_range": [
+              390.7,
+              397.5
+            ],
+            "throughput_change_vs_control": "-21.2%",
+            "ttft_p50_ms": 49.2,
+            "ttft_p95_ms": 59.5
+          },
+          "triton": {
+            "itl_p50_ms": 8.09,
+            "output_tokens_per_second": 478.4,
+            "per_run_range": [
+              469.1,
+              484.8
+            ],
+            "throughput_change_vs_control": "-4.6%",
+            "ttft_p50_ms": 32.9,
+            "ttft_p95_ms": 49.6
+          }
+        },
+        "concurrency": 4,
+        "control_itl_p50_ms": 7.67,
+        "control_output_tokens_per_second": 501.7
+      },
+      {
+        "arms": {
+          "control": {
+            "itl_p50_ms": 11.14,
+            "output_tokens_per_second": 1328.8,
+            "per_run_range": [
+              1257.0,
+              1373.0
+            ],
+            "throughput_change_vs_control": "-0.1%",
+            "ttft_p50_ms": 78.9,
+            "ttft_p95_ms": 172.9
+          },
+          "control-again": {
+            "itl_p50_ms": 11.22,
+            "output_tokens_per_second": 1332.3,
+            "per_run_range": [
+              1284.2,
+              1359.4
+            ],
+            "throughput_change_vs_control": "+0.1%",
+            "ttft_p50_ms": 78.4,
+            "ttft_p95_ms": 154.8
+          },
+          "kernel": {
+            "itl_p50_ms": 15.68,
+            "output_tokens_per_second": 826.5,
+            "per_run_range": [
+              528.0,
+              977.3
+            ],
+            "throughput_change_vs_control": "-37.9%",
+            "ttft_p50_ms": 107.4,
+            "ttft_p95_ms": 1304.1
+          },
+          "kernel-small-batches": {
+            "itl_p50_ms": 15.96,
+            "output_tokens_per_second": 849.0,
+            "per_run_range": [
+              846.6,
+              851.6
+            ],
+            "throughput_change_vs_control": "-36.2%",
+            "ttft_p50_ms": 122.6,
+            "ttft_p95_ms": 678.7
+          },
+          "triton": {
+            "itl_p50_ms": 11.04,
+            "output_tokens_per_second": 1135.8,
+            "per_run_range": [
+              1090.2,
+              1160.1
+            ],
+            "throughput_change_vs_control": "-14.6%",
+            "ttft_p50_ms": 113.6,
+            "ttft_p95_ms": 688.3
+          }
+        },
+        "concurrency": 16,
+        "control_itl_p50_ms": 11.18,
+        "control_output_tokens_per_second": 1330.6
+      }
+    ],
+    "default_moe_backend": "FlashInfer CUTLASS (both control arms' logs); --moe-backend triton selects TRITON, with vLLM's default Triton config because no tuned file exists for E=128,N=768 on NVIDIA_H100_80GB_HBM3",
+    "kernel_marker": {
+      "kernel": {
+        "kernel_invoked": true,
+        "small_batch_path_invoked": null
+      },
+      "kernel-small-batches": {
+        "kernel_invoked": true,
+        "small_batch_path_invoked": true
+      }
+    },
+    "verdict": "not qualified: the pack's reference kernel answers correctly (24/24 exact) but serves 21-44% fewer output tokens per second than the default setup at every concurrency; the microbenchmark that put it at x1.36 over vLLM's Triton experts disagrees with serving"
+  },
+  "workload": {
+    "concurrency": [
+      1,
+      4,
+      16
+    ],
+    "generator": "aiperf synthetic",
+    "ignore_eos": true,
+    "input_tokens": 512,
+    "output_tokens": 128,
+    "profile_runs": 3,
+    "streaming": true
+  }
+}
