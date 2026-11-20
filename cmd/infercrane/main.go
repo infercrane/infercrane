@@ -252,7 +252,11 @@ func writeCLIError(w io.Writer, args []string, err error) {
 		}
 	}
 	if !jsonOutput {
-		fmt.Fprintln(w, "Error:", err)
+		t := plainTheme
+		if file, ok := w.(*os.File); ok {
+			t = themeFor(file, "")
+		}
+		renderHumanError(w, t, err)
 		return
 	}
 	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or inspect current durable state before retrying."}

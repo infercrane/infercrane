@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"strings"
 
@@ -9,82 +10,96 @@ import (
 )
 
 type commandSpec struct {
-	use, short, group string
-	aliases           []string
+	use, short, section string
+	aliases             []string
+	// suggestFor lists words people type for this command, so a typo or a
+	// habit from another CLI ("infercrane ps") points at it.
+	suggestFor []string
 }
 
+// publicCommandSpecs is every command the CLI dispatches, in the order help
+// lists it within its section. Everyday sections show in `infercrane help`;
+// the rest show with `infercrane help --all`. Descriptions are short, start
+// with a verb, and say what you get.
 var publicCommandSpecs = []commandSpec{
-	{use: "login [flags]", short: "Sign in through the dashboard in your browser", group: "start"},
-	{use: "logout [flags]", short: "Sign out and revoke this CLI's key", group: "start"},
-	{use: "init [flags]", short: "Connect this CLI to a control plane with an existing key", group: "start"},
-	{use: "doctor [flags]", short: "Validate configuration and dependencies", group: "start"},
-	{use: "discover local [flags]", short: "Inspect local GPUs without changing the host", group: "start"},
-	{use: "plan MODEL [flags]", short: "Preview deployment changes without side effects", group: "start"},
-	{use: "deploy MODEL [flags]", short: "Create a durable inference deployment", group: "start"},
-	{use: "workload ACTION [PATH] [flags]", short: "Initialize, validate, build, develop, and deploy inference projects", group: "start"},
-	{use: "evaluation ACTION [arguments]", short: "Sign, verify, attach, and inspect semantic quality evidence", group: "understand"},
-	{use: "agent run|detect|create|list|revoke [flags]", short: "Connect model servers on this machine through an outbound-only agent", group: "start"},
-	{use: "connect URL --as NAME [flags]", short: "Connect an existing inference endpoint", group: "start"},
-	{use: "adopt endpoint|promote NAME [flags]", short: "Connect an existing inference workload", group: "start"},
-	{use: "alert ACTION ENDPOINT [flags]", short: "Configure and evaluate signed webhook alerts", group: "operate"},
-	{use: "admission ACTION ENDPOINT [flags]", short: "Bound endpoint concurrency and queueing", group: "operate"},
-	{use: "async ACTION SUBJECT [flags]", short: "Submit and resume durable encrypted inference", group: "operate"},
-	{use: "ui", short: "Open the interactive operations workspace", group: "operate"},
-	{use: "mcp", short: "Serve read-only operational evidence over MCP stdio", group: "understand"},
-	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "See health, traffic, operations, Guard evidence, and recent events", group: "operate"},
-	{use: "telemetry collect dcgm|amd DEPLOYMENT [flags]", short: "Collect bounded GPU evidence from DCGM or AMD's exporter through the control plane", group: "understand"},
-	{use: "profile ENDPOINT [flags]", short: "Capture and analyze a GPU profile: where GPU time goes and why", group: "understand"},
-	{use: "inbox [flags]", short: "Rank fleet state that needs operator attention", group: "operate"},
-	{use: "request ENDPOINT [flags]", short: "Send a buffered or streaming inference request", group: "start"},
-	{use: "version [flags]", short: "Print the InferCrane version", group: "start"},
-	{use: "apply MODEL_OR_SPEC [flags]", short: "Declaratively converge a deployment", group: "operate"},
-	{use: "deployments [flags]", short: "List logical deployments", group: "operate", aliases: []string{"ls"}},
-	{use: "endpoints [flags]", short: "List stable application endpoints", group: "operate"},
-	{use: "endpoint ACTION [arguments]", short: "Create and manage stable endpoint serving plans", group: "operate"},
-	{use: "environment ACTION [arguments]", short: "Manage endpoint environments", group: "admin"},
-	{use: "logical-model ACTION [arguments]", short: "Manage stable logical model identities", group: "admin"},
-	{use: "status DEPLOYMENT [flags]", short: "Inspect deployment health and traffic", group: "operate"},
-	{use: "logs DEPLOYMENT [flags]", short: "Stream the durable operational timeline", group: "operate"},
-	{use: "events DEPLOYMENT [flags]", short: "Show durable deployment events", group: "operate"},
-	{use: "rollout ACTION [arguments]", short: "Inspect and control immutable revisions", group: "operate"},
-	{use: "route DEPLOYMENT --strategy STRATEGY [flags]", short: "Change replica routing policy", group: "operate"},
-	{use: "delete DEPLOYMENT [flags]", short: "Preview or execute safe deletion", group: "operate"},
-	{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", group: "understand"},
-	{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain persisted operational decisions", group: "understand"},
-	{use: "benchmark DEPLOYMENT [flags]", short: "Run and persist a reproducible benchmark", group: "understand"},
-	{use: "replay DEPLOYMENT [flags]", short: "Capture a privacy-preserving production workload shape", group: "understand"},
-	{use: "capacity [flags]", short: "Inspect observed capacity reliability", group: "understand"},
-	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Inspect cache evidence and request provider-native prefetch", group: "understand"},
-	{use: "sandbox ACTION [arguments]", short: "Compose external sandboxes with expiring endpoint access", group: "operate"},
-	{use: "training ACTION [arguments]", short: "Verify and attach immutable external training artifacts", group: "operate"},
-	{use: "finops DEPLOYMENT | finops collect opencost DEPLOYMENT [flags]", short: "Collect and report attributed inference cost evidence", group: "understand"},
-	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve advisory serving plans", group: "operate"},
-	{use: "session ACTION SUBJECT [flags]", short: "Manage durable logical session identity", group: "operate"},
-	{use: "burst DEPLOYMENT [flags]", short: "Evaluate policy-bounded overflow", group: "operate"},
-	{use: "recipe create DEPLOYMENT [flags]", short: "Capture an immutable evidence-backed model recipe", group: "understand"},
-	{use: "recipes [QUERY] [flags]", short: "Search immutable model recipes", group: "understand"},
-	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Explore reviewed models, or check any open Hugging Face model", group: "start"},
-	{use: "lab MODEL_IDENTITY [flags]", short: "Compare persisted measured serving evidence", group: "understand"},
-	{use: "optimize propose|create MODEL [flags] | optimize workload-profile --file FILE | optimize evidence ACTION --file FILE | optimize kernel-run --file FILE | optimize list|inspect|results|watch|report|approve|activate|cancel | optimize doctor", short: "Propose, measure, and roll out evidence-gated serving optimization runs", group: "understand"},
-	{use: "passport ACTION [arguments]", short: "Issue, inspect, or verify signed release evidence", group: "understand"},
-	{use: "recommend DEPLOYMENT [flags]", short: "Recommend a qualified configuration from persisted evidence", group: "understand"},
-	{use: "slo ACTION DEPLOYMENT [flags]", short: "Inspect or set deterministic inference SLO policy", group: "operate"},
-	{use: "operation list | operation [inspect] ID | operation watch ID | operation cancel ID", short: "List, inspect, resume, or cancel durable operations", group: "understand"},
-	{use: "orphans [flags]", short: "List unmanaged provisioned resources", group: "understand"},
-	{use: "integrations [list] [flags]", short: "Inspect registered and qualified integration capabilities", group: "understand"},
-	{use: "system instances [flags]", short: "Inspect live control-plane HA membership", group: "understand"},
-	{use: "target ACTION [arguments]", short: "Register or list existing inference targets", group: "admin"},
-	{use: "provider ACTION [arguments]", short: "Connect and manage external inference APIs", group: "admin"},
-	{use: "model-api publish TYPE --file PATH [flags]", short: "Publish immutable shared Model API contracts", group: "admin"},
-	{use: "context ACTION [arguments]", short: "List, inspect, or select CLI contexts", group: "admin"},
-	{use: "auth status|login|logout [flags]", short: "Show the authenticated control-plane identity, or sign in and out", group: "admin"},
-	{use: "whoami [flags]", short: "Show who this CLI is signed in as", group: "admin"},
-	{use: "open [endpoint|deployment|run|model|operation NAME] [flags]", short: "Open a dashboard page in the browser", group: "operate"},
-	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", group: "admin"},
-	{use: "principal ACTION [arguments]", short: "Manage scoped credentials", group: "admin"},
-	{use: "secret ACTION [arguments]", short: "Manage reference-only secrets", group: "admin"},
-	{use: "external ACTION [arguments]", short: "Govern explicit external fallback capacity", group: "operate"},
-	{use: "serve", short: "Run the control plane and gateway", group: "admin"},
+	{use: "login [flags]", short: "Sign in through your browser", section: "start", suggestFor: []string{"signin", "setup"}},
+	{use: "deploy MODEL [flags]", short: "Deploy a model and get an endpoint", section: "start", suggestFor: []string{"run", "create", "up"}},
+	{use: "request ENDPOINT [flags]", short: "Send a test request to an endpoint", section: "start", suggestFor: []string{"chat", "curl", "invoke", "call"}},
+	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Browse models, or check any Hugging Face model", section: "start", suggestFor: []string{"model"}},
+	{use: "doctor [flags]", short: "Check your setup and connection", section: "start"},
+
+	{use: "deployments [flags]", short: "List your deployments", section: "deployments", aliases: []string{"ls"}, suggestFor: []string{"list", "ps", "deployment"}},
+	{use: "endpoints [flags]", short: "List your endpoints", section: "deployments"},
+	{use: "status DEPLOYMENT [flags]", short: "Show a deployment's health and traffic", section: "deployments"},
+	{use: "logs DEPLOYMENT [flags]", short: "Stream what happens to a deployment", section: "deployments", suggestFor: []string{"log", "tail"}},
+	{use: "rollout ACTION [arguments]", short: "Roll out or roll back a revision", section: "deployments", suggestFor: []string{"rollback", "promote", "release"}},
+	{use: "delete DEPLOYMENT [flags]", short: "Preview and delete a deployment", section: "deployments", suggestFor: []string{"rm", "remove", "destroy", "down", "stop"}},
+
+	{use: "optimize ACTION [arguments]", short: "Find a cheaper, faster setup and prove it", section: "optimize", suggestFor: []string{"optimise", "tune"}},
+	{use: "benchmark DEPLOYMENT [flags]", short: "Measure a deployment's speed", section: "optimize", suggestFor: []string{"bench", "perf"}},
+	{use: "profile ENDPOINT [flags]", short: "See where GPU time goes", section: "optimize", suggestFor: []string{"trace", "profiler"}},
+	{use: "recommend DEPLOYMENT [flags]", short: "Suggest a better setup from measured results", section: "optimize"},
+
+	{use: "inbox [flags]", short: "See what needs your attention", section: "observe", suggestFor: []string{"alerts", "issues"}},
+	{use: "observe ENDPOINT_OR_DEPLOYMENT [flags]", short: "Watch health, traffic, and recent events", section: "observe", suggestFor: []string{"watch", "monitor", "top"}},
+	{use: "explain [TOPIC] DEPLOYMENT [flags]", short: "Explain why InferCrane made a decision", section: "observe", suggestFor: []string{"why"}},
+	{use: "finops DEPLOYMENT | finops collect opencost DEPLOYMENT [flags]", short: "Show what a deployment costs", section: "observe", suggestFor: []string{"cost", "costs", "billing", "spend"}},
+	{use: "open [endpoint|deployment|run|model|operation NAME] [flags]", short: "Open the dashboard in your browser", section: "observe", aliases: []string{"dashboard"}, suggestFor: []string{"browse", "web", "console"}},
+	{use: "ui", short: "Open the dashboard in this terminal", section: "observe", suggestFor: []string{"tui"}},
+
+	{use: "whoami [flags]", short: "Show who you're signed in as", section: "config", suggestFor: []string{"me", "account"}},
+	{use: "context ACTION [arguments]", short: "Switch between control planes", section: "config", suggestFor: []string{"ctx", "profile", "workspace"}},
+	{use: "target ACTION [arguments]", short: "Add GPU servers and clusters you already run", section: "config", suggestFor: []string{"cluster", "node", "gpu"}},
+	{use: "provider ACTION [arguments]", short: "Connect hosted model APIs", section: "config", suggestFor: []string{"providers"}},
+	{use: "secret ACTION [arguments]", short: "Manage secrets", section: "config", suggestFor: []string{"secrets"}},
+	{use: "principal ACTION [arguments]", short: "Manage API keys and service accounts", section: "config", suggestFor: []string{"token", "tokens", "key", "keys", "apikey"}},
+	{use: "logout [flags]", short: "Sign out and revoke this CLI's key", section: "config", suggestFor: []string{"signout"}},
+	{use: "version [flags]", short: "Show the CLI version", section: "config"},
+
+	{use: "plan MODEL [flags]", short: "Preview a deployment without changing anything", section: "serving", suggestFor: []string{"preview", "diff"}},
+	{use: "apply MODEL_OR_SPEC [flags]", short: "Make a deployment match a spec file", section: "serving"},
+	{use: "connect URL --as NAME [flags]", short: "Put an endpoint you already run behind InferCrane", section: "serving"},
+	{use: "adopt endpoint|promote NAME [flags]", short: "Take over a workload you already run", section: "serving"},
+	{use: "agent run|detect|create|list|revoke [flags]", short: "Connect model servers on this machine, outbound only", section: "serving"},
+	{use: "discover local [flags]", short: "List the GPUs on this machine without changing it", section: "serving"},
+	{use: "workload ACTION [PATH] [flags]", short: "Build, run, and deploy a custom inference project", section: "serving"},
+	{use: "endpoint ACTION [arguments]", short: "Create an endpoint and manage its serving plan", section: "serving"},
+	{use: "environment ACTION [arguments]", short: "Manage endpoint environments", section: "serving"},
+	{use: "logical-model ACTION [arguments]", short: "Give a model a stable name across versions", section: "serving"},
+	{use: "events DEPLOYMENT [flags]", short: "List a deployment's events", section: "serving"},
+	{use: "route DEPLOYMENT --strategy STRATEGY [flags]", short: "Change how traffic is spread across replicas", section: "serving"},
+	{use: "admission ACTION ENDPOINT [flags]", short: "Limit concurrent requests and queueing", section: "serving"},
+	{use: "slo ACTION DEPLOYMENT [flags]", short: "Set latency and availability targets", section: "serving"},
+	{use: "alert ACTION ENDPOINT [flags]", short: "Send signed webhook alerts", section: "serving"},
+	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve suggested serving plans", section: "serving"},
+	{use: "burst DEPLOYMENT [flags]", short: "Check when traffic can overflow to extra capacity", section: "serving"},
+	{use: "external ACTION [arguments]", short: "Control fallback to an external API", section: "serving"},
+	{use: "async ACTION SUBJECT [flags]", short: "Submit long requests and fetch results later", section: "serving"},
+	{use: "session ACTION SUBJECT [flags]", short: "Prefer one replica for a conversation", section: "serving"},
+	{use: "sandbox ACTION [arguments]", short: "Give sandboxes short-lived endpoint access", section: "serving"},
+	{use: "operation list | operation [inspect] ID | operation watch ID | operation cancel ID", short: "Follow, resume, or cancel a long-running change", section: "serving", suggestFor: []string{"op", "ops", "operations"}},
+	{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", section: "serving", suggestFor: []string{"describe", "show", "get"}},
+
+	{use: "evaluation ACTION [arguments]", short: "Sign, verify, and attach answer-quality results", section: "evidence", suggestFor: []string{"eval", "evals"}},
+	{use: "passport ACTION [arguments]", short: "Issue and verify signed release records", section: "evidence"},
+	{use: "lab MODEL_IDENTITY [flags]", short: "Compare measured results for a model", section: "evidence"},
+	{use: "recipe create DEPLOYMENT [flags]", short: "Save a deployment's proven setup", section: "evidence"},
+	{use: "recipes [QUERY] [flags]", short: "Find saved setups", section: "evidence"},
+	{use: "replay DEPLOYMENT [flags]", short: "Record your traffic's shape without its content", section: "evidence"},
+	{use: "capacity [flags]", short: "Show how reliably GPU capacity was available", section: "evidence"},
+	{use: "telemetry collect dcgm|amd DEPLOYMENT [flags]", short: "Collect GPU metrics from DCGM or AMD's exporter", section: "evidence"},
+	{use: "artifact ACTION ARTIFACT_ID [flags]", short: "Check model caches and request prefetch", section: "evidence"},
+	{use: "training ACTION [arguments]", short: "Verify and attach checkpoints trained elsewhere", section: "evidence"},
+	{use: "orphans [flags]", short: "Find cloud resources InferCrane doesn't manage", section: "evidence"},
+	{use: "integrations [list] [flags]", short: "List connected integrations and what they support", section: "evidence"},
+
+	{use: "init [flags]", short: "Connect to a control plane with an existing key", section: "platform"},
+	{use: "auth status|login|logout [flags]", short: "Sign in, sign out, or show your identity", section: "platform"},
+	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", section: "platform"},
+	{use: "model-api publish TYPE --file PATH [flags]", short: "Publish a shared Model API contract", section: "platform"},
+	{use: "system instances [flags]", short: "List the running control-plane instances", section: "platform"},
+	{use: "mcp", short: "Give AI agents read-only access over MCP", section: "platform"},
+	{use: "serve", short: "Run the control plane and gateway", section: "platform", suggestFor: []string{"server"}},
 }
 
 var commandExamples = map[string]string{
@@ -130,21 +145,21 @@ var commandExamples = map[string]string{
   # Check any open Hugging Face model, then deploy the setup it proposes
   infercrane models check microsoft/phi-4 --spec phi-4.yaml
   infercrane deploy phi-4.yaml --wait`,
-	"plan": `  # Common path: preview safe defaults
-  infercrane plan meta-llama/Llama-3.1-8B-Instruct
+	"plan": `  # See what a deployment would create, without changing anything
+  infercrane plan Qwen/Qwen3-8B
 
-  # Advanced path: preview a reviewable DeploymentSpec
+  # Preview a spec file before you apply it
   infercrane plan infercrane.yaml`,
-	"deploy": `  # Common path: one durable deployment
-  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --wait
+	"deploy": `  # Deploy a model and wait until its endpoint is ready
+  infercrane deploy Qwen/Qwen3-8B --wait
 
-  # Attach existing registered capacity
-  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --targets gpu-a,gpu-b
+  # Use GPU servers you already registered with infercrane target
+  infercrane deploy Qwen/Qwen3-8B --targets gpu-a,gpu-b
 
-  # Optional advanced serving backend
-  infercrane deploy meta-llama/Llama-3.1-8B-Instruct --backend dynamo --gpu NVIDIA-L40S
+  # Pick the GPU and serving backend yourself
+  infercrane deploy Qwen/Qwen3-8B --backend dynamo --gpu NVIDIA-L40S
 
-  # Full reviewable configuration
+  # Deploy from a spec file you can review and keep in git
   infercrane deploy infercrane.yaml --idempotency-key production-r1`,
 	"login": `  # Sign in through the dashboard; the terminal and the browser show the same code
   infercrane login
@@ -223,12 +238,12 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 	var noColor bool
 	root := &cobra.Command{
 		Use:           "infercrane",
-		Short:         "Production inference without the platform engineering",
-		Long:          "InferCrane operates durable, explainable inference deployments without hiding the infrastructure.",
+		Short:         "Run open models at the lowest cost that meets your targets",
+		Long:          rootTagline,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Args:          cobra.NoArgs,
+		Args:          rootArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
@@ -244,16 +259,26 @@ func newRootCommand(ctx context.Context) *cobra.Command {
 			return nil
 		},
 	}
-	root.PersistentFlags().StringVar(&contextName, "context", "", "use a named CLI context")
-	root.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable ANSI color output")
+	root.PersistentFlags().StringVar(&contextName, "context", "", "use another saved context for one command")
+	root.PersistentFlags().BoolVar(&noColor, "no-color", false, "turn off colors")
 	root.SetOut(os.Stdout)
 	root.SetErr(os.Stderr)
-	root.AddGroup(
-		&cobra.Group{ID: "start", Title: "Start:"},
-		&cobra.Group{ID: "operate", Title: "Operate:"},
-		&cobra.Group{ID: "understand", Title: "Understand:"},
-		&cobra.Group{ID: "admin", Title: "Administration:"},
-	)
+	root.SetVersionTemplate("infercrane {{.Version}}\n")
+	root.SetUsageTemplate(usageTemplate)
+	root.SuggestionsMinimumDistance = 2
+	root.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		if cmd == root {
+			renderRootHelp(cmd.OutOrStdout(), helpTheme(), root, false)
+			return
+		}
+		if text := strings.TrimSpace(cmd.Long); text != "" {
+			_, _ = io.WriteString(cmd.OutOrStdout(), text+"\n\n")
+		} else if cmd.Short != "" {
+			_, _ = io.WriteString(cmd.OutOrStdout(), cmd.Short+"\n\n")
+		}
+		_, _ = io.WriteString(cmd.OutOrStdout(), cmd.UsageString())
+	})
+	root.SetHelpCommand(newHelpCommand(root))
 	for _, spec := range publicCommandSpecs {
 		root.AddCommand(newLegacyCommand(ctx, spec))
 	}
@@ -265,8 +290,8 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 	command := &cobra.Command{
 		Use:                spec.use,
 		Short:              spec.short,
-		GroupID:            spec.group,
 		Aliases:            spec.aliases,
+		SuggestFor:         spec.suggestFor,
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		ValidArgsFunction:  completionFor(name),

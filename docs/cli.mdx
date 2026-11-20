@@ -7,7 +7,48 @@ import SafeRetry from "/snippets/safe-retry.mdx";
 
 # CLI reference
 
-The public CLI uses Cobra for grouped help, typo suggestions, aliases, and shell completion. It talks to the authenticated control-plane API and never opens PostgreSQL directly. Run `infercrane help` for the current command tree and `infercrane version` for the build version. `infercrane version --output json` returns `version` plus a `build` object with the Go version, platform, and, when the binary embeds them, the source `commit`, `commit_time`, and `modified` flag. Build fields that were not embedded are omitted, never guessed.
+The CLI talks to the authenticated control-plane API and never opens PostgreSQL directly. `infercrane version` prints the build version. `infercrane version --output json` returns `version` plus a `build` object with the Go version, platform, and, when the binary embeds them, the source `commit`, `commit_time`, and `modified` flag. Build fields that were not embedded are omitted, never guessed.
+
+## Help
+
+`infercrane` or `infercrane help` lists the everyday commands in five sections: Get started,
+Deployments, Optimize, Observe, and Configuration. `infercrane help --all` adds the operator tools in
+three more: More serving tools, Evidence and measurement, and Platform administration. Every command
+runs and completes in the shell either way; the split only keeps the first screen short.
+`infercrane help COMMAND` and `infercrane COMMAND --help` show one command's usage, examples, and
+options.
+
+Help also says which control plane the CLI uses, for example `● Using control.example.com · context
+prod`, or `○ Not signed in. Run infercrane login to start.` It reads only the saved configuration
+and the environment. It never contacts the control plane or the OS keychain, so it does not say
+whether a saved key is still valid; `infercrane whoami` checks that.
+
+An unknown command suggests the closest real one, and common words from other tools map to the
+InferCrane command: `ps` and `list` suggest `deployments`, `cost` suggests `finops`, `chat` and
+`curl` suggest `request`, and `rm` suggests `delete`. `infercrane dashboard` is an alias for
+`infercrane open`.
+
+```text
+$ infercrane deplyo
+Error: unknown command "deplyo"
+  Did you mean infercrane deploy?
+  Run infercrane help to see the commands.
+```
+
+## Errors
+
+A failure prints `Error:` and what happened, then indented lines that say what to do next. A
+control-plane error adds its remediation as `Next:` and its code, noting when the request is safe to
+retry:
+
+```text
+Error: RunPod is unavailable
+  Next: Retry with the same idempotency key.
+  Code: provider_unavailable · safe to retry
+```
+
+In a terminal the first line starts with a red `✗` and commands to type are highlighted. With
+`--output json` the error is the JSON object described below instead.
 
 ## Global conventions
 
