@@ -69,6 +69,13 @@ revocation take effect on the next successful snapshot refresh. If immediate rev
 while PostgreSQL is unreachable, restore authoritative database access or fence/restart the affected
 gateway instances; InferCrane cannot infer a revocation it cannot read.
 
+Inference errors name no internal host, URL, or service. When an upstream fails, the gateway answers
+with its own OpenAI-shaped error (503 `upstream_unavailable`, or 504 when the endpoint deadline
+passes). It never forwards an error body that a model server did not write, such as the router's
+report of an unreachable worker, which names the in-cluster service URL. A failed async job's
+`error_message` is only the gateway's HTTP status or a fixed message. The detail is logged under the
+request or job ID for operators. See [gateway failure behavior](/features/gateway#failure-behavior).
+
 A workspace secret is sealed in InferCrane, or a reference to where the secret already lives:
 
 ```bash

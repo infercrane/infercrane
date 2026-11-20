@@ -399,10 +399,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		openAIError(w, "Inference upstream is unavailable", http.StatusServiceUnavailable, "server_error")
 		return
 	}
-	client := g.Client
-	if client == nil {
-		client = &http.Client{Transport: &http.Transport{MaxIdleConns: 512, MaxIdleConnsPerHost: 128, IdleConnTimeout: 90 * time.Second, ResponseHeaderTimeout: 5 * time.Minute}}
-	}
+	client := g.upstreamClient()
 	var resp *http.Response
 	attemptCount := 0
 	for attempt := 0; attempt <= retryBudget; attempt++ {

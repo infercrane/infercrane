@@ -47,6 +47,15 @@ control API's shape (`error.code`).
 - Upstream connection failures return 503; timeouts return 504.
 - Client cancellation and upstream disconnects are recorded distinctly.
 - The last published route remains usable during control-plane failure.
+- The caller never gets error text that a model server did not write. A model server answers an
+  error with a JSON object or inside its event stream; a server error with any other body was
+  written in between and can name internal hosts. One example is the instance-local vLLM Router's
+  `500 Request failed: error sending request for url (http://<service>.<namespace>.svc:8080/...)`
+  when its worker is unreachable. The gateway treats such an answer as an upstream connection
+  failure: it may retry within the retry budget, then returns its own 503 `upstream_unavailable`
+  error. The upstream URL, status, the first 512 bytes of that body, and any connection error are
+  logged as `inference upstream failed` with the request ID and attempt. A model server's JSON
+  error still reaches the caller with its status. `internal/gateway/upstream_test.go` covers this.
 
 ## Tests
 

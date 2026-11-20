@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,6 +42,8 @@ type Service struct {
 	Client                                  *http.Client
 	Secrets                                 secrets.Resolver
 	Lease                                   time.Duration
+	// Logger receives the detail of failed attempts; nil uses slog.Default.
+	Logger *slog.Logger
 }
 
 type SubmitRequest struct {
@@ -141,7 +144,8 @@ func (s Service) Run(ctx context.Context) error {
 		}
 		if executeErr != nil {
 			retryable := job.Attempt < 3 && time.Now().UTC().Before(job.ExecutionDeadline)
-			_ = s.Store.FailAsyncInferenceJob(ctx, job.ID, owner, token, "execution_failed", executeErr.Error(), retryable)
+			s.logger().Warn("async inference attempt failed", "job_id", job.ID, "request_id", job.RequestID, "attempt", job.Attempt, "retryable", retryable, "error", executeErr)
+			_ = s.Store.FailAsyncInferenceJob(ctx, job.ID, owner, token, "execution_failed", publicFailure(executeErr), retryable)
 		}
 	}
 }
@@ -207,7 +211,7 @@ func (s Service) execute(ctx context.Context, owner, token string, job domain.As
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("gateway returned HTTP %d", resp.StatusCode)
+		return gatewayStatusError{status: resp.StatusCode}
 	}
 	ciphertext, nonce, err := s.Cipher.Encrypt(body, []byte(job.TenantID+"/"+job.ID))
 	if err != nil {
@@ -220,6 +224,32 @@ func (s Service) execute(ctx context.Context, owner, token string, job domain.As
 		_ = s.deliverWebhook(ctx, job, body)
 	}
 	return nil
+}
+
+// gatewayStatusError is a gateway answer outside 2xx.
+type gatewayStatusError struct{ status int }
+
+func (e gatewayStatusError) Error() string {
+	return fmt.Sprintf("gateway returned HTTP %d", e.status)
+}
+
+// publicFailure is the error_message the job's owner reads through the API.
+// Only the gateway's status is passed on: a transport error names the
+// internal gateway address, and the other failures carry key or storage
+// detail. The full error goes to the server log.
+func publicFailure(err error) string {
+	var status gatewayStatusError
+	if errors.As(err, &status) {
+		return status.Error()
+	}
+	return "async inference execution failed"
+}
+
+func (s Service) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
 
 func (s Service) deliverWebhook(ctx context.Context, job domain.AsyncInferenceJob, result []byte) error {

@@ -358,7 +358,10 @@ from committing a later result because the fenced status update no longer matche
 promise that an already transmitted provider request stops instantly. If completion or cancellation
 won the state transition first, the later request returns the current terminal outcome rather than
 rewriting history. Inspect `status`, `completed_at`, `error_code`, and `expires_at` with
-`infercrane async get JOB_ID --output json`.
+`infercrane async get JOB_ID --output json`. After a failed attempt, `error_message` is
+`gateway returned HTTP <status>` or `async inference execution failed`. It never holds the error
+itself, which can name the internal gateway address; operators find that in the server log as
+`async inference attempt failed` with the job ID.
 
 ### Cancellation and billing
 
