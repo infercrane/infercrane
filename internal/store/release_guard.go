@@ -63,35 +63,13 @@ func (s *Store) SetReleaseGuardPolicy(ctx context.Context, tenant, deploymentNam
 	return s.ReleaseGuardPolicy(ctx, tenant, deploymentName)
 }
 
-// requestOutputSpeedSQL is the median successful request's output tokens
-// per second of request time. Release Guard compares revisions that serve
-// very different shares of traffic, such as a 5% canary beside the active
-// revision, so it compares how fast each served a request, never how many
-// tokens each served in the window: that would measure demand, and a canary
-// would always look 95% slower.
-const requestOutputSpeedSQL = `percentile_cont(0.5) WITHIN GROUP (ORDER BY output_tokens*1000.0/latency_ms) FILTER (WHERE output_tokens>0 AND latency_ms>0 AND error_type IS NULL AND status_code<400)`
-
 func (s *Store) RevisionMetrics(ctx context.Context, revisionID string, window time.Duration) (domain.RevisionMetrics, error) {
 	if window <= 0 {
 		return domain.RevisionMetrics{}, errors.New("metrics window must be positive")
 	}
-	var metrics domain.RevisionMetrics
-	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE revision_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, revisionID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	metrics, err := s.revisionMetrics(ctx, revisionID, `started_at>=NOW()-(?*INTERVAL '1 second')`, window.Seconds())
 	if err != nil {
 		return metrics, err
-	}
-	if ttft.Valid {
-		metrics.P95TTFTMS = &ttft.Float64
-	}
-	if latency.Valid {
-		metrics.P95LatencyMS = &latency.Float64
-	}
-	if output.Valid {
-		metrics.OutputTokensPerSecond = &output.Float64
-	}
-	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state IN ('ready','active') AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
-		return domain.RevisionMetrics{}, err
 	}
 	metrics.EvidenceSource = "request_telemetry"
 	return metrics, nil
@@ -101,14 +79,65 @@ func (s *Store) RevisionMetricsSince(ctx context.Context, revisionID string, sin
 	if since.IsZero() || since.After(time.Now().UTC()) {
 		return domain.RevisionMetrics{}, errors.New("metrics start must be a past timestamp")
 	}
-	duration := time.Since(since)
-	if duration < time.Second {
-		duration = time.Second
+	metrics, err := s.revisionMetrics(ctx, revisionID, `started_at>=?`, since.Format(time.RFC3339Nano))
+	if err != nil {
+		return metrics, err
 	}
+	metrics.EvidenceSource = "post_promotion_request_telemetry"
+	return metrics, nil
+}
+
+func (s *Store) revisionMetrics(ctx context.Context, revisionID, window string, windowArgs ...any) (domain.RevisionMetrics, error) {
+	metrics, err := s.requestMetrics(ctx, revisionRequests, revisionID, window, windowArgs...)
+	if err != nil {
+		return metrics, err
+	}
+	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state IN ('ready','active') AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
+		return domain.RevisionMetrics{}, err
+	}
+	return metrics, nil
+}
+
+// requestSubject names the request_records columns that tie a request to a
+// revision or a binding: served is the one that answered it, left the first
+// one a failed-over request left (see gateway failover).
+type requestSubject struct{ served, left string }
+
+var (
+	revisionRequests = requestSubject{served: "revision_id", left: "fallback_from_revision_id"}
+	bindingRequests  = requestSubject{served: "binding_id", left: "fallback_from_binding_id"}
+)
+
+// requestMetricsSQL measures one revision or binding from request records;
+// scope holds the further predicates, such as the window.
+//
+// A request the subject left is one of its requests and one of its errors,
+// whichever binding then answered it. TTFT, latency and output speed come
+// only from requests the subject served. Output speed is the median
+// successful request's output tokens per second of request time. Release
+// Guard compares subjects that serve very different shares of traffic, such
+// as a 5% canary beside the active revision, so it compares how fast each
+// served a request, never how many tokens each served in the window: that
+// would measure demand, and a canary would always look 95% slower.
+//
+// The OR keeps an index on each side: the served column's index and the
+// partial index on the left column. The first six arguments are the
+// subject's ID.
+func requestMetricsSQL(subject requestSubject, scope string) string {
+	served, left := subject.served+"=?", subject.left+"=?"
+	return `SELECT COUNT(*),` +
+		`COALESCE(AVG(CASE WHEN ` + left + ` OR error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),` +
+		`percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ` + served + ` AND ttft_ms IS NOT NULL),` +
+		`percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE ` + served + ` AND latency_ms IS NOT NULL),` +
+		`percentile_cont(0.5) WITHIN GROUP (ORDER BY output_tokens*1000.0/latency_ms) FILTER (WHERE ` + served + ` AND output_tokens>0 AND latency_ms>0 AND error_type IS NULL AND status_code<400) ` +
+		`FROM request_records WHERE (` + served + ` OR ` + left + `) AND ` + scope
+}
+
+func (s *Store) requestMetrics(ctx context.Context, subject requestSubject, id, scope string, scopeArgs ...any) (domain.RevisionMetrics, error) {
 	var metrics domain.RevisionMetrics
 	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE revision_id=? AND started_at>=?`, revisionID, since.Format(time.RFC3339Nano)).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
-	if err != nil {
+	args := append([]any{id, id, id, id, id, id}, scopeArgs...)
+	if err := s.QueryRowContext(ctx, requestMetricsSQL(subject, scope), args...).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output); err != nil {
 		return metrics, err
 	}
 	if ttft.Valid {
@@ -120,10 +149,6 @@ func (s *Store) RevisionMetricsSince(ctx context.Context, revisionID string, sin
 	if output.Valid {
 		metrics.OutputTokensPerSecond = &output.Float64
 	}
-	if err = s.QueryRowContext(ctx, `SELECT COUNT(*) FROM replicas WHERE revision_id=? AND lifecycle_state IN ('ready','active') AND health='healthy'`, revisionID).Scan(&metrics.ReadyReplicas); err != nil {
-		return domain.RevisionMetrics{}, err
-	}
-	metrics.EvidenceSource = "post_promotion_request_telemetry"
 	return metrics, nil
 }
 

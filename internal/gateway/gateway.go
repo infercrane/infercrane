@@ -339,7 +339,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 				w.Header().Set("Retry-After", "1")
 			}
 			queueMS := float64(time.Since(admissionStarted).Microseconds()) / 1000
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, "")
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, failover{})
 			openAIError(w, admissionErr.Error(), status, errorType)
 			return
 		}
@@ -358,7 +358,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	if g.RequestAuthorizer != nil {
 		if err := g.RequestAuthorizer.Authorize(principal.TenantID); err != nil {
 			w.Header().Set("Retry-After", "1")
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, "")
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, http.StatusTooManyRequests, "tenant_request_quota_exhausted", streaming, responseObservation{}, capacityEvidence{}, replay, &queueMS, 0, failover{})
 			openAIError(w, "Tenant request-rate quota is exhausted", http.StatusTooManyRequests, "rate_limit_error")
 			return
 		}
@@ -368,7 +368,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	attempt, refused := g.forward(r, call, route, body, retryBudget, 0)
 	if refused != nil {
 		if refused.errorType != "" {
-			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, refused.status, refused.errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, 0, "")
+			g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, refused.status, refused.errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, 0, failover{})
 		}
 		openAIError(w, refused.message, refused.status, refused.publicType)
 		return
@@ -379,7 +379,8 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	// router behind a route has already retried its own workers. A paid
 	// external route is never left for another, as it is never retried: the
 	// supplier may have charged for the attempt.
-	retries, attempts, fallbackReason := 0, attempt.attempts, ""
+	retries, attempts := 0, attempt.attempts
+	var moved failover
 	tried := []routes.Snapshot{route}
 	for hop := 0; hop < maxFailoverRoutes && !streaming && route.ExternalPolicyID == "" && attempt.mayFailOver(r.Context()); hop++ {
 		next, releaseNext, found := g.Routes.AcquireFallbackForTenant(principal.TenantID, alias, tried)
@@ -403,15 +404,15 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 			// failure of the route that was actually tried.
 			continue
 		}
-		if fallbackReason == "" {
-			fallbackReason = attempt.failoverReason()
+		if moved.reason == "" {
+			moved = failover{reason: attempt.failoverReason(), bindingID: route.BindingID, revisionID: route.RevisionID}
 		}
 		retries += attempt.attempts - 1
 		attempts += nextAttempt.attempts
 		attempt, route = nextAttempt, next
 	}
 	retries += attempt.attempts - 1
-	if passportID != "" && fallbackReason != "" {
+	if passportID != "" && moved.reason != "" {
 		w.Header().Set("X-InferCrane-Affinity", "fallback")
 	}
 	resp := attempt.resp
@@ -420,7 +421,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		if errors.Is(attempt.err, context.DeadlineExceeded) {
 			status, errorType, message = http.StatusGatewayTimeout, "request_deadline_exceeded", "Inference request exceeded its endpoint deadline"
 		}
-		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, retries, fallbackReason)
+		g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, status, errorType, streaming, responseObservation{}, <-attempt.evidence, replay, &queueMS, retries, moved)
 		openAIError(w, message, status, "server_error")
 		return
 	}
@@ -450,11 +451,11 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		}
 		cancel()
 	}
-	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-attempt.evidence, replay, &queueMS, retries, fallbackReason)
+	g.record(context.WithoutCancel(r.Context()), requestID, route, alias, operation, started, resp.StatusCode, errorType, streaming, observation, <-attempt.evidence, replay, &queueMS, retries, moved)
 	if g.Logger != nil {
 		attributes := []any{"request_id", requestID, "traceparent", traceParent, "tenant_id", principal.TenantID, "deployment_id", route.DeploymentID, "status", resp.StatusCode, "duration_ms", float64(time.Since(started).Microseconds()) / 1000}
-		if fallbackReason != "" {
-			attributes = append(attributes, "binding_id", route.BindingID, "fallback_reason", fallbackReason)
+		if moved.reason != "" {
+			attributes = append(attributes, "binding_id", route.BindingID, "fallback_reason", moved.reason, "fallback_from_binding_id", moved.bindingID)
 		}
 		g.Logger.Info("inference request", attributes...)
 	}
@@ -489,6 +490,14 @@ type routeAttempt struct {
 // time. A timeout does not move, since the route may still be working.
 func (a routeAttempt) mayFailOver(ctx context.Context) bool {
 	return a.resp == nil && ctx.Err() == nil && !errors.Is(a.err, context.DeadlineExceeded) && !errors.Is(a.err, context.Canceled)
+}
+
+// failover is how a request came to be served by a later route than the
+// first one it tried: why it left that route, and the binding and revision
+// it left. The request's one record carries it, so the revision it left
+// counts the request as one of its errors (store.RevisionMetrics).
+type failover struct {
+	reason, bindingID, revisionID string
 }
 
 // failoverReason is recorded as request_records.fallback_reason on the
@@ -720,7 +729,7 @@ func (g *Gateway) replayShape(payload map[string]any, headers http.Header) repla
 	return shape
 }
 
-func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape, queueMS *float64, retryCount int, fallbackReason string) {
+func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, requestModel, operation string, started time.Time, status int, errorType string, streaming bool, observation responseObservation, evidence capacityEvidence, replay replayShape, queueMS *float64, retryCount int, moved failover) {
 	if g.Recorder == nil {
 		return
 	}
@@ -738,7 +747,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 			generationMS = &value
 		}
 	}
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: usage.model, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: usage.inputTokens, OutputTokens: usage.outputTokens, CachedInputTokens: usage.cachedInput, Streaming: streaming, RetryCount: retryCount, FallbackReason: fallbackReason, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: usage.model, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: usage.inputTokens, OutputTokens: usage.outputTokens, CachedInputTokens: usage.cachedInput, Streaming: streaming, RetryCount: retryCount, FallbackReason: moved.reason, FallbackFromBindingID: moved.bindingID, FallbackFromRevisionID: moved.revisionID, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}
