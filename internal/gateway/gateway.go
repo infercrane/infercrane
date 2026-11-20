@@ -299,6 +299,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		openAIError(w, "Endpoint does not support streaming for the '"+operation+"' protocol", http.StatusUnprocessableEntity, "unsupported_protocol")
 		return
 	}
+	stripAddedUsage := streaming && route.ComputeMode == "external" && requestStreamUsage(payload, operation)
 	maxOutputTokens := integerField(payload, "max_output_tokens")
 	if maxOutputTokens == 0 {
 		maxOutputTokens = integerField(payload, "max_tokens")
@@ -464,7 +465,7 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 	w.Header().Set("traceparent", traceParent)
 	w.WriteHeader(resp.StatusCode)
 	observation := responseObservation{}
-	copyErr := copyResponse(w, resp, &observation)
+	copyErr := copyResponse(w, resp, &observation, stripAddedUsage)
 	errorType := ""
 	if copyErr != nil {
 		if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
@@ -476,7 +477,8 @@ func (g *Gateway) proxyInference(w http.ResponseWriter, r *http.Request, operati
 		}
 	}
 	if billingAuthorization.Required && g.ManagedBilling != nil {
-		_, inputTokens, outputTokens := observation.usage()
+		usage := observation.usage()
+		inputTokens, outputTokens := usage.inputTokens, usage.outputTokens
 		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		if _, settleErr := g.ManagedBilling.SettleManagedUsage(settleCtx, principal.TenantID, billingAuthorization.ReservationID, domain.ManagedUsageSettlement{StatusCode: resp.StatusCode, InputTokens: inputTokens, OutputTokens: outputTokens}); settleErr != nil && g.Logger != nil {
 			g.Logger.Error("settle managed model API usage", "error", settleErr, "request_id", requestID, "tenant_id", principal.TenantID)
@@ -610,7 +612,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 		value := float64(observation.firstByteAt.Sub(started).Microseconds()) / 1000
 		ttft = &value
 	}
-	responseModel, inputTokens, outputTokens := observation.usage()
+	usage := observation.usage()
 	var generationMS *float64
 	if streaming && ttft != nil {
 		value := latency - *ttft
@@ -618,7 +620,7 @@ func (g *Gateway) record(ctx context.Context, id string, route routes.Snapshot, 
 			generationMS = &value
 		}
 	}
-	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: responseModel, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: inputTokens, OutputTokens: outputTokens, Streaming: streaming, RetryCount: retryCount, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
+	record := domain.InferenceRecord{RequestID: id, TenantID: route.TenantID, DeploymentID: route.DeploymentID, RevisionID: route.RevisionID, TargetID: route.TargetID, LogicalModelID: route.LogicalModelID, EnvironmentID: route.EnvironmentID, EndpointID: route.EndpointID, ServingPlanID: route.ServingPlanID, BindingID: route.BindingID, Provider: route.Provider, Runtime: route.Runtime, ComputeMode: route.ComputeMode, OperationName: operation, RequestModel: requestModel, ResponseModel: usage.model, SemanticConventionSchema: "https://opentelemetry.io/schemas/gen-ai/1.42.0", StartedAt: started, StatusCode: status, LatencyMS: latency, QueueMS: queueMS, TTFTMS: ttft, GenerationMS: generationMS, InputTokens: usage.inputTokens, OutputTokens: usage.outputTokens, CachedInputTokens: usage.cachedInput, Streaming: streaming, RetryCount: retryCount, ErrorType: errorType, ColdStart: evidence.coldStart, ProviderWorkersAtArrival: evidence.workers, ProviderCapacityObservedAt: evidence.observedAt, SessionIDHash: replay.sessionIDHash, ParentSessionIDHash: replay.parentSessionIDHash, SharedPrefixHash: replay.sharedPrefixHash, ToolPauseMS: replay.toolPauseMS}
 	if err := g.Recorder.RecordRequest(ctx, record); err != nil && g.Logger != nil {
 		g.Logger.Error("record request", "error", err, "request_id", id)
 	}
@@ -647,68 +649,216 @@ func (o *responseObservation) observe(body []byte) {
 	}
 }
 
-func (o responseObservation) usage() (string, *int, *int) {
-	var response struct {
-		Model string `json:"model"`
-		Usage struct {
-			PromptTokens     *int `json:"prompt_tokens"`
-			CompletionTokens *int `json:"completion_tokens"`
-			InputTokens      *int `json:"input_tokens"`
-			OutputTokens     *int `json:"output_tokens"`
-		} `json:"usage"`
+// tokenUsage is the usage a response reported. CachedInputTokens is the part
+// of the input the upstream served from its prompt cache; nil when the
+// response did not say.
+type tokenUsage struct {
+	model                                  string
+	inputTokens, outputTokens, cachedInput *int
+}
+
+type usageFields struct {
+	PromptTokens        *int `json:"prompt_tokens"`
+	CompletionTokens    *int `json:"completion_tokens"`
+	InputTokens         *int `json:"input_tokens"`
+	OutputTokens        *int `json:"output_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens *int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	InputTokensDetails *struct {
+		CachedTokens *int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+}
+
+func (u usageFields) tokens(model string) tokenUsage {
+	result := tokenUsage{model: model, inputTokens: u.PromptTokens, outputTokens: u.CompletionTokens}
+	if result.inputTokens == nil {
+		result.inputTokens = u.InputTokens
 	}
-	decode := func(value []byte) bool { return json.Unmarshal(value, &response) == nil }
-	if !decode(o.body) {
-		for _, line := range bytes.Split(o.body, []byte("\n")) {
-			line = bytes.TrimSpace(line)
-			if !bytes.HasPrefix(line, []byte("data:")) {
-				continue
+	if result.outputTokens == nil {
+		result.outputTokens = u.OutputTokens
+	}
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil {
+		result.cachedInput = u.PromptTokensDetails.CachedTokens
+	} else if u.InputTokensDetails != nil {
+		result.cachedInput = u.InputTokensDetails.CachedTokens
+	}
+	if result.cachedInput != nil && (*result.cachedInput < 0 || result.inputTokens == nil || *result.cachedInput > *result.inputTokens) {
+		// A cached count that is not part of the reported input is not
+		// evidence of anything.
+		result.cachedInput = nil
+	}
+	return result
+}
+
+func (o responseObservation) usage() tokenUsage {
+	var response struct {
+		Model string      `json:"model"`
+		Usage usageFields `json:"usage"`
+	}
+	if json.Unmarshal(o.body, &response) == nil {
+		return response.Usage.tokens(response.Model)
+	}
+	model, usage := "", usageFields{}
+	for _, line := range bytes.Split(o.body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		value := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		if bytes.Equal(value, []byte("[DONE]")) {
+			continue
+		}
+		var chunk struct {
+			Model string       `json:"model"`
+			Usage *usageFields `json:"usage"`
+		}
+		if json.Unmarshal(value, &chunk) == nil {
+			if chunk.Model != "" {
+				model = chunk.Model
 			}
-			value := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-			if bytes.Equal(value, []byte("[DONE]")) {
-				continue
-			}
-			var chunk struct {
-				Model string `json:"model"`
-				Usage *struct {
-					PromptTokens     *int `json:"prompt_tokens"`
-					CompletionTokens *int `json:"completion_tokens"`
-					InputTokens      *int `json:"input_tokens"`
-					OutputTokens     *int `json:"output_tokens"`
-				} `json:"usage"`
-			}
-			if json.Unmarshal(value, &chunk) == nil {
-				if chunk.Model != "" {
-					response.Model = chunk.Model
-				}
-				if chunk.Usage != nil {
-					response.Usage.PromptTokens = chunk.Usage.PromptTokens
-					response.Usage.CompletionTokens = chunk.Usage.CompletionTokens
-					response.Usage.InputTokens = chunk.Usage.InputTokens
-					response.Usage.OutputTokens = chunk.Usage.OutputTokens
-				}
+			if chunk.Usage != nil {
+				usage = *chunk.Usage
 			}
 		}
 	}
-	inputTokens, outputTokens := response.Usage.PromptTokens, response.Usage.CompletionTokens
-	if inputTokens == nil {
-		inputTokens = response.Usage.InputTokens
-	}
-	if outputTokens == nil {
-		outputTokens = response.Usage.OutputTokens
-	}
-	return response.Model, inputTokens, outputTokens
+	return usage.tokens(model)
 }
 
-func copyResponse(w http.ResponseWriter, resp *http.Response, observation *responseObservation) error {
+// requestStreamUsage asks an external OpenAI-compatible upstream to report
+// token usage on a stream, which it otherwise omits, so a closed API's
+// traffic is recorded with tokens like any other. It reports whether the
+// usage chunk this adds must be removed again, because the caller did not ask
+// for it. A caller that set stream_options itself is left as it asked.
+func requestStreamUsage(payload map[string]any, operation string) bool {
+	if operation != "chat" && operation != "completions" {
+		// The Responses API reports usage on its completed event already.
+		return false
+	}
+	raw, present := payload["stream_options"]
+	if !present {
+		payload["stream_options"] = map[string]any{"include_usage": true}
+		return true
+	}
+	options, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	if _, asked := options["include_usage"]; asked {
+		return false
+	}
+	options["include_usage"] = true
+	return true
+}
+
+// addedUsageFilter passes server-sent events through whole and drops the
+// usage-only chunk (empty choices, usage set) that requestStreamUsage added,
+// so the caller's stream is the one it asked for. An event that grows past
+// maxPendingEvent without ending is passed through unchanged.
+type addedUsageFilter struct {
+	w       io.Writer
+	pending []byte
+}
+
+const maxPendingEvent = 1 << 20
+
+func (f *addedUsageFilter) Write(p []byte) (int, error) {
+	f.pending = append(f.pending, p...)
+	for {
+		end, size := sseEventEnd(f.pending)
+		if end < 0 {
+			break
+		}
+		event := f.pending[:end+size]
+		if !isAddedUsageEvent(f.pending[:end]) {
+			if _, err := f.w.Write(event); err != nil {
+				return 0, err
+			}
+		}
+		f.pending = f.pending[end+size:]
+	}
+	if len(f.pending) > maxPendingEvent {
+		if err := f.flush(); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+// flush writes what is left, such as a final event without its blank line.
+func (f *addedUsageFilter) flush() error {
+	if len(f.pending) == 0 {
+		return nil
+	}
+	pending := f.pending
+	f.pending = nil
+	if isAddedUsageEvent(bytes.TrimRight(pending, "\r\n")) {
+		return nil
+	}
+	_, err := f.w.Write(pending)
+	return err
+}
+
+func sseEventEnd(buffer []byte) (int, int) {
+	lf := bytes.Index(buffer, []byte("\n\n"))
+	crlf := bytes.Index(buffer, []byte("\r\n\r\n"))
+	switch {
+	case lf < 0 && crlf < 0:
+		return -1, 0
+	case crlf >= 0 && (lf < 0 || crlf < lf):
+		return crlf, 4
+	default:
+		return lf, 2
+	}
+}
+
+func isAddedUsageEvent(event []byte) bool {
+	var data []byte
+	for _, line := range bytes.Split(event, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			if len(bytes.TrimSpace(line)) == 0 || bytes.HasPrefix(line, []byte(":")) {
+				continue
+			}
+			// An event with its own type or id is not the usage chunk.
+			return false
+		}
+		data = append(data, bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))...)
+	}
+	var chunk struct {
+		Choices *[]json.RawMessage `json:"choices"`
+		Usage   json.RawMessage    `json:"usage"`
+	}
+	if json.Unmarshal(data, &chunk) != nil || chunk.Choices == nil {
+		return false
+	}
+	return len(*chunk.Choices) == 0 && len(chunk.Usage) > 0 && !bytes.Equal(chunk.Usage, []byte("null"))
+}
+
+func copyResponse(w http.ResponseWriter, resp *http.Response, observation *responseObservation, stripAddedUsage bool) error {
 	buffer := copyBuffers.Get().(*[]byte)
 	defer copyBuffers.Put(buffer)
 	streaming := strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
+	out := io.Writer(w)
+	var filter *addedUsageFilter
+	if streaming && stripAddedUsage {
+		filter = &addedUsageFilter{w: w}
+		out = filter
+	}
+	finish := func() error {
+		if filter == nil {
+			return nil
+		}
+		if err := filter.flush(); err != nil {
+			return err
+		}
+		return http.NewResponseController(w).Flush()
+	}
 	for {
 		n, err := resp.Body.Read(*buffer)
 		if n > 0 {
 			observation.observe((*buffer)[:n])
-			if _, writeErr := w.Write((*buffer)[:n]); writeErr != nil {
+			if _, writeErr := out.Write((*buffer)[:n]); writeErr != nil {
 				return writeErr
 			}
 			if streaming {
@@ -720,14 +870,15 @@ func copyResponse(w http.ResponseWriter, resp *http.Response, observation *respo
 				// not wait for EOF and misclassify the client's normal exit as a
 				// cancellation.
 				if hasSSEDone(observation.body) {
-					return nil
+					return finish()
 				}
 			}
 		}
 		if errors.Is(err, io.EOF) {
-			return nil
+			return finish()
 		}
 		if err != nil {
+			_ = finish()
 			return err
 		}
 	}

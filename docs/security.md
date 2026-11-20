@@ -51,9 +51,13 @@ old one.
 
 `infercrane connect --token-env VAR` sends a server's API key to the control plane once. It is
 stored only as AES-256-GCM ciphertext bound to the workspace and endpoint, sealed with
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only for discovery and health
-probes of that server. Without that key the control plane refuses the credential, and the agent,
-which keeps the key on the server's machine, is the path.
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, never returned, and used only toward that server: for
+discovery and health probes, as the bearer token on requests the gateway routes to it when its
+binding is traffic-managed, and by a migration Proof's graded quality check of that server. It is
+held in the gateway's in-memory route snapshot and is never logged or shown. A key that cannot be
+opened makes the server unroutable and unchecked, never reached without it. Without the encryption
+key the control plane refuses the credential, and the agent, which keeps the key on the server's
+machine, is the path.
 
 Compute configured on the control-plane process (cloud workload identity, a kubeconfig context,
 SkyPilot manifests) is not tenant-scoped. Only the bootstrap operator may deploy or optimize on it

@@ -112,6 +112,43 @@ The candidate must win on the declared objective without violating error, prompt
 quality, TTFT, TPOT, and SLO gates. The receipt stays bound to the exact model, runtime, CUDA/GPU,
 recipe, workload digest, and run count.
 
+### The same campaign through the control plane on H100s
+
+`tools/poc-modal` runs one campaign through the unchanged control plane, with every setup on its
+own H100. This is development tooling, not a provider. The Kubernetes provider starts ordinary model
+server pods in a local kind cluster. Each pod is a proxy to one Modal H100 that serves exactly the
+pod's vLLM arguments. A broker on the developer's laptop starts those GPUs and caps the run's spend:
+
+```bash
+python3 tools/poc-modal/poc_modal.py up
+python3 tools/poc-modal/poc_modal.py download
+python3 tools/poc-modal/poc_modal.py run --budget-usd 10
+```
+
+The run replays Mooncake FAST'25 rows through the gateway and reads vLLM's own metrics to pick
+candidates. Then the control plane measures each candidate against the live current setup in turns,
+runs its signed answer check, and ranks the setups. It stops at the proposal. Latency is measured from
+the laptop, so it includes the network path to the GPU. See `tools/poc-modal/README.md`.
+
+The first run, on 2026-11-20, used Qwen3-8B (`b968826d`) on vLLM 0.22.1 with one H100 per setup.
+It replayed 200 Mooncake rows, a content-free shape averaging 4,813 input and 192 output tokens.
+AIPerf drove 32 concurrent streams for three runs per arm, each candidate taking turns with the live
+current setup. The current setup's row shows its means from the FP8-weights turns. In the FP8 KV
+cache turns it measured 912 output tokens/s, 2,000 ms p95 TTFT, and 17,122 ms p95 latency:
+
+| Setup | Output tokens/s | p95 TTFT | p95 latency | $ per 1M output tokens | Answers (24 prompts) | Decision |
+|---|---|---|---|---|---|---|
+| Current setup (vLLM defaults) | 913 | 2,020 ms | 17,124 ms | 1.20 | reference | superseded |
+| FP8 weights (`--quantization fp8`) | 1,084 (+18.7%, noise floor 1.2%) | 1,596 ms | 14,273 ms | 1.01 | 100% match | proposed |
+| FP8 KV cache (`--kv-cache-dtype fp8`) | 996 (+9.3%, noise floor 0.8%) | 1,925 ms (within noise) | 15,679 ms | 1.10 | 100% match | superseded by FP8 weights |
+
+Costs use Modal's H100 list price of $3.9492 per hour, GPU only. The campaign was billed $6.39 by
+Modal. The current setup ran on a host with a different NVIDIA driver (610.57.04) from both
+candidates (620.70.06); turns control for time, not for hosts. Latency includes a laptop-to-Modal
+round trip of 28 to 71 ms at the median and about 300 ms at p95. The record, the outcome report, and
+the billing are in
+[`evidence/qwen3-8b-campaign-modal-h100-2026-11-20.json`](./evidence/qwen3-8b-campaign-modal-h100-2026-11-20.json).
+
 ## Mechanism ladder
 
 Use the cheapest, broadest mechanisms first:

@@ -63,8 +63,14 @@ An eval set replaces the built-in prompts. It has the same format as the built-i
 ```
 
 Up to 200 prompts and 512 KiB. Prompt IDs are 1 to 64 letters, digits, dots, dashes, or underscores
-and must be unique. Unknown fields are rejected, so expected answers are not accepted: candidates are
-scored against the reference's answers, not against stored answers.
+and must be unique. Unknown fields are rejected. Expected answers are accepted only in a **graded**
+set, which names its `grading` (`exact_match` or `token_f1`) and gives every prompt 1 to 8
+`expected` answers; an ungraded set with expected answers is refused, because the ordinary check
+scores agreement with the reference's answers, not stored answers. A graded set is what a
+[migration Proof](/features/migration) scores both the closed API and each setup against
+(evaluator `infercrane-graded`), compared with a paired bootstrap into a signed PASS, BLOCK, or
+UNKNOWN verdict. The evaluator names `infercrane-builtin` and `infercrane-graded` are reserved: your
+own evidence cannot claim them.
 
 ```bash
 infercrane evaluation set upload eval-set.json

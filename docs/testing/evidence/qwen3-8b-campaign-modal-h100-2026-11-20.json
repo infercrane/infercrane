@@ -1,0 +1,1183 @@
+{
+  "schema_version": "infercrane.poc-modal-campaign-evidence/v1",
+  "evidence_class": "real-gpu-campaign-through-the-control-plane (development harness)",
+  "recorded": "2026-11-20",
+  "harness": "tools/poc-modal (kind + infercrane serve with the Kubernetes provider; each model server pod proxies to one Modal H100 via internal/testtools/modal-gpu-proxy)",
+  "campaign_id": "c48bd5322b9d8076ed618382842178bf",
+  "campaign_state": "qualified",
+  "decision": "propose FP8 weights (quantized by vLLM at load); nothing activated",
+  "model": {
+    "id": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "dtype": "bfloat16 weights on the volume"
+  },
+  "runtime": {
+    "image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+    "vllm": "0.22.1",
+    "server_env": {
+      "VLLM_USE_DEEP_GEMM": "0"
+    },
+    "base_args": [
+      "--served-model-name",
+      "Qwen/Qwen3-8B"
+    ]
+  },
+  "hardware": {
+    "request": "Modal gpu=\"H100!\", 1 GPU, 4 CPU cores, 24 GiB per setup",
+    "reported": [
+      {
+        "setup_args": [],
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 610.57.04",
+        "startup_seconds": 105.8
+      },
+      {
+        "setup_args": [
+          "--quantization",
+          "fp8"
+        ],
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 620.70.06",
+        "startup_seconds": 92.3
+      },
+      {
+        "setup_args": [
+          "--kv-cache-dtype",
+          "fp8"
+        ],
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 620.70.06",
+        "startup_seconds": 103.0
+      }
+    ],
+    "caveat": "the current setup ran on a host with NVIDIA driver 610.57.04 and both candidates on hosts with 620.70.06; turns interleave time, not hosts"
+  },
+  "rate": {
+    "usd_per_hour": 3.9492,
+    "basis": "Modal list price H100 SXM5 $0.001097/s, GPU only, read 2026-11-20"
+  },
+  "traffic": {
+    "trace": "kvcache-ai/Mooncake FAST'25 arxiv trace (Apache-2.0), first 200 rows at recorded arrival times, inputs scaled 1/2 and capped at 30,000 tokens, outputs capped at 512; content-free (words generated from prefix block hashes)",
+    "replay_through_gateway": {
+      "requests": 200,
+      "failed": 0,
+      "seconds": 46.6,
+      "output_tokens": 38418,
+      "input_words_sent": 960022,
+      "input_scale": 2,
+      "max_input_tokens": 30000,
+      "max_output_tokens": 512
+    },
+    "captured_shape": {
+      "digest": "sha256:b85bdebcd0d31d6e1449a070fc19f1dd570c6a069e02dafd22eb597fe3712b29",
+      "requests": 200,
+      "input_tokens_mean": 4813,
+      "output_tokens_mean": 192,
+      "peak_concurrency": 45,
+      "shared_prefixes": 195,
+      "content_stored": false
+    }
+  },
+  "measurement": {
+    "tool": "AIPerf 0.12.0 inside the control plane",
+    "method": "campaign-interleaved-control-v1",
+    "profile": "throughput (32 concurrent streams, streaming)",
+    "runs_per_arm": 3,
+    "requests_per_run": 200,
+    "measured_from": "the control plane in a kind cluster on a shared laptop Docker VM (8 CPUs); every request crosses the internet to Modal through a tunnel",
+    "network_round_trip_per_pod": {
+      "infercrane-bbe3be6ac218eee2a86d2f29-66dccff785-s9hgx": {
+        "lease_id": "be3be6ac218eee2a86d2f29-66dccff785-s9hgx-5e02b3",
+        "health_rtt_samples": 787,
+        "health_rtt_p50_ms": 71.252,
+        "health_rtt_p95_ms": 288.653,
+        "health_rtt_min_ms": 65.622
+      },
+      "infercrane-61e206a548434682077b42aa-64f65d9676-42mn8": {
+        "lease_id": "1e206a548434682077b42aa-64f65d9676-42mn8-614911",
+        "health_rtt_samples": 271,
+        "health_rtt_p50_ms": 28.198,
+        "health_rtt_p95_ms": 321.78,
+        "health_rtt_min_ms": 22.79
+      },
+      "infercrane-08d11ec3fa4d13c61c1a886f-d65fc458b-m9kss": {
+        "lease_id": "08d11ec3fa4d13c61c1a886f-d65fc458b-m9kss-78cbf9",
+        "health_rtt_samples": 127,
+        "health_rtt_p50_ms": 51.166,
+        "health_rtt_p95_ms": 311.594,
+        "health_rtt_min_ms": 24.279
+      }
+    }
+  },
+  "diagnosis": {
+    "source": "run-attempt1.log, rounded as printed (the exact values were cleared by reset_previous)",
+    "prefill_share": 0.06,
+    "decode_share": 0.94,
+    "waiting_mean": 0.5,
+    "waiting_peak": 7,
+    "kv_usage_peak": 0.62,
+    "preemptions": 0,
+    "prefix_cache_hit_rate": 0.28,
+    "chosen_because": {
+      "FP8 weights": "decode took 94% of request time; FP8 halves weight reads",
+      "FP8 KV cache": "second option (fallback): the KV cache did not fill (62% peak, 0 preemptions); decode-bound with ~4.8k-token contexts, where KV reads per step rival weight reads"
+    }
+  },
+  "setups": [
+    {
+      "label": "Your current setup (vLLM defaults)",
+      "candidate_id": "fb1b082f7eea7a45127e1ddc9592a08d",
+      "state": "cleaned",
+      "failure_code": "measured_candidate_superseded",
+      "output_tokens_per_second": 913.887960430026,
+      "request_throughput": 4.757603000833078,
+      "ttft_p95_ms": 2110.108751,
+      "latency_p95_ms": 17075.043326666666,
+      "tpot_p95_ms": 179.32155613043474,
+      "usd_per_million_output_tokens": 1.2003659611445274,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {},
+      "runs": 3,
+      "requests_per_run": 200,
+      "concurrency": 32,
+      "succeeded": 600,
+      "failed": 0
+    },
+    {
+      "label": "FP8 weights (quantized by vLLM at load)",
+      "candidate_id": "98f7c0a0ec292abb3b358022d093a447",
+      "state": "qualified",
+      "failure_code": "",
+      "output_tokens_per_second": 1084.1918064907732,
+      "request_throughput": 5.6486330401446745,
+      "ttft_p95_ms": 1596.2982366666665,
+      "latency_p95_ms": 14273.415964666667,
+      "tpot_p95_ms": 136.14426921913875,
+      "usd_per_million_output_tokens": 1.0118135863345834,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {
+        "tpot_p95_ms": {
+          "delta": -0.217393449858931,
+          "decision": "improved",
+          "noise_floor": 0.21733538834108976,
+          "control_mean": 173.96259869611112,
+          "candidate_mean": 136.14426921913875,
+          "control_spread": 0.21733538834108976,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.0661894525376496
+        },
+        "ttft_p95_ms": {
+          "delta": -0.2097541513406242,
+          "decision": "improved",
+          "noise_floor": 0.11593948432437169,
+          "control_mean": 2020.0020530000002,
+          "candidate_mean": 1596.2982366666665,
+          "control_spread": 0.07947706476910202,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.11593948432437169
+        },
+        "latency_p95_ms": {
+          "delta": -0.16644721713136332,
+          "decision": "improved",
+          "noise_floor": 0.033541012622529495,
+          "control_mean": 17123.589841,
+          "candidate_mean": 14273.415964666667,
+          "control_spread": 0.033541012622529495,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.021033456611425555
+        },
+        "request_throughput": {
+          "delta": 0.1864083329919384,
+          "decision": "improved",
+          "noise_floor": 0.009238236359391645,
+          "control_mean": 4.761120503848532,
+          "candidate_mean": 5.6486330401446745,
+          "control_spread": 0.006115691697807454,
+          "higher_is_better": true,
+          "candidate_uncertainty": 0.009238236359391645
+        },
+        "output_token_throughput": {
+          "delta": 0.18693472206525205,
+          "decision": "improved",
+          "noise_floor": 0.01188239021215001,
+          "control_mean": 913.4384447059502,
+          "candidate_mean": 1084.1918064907732,
+          "control_spread": 0.0064998170276400775,
+          "higher_is_better": true,
+          "candidate_uncertainty": 0.01188239021215001
+        }
+      },
+      "runs": 3,
+      "requests_per_run": 200,
+      "concurrency": 32,
+      "succeeded": 600,
+      "failed": 0
+    },
+    {
+      "label": "Compact FP8 KV cache",
+      "candidate_id": "3a0742cde7ada05b3b433d842155284f",
+      "state": "rejected",
+      "failure_code": "measured_candidate_superseded",
+      "output_tokens_per_second": 996.3638586967245,
+      "request_throughput": 5.201865231429271,
+      "ttft_p95_ms": 1925.281626,
+      "latency_p95_ms": 15678.799992666667,
+      "tpot_p95_ms": 187.77705988011692,
+      "usd_per_million_output_tokens": 1.1010034039521575,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {
+        "tpot_p95_ms": {
+          "delta": 0.23922677337256318,
+          "decision": "no_measurable_difference",
+          "noise_floor": 0.46515054091739183,
+          "control_mean": 151.52760085152173,
+          "candidate_mean": 187.77705988011692,
+          "control_spread": 0.46515054091739183,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.19054218667089148
+        },
+        "ttft_p95_ms": {
+          "delta": -0.03713198565437236,
+          "decision": "no_measurable_difference",
+          "noise_floor": 0.15539047892300184,
+          "control_mean": 1999.5280737499997,
+          "candidate_mean": 1925.281626,
+          "control_spread": 0.15539047892300184,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.05933448091875569
+        },
+        "latency_p95_ms": {
+          "delta": -0.08426449076272752,
+          "decision": "improved",
+          "noise_floor": 0.03097523437634915,
+          "control_mean": 17121.537643249998,
+          "candidate_mean": 15678.799992666667,
+          "control_spread": 0.012199376385002656,
+          "higher_is_better": false,
+          "candidate_uncertainty": 0.03097523437634915
+        },
+        "request_throughput": {
+          "delta": 0.09408582807091977,
+          "decision": "improved",
+          "noise_floor": 0.003942913392830395,
+          "control_mean": 4.754531224118992,
+          "candidate_mean": 5.201865231429271,
+          "control_spread": 0.003883990292502271,
+          "higher_is_better": true,
+          "candidate_uncertainty": 0.003942913392830395
+        },
+        "output_token_throughput": {
+          "delta": 0.09263474481091932,
+          "decision": "improved",
+          "noise_floor": 0.007738610564324527,
+          "control_mean": 911.8910627989827,
+          "candidate_mean": 996.3638586967245,
+          "control_spread": 0.007738610564324527,
+          "higher_is_better": true,
+          "candidate_uncertainty": 0.0006689922706247288
+        }
+      },
+      "runs": 3,
+      "requests_per_run": 200,
+      "concurrency": 32,
+      "succeeded": 600,
+      "failed": 0
+    }
+  ],
+  "outcome_report": {
+    "schema_version": "infercrane.optimization-report/v1",
+    "algorithm_version": "campaign-outcome-report-v2",
+    "campaign_id": "c48bd5322b9d8076ed618382842178bf",
+    "model_identity": "Qwen/Qwen3-8B",
+    "objective": "throughput",
+    "intent": "new_endpoint",
+    "campaign_state": "qualified",
+    "finished": true,
+    "simulated_accelerator": false,
+    "outcome": {
+      "kind": "winner_selected",
+      "headline": "Roll out \u201cFP8 weights (quantized by vLLM at load)\u201d: it measured better than your current setup on the same traffic.",
+      "baseline_candidate_id": "fb1b082f7eea7a45127e1ddc9592a08d",
+      "baseline_label": "Your current setup (vLLM defaults)",
+      "winner_candidate_id": "98f7c0a0ec292abb3b358022d093a447",
+      "winner_label": "FP8 weights (quantized by vLLM at load)",
+      "activated": false
+    },
+    "metrics": [
+      {
+        "key": "cost_per_million_output_tokens",
+        "label": "Cost per 1M output tokens",
+        "unit": "usd",
+        "higher_is_better": false,
+        "baseline": 1.2009566778778848,
+        "winner": 1.0118135863345834,
+        "change_percent": -15.749368401658014,
+        "noise_floor_percent": 1.1882390212150011,
+        "decision": "improved",
+        "basis": "interleaved_control"
+      },
+      {
+        "key": "ttft_p95_ms",
+        "label": "p95 time to first token",
+        "unit": "ms",
+        "higher_is_better": false,
+        "baseline": 2020.0020530000002,
+        "winner": 1596.2982366666665,
+        "change_percent": -20.975415134062423,
+        "noise_floor_percent": 11.59394843243717,
+        "decision": "improved",
+        "basis": "interleaved_control"
+      },
+      {
+        "key": "output_tokens_per_second_per_user",
+        "label": "Output tokens/s per user",
+        "unit": "tokens_per_second",
+        "higher_is_better": true,
+        "baseline": 5.748362047332159,
+        "winner": 7.345149419329529,
+        "change_percent": 27.77812807977964,
+        "noise_floor_percent": 21.733538834108977,
+        "decision": "improved",
+        "basis": "interleaved_control"
+      },
+      {
+        "key": "output_tokens_per_second_per_accelerator",
+        "label": "Output tokens/s per GPU",
+        "unit": "tokens_per_second",
+        "higher_is_better": true,
+        "baseline": 913.4384447059502,
+        "winner": 1084.1918064907732,
+        "change_percent": 18.693472206525197,
+        "noise_floor_percent": 1.1882390212150011,
+        "decision": "improved",
+        "basis": "interleaved_control"
+      },
+      {
+        "key": "requests_per_second",
+        "label": "Requests/s",
+        "unit": "requests_per_second",
+        "higher_is_better": true,
+        "baseline": 4.761120503848532,
+        "winner": 5.6486330401446745,
+        "change_percent": 18.640833299193837,
+        "noise_floor_percent": 0.9238236359391645,
+        "decision": "improved",
+        "basis": "interleaved_control"
+      }
+    ],
+    "quality": {
+      "verdict": "PASS",
+      "basis": "builtin_answer_check",
+      "eval": "infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af",
+      "baseline_score": 1,
+      "winner_score": 1,
+      "delta": 0,
+      "regression_percent": 0,
+      "watch_threshold_percent": 5,
+      "block_threshold_percent": 10,
+      "source": "infercrane",
+      "reason": "InferCrane asked both setups the same prompts and compared the winner's answers with the baseline's",
+      "evals": [
+        {
+          "suite": "infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af",
+          "evaluator": "infercrane-builtin@2",
+          "verdict": "PASS",
+          "baseline_score": 1,
+          "winner_score": 1,
+          "delta": 0,
+          "regression_percent": 0,
+          "message": "Candidate is within the persisted quality policy"
+        }
+      ]
+    },
+    "noise": {
+      "basis": "interleaved_control",
+      "candidate_id": "98f7c0a0ec292abb3b358022d093a447",
+      "control_runs": 4,
+      "candidate_runs": 3,
+      "control_drift_percent": 0.6478659850992979,
+      "drift_limit_percent": 5,
+      "objective_metric": "output_token_throughput",
+      "objective_change_percent": 18.693472206525204,
+      "objective_noise_floor_percent": 1.1882390212150011,
+      "objective_decision": "improved"
+    },
+    "monthly": {
+      "basis": "replayed_traffic",
+      "trace_digest": "sha256:b85bdebcd0d31d6e1449a070fc19f1dd570c6a069e02dafd22eb597fe3712b29",
+      "window_seconds": 3600,
+      "capture_window_seconds": 3600,
+      "capture_cut_off": false,
+      "requests_in_window": 200,
+      "output_tokens_in_window": 38418,
+      "monthly_output_tokens": 28045140,
+      "hours_per_month": 730,
+      "baseline_usd": 33.680998165020185,
+      "winner_usd": 28.376453682655477,
+      "change_usd": -5.304544482364708,
+      "change_percent": -15.749368401658014,
+      "decision": "improved",
+      "assumption": "measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included"
+    },
+    "workload": {
+      "source": "customer_replay",
+      "profile": "throughput",
+      "concurrency": 32,
+      "requests_per_run": 200,
+      "method": "campaign-interleaved-control-v1"
+    },
+    "candidates": [
+      {
+        "id": "fb1b082f7eea7a45127e1ddc9592a08d",
+        "label": "Your current setup (vLLM defaults)",
+        "role": "baseline",
+        "state": "cleaned",
+        "failure_code": "measured_candidate_superseded",
+        "output_tokens_per_second": 913.887960430026,
+        "requests_per_second": 4.757603000833078,
+        "ttft_p95_ms": 2110.108751,
+        "tpot_p95_ms": 179.32155613043474,
+        "latency_p95_ms": 17075.043326666666,
+        "cost_per_million_output_tokens": 1.2003659611445274,
+        "error_rate_percent": 0,
+        "output_tokens_per_request": 192.09,
+        "versus_baseline": null
+      },
+      {
+        "id": "98f7c0a0ec292abb3b358022d093a447",
+        "label": "FP8 weights (quantized by vLLM at load)",
+        "role": "winner",
+        "state": "qualified",
+        "output_tokens_per_second": 1084.1918064907732,
+        "requests_per_second": 5.6486330401446745,
+        "ttft_p95_ms": 1596.2982366666665,
+        "tpot_p95_ms": 136.14426921913875,
+        "latency_p95_ms": 14273.415964666667,
+        "cost_per_million_output_tokens": 1.0118135863345834,
+        "error_rate_percent": 0,
+        "output_tokens_per_request": 191.93833333333333,
+        "versus_baseline": {
+          "metric": "output_token_throughput",
+          "change_percent": 18.693472206525204,
+          "noise_floor_percent": 1.1882390212150011,
+          "decision": "improved"
+        }
+      },
+      {
+        "id": "3a0742cde7ada05b3b433d842155284f",
+        "label": "Compact FP8 KV cache",
+        "role": "candidate",
+        "state": "cleaned",
+        "failure_code": "measured_candidate_superseded",
+        "output_tokens_per_second": 996.3638586967245,
+        "requests_per_second": 5.201865231429271,
+        "ttft_p95_ms": 1925.281626,
+        "tpot_p95_ms": 187.77705988011692,
+        "latency_p95_ms": 15678.799992666667,
+        "cost_per_million_output_tokens": 1.1010034039521575,
+        "error_rate_percent": 0,
+        "output_tokens_per_request": 191.54,
+        "versus_baseline": {
+          "metric": "output_token_throughput",
+          "change_percent": 9.263474481091933,
+          "noise_floor_percent": 0.7738610564324527,
+          "decision": "improved"
+        }
+      }
+    ],
+    "warnings": [],
+    "bottleneck": {
+      "state": "unknown",
+      "source": "engine_metrics_during_measurement",
+      "gpu_telemetry": "not_collected",
+      "signals": [],
+      "reason": "the serving engine's metrics were not collected: AIPerf wrote no server-metrics export; the runtime metrics endpoint may be unreachable"
+    },
+    "appendix": {
+      "winner": {
+        "candidate_id": "98f7c0a0ec292abb3b358022d093a447",
+        "label": "FP8 weights (quantized by vLLM at load)",
+        "model": "Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218",
+        "engine": "custom-oci",
+        "engine_version": "vllm-openai-0.22.1-953d3a06",
+        "args": [
+          "--quantization",
+          "fp8"
+        ],
+        "image": "registry.poc.local/infercrane-gpu-poc/modal-gpu-proxy@sha256:499b9601467fd5fbdeb214178496725c05cb4e998ef2e8c778a9b0fc9d6004f7",
+        "accelerator": "H100",
+        "accelerator_count": 1,
+        "accelerator_class": "gpu",
+        "provider": "kubernetes",
+        "compute_mode": "elastic",
+        "min_replicas": 1,
+        "max_replicas": 1,
+        "deployment_name": "gpu-optimized-opt-98f7c0a0",
+        "revision_id": "626c9bc123d3d1773944103d75fe7263-rev-1",
+        "hourly_usd_per_replica": 3.9492,
+        "price_source": "operator-rate-card/modal-h100-sxm5-list-2026-11-20"
+      },
+      "baseline": {
+        "candidate_id": "fb1b082f7eea7a45127e1ddc9592a08d",
+        "label": "Your current setup (vLLM defaults)",
+        "model": "Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218",
+        "engine": "custom-oci",
+        "engine_version": "vllm-openai-0.22.1-953d3a06",
+        "args": [],
+        "image": "registry.poc.local/infercrane-gpu-poc/modal-gpu-proxy@sha256:499b9601467fd5fbdeb214178496725c05cb4e998ef2e8c778a9b0fc9d6004f7",
+        "accelerator": "H100",
+        "accelerator_count": 1,
+        "accelerator_class": "gpu",
+        "provider": "kubernetes",
+        "compute_mode": "elastic",
+        "min_replicas": 1,
+        "max_replicas": 1,
+        "deployment_name": "gpu-optimized-opt-fb1b082f",
+        "revision_id": "75fa6416e7f41d45dd2685767f44e32e-rev-1",
+        "hourly_usd_per_replica": 3.9492,
+        "price_source": "operator-rate-card/modal-h100-sxm5-list-2026-11-20"
+      },
+      "evidence": [
+        {
+          "kind": "campaign_input",
+          "id": "c48bd5322b9d8076ed618382842178bf",
+          "digest": "sha256:a1ca0998795ecd5e0f17e021eb338868d32fb7fb7d5221f130b3091651cdb970",
+          "subject": "Qwen/Qwen3-8B"
+        },
+        {
+          "kind": "proposal",
+          "digest": "sha256:8d033a31b3048cbb9fc93cbd1726b02ff3586d4c31213fe8b286cdf64cc2b9f5",
+          "subject": "catalog-candidate-planner-v2"
+        },
+        {
+          "kind": "winner_benchmark",
+          "id": "0474dc764d18a858309624889bc701b1",
+          "digest": "sha256:a964ab9076d42965ab08016f9e7b78f149c7fcff6bef8bbd4660129e28be2e2d",
+          "subject": "Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218 revision 626c9bc123d3d1773944103d75fe7263-rev-1"
+        },
+        {
+          "kind": "winner_quality",
+          "id": "764805c2eade94778954073b5ff7baae",
+          "digest": "sha256:523d603a9f32e461f6aac10ba9fb841a0abb6cc0426db1e485078536e8b5eca1",
+          "subject": "infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af signed by sha256:5dc39163e95498ba"
+        },
+        {
+          "kind": "ranking",
+          "id": "optlab-57e00bd4a8744af437f12e1567eb622fb00596122cc0feca82bee6035cee7323",
+          "digest": "sha256:57e00bd4a8744af437f12e1567eb622fb00596122cc0feca82bee6035cee7323",
+          "subject": "content-addressed measured ranking"
+        },
+        {
+          "kind": "baseline_benchmark",
+          "id": "660ddec6b0e63e12616cea87083ce2af",
+          "digest": "sha256:32df7f19f078023ab27126046e2b773279be40faf934b6fb8cdf994b03491ca1",
+          "subject": "Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218 revision 75fa6416e7f41d45dd2685767f44e32e-rev-1"
+        },
+        {
+          "kind": "baseline_quality",
+          "id": "d2c3c00d01fdac4c5d4b0731eda7c4d0",
+          "digest": "sha256:f9f13fd0cdd435fa71cd44a1d0aef27a99f64868db564e6563925b32a4c13304",
+          "subject": "infercrane-default@1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af signed by sha256:5dc39163e95498ba"
+        },
+        {
+          "kind": "replayed_traffic",
+          "id": "0af2afb9436e9b695692e5bb71a2a0cd",
+          "digest": "sha256:b85bdebcd0d31d6e1449a070fc19f1dd570c6a069e02dafd22eb597fe3712b29",
+          "subject": "200 requests, content not stored"
+        }
+      ]
+    },
+    "unknown": [
+      "bottleneck"
+    ],
+    "report_digest": "sha256:1c90b3982b1e6ff47caef08100f9fee39689097b5890a2838842eca8242ae8a0"
+  },
+  "billing": {
+    "source": "modal billing report --for today --show-resources, read 2026-11-20 08:55 CET after every container stopped",
+    "campaign_app": "ap-Wut2pdJwIP8LG1zE5CgAlu",
+    "campaign_usd": 6.3924,
+    "campaign_breakdown_usd": {
+      "Network Egress": 0.0138,
+      "CPU": 0.2786,
+      "H100": 5.8172,
+      "Memory": 0.2828
+    },
+    "this_work_total_usd": 7.1483,
+    "this_work_runs": {
+      "weights staging (CPU)": 0.0241,
+      "dry run (CPU)": 0.0002,
+      "attempt 1: baseline and replay; approval refused (2-replica price)": 0.3172,
+      "attempt 4: stopped to fix spend accounting": 0.4143,
+      "campaign": 6.3924
+    },
+    "broker_estimate_usd": 6.7413,
+    "control_plane_estimate_usd": 8.87261464550529
+  },
+  "broker_ledger": {
+    "budget_usd": 10.0,
+    "rate_usd_per_second": 0.00120268,
+    "rate_basis": "Modal list price: H100 SXM5 + container CPU and memory requests",
+    "billing_basis": "from the container's reported start minus 120 s (from the request until the start is known) to its end",
+    "estimated_usd": 6.7413,
+    "exhausted": false,
+    "leases": [
+      {
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3-8B"
+        ],
+        "state": "stopped",
+        "reason": "released",
+        "requested_at": 1795156234.958663,
+        "container_started_at": 1795157750.8228803,
+        "ready_at": 1795157856.5860212,
+        "stopped_at": 1795160809.6692913,
+        "ended_at": 1795160810.43997,
+        "startup_seconds": 105.8,
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 610.57.04",
+        "vllm_version": "0.22.1",
+        "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+        "server_env": {
+          "VLLM_USE_DEEP_GEMM": "0"
+        },
+        "seconds": 3179.6,
+        "estimated_usd": 3.824
+      },
+      {
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3-8B",
+          "--quantization",
+          "fp8"
+        ],
+        "state": "stopped",
+        "reason": "released",
+        "requested_at": 1795158207.2571929,
+        "container_started_at": 1795159427.7826746,
+        "ready_at": 1795159520.0944,
+        "stopped_at": 1795160886.2794993,
+        "ended_at": 1795160889.007143,
+        "startup_seconds": 92.3,
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 620.70.06",
+        "vllm_version": "0.22.1",
+        "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+        "server_env": {
+          "VLLM_USE_DEEP_GEMM": "0"
+        },
+        "seconds": 1581.2,
+        "estimated_usd": 1.9017
+      },
+      {
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3-8B",
+          "--kv-cache-dtype",
+          "fp8"
+        ],
+        "state": "stopped",
+        "reason": "released",
+        "requested_at": 1795160044.791976,
+        "container_started_at": 1795160132.9300163,
+        "ready_at": 1795160235.8874178,
+        "stopped_at": 1795160888.448398,
+        "ended_at": 1795160889.154284,
+        "startup_seconds": 103.0,
+        "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, 620.70.06",
+        "vllm_version": "0.22.1",
+        "runtime_image": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+        "server_env": {
+          "VLLM_USE_DEEP_GEMM": "0"
+        },
+        "seconds": 844.4,
+        "estimated_usd": 1.0155
+      }
+    ]
+  },
+  "unknown": [
+    "bottleneck during measurement (AIPerf wrote no server-metrics export through the proxy)",
+    "the diagnosis's exact values (cleared by a harness reset; rounded values from the run log are kept)",
+    "latency next to users: every latency includes the laptop-to-Modal path"
+  ],
+  "campaign_record": {
+    "id": "c48bd5322b9d8076ed618382842178bf",
+    "model_identity": "Qwen/Qwen3-8B",
+    "objective": "throughput",
+    "source": "catalog-candidate-planner-v2",
+    "intent": "new_endpoint",
+    "target_deployment": "",
+    "state": "qualified",
+    "approved_max_cost_usd": 24.88,
+    "approval_expires_at": "2026-11-20T08:30:31Z",
+    "warnings": [],
+    "candidates": [
+      {
+        "id": "fb1b082f7eea7a45127e1ddc9592a08d",
+        "proposal_candidate_id": "647eb45dd0515611f857e3642ca3d26265cefde3bdc713a4282568b768837f29",
+        "state": "cleaned",
+        "evidence_state": "stale",
+        "target_endpoint": "gpu-optimized",
+        "deployment_name": "gpu-optimized-opt-fb1b082f",
+        "revision_id": "75fa6416e7f41d45dd2685767f44e32e-rev-1",
+        "benchmark_id": "660ddec6b0e63e12616cea87083ce2af",
+        "quality_evidence_id": "d2c3c00d01fdac4c5d4b0731eda7c4d0",
+        "failure_code": "measured_candidate_superseded",
+        "rank": 1,
+        "quality": {
+          "state": "passed",
+          "source": "infercrane",
+          "role": "reference",
+          "reason": "This setup's answers to the 24 prompts are the reference the other setups are compared with.",
+          "check": "builtin",
+          "suite": "infercrane-default",
+          "suite_version": "1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af",
+          "prompt_count": 24,
+          "score": 1,
+          "watch_limit_percent": 5,
+          "block_limit_percent": 10,
+          "reference_revision_id": "75fa6416e7f41d45dd2685767f44e32e-rev-1",
+          "evidence_id": "d2c3c00d01fdac4c5d4b0731eda7c4d0"
+        },
+        "label": "Your current setup (vLLM defaults)",
+        "control": true,
+        "state_entered_at": {
+          "cleaned": "2026-11-20T07:47:56.182326714Z",
+          "measuring": "2026-11-20T07:00:18.178355002Z",
+          "proposed": "2026-11-20T06:30:31.682387467Z",
+          "provisioning": "2026-11-20T06:30:32.157629342Z",
+          "ranked": "2026-11-20T07:03:26.361362381Z",
+          "ready": "2026-11-20T07:00:18.169616168Z",
+          "rejected": "2026-11-20T07:46:41.437883304Z",
+          "validating": "2026-11-20T07:03:23.877971379Z"
+        },
+        "measurement": {
+          "current": null,
+          "method": "campaign-interleaved-control-v1",
+          "runs": [
+            {
+              "kind": "warmup",
+              "arm": "candidate",
+              "started_at": "2026-11-20T07:00:18.192119543Z",
+              "ended_at": "2026-11-20T07:00:51.088484878Z",
+              "duration_seconds": 32.896365335,
+              "requests": 64,
+              "failed": 0,
+              "output_token_throughput": 584.8817237818868,
+              "ttft_p95_ms": 9174.438879,
+              "latency_p95_ms": 20438.697968
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 1,
+              "started_at": "2026-11-20T07:00:51.090649586Z",
+              "ended_at": "2026-11-20T07:01:41.874551805Z",
+              "duration_seconds": 50.783902219,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 913.0894953729547,
+              "ttft_p95_ms": 2139.3580429999997,
+              "latency_p95_ms": 17282.597716
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 2,
+              "started_at": "2026-11-20T07:01:41.877501596Z",
+              "ended_at": "2026-11-20T07:02:33.00004355Z",
+              "duration_seconds": 51.122541954,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 914.3765939634258,
+              "ttft_p95_ms": 2076.287042,
+              "latency_p95_ms": 16881.003131999998
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 3,
+              "started_at": "2026-11-20T07:02:33.00182505Z",
+              "ended_at": "2026-11-20T07:03:23.870532213Z",
+              "duration_seconds": 50.868707163,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 914.1977919536976,
+              "ttft_p95_ms": 2114.681168,
+              "latency_p95_ms": 17061.529132
+            }
+          ],
+          "started_at": "2026-11-20T07:00:18.191679543Z",
+          "turns_done": 3,
+          "turns_planned": 3,
+          "updated_at": "2026-11-20T07:03:23.870533504Z",
+          "warmups_planned": 1
+        }
+      },
+      {
+        "id": "98f7c0a0ec292abb3b358022d093a447",
+        "proposal_candidate_id": "d831b803cda6d1c4eefc33d5e16bc5210a8099591fa10c611d2c7a9d549cb28d",
+        "state": "qualified",
+        "evidence_state": "qualified",
+        "target_endpoint": "gpu-optimized",
+        "deployment_name": "gpu-optimized-opt-98f7c0a0",
+        "revision_id": "626c9bc123d3d1773944103d75fe7263-rev-1",
+        "benchmark_id": "0474dc764d18a858309624889bc701b1",
+        "quality_evidence_id": "764805c2eade94778954073b5ff7baae",
+        "failure_code": "",
+        "rank": 2,
+        "quality": {
+          "state": "passed",
+          "source": "infercrane",
+          "role": "candidate",
+          "reason": "Answers matched the reference 100% across 24 prompts.",
+          "check": "builtin",
+          "suite": "infercrane-default",
+          "suite_version": "1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af",
+          "prompt_count": 24,
+          "score": 1,
+          "regression_percent": 0,
+          "watch_limit_percent": 5,
+          "block_limit_percent": 10,
+          "reference_revision_id": "75fa6416e7f41d45dd2685767f44e32e-rev-1",
+          "evidence_id": "764805c2eade94778954073b5ff7baae"
+        },
+        "label": "FP8 weights (quantized by vLLM at load)",
+        "control": false,
+        "state_entered_at": {
+          "measuring": "2026-11-20T07:27:35.192176926Z",
+          "proposed": "2026-11-20T06:30:31.682387467Z",
+          "provisioning": "2026-11-20T07:03:26.371522297Z",
+          "qualified": "2026-11-20T07:47:56.20380063Z",
+          "ranked": "2026-11-20T07:34:04.055523468Z",
+          "ready": "2026-11-20T07:27:35.184690843Z",
+          "validating": "2026-11-20T07:34:00.330895174Z"
+        },
+        "measurement": {
+          "current": null,
+          "method": "campaign-interleaved-control-v1",
+          "runs": [
+            {
+              "kind": "warmup",
+              "arm": "control",
+              "started_at": "2026-11-20T07:27:35.206622385Z",
+              "ended_at": "2026-11-20T07:27:59.58033734Z",
+              "duration_seconds": 24.373714955,
+              "requests": 64,
+              "failed": 0,
+              "output_token_throughput": 832.2039808775543,
+              "ttft_p95_ms": 2791.564875,
+              "latency_p95_ms": 14070.286756
+            },
+            {
+              "kind": "warmup",
+              "arm": "candidate",
+              "started_at": "2026-11-20T07:27:59.58279559Z",
+              "ended_at": "2026-11-20T07:28:25.146744588Z",
+              "duration_seconds": 25.563948998,
+              "requests": 64,
+              "failed": 0,
+              "output_token_throughput": 718.3732671037798,
+              "ttft_p95_ms": 8094.119836999999,
+              "latency_p95_ms": 16720.494673999998
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 1,
+              "started_at": "2026-11-20T07:28:25.148285547Z",
+              "ended_at": "2026-11-20T07:29:15.718073876Z",
+              "duration_seconds": 50.569788329,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 915.8289748271653,
+              "ttft_p95_ms": 1942.516917,
+              "latency_p95_ms": 17112.861008
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 2,
+              "started_at": "2026-11-20T07:29:15.719500542Z",
+              "ended_at": "2026-11-20T07:29:59.923822174Z",
+              "duration_seconds": 44.204321632,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 1089.548968380827,
+              "ttft_p95_ms": 1535.036501,
+              "latency_p95_ms": 14190.407298999999
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 3,
+              "started_at": "2026-11-20T07:29:59.925935507Z",
+              "ended_at": "2026-11-20T07:30:50.905203128Z",
+              "duration_seconds": 50.979267621,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 911.0191170381927,
+              "ttft_p95_ms": 2068.861418,
+              "latency_p95_ms": 17392.5018
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 4,
+              "started_at": "2026-11-20T07:30:50.908323961Z",
+              "ended_at": "2026-11-20T07:31:34.885471885Z",
+              "duration_seconds": 43.977147924,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 1083.829706570571,
+              "ttft_p95_ms": 1574.632375,
+              "latency_p95_ms": 14217.783131
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 5,
+              "started_at": "2026-11-20T07:31:34.886577843Z",
+              "ended_at": "2026-11-20T07:32:25.597028047Z",
+              "duration_seconds": 50.710450204,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 916.4214348575218,
+              "ttft_p95_ms": 2103.060751,
+              "latency_p95_ms": 17170.837299
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 6,
+              "started_at": "2026-11-20T07:32:25.59927538Z",
+              "ended_at": "2026-11-20T07:33:09.690574387Z",
+              "duration_seconds": 44.091299007,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 1079.196744520921,
+              "ttft_p95_ms": 1679.2258339999998,
+              "latency_p95_ms": 14412.057464
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 7,
+              "started_at": "2026-11-20T07:33:09.691585429Z",
+              "ended_at": "2026-11-20T07:34:00.324715091Z",
+              "duration_seconds": 50.633129662,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 910.484252100921,
+              "ttft_p95_ms": 1965.5691259999999,
+              "latency_p95_ms": 16818.159257
+            }
+          ],
+          "started_at": "2026-11-20T07:27:35.20628351Z",
+          "turns_done": 7,
+          "turns_planned": 7,
+          "updated_at": "2026-11-20T07:34:00.324716424Z",
+          "warmups_planned": 2
+        }
+      },
+      {
+        "id": "3a0742cde7ada05b3b433d842155284f",
+        "proposal_candidate_id": "8d9281d0b366411b0f9fd6b8e8e431743369fbd7dcb7385fa14f80eff208f5c8",
+        "state": "rejected",
+        "evidence_state": "rejected",
+        "target_endpoint": "gpu-optimized",
+        "deployment_name": "gpu-optimized-opt-3a0742cd",
+        "revision_id": "c4178238cacd8d9f0909f3d16d453023-rev-1",
+        "benchmark_id": "d99a6656aa1b058bc51f903eef567e71",
+        "quality_evidence_id": "fbafe23991ff6bf43d8b19ddf4e31970",
+        "failure_code": "measured_candidate_superseded",
+        "rank": 3,
+        "quality": {
+          "state": "passed",
+          "source": "infercrane",
+          "role": "candidate",
+          "reason": "Answers matched the reference 100% across 24 prompts.",
+          "check": "builtin",
+          "suite": "infercrane-default",
+          "suite_version": "1@sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af",
+          "prompt_count": 24,
+          "score": 1,
+          "regression_percent": 0,
+          "watch_limit_percent": 5,
+          "block_limit_percent": 10,
+          "reference_revision_id": "75fa6416e7f41d45dd2685767f44e32e-rev-1",
+          "evidence_id": "fbafe23991ff6bf43d8b19ddf4e31970"
+        },
+        "label": "Compact FP8 KV cache",
+        "control": false,
+        "state_entered_at": {
+          "measuring": "2026-11-20T07:40:02.203748842Z",
+          "proposed": "2026-11-20T06:30:31.682387467Z",
+          "provisioning": "2026-11-20T07:34:04.063954051Z",
+          "ranked": "2026-11-20T07:46:41.421931679Z",
+          "ready": "2026-11-20T07:40:02.196839175Z",
+          "rejected": "2026-11-20T07:47:56.215132172Z",
+          "validating": "2026-11-20T07:46:37.344888469Z"
+        },
+        "measurement": {
+          "current": null,
+          "method": "campaign-interleaved-control-v1",
+          "runs": [
+            {
+              "kind": "warmup",
+              "arm": "control",
+              "started_at": "2026-11-20T07:40:02.217197425Z",
+              "ended_at": "2026-11-20T07:40:26.202625755Z",
+              "duration_seconds": 23.98542833,
+              "requests": 64,
+              "failed": 0,
+              "output_token_throughput": 836.6625288297613,
+              "ttft_p95_ms": 3219.81396,
+              "latency_p95_ms": 14052.430714999999
+            },
+            {
+              "kind": "warmup",
+              "arm": "candidate",
+              "started_at": "2026-11-20T07:40:26.203838755Z",
+              "ended_at": "2026-11-20T07:40:53.746616629Z",
+              "duration_seconds": 27.542777874,
+              "requests": 64,
+              "failed": 0,
+              "output_token_throughput": 643.7296816786723,
+              "ttft_p95_ms": 7923.558086999999,
+              "latency_p95_ms": 18414.865466
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 1,
+              "started_at": "2026-11-20T07:40:53.748152671Z",
+              "ended_at": "2026-11-20T07:41:44.107225666Z",
+              "duration_seconds": 50.359072995,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 914.5547338890186,
+              "ttft_p95_ms": 1970.5725419999999,
+              "latency_p95_ms": 17060.717466
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 2,
+              "started_at": "2026-11-20T07:41:44.108529791Z",
+              "ended_at": "2026-11-20T07:42:31.242937633Z",
+              "duration_seconds": 47.134407842,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 996.1241650944824,
+              "ttft_p95_ms": 1896.3665839999999,
+              "latency_p95_ms": 15890.965341
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 3,
+              "started_at": "2026-11-20T07:42:31.244129633Z",
+              "ended_at": "2026-11-20T07:43:21.805923212Z",
+              "duration_seconds": 50.561793579,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 912.0710893639102,
+              "ttft_p95_ms": 2209.307501,
+              "latency_p95_ms": 17250.530299
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 4,
+              "started_at": "2026-11-20T07:43:21.808713878Z",
+              "ended_at": "2026-11-20T07:44:08.80445772Z",
+              "duration_seconds": 46.995743842,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 996.6536986358489,
+              "ttft_p95_ms": 1901.17346,
+              "latency_p95_ms": 15639.458298
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 5,
+              "started_at": "2026-11-20T07:44:08.80597622Z",
+              "ended_at": "2026-11-20T07:44:59.602200924Z",
+              "duration_seconds": 50.796224704,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 907.4979640769293,
+              "ttft_p95_ms": 1919.632376,
+              "latency_p95_ms": 17133.244591
+            },
+            {
+              "kind": "turn",
+              "arm": "candidate",
+              "turn": 6,
+              "started_at": "2026-11-20T07:44:59.605020674Z",
+              "ended_at": "2026-11-20T07:45:46.729943626Z",
+              "duration_seconds": 47.124922952,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 996.313712359842,
+              "ttft_p95_ms": 1978.3048339999998,
+              "latency_p95_ms": 15505.976338999999
+            },
+            {
+              "kind": "turn",
+              "arm": "control",
+              "turn": 7,
+              "started_at": "2026-11-20T07:45:46.731502584Z",
+              "ended_at": "2026-11-20T07:46:37.338432802Z",
+              "duration_seconds": 50.606930218,
+              "requests": 200,
+              "failed": 0,
+              "output_token_throughput": 913.4404638660726,
+              "ttft_p95_ms": 1898.599876,
+              "latency_p95_ms": 17041.658217
+            }
+          ],
+          "started_at": "2026-11-20T07:40:02.216788842Z",
+          "turns_done": 7,
+          "turns_planned": 7,
+          "updated_at": "2026-11-20T07:46:37.338434261Z",
+          "warmups_planned": 2
+        }
+      }
+    ],
+    "progress": {
+      "stage": "decided",
+      "started_at": "2026-11-20T06:30:31.780578Z",
+      "ended_at": "2026-11-20T07:47:56.215132172Z",
+      "elapsed_seconds": 4644.434554172,
+      "setups_total": 3,
+      "setups_measured": 3,
+      "turns_done": 17,
+      "turns_total": 17,
+      "eta": {
+        "state": "unknown",
+        "basis": "observed_durations",
+        "remaining_seconds": null,
+        "completes_at": null,
+        "observed": {
+          "answer_checks": 3,
+          "provisioning": 3,
+          "turns": 17,
+          "warmups": 5
+        },
+        "reason": "the run is not measuring"
+      }
+    },
+    "spend": {
+      "state": "estimated",
+      "basis": "quoted_rate_x_replica_seconds",
+      "label": "estimated from quoted rate",
+      "estimated_usd": 8.87261464550529,
+      "replica_seconds": 8088.071691436,
+      "cap_usd": 24.88
+    }
+  }
+}

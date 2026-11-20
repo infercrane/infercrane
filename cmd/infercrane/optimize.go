@@ -92,6 +92,9 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	qualityCheck := fs.String("quality-check", "builtin", "who checks answer quality: builtin (InferCrane compares answers with your current setup) or customer_evidence (wait for your signed evaluation)")
 	evalSet := fs.String("eval-set", "", "digest of an uploaded eval set that replaces the built-in prompts (see: infercrane evaluation set upload)")
 	diagnosisEndpoint := fs.String("diagnosis-endpoint", "", "endpoint whose recorded bottleneck diagnosis chooses and orders the setups; the control plane reads it and plans")
+	migrateFrom := fs.String("migrate-from", "", "ENDPOINT/BINDING of the closed API this run would replace; makes the run a migration Proof")
+	dialect := fs.String("dialect", "openai-compatible", "how the closed API reads requests: openai or openai-compatible (with --migrate-from)")
+	maxQualityDrop := fs.Float64("max-quality-drop", 5, "largest graded-quality drop against the closed API, in percent, a setup may show and still pass (with --migrate-from)")
 	modelSecret := fs.String("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model; every setup's worker receives it from its provider")
 	adapterFlag := fs.String("adapter", "", "serve a LoRA adapter on every setup: NAME=OWNER/REPO@COMMIT or NAME=s3://BUCKET/PREFIX@sha256:DIGEST")
 	output := fs.String("output", "human", "human or json")
@@ -105,6 +108,13 @@ func optimizeCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	request := optimizer.Request{ModelIdentity: model, ModelRevision: *modelRevision, Provider: *provider, Region: *region, GPU: *gpu, GPUCount: *gpuCount, Runtimes: splitList(*runtimes), Objective: *objective, WorkloadProfile: *profile, IncludeSimulated: *includeSimulated, WorkloadFingerprint: *workloadFingerprint, MaxCandidates: *maxCandidates, QualityCheck: *qualityCheck, QualityEvalSet: *evalSet, ModelSecretReferenceID: *modelSecret}
+	if *migrateFrom != "" {
+		endpoint, binding, found := strings.Cut(*migrateFrom, "/")
+		if !found || endpoint == "" || binding == "" {
+			return errors.New("--migrate-from must be ENDPOINT/BINDING, such as support-bot/primary")
+		}
+		request.Migration = &optimizer.MigrationBaseline{Endpoint: endpoint, Binding: binding, Dialect: *dialect, MaxQualityRegressionPercent: *maxQualityDrop}
+	}
 	var err error
 	if *adapterFlag != "" {
 		adapter, adapterErr := parseAdapterFlag(*adapterFlag)

@@ -41,8 +41,10 @@ var ErrReferenceUnanswered = errors.New("the reference gave no answer text")
 // Comparison is the in-memory result of one candidate against its reference.
 // It holds scores and digests only; answers are discarded.
 type Comparison struct {
-	Set                 EvalSet
-	ReferenceRevisionID string
+	Set EvalSet
+	// ReferenceID is the reference's subject: a revision ID, or
+	// binding:<id> for a closed API.
+	ReferenceID         string
 	CandidateRevisionID string
 	// Scores holds one agreement score per prompt, in eval-set order.
 	Scores []float64
@@ -59,10 +61,10 @@ type Comparison struct {
 // are the same revision the candidate is the reference, so each prompt is
 // asked once and agreement is 1 by definition.
 func Compare(ctx context.Context, completer Completer, set EvalSet, reference, candidate Target, now func() time.Time) (Comparison, error) {
-	if completer == nil || len(set.Prompts) == 0 || !ValidDigest(set.Digest) || reference.RevisionID == "" || candidate.RevisionID == "" {
+	if completer == nil || len(set.Prompts) == 0 || !ValidDigest(set.Digest) || reference.SubjectID == "" || candidate.SubjectID == "" {
 		return Comparison{}, errors.New("quality check requires a completer, a decoded eval set, and both revisions")
 	}
-	self := reference.RevisionID == candidate.RevisionID
+	self := reference.SubjectID == candidate.SubjectID
 	scores := make([]float64, 0, len(set.Prompts))
 	referenceAnswers := make([]string, 0, len(set.Prompts))
 	candidateAnswers := make([]string, 0, len(set.Prompts))
@@ -96,14 +98,14 @@ func Compare(ctx context.Context, completer Completer, set EvalSet, reference, c
 	score := round(mean(scores))
 	bundle, _ := json.Marshal(map[string]any{
 		"evaluator": Evaluator, "evaluator_version": EvaluatorVersion, "eval_set": set.Digest,
-		"reference_revision_id": reference.RevisionID, "candidate_revision_id": candidate.RevisionID,
+		"reference_revision_id": reference.SubjectID, "candidate_revision_id": candidate.SubjectID,
 		"reference_answers": referenceAnswers, "candidate_answers": candidateAnswers, "scores": scores,
 	})
 	stamp := time.Now().UTC()
 	if now != nil {
 		stamp = now().UTC()
 	}
-	comparison := Comparison{Set: set, ReferenceRevisionID: reference.RevisionID, CandidateRevisionID: candidate.RevisionID, Scores: scores, Score: score, ResultDigest: Digest(bundle), EvaluatedAt: stamp.Truncate(time.Second)}
+	comparison := Comparison{Set: set, ReferenceID: reference.SubjectID, CandidateRevisionID: candidate.SubjectID, Scores: scores, Score: score, ResultDigest: Digest(bundle), EvaluatedAt: stamp.Truncate(time.Second)}
 	comparison.Eval = Classify(set, score, scores)
 	return comparison, nil
 }
@@ -148,7 +150,7 @@ func (c Comparison) Payload(deployment string, reference bool) qualityevidence.P
 	revision, score, passed := c.CandidateRevisionID, c.Score, c.Eval.Verdict != releaseguard.QualityBlock
 	scores := c.Scores
 	if reference {
-		revision, score, passed = c.ReferenceRevisionID, 1, true
+		revision, score, passed = c.ReferenceID, 1, true
 		scores = make([]float64, len(c.Scores))
 		for index := range scores {
 			scores[index] = 1

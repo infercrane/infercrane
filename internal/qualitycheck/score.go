@@ -58,3 +58,25 @@ func tokens(answer string) []string {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 }
+
+// Grade scores one answer of a graded set against the prompt's expected
+// answers, from 0 to 1. An answer with no text scores 0.
+func Grade(grading string, prompt Prompt, answer string) float64 {
+	if !Answered(answer) {
+		return 0
+	}
+	best := 0.0
+	for _, expected := range prompt.Expected {
+		var score float64
+		switch grading {
+		case GradingExactMatch:
+			if strings.Join(tokens(expected), " ") == strings.Join(tokens(answer), " ") {
+				score = 1
+			}
+		case GradingTokenF1:
+			score = Agreement(expected, answer)
+		}
+		best = max(best, score)
+	}
+	return best
+}

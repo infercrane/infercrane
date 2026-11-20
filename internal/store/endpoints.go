@@ -244,9 +244,12 @@ func (s *Store) CreateBackendBinding(ctx context.Context, tenant string, binding
 type canonicalPlan struct {
 	RoutingPolicy string                      `json:"routing_policy"`
 	Bindings      []domain.ServingPlanBinding `json:"bindings"`
+	// MigrationVerdictID is omitted when empty, so every plan created before
+	// migration plans keeps its spec digest.
+	MigrationVerdictID string `json:"migration_verdict_id,omitempty"`
 }
 
-func normalizePlan(policy string, bindings []domain.ServingPlanBinding) (canonicalPlan, []byte, error) {
+func normalizePlan(policy string, bindings []domain.ServingPlanBinding, migrationVerdictID string) (canonicalPlan, []byte, error) {
 	if policy != "manual" && policy != "primary-fallback" && policy != "weighted" {
 		return canonicalPlan{}, nil, errors.New("unsupported routing policy")
 	}
@@ -270,13 +273,16 @@ func normalizePlan(policy string, bindings []domain.ServingPlanBinding) (canonic
 	if policy == "weighted" && len(copyBindings) != 2 {
 		return canonicalPlan{}, nil, errors.New("weighted active-active routing requires exactly two bindings")
 	}
-	plan := canonicalPlan{RoutingPolicy: policy, Bindings: copyBindings}
+	if migrationVerdictID != "" && (policy == "manual" || len(copyBindings) != 2) {
+		return canonicalPlan{}, nil, errors.New("a migration plan routes between exactly two bindings, weighted or primary-fallback")
+	}
+	plan := canonicalPlan{RoutingPolicy: policy, Bindings: copyBindings, MigrationVerdictID: migrationVerdictID}
 	body, err := json.Marshal(plan)
 	return plan, body, err
 }
 
 func (s *Store) CreateServingPlan(ctx context.Context, tenant string, plan domain.ServingPlan) (domain.ServingPlan, error) {
-	_, body, err := normalizePlan(plan.RoutingPolicy, plan.Bindings)
+	_, body, err := normalizePlan(plan.RoutingPolicy, plan.Bindings, plan.MigrationVerdictID)
 	if err != nil {
 		return domain.ServingPlan{}, err
 	}
@@ -300,7 +306,13 @@ func (s *Store) CreateServingPlan(ctx context.Context, tenant string, plan domai
 	} else if err != nil {
 		return domain.ServingPlan{}, err
 	}
-	if plan.RoutingPolicy == "weighted" {
+	if plan.MigrationVerdictID != "" {
+		// A closed API and an open model never share a model name. The
+		// signed migration verdict is the evidence they answer alike.
+		if err = validateMigrationPlan(ctx, tx, tenant, plan); err != nil {
+			return domain.ServingPlan{}, err
+		}
+	} else if plan.RoutingPolicy == "weighted" {
 		identities := make([]activeActiveIdentity, 0, len(plan.Bindings))
 		for _, planned := range plan.Bindings {
 			var identity activeActiveIdentity
@@ -481,6 +493,15 @@ func (s *Store) StageEnvironmentPromotion(ctx context.Context, tenant, sourceNam
 	if sourceModelID != destinationModelID {
 		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: endpoints belong to different logical models", ErrConflict)
 	}
+	var sourceMigration string
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(spec_json->>'migration_verdict_id','') FROM serving_plans WHERE id=?`, sourcePlanID).Scan(&sourceMigration); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return domain.EnvironmentPromotion{}, false, err
+	}
+	if sourceMigration != "" {
+		// A migration verdict is bound to the source endpoint's closed API;
+		// a copy would route another endpoint on evidence it does not have.
+		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: a migration plan cannot be promoted to another environment; run the migration there", ErrConflict)
+	}
 	if destinationActive == "" {
 		return domain.EnvironmentPromotion{}, false, fmt.Errorf("%w: destination has no active plan; initialize it explicitly before environment promotion", ErrConflict)
 	}
@@ -541,7 +562,7 @@ func (s *Store) StageEnvironmentPromotion(ctx context.Context, tenant, sourceNam
 		}
 		destinationBindings = append(destinationBindings, domain.ServingPlanBinding{BindingID: bindingID, Priority: source.Priority, Weight: source.Weight})
 	}
-	_, specBody, err := normalizePlan(sourcePolicy, destinationBindings)
+	_, specBody, err := normalizePlan(sourcePolicy, destinationBindings, "")
 	if err != nil {
 		return domain.EnvironmentPromotion{}, false, err
 	}
@@ -737,6 +758,10 @@ func (s *Store) plansForEndpoint(ctx context.Context, tenant, endpointID string)
 			return nil, err
 		}
 		p.CreatedAt = parseTime(c)
+		var spec canonicalPlan
+		if json.Unmarshal([]byte(p.SpecJSON), &spec) == nil {
+			p.MigrationVerdictID = spec.MigrationVerdictID
+		}
 		bindingRows, e := s.QueryContext(ctx, `SELECT binding_id,priority,weight FROM serving_plan_bindings WHERE serving_plan_id=? ORDER BY priority`, p.ID)
 		if e != nil {
 			return nil, e
