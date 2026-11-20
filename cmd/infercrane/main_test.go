@@ -169,7 +169,7 @@ func TestOptimizeHelpMatchesCampaignWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"approve|activate|cancel",
+		"approve   approve a spend cap",
 		"--max-error-rate",
 		"--min-goodput",
 		"--target-deployment",
