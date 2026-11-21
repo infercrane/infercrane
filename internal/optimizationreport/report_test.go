@@ -11,6 +11,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
@@ -39,7 +40,7 @@ type armFixture struct {
 
 type fixture struct {
 	intent, state, objective string
-	source                   string
+	source, profile          string
 	arms                     []armFixture
 	replay                   *domain.ReplayTrace
 	guard                    map[string]domain.ReleaseGuardEvaluation
@@ -69,7 +70,7 @@ func workloadJSON(source string, measured *optimizationcampaign.MeasuredEvidence
 }
 
 func (f fixture) evidence() Evidence {
-	proposal := optimizer.Proposal{SchemaVersion: optimizer.SchemaVersion, AlgorithmVersion: "catalog-v1", Input: optimizer.Request{ModelIdentity: fixtureModel, Objective: f.objective, WorkloadSource: f.source}, StartingPoint: &optimizer.StartingPoint{CandidateID: "proposal-control"}}
+	proposal := optimizer.Proposal{SchemaVersion: optimizer.SchemaVersion, AlgorithmVersion: "catalog-v1", Input: optimizer.Request{ModelIdentity: fixtureModel, Objective: f.objective, WorkloadProfile: f.profile, WorkloadSource: f.source}, StartingPoint: &optimizer.StartingPoint{CandidateID: "proposal-control"}}
 	if f.source == optimizer.WorkloadSourceCustomerObserved {
 		proposal.Input.WorkloadFingerprint = "sha256:" + traceDigest
 	}
@@ -821,5 +822,60 @@ func TestCleanedCampaignWithoutAProvenWinnerStaysWithoutOne(t *testing.T) {
 				t.Fatalf("outcome cards = %v", values)
 			}
 		})
+	}
+}
+
+// An interactive campaign on the buffered profile ranked on p95 request
+// latency. The report compares that metric and says why it is not the usual
+// one; a streaming campaign keeps time to first token and no note.
+func TestReportLabelsALatencyObjectiveRankedOnRequestLatency(t *testing.T) {
+	f := winnerFixture()
+	f.objective, f.profile = "interactive", "buffered"
+	f.arms[1].measured.Comparison[lab.MetricLatencyP95] = optimizationcampaign.MetricComparison{ControlMean: 1200, CandidateMean: 900, Delta: -0.25, NoiseFloor: 0.04, Decision: optimizationcampaign.DecisionImproved}
+	report := Assemble(f.evidence())
+	if report.ObjectiveMetric != lab.MetricLatencyP95 || report.ObjectiveNote != lab.BufferedLatencyNote {
+		t.Fatalf("objective metric=%q note=%q", report.ObjectiveMetric, report.ObjectiveNote)
+	}
+	if report.Noise.ObjectiveMetric != lab.MetricLatencyP95 || !near(report.Noise.ObjectiveChangePercent, -25) || report.Noise.ObjectiveDecision != DecisionImproved {
+		t.Fatalf("noise = %+v", report.Noise)
+	}
+	if winner := report.Candidates[1]; winner.Role != "winner" || winner.VersusBaseline == nil || winner.VersusBaseline.Metric != lab.MetricLatencyP95 {
+		t.Fatalf("winner = %+v", winner)
+	}
+	text := Text(Document{Report: report})
+	for _, want := range []string{"goal: interactive, ranked on p95 request latency · run campaign-1", "on p95 request latency"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("report lacks %q:\n%s", want, text)
+		}
+	}
+
+	f.profile = ""
+	report = Assemble(f.evidence())
+	if report.ObjectiveMetric != lab.MetricTTFTP95 || report.ObjectiveNote != "" || report.Noise.ObjectiveMetric != lab.MetricTTFTP95 {
+		t.Fatalf("streaming objective metric=%q note=%q noise=%+v", report.ObjectiveMetric, report.ObjectiveNote, report.Noise)
+	}
+	if !strings.Contains(Text(Document{Report: report}), "goal: interactive · run campaign-1") {
+		t.Fatalf("a usual metric needs no label:\n%s", Text(Document{Report: report}))
+	}
+}
+
+// A buffered interactive campaign ranked before Lab inference-lab-v5 compared
+// time to first token, which its runs never measured. Its report names the
+// metric that ranking used instead of relabelling it as request latency.
+func TestReportKeepsTheMetricAnEarlierRankingCompared(t *testing.T) {
+	f := winnerFixture()
+	f.objective, f.profile = "interactive", "buffered"
+	f.arms[1].measured.Comparison[lab.MetricLatencyP95] = optimizationcampaign.MetricComparison{ControlMean: 1200, CandidateMean: 900, Delta: -0.25, NoiseFloor: 0.04, Decision: optimizationcampaign.DecisionImproved}
+	rows, _ := json.Marshal([]map[string]any{
+		{"candidate_id": "control", "campaign_decision": optimizationcampaign.RankInconclusive, "objective_metric": lab.MetricTTFTP95},
+		{"candidate_id": "winner", "campaign_decision": optimizationcampaign.RankInconclusive, "objective_metric": lab.MetricTTFTP95},
+	})
+	f.rankings = map[string]domain.LabEvaluation{"optlab-" + strings.Repeat("e", 64): {ID: "optlab-" + strings.Repeat("e", 64), TenantID: "tenant-a", AlgorithmVersion: "inference-lab-v4+campaign-control-noise-floor-v3", ResultsJSON: string(rows)}}
+	report := Assemble(f.evidence())
+	if report.ObjectiveMetric != lab.MetricTTFTP95 || report.ObjectiveNote != "" || report.Noise.ObjectiveMetric != lab.MetricTTFTP95 {
+		t.Fatalf("objective metric=%q note=%q noise=%+v", report.ObjectiveMetric, report.ObjectiveNote, report.Noise)
+	}
+	if strings.Contains(Text(Document{Report: report}), "ranked on p95 request latency") {
+		t.Fatalf("an earlier ranking was relabelled:\n%s", Text(Document{Report: report}))
 	}
 }

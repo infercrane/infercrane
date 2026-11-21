@@ -13,6 +13,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
@@ -217,7 +218,11 @@ func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, cand
 // without them the ranking cannot decide on cost either, so nothing is
 // confirmed.
 func (e BenchmarkExecutor) confirmation(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) func(MeasuredEvidence) bool {
-	metric, _, costScale := objectiveMetric(campaignRequest(campaign).Objective)
+	// The same metric the ranking compares, so a buffered latency run is
+	// confirmed on p95 request latency rather than an unmeasured TTFT.
+	request := campaignRequest(campaign)
+	objective, _ := lab.ObjectiveMetric(request.Objective, request.WorkloadProfile)
+	metric, costScale := objective.Name, objective.CostScaled
 	if metric == "" {
 		return nil
 	}

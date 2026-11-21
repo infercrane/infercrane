@@ -1076,6 +1076,40 @@ length, and which check fired. Rankings with these checks, the paired comparison
 confirmation on fresh servers record algorithm `campaign-paired-confirmed-v5`; with the machine
 difference in every interval, `campaign-paired-confirmed-v6`.
 
+**Objective metric.** Each objective ranks on one measured metric, and Lab and the control gate use
+the same one:
+
+| Objective | Streaming profile (all but `buffered`) | `buffered` profile |
+|---|---|---|
+| `interactive`, `latency` | p95 time to first token, lower is better | p95 request latency, lower is better |
+| `throughput` | Output tokens per second | Output tokens per second |
+| `cost-efficiency` | Output tokens per second per sourced hourly cost | Output tokens per second per sourced hourly cost |
+
+A buffered run receives each answer whole, so AIPerf measures no first token. The wait a buffered
+client sees is the whole request, so latency objectives rank on p95 request latency there.
+Before Lab `inference-lab-v5`, they ranked on time to first token on every profile, and an
+`interactive` or `latency` run on `buffered` ended `measured_ranking_inconclusive` after spending
+its whole measurement time. The substitution is labelled at each step:
+
+- `optimize propose` and the stored run carry a warning, for example `Objective interactive ranks
+  setups on p95 request latency on the buffered profile: …`.
+- Every Lab row in the persisted ranking names its metric in `objective_metric`. The selection
+  reason names it too, for example `best measured interactive (p95 request latency) among
+  exact-workload candidates`.
+- The report sets `objective_metric` to `latency_p95_ms` and `objective_note` to the reason. Its
+  subtitle reads `goal: interactive, ranked on p95 request latency`. The report takes the metric
+  from the stored ranking when it recorded one, so a run ranked before `inference-lab-v5` still
+  reads `ttft_p95_ms`.
+
+A time-to-first-token or time-per-output-token limit (`--max-ttft-p95-ms`, `--max-tpot-p95-ms`) has
+no substitute: no buffered run measures either, so every setup would miss it. `optimize propose`
+and `optimize create` stop with an error naming the limit before anything is sent. The API answers
+HTTP 422: `invalid_optimization_request` from `POST /api/v1/optimization/proposals` and
+`invalid_optimization_proposal` from `POST /api/v1/optimization/campaigns`, before anything is
+stored or provisioned. Use a streaming profile such as `interactive`, or drop the limit. Without `--profile`,
+the profile comes from the objective: `interactive` for `interactive` and `latency`, `throughput`
+for `throughput` and `cost-efficiency`, both streaming.
+
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric and
 passes both checks above. If none does, the control is kept. Each losing candidate is superseded with

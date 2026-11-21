@@ -54,7 +54,10 @@ infercrane lab 'mistralai/Mistral-7B-Instruct-v0.3@IMMUTABLE_COMMIT' \
 
 Choose `interactive`, `latency`, `throughput`, or `cost-efficiency`. Interactive and latency minimize measured p95 TTFT,
 throughput maximizes output tokens per second, and cost efficiency maximizes measured output tokens
-per second per sourced hourly currency unit. Rows include runtime, provider, GPU, error rate,
+per second per sourced hourly currency unit. On the non-streaming `buffered` profile, interactive
+and latency minimize p95 request latency instead: buffered runs measure no first token, and a
+buffered client waits for the whole answer. Each row names the metric it ranked on in
+`objective_metric` (Lab `inference-lab-v5` and later). Rows include runtime, provider, GPU, error rate,
 TTFT, TPOT, goodput, throughput, constraint result, and cost metadata exactly as persisted. Region,
 GPU-count, error-rate, goodput, throughput, and sourced hourly-cost constraints fail closed when the
 required evidence is absent. Current Lab results
