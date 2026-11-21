@@ -68,6 +68,11 @@ func TestCandidateQualityStatesComeFromPersistedState(t *testing.T) {
 	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, unanswered), unanswered, campaignQualityInputs{}); view.State != qualityStateInconclusive || !strings.Contains(view.Reason, "no answer text") {
 		t.Fatalf("unanswered reference = %+v", view)
 	}
+	nothingChecked := validating
+	nothingChecked.State, nothingChecked.FailureCode = optimizationcampaign.CandidateInconclusive, optimizationcampaign.FailureQualityNothingChecked
+	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, nothingChecked), nothingChecked, campaignQualityInputs{}); view.State != qualityStateInconclusive || !strings.Contains(view.Reason, "refused requests with tools") {
+		t.Fatalf("nothing checked = %+v", view)
+	}
 	failed := validating
 	failed.State = optimizationcampaign.CandidateFailed
 	if view := candidateQuality(qualityTestCampaign(t, optimizer.Request{}, failed), failed, campaignQualityInputs{}); view.State != qualityStateNotRun {
@@ -107,8 +112,25 @@ func TestCandidateQualityReportsBuiltinAndCustomerVerdicts(t *testing.T) {
 	}
 	// A broken tool call blocks even when the mean is inside the PASS band.
 	broken := candidateQuality(campaign, ranked, withToolCalls(0.96, false, 1))
-	if broken.State != qualityStateBlocked || broken.ToolCalls == nil || broken.ToolCalls.Broken != 1 || broken.ToolCalls.Candidate.MissingCall != 1 || !strings.Contains(broken.Reason, "broke 1 of 3 tool calls the reference made correctly (missing call 1)") || !strings.Contains(broken.Reason, "tool calls matched 67% across 3") {
+	if broken.State != qualityStateBlocked || broken.ToolCalls == nil || broken.ToolCalls.Broken != 1 || broken.ToolCalls.Candidate.MissingCall != 1 || !strings.Contains(broken.Reason, "broke 1 of 3 tool calls (missing call 1)") || !strings.Contains(broken.Reason, "tool calls matched 67% across 3") {
 		t.Fatalf("broken tool call = %+v", broken)
+	}
+	// Tool cases the reference refused are named as not checked, never as
+	// a match, and no tool-call score is claimed when none was scored.
+	withUnchecked := func(calls string) campaignQualityInputs {
+		inputs := builtin(0.99, true, "rev-control")
+		row := inputs.evidence["q1"]
+		row.DistributionJSON = `{"schema":"infercrane.dev/quality-distribution/v1","kind":"paired_scores","pairing_digest":"sha256:` + strings.Repeat("a", 64) + `","scores":[],"tool_calls":` + calls + `}`
+		inputs.evidence["q1"] = row
+		return inputs
+	}
+	unchecked := candidateQuality(campaign, ranked, withUnchecked(`{"cases":0,"not_checked":5,"score":0,"broken":0,"reference_invalid":0,"candidate":{},"reference":{}}`))
+	if unchecked.State != qualityStatePassed || unchecked.ToolCalls == nil || unchecked.ToolCalls.NotChecked != 5 || strings.Contains(unchecked.Reason, "tool calls matched") || !strings.Contains(unchecked.Reason, "5 tool cases not checked because the reference refused requests with tools") {
+		t.Fatalf("unchecked tool cases = %+v", unchecked)
+	}
+	refused := candidateQuality(campaign, ranked, withUnchecked(`{"cases":2,"not_checked":3,"score":0.5,"broken":1,"reference_invalid":0,"candidate":{"tools_refused":1},"reference":{}}`))
+	if refused.State != qualityStateBlocked || !strings.Contains(refused.Reason, "broke 1 of 2 tool calls (refused tools the reference accepted 1)") || !strings.Contains(refused.Reason, "3 tool cases not checked") {
+		t.Fatalf("candidate that refused tools = %+v", refused)
 	}
 	kept := candidateQuality(campaign, ranked, withToolCalls(0.99, true, 0))
 	if kept.State != qualityStatePassed || kept.ToolCalls == nil || kept.ToolCalls.Cases != 3 || !strings.Contains(kept.Reason, "tool calls matched 100% across 3") {

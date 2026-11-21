@@ -1178,16 +1178,17 @@ func optimizationCandidateQualitySchema() map[string]any {
 
 func qualityToolCallScoresSchema() map[string]any {
 	count := map[string]any{"type": "integer", "minimum": 0}
-	kinds := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"missing_call", "malformed_arguments", "wrong_function", "schema_invalid", "extra_calls", "unexpected_call"}, "description": "Tool cases by how their calls failed; a case can count under several kinds.", "properties": map[string]any{
-		"missing_call": count, "malformed_arguments": count, "wrong_function": count, "schema_invalid": count, "extra_calls": count, "unexpected_call": count,
+	kinds := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"missing_call", "malformed_arguments", "wrong_function", "schema_invalid", "extra_calls", "unexpected_call", "tools_refused"}, "description": "Tool cases by how their calls failed; a case can count under several kinds. tools_refused counts cases where the server refused a request with tools that the reference accepted.", "properties": map[string]any{
+		"missing_call": count, "malformed_arguments": count, "wrong_function": count, "schema_invalid": count, "extra_calls": count, "unexpected_call": count, "tools_refused": count,
 	}}
-	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"cases", "score", "broken", "reference_invalid", "candidate", "reference"}, "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.", "properties": map[string]any{
-		"cases":             map[string]any{"type": "integer", "minimum": 1},
-		"score":             map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Mean over tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference."},
-		"broken":            map[string]any{"type": "integer", "minimum": 0, "description": "Cases where the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate."},
+	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"cases", "not_checked", "score", "broken", "reference_invalid", "candidate", "reference"}, "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.", "properties": map[string]any{
+		"cases":             map[string]any{"type": "integer", "minimum": 0, "description": "Tool cases the check scored."},
+		"not_checked":       map[string]any{"type": "integer", "minimum": 0, "description": "Tool cases not checked because the reference refused requests with tools. They have no score and are unknown, not passed."},
+		"score":             map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Mean over scored tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference. 0 and meaningless when cases is 0."},
+		"broken":            map[string]any{"type": "integer", "minimum": 0, "description": "Cases where the candidate refused tools the reference accepted, or the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate."},
 		"reference_invalid": map[string]any{"type": "integer", "minimum": 0, "description": "Cases where the reference's own calls did not validate; they measure agreement only."},
 		"candidate":         kinds,
-		"reference":         map[string]any{"allOf": []any{kinds}, "description": "The reference's own failures; missing, extra, and unexpected calls stay 0."},
+		"reference":         map[string]any{"allOf": []any{kinds}, "description": "The reference's own failures; missing, extra, unexpected, and refused calls stay 0."},
 	}}
 }
 

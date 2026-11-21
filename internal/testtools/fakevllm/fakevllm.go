@@ -22,6 +22,9 @@ var DefaultToolCall = ToolCall{Name: "weather", Arguments: `{"city":"Berlin"}`}
 type Options struct {
 	Worker, Model, APIKey string
 	ToolCall              ToolCall
+	// RefuseTools answers HTTP 400 to a request with tools, as vLLM does
+	// when it runs without --enable-auto-tool-choice.
+	RefuseTools bool
 }
 
 // Handler serves the fake's routes.
@@ -64,6 +67,12 @@ func Handler(options Options) http.Handler {
 			// Load generators count tokens from the server's usage report.
 			fmt.Fprintf(w, "data: {\"id\":\"chatcmpl-fake\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[],\"usage\":{\"prompt_tokens\":%d,\"completion_tokens\":3,\"total_tokens\":%d}}\n\n", body["model"], promptTokens(body), promptTokens(body)+3)
 			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
+		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 && options.RefuseTools {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "error", "type": "BadRequestError", "code": 400, "message": `"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`})
 			return
 		}
 		if tools, ok := body["tools"].([]any); ok && len(tools) > 0 {

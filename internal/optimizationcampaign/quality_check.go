@@ -19,6 +19,7 @@ import (
 const (
 	FailureQualityReferenceUnavailable = "quality_reference_unavailable"
 	FailureQualityReferenceUnanswered  = "quality_reference_unanswered"
+	FailureQualityNothingChecked       = "quality_nothing_checked"
 	FailureQualityRejected             = "quality_gate_rejected"
 	retryQualityEvidencePending        = "optimization_quality_evidence_pending"
 	retryQualityEvalSetPending         = "optimization_quality_eval_set_pending"
@@ -36,6 +37,9 @@ var (
 	// ErrQualityReferenceUnanswered means the reference gave no answer text
 	// to some prompts, so there is nothing to compare the candidate with.
 	ErrQualityReferenceUnanswered = qualitycheck.ErrReferenceUnanswered
+	// ErrQualityNothingChecked means every case of the eval set declares
+	// tools and the reference refused requests with tools.
+	ErrQualityNothingChecked = qualitycheck.ErrNothingChecked
 )
 
 // QualityChecker produces InferCrane-run quality evidence for one candidate.

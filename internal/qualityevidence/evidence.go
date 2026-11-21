@@ -60,11 +60,15 @@ type Distribution struct {
 // ToolCallScores is the built-in check's score over the cases that declare
 // function tools. Those cases' scores are also in Scores.
 type ToolCallScores struct {
-	// Cases counts the cases that declare tools.
+	// Cases counts the tool cases the check scored.
 	Cases int `json:"cases"`
-	// Score is the mean of those cases' scores: 1 for a case when the
-	// candidate called the same functions with the same arguments as the
-	// reference.
+	// NotChecked counts the tool cases the check could not run because the
+	// reference refused requests with tools. They have no score and are in
+	// neither Cases, Scores, nor the sample count. When Cases is 0, no tool
+	// call was checked and every other field is 0.
+	NotChecked int `json:"not_checked"`
+	// Score is the mean of the scored cases: 1 for a case when the candidate
+	// called the same functions with the same arguments as the reference.
 	Score float64 `json:"score"`
 	// Broken counts cases where the reference's calls validated against the
 	// declared schemas and the candidate's did not. One blocks the candidate.
@@ -77,7 +81,7 @@ type ToolCallScores struct {
 	Candidate ToolCallFailures `json:"candidate"`
 	// Reference counts the cases where the reference's own calls failed.
 	// Missing, extra, and unexpected calls are relative to the reference, so
-	// they stay 0 here.
+	// they stay 0 here, and a case the reference refused is not checked.
 	Reference ToolCallFailures `json:"reference"`
 }
 
@@ -98,6 +102,9 @@ type ToolCallFailures struct {
 	ExtraCalls int `json:"extra_calls"`
 	// UnexpectedCall: a call where the reference answered without one.
 	UnexpectedCall int `json:"unexpected_call"`
+	// ToolsRefused: the server refused the request with tools, which the
+	// reference accepted.
+	ToolsRefused int `json:"tools_refused"`
 }
 
 // Add returns the sum of two counts.
@@ -106,11 +113,12 @@ func (f ToolCallFailures) Add(other ToolCallFailures) ToolCallFailures {
 		MissingCall: f.MissingCall + other.MissingCall, MalformedArguments: f.MalformedArguments + other.MalformedArguments,
 		WrongFunction: f.WrongFunction + other.WrongFunction, SchemaInvalid: f.SchemaInvalid + other.SchemaInvalid,
 		ExtraCalls: f.ExtraCalls + other.ExtraCalls, UnexpectedCall: f.UnexpectedCall + other.UnexpectedCall,
+		ToolsRefused: f.ToolsRefused + other.ToolsRefused,
 	}
 }
 
 func (f ToolCallFailures) within(cases int) bool {
-	for _, count := range []int{f.MissingCall, f.MalformedArguments, f.WrongFunction, f.SchemaInvalid, f.ExtraCalls, f.UnexpectedCall} {
+	for _, count := range []int{f.MissingCall, f.MalformedArguments, f.WrongFunction, f.SchemaInvalid, f.ExtraCalls, f.UnexpectedCall, f.ToolsRefused} {
 		if count < 0 || count > cases {
 			return false
 		}
@@ -237,8 +245,8 @@ func (p Payload) Validate() error {
 			}
 		}
 		if calls := p.Distribution.ToolCalls; calls != nil {
-			if calls.Cases < 1 || calls.Cases > p.SampleCount || math.IsNaN(calls.Score) || calls.Score < 0 || calls.Score > 1 || calls.Broken < 0 || calls.Broken > calls.Cases || calls.ReferenceInvalid < 0 || calls.ReferenceInvalid > calls.Cases || !calls.Candidate.within(calls.Cases) || !calls.Reference.within(calls.Cases) || calls.Reference.MissingCall+calls.Reference.ExtraCalls+calls.Reference.UnexpectedCall > 0 {
-				return errors.New("quality distribution tool_calls must count 1 to sample_count cases, at most that many of each kind, with a score between 0 and 1; the reference has no missing, extra, or unexpected calls")
+			if calls.Cases < 0 || calls.Cases > p.SampleCount || calls.NotChecked < 0 || calls.NotChecked > 100_000 || calls.Cases+calls.NotChecked < 1 || math.IsNaN(calls.Score) || calls.Score < 0 || calls.Score > 1 || calls.Cases == 0 && calls.Score != 0 || calls.Broken < 0 || calls.Broken > calls.Cases || calls.ReferenceInvalid < 0 || calls.ReferenceInvalid > calls.Cases || !calls.Candidate.within(calls.Cases) || !calls.Reference.within(calls.Cases) || calls.Reference.MissingCall+calls.Reference.ExtraCalls+calls.Reference.UnexpectedCall+calls.Reference.ToolsRefused > 0 {
+				return errors.New("quality distribution tool_calls must count 0 to sample_count scored cases and at least one case in all, at most that many of each kind, with a score between 0 and 1 (0 when no case was scored); the reference has no missing, extra, unexpected, or refused calls")
 			}
 		}
 	}

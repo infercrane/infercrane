@@ -48,6 +48,13 @@ const (
 	DialectOpenAICompatible Dialect = "openai-compatible"
 )
 
+// ErrToolsRefused means the server refused a request that declares tools.
+// vLLM answers HTTP 400 to any request with tools unless it was started with
+// --enable-auto-tool-choice, and many servers in use run without it. Compare
+// leaves a tool case the reference refused unchecked, and blocks a candidate
+// that refuses one the reference accepted.
+var ErrToolsRefused = errors.New("the server refused a request with tools")
+
 // BindingSubject is the SubjectID of a closed API behind an external binding.
 func BindingSubject(bindingID string) string { return "binding:" + bindingID }
 
@@ -97,7 +104,7 @@ func (c HTTPCompleter) Complete(ctx context.Context, target Target, set EvalSet,
 	if response.StatusCode == http.StatusBadRequest && prompt.HasTools() {
 		// vLLM refuses tools unless it was started with
 		// --enable-auto-tool-choice and a --tool-call-parser.
-		return Answer{}, fmt.Errorf("prompt %s: server returned HTTP 400 to a request with tools; the server may not accept tool calls", prompt.ID)
+		return Answer{}, fmt.Errorf("prompt %s: %w: HTTP 400; the server may not accept tool calls", prompt.ID, ErrToolsRefused)
 	}
 	if response.StatusCode != http.StatusOK {
 		return Answer{}, fmt.Errorf("prompt %s: server returned HTTP %d", prompt.ID, response.StatusCode)

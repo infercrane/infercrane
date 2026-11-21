@@ -25,13 +25,13 @@ steps.
 
 | Property | Built-in answer check |
 |---|---|
-| Prompts | `infercrane-default` version 1: 24 short prompts with short answers (arithmetic, facts, extraction, code, translation, summaries), pinned by SHA-256 digest in the product. Print it with `infercrane evaluation set default`. |
-| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most 64 output tokens unless the eval set sets `max_tokens`. Each request also sends `chat_template_kwargs: {"enable_thinking": false}`, so hybrid reasoning models such as Qwen3 and GLM answer directly; chat templates without that switch ignore it. A case from your eval set also sends its conversation, `tools`, and `tool_choice`. Sent directly to one ready replica of each exact revision. |
+| Prompts | `infercrane-default` version 2: 24 short prompts with short answers (arithmetic, facts, extraction, code, translation, summaries) and 5 [tool cases](#built-in-tool-cases), pinned by SHA-256 digest in the product. Print it with `infercrane evaluation set default`. |
+| Requests | One prompt at a time, `temperature 0`, `top_p 1`, seed 17, at most `max_tokens` output tokens: 256 for the built-in suite, and 64 for an eval set that does not set it. Each request also sends `chat_template_kwargs: {"enable_thinking": false}`, so hybrid reasoning models such as Qwen3 and GLM answer directly; chat templates without that switch ignore it. A tool case also sends its conversation, `tools`, and `tool_choice`. Sent directly to one ready replica of each exact revision. |
 | Score per prompt | Token-level F1 of the candidate's answer against the reference's answer, ignoring case, punctuation, and reasoning: `<think>` blocks, and any text before a `</think>` that the chat template opened in the prompt. A case that declares tools is scored on its tool calls; see [Tool calls](#tool-calls). |
 | Answers with no text | If the reference gives no answer text and makes no tool call to any prompt within the token limit, for example because a reasoning model was cut off mid-reasoning or its server returned only reasoning, the check stops without a score. The candidate ends `inconclusive` with `quality_reference_unanswered`. Use an eval set with a larger `max_tokens`. |
-| Score | The mean over prompts. The reference's own row records 1. |
-| Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. A candidate that breaks a tool call the reference made correctly is `BLOCK` whatever its score. `BLOCK` records `passed: false`. |
-| Evidence | Evaluator `infercrane-builtin` version 3, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, the tool-call score in `distribution.tool_calls` when the eval set has tool cases, and an artifact digest that commits to a hash of every answer and call. Signed with the control plane's key. Evidence from version 2 is not compared with version 3. |
+| Score | The mean over the prompts that were checked. A tool case the reference refused is not checked; see [When tool cases are not checked](#when-tool-cases-are-not-checked). The reference's own row records 1. |
+| Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. A candidate that breaks a tool call the reference made correctly, or refuses tools the reference accepted, is `BLOCK` whatever its score. `BLOCK` records `passed: false`. |
+| Evidence | Evaluator `infercrane-builtin` version 4, suite version `VERSION@sha256:DIGEST`, a paired score per checked prompt, the tool-call score in `distribution.tool_calls` when the eval set has tool cases, and an artifact digest that commits to a hash of every answer and call. Signed with the control plane's key. Evidence from version 3 is not compared with version 4. |
 | Provenance | `source: infercrane` and the reference's revision ID. Only the worker writes these rows; the attach API always records `source: customer` and refuses the evaluator name `infercrane-builtin`. |
 
 Answers are compared in memory and discarded. Prompts of the built-in suite live in the product;
@@ -45,10 +45,27 @@ command for each waiting candidate.
 The answer check measures agreement with your current setup on general prompts. It is not a task
 accuracy benchmark. Use an eval set of your own prompts, or your own evaluator, for that.
 
+### Built-in tool cases
+
+The built-in suite checks tool calls on every run, even when you upload no eval set. Each tool case
+declares OpenAI function `tools` with `tool_choice: "auto"` and is scored as described in
+[Tool calls](#tool-calls):
+
+| Case | What it asks | What it catches |
+|---|---|---|
+| `tool-single-call` | The weather in one city, with one function that takes a required `city`. | A missing call, an answer in text instead, an empty city, or an argument the function does not declare. |
+| `tool-parallel-calls` | The weather in two cities in one request. | A dropped or extra call. The order of the two calls does not count. |
+| `tool-nested-arguments` | A calendar event with a title, a `start` object of `date` and `time`, and a list of attendee objects. | Nested objects flattened, an attendee list of plain names, or a date or time in the wrong format. |
+| `tool-enum-argument` | A thermostat mode from `heat`, `cool`, and `off`, and a whole-number temperature. | A mode outside the list, such as `cooling`, or a temperature sent as text. |
+| `tool-no-call` | A question no declared function can answer. | A call where the reference answered in text. It scores 0 but is not a broken call. |
+
+The functions are never executed. The 24 answer prompts are the same as in version 1, so a model
+served without tool calling is still checked on them; see
+[When tool cases are not checked](#when-tool-cases-are-not-checked).
+
 ### Use your own test set
 
-An eval set replaces the built-in prompts with your own cases. Schema v1 has the same format as the
-built-in suite: single prompts.
+An eval set replaces the built-in prompts with your own cases. Schema v1 holds single prompts.
 
 ```json eval-set.json
 {
@@ -128,7 +145,8 @@ calls); otherwise 0.
 A candidate **breaks** a tool call when the reference's calls name declared functions and their
 arguments validate against those functions' `parameters`, and the candidate's do not: it calls a
 different or undeclared function, drops or adds a call, answers in text instead, or sends arguments
-that are not JSON or do not fit the schema. One broken call blocks the candidate, whatever its mean
+that are not JSON or do not fit the schema. A candidate that refuses a request with tools the
+reference accepted breaks that case too. One broken call blocks the candidate, whatever its mean
 score: its evidence records `passed: false`, so Release Guard blocks it too. A valid call with other
 arguments, such as another city, is not broken; it scores 0 and counts in the mean like any other
 different answer.
@@ -142,9 +160,10 @@ in the candidate's `quality.tool_calls`:
 
 | Field | Meaning |
 |---|---|
-| `cases` | Cases that declare tools. |
-| `score` | Mean over those cases. Their scores also count in the overall mean. |
-| `broken` | Cases where the candidate broke a call the reference made correctly. |
+| `cases` | Tool cases that were scored. |
+| `not_checked` | Tool cases not checked because the reference refused requests with tools. They have no score. |
+| `score` | Mean over the scored tool cases. Their scores also count in the overall mean. It is 0 and means nothing when `cases` is 0. |
+| `broken` | Cases where the candidate broke a call the reference made correctly, or refused tools the reference accepted. |
 | `reference_invalid` | Cases where the reference's own call did not validate. |
 | `candidate` | Cases by how the candidate's calls failed against the reference's, below. |
 | `reference` | Cases by how the reference's own calls failed. Missing, extra, and unexpected calls are relative to the reference, so they stay 0 here. |
@@ -159,10 +178,26 @@ Each failure kind counts cases, never call content, and one case can count under
 | `schema_invalid` | Arguments that do not validate against the declared `parameters`. |
 | `extra_calls` | More calls than the reference made. |
 | `unexpected_call` | A call where the reference answered without one. It scores 0 but is not a broken call. |
+| `tools_refused` | The server refused the request with tools, which the reference accepted. |
 
-Calls are compared in memory and never executed. A tool case needs a server that accepts `tools`: vLLM
-must run with `--enable-auto-tool-choice` and a `--tool-call-parser` for the model. A server that
-refuses a request with tools fails the check with an error that says so; it is never scored.
+Calls are compared in memory and never executed.
+
+#### When tool cases are not checked
+
+A tool case needs a server that accepts `tools`: vLLM answers HTTP 400 to any request with tools
+unless it runs with `--enable-auto-tool-choice` and a `--tool-call-parser` for the model. The check
+reads HTTP 400 to a request with tools as a refusal.
+
+| Who refuses | Result |
+|---|---|
+| The reference | The case is not checked. It is not sent to the candidate, has no score, and counts only in `not_checked`. It is unknown, never a pass or a block. The other cases decide the verdict, and both sides' evidence pairs on those cases only. |
+| The candidate, where the reference accepted | The candidate breaks the case, which blocks it. A setup that cannot take tools cannot serve tool traffic that works today. |
+| Both | The reference refused first, so the case is not checked. |
+
+If every case of an eval set declares tools and the reference refuses them, nothing can be checked:
+the candidate ends `inconclusive` with `quality_nothing_checked`. The built-in suite cannot end this
+way, because its 24 answer prompts need no tools. To check tool calls against such a reference, start
+it with tool calling on.
 
 ```bash
 infercrane evaluation set upload eval-set.json
