@@ -124,20 +124,22 @@ works for any model it deployed.
 
 ### Find the best setup for a pinned model
 
-To find the best setup for any model pinned to a commit, add `--search recipes`. InferCrane adds
-setups to measure and reads the model's pinned `config.json` to decide which apply, so this does
-not depend on the model name:
+To find the best setup for any model pinned to a commit, let InferCrane read the model's pinned
+`config.json` with `--allow-model-metadata-network`. It then adds setups to measure and uses the
+config to decide which apply, so this does not depend on the model name:
 
 ```bash
 infercrane optimize propose acme/novel-open-model \
   --model-revision 0123456789abcdef0123456789abcdef01234567 \
   --provider runpod-pods --gpu H200 \
   --objective throughput \
-  --search recipes --allow-model-metadata-network
+  --allow-model-metadata-network
 ```
 
-Pass `--model-config config.json` instead to stay offline. Without either, setups that need a
-declared model feature, such as speculative decoding, are skipped and the proposal says why. API
+Pass `--model-config config.json` instead to stay offline. Either one turns on these added setups;
+`--search recipes` is still accepted by scripts that pass it. Without either, setups that need a
+declared model feature, such as speculative decoding, are skipped and the proposal says why. With
+`--source aiconfigurator`, `--allow-model-metadata-network` only feeds the estimator. API
 clients send `search`, `model_features`, and `model_config_digest` on
 `POST /api/v1/optimization/proposals`.
 

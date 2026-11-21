@@ -1,29 +1,30 @@
 ---
-title: InferCrane v1.0.0-rc.3
+title: InferCrane v1.0.0-rc.4
 description: Second public beta of InferCrane, with optimization runs, any Hugging Face model, AMD Instinct, GPU profiling, and a simpler CLI.
-sidebarTitle: v1.0.0-rc.3 public beta
+sidebarTitle: v1.0.0-rc.4 public beta
 ---
 
-# InferCrane v1.0.0-rc.3 — Public Beta
+# InferCrane v1.0.0-rc.4 — Public Beta
 
-`v1.0.0-rc.3` is the second public beta. It brings everything merged since
+`v1.0.0-rc.4` is the second public beta. It brings everything merged since
 [`v1.0.0-rc.1`](/release-notes-v1.0.0-rc.1) to the released CLI, SDKs, and Terraform provider.
 
-The `v1.0.0-rc.2` tag was never published: its build failed the release vulnerability scan on the
-Go 1.26.7 standard library. This candidate is built with Go 1.26.11.
+The `v1.0.0-rc.2` and `v1.0.0-rc.3` tags were never published. rc.2's build failed the release
+vulnerability scan on the Go 1.26.7 standard library, so this candidate is built with Go 1.26.11;
+rc.3 was stopped to include the CLI help fixes below.
 
 ## Install
 
 ```bash
 brew install infercrane/tap/infercrane
 python -m pip install \
-  'https://github.com/infercrane/infercrane/releases/download/v1.0.0-rc.3/infercrane-1.0.0rc3-py3-none-any.whl'
-npm install '@infercrane/sdk@1.0.0-rc.3'
+  'https://github.com/infercrane/infercrane/releases/download/v1.0.0-rc.4/infercrane-1.0.0rc4-py3-none-any.whl'
+npm install '@infercrane/sdk@1.0.0-rc.4'
 ```
 
 If you installed `v1.0.0-rc.1` with Homebrew, run `brew upgrade infercrane`.
 
-The [GitHub prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.3)
+The [GitHub prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.4)
 provides native CLI archives, checksums, SPDX SBOMs, attestations, a Homebrew formula, SDK packages,
 and Terraform provider ZIPs for macOS and Linux on amd64 and arm64.
 
@@ -52,9 +53,15 @@ and Terraform provider ZIPs for macOS and Linux on amd64 and arm64.
 - **More clouds.** Optimization runs on SkyPilot clouds, starting with Vast.ai, and RunPod uses its
   REST API v2.
 - **A simpler CLI.** `infercrane` opens on the everyday commands in five sections, with every other
-  command behind `infercrane help --all`. Unknown commands suggest the closest one, errors say what
-  to do next, and human output is styled like the dashboard in a terminal while scripts and
-  `--output json` stay plain.
+  command behind `infercrane help --all`. Every command's help lists its actions and shows
+  examples, and option descriptions wrap to the terminal. Unknown commands suggest the closest one,
+  errors say what to do next, and human output is styled like the dashboard in a terminal while
+  scripts and `--output json` stay plain.
+- **Older commands marked.** `auth`, `init`, `events`, `recommend`, `autopilot`, `recipe`,
+  `recipes`, `lab`, `burst`, and `session` still run, but help lists them last and names the
+  command to use instead.
+- **Setups from a model's config.** `optimize propose` adds setups to measure whenever you give it
+  the model's config, with `--model-config` or `--allow-model-metadata-network`.
 
 ## Distribution status
 
