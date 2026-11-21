@@ -125,6 +125,23 @@ type RouteSource struct {
 	Candidates  []CandidateSource
 }
 
+// RouteGeneration is one compiled generation: the products that are callable
+// now, and the products withheld because their evidence, a validity window,
+// or a readiness state lapsed. A withheld product is not callable until it is
+// renewed; it never blocks the others.
+type RouteGeneration struct {
+	Sources  []RouteSource
+	Withheld []WithheldRoute
+}
+
+// WithheldRoute names one customer product left out of a generation and why.
+// The reason is secret-free and safe to log.
+type WithheldRoute struct {
+	CustomerTenantID string
+	ProductID        string
+	Reason           string
+}
+
 type CandidateSource struct {
 	Candidate            Candidate
 	Adapter              string `json:"-"`

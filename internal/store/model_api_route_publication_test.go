@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -54,5 +56,66 @@ func TestPublishedRouteCompilerMatchesExactPersistedPlanPosition(t *testing.T) {
 	}
 	if _, _, ok = selectionAt(plan, "fallback", 3); ok {
 		t.Fatal("candidate outside immutable plan was accepted")
+	}
+}
+
+func TestPublishedRouteCompilerWithholdsOnlyLapsedProducts(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	later := now.Add(time.Hour)
+	current := productReadiness{
+		publicationState: "qualified", availability: "available", planStatus: modelapisupply.StatusReady,
+		publicationUntil: later, planUntil: later, entitlementFrom: now.Add(-time.Hour), rateFrom: now.Add(-time.Hour), rateUntil: later,
+	}
+	if reason := productLapse(now, current); reason != "" {
+		t.Fatalf("current product was withheld: %s", reason)
+	}
+	degraded := current
+	degraded.availability = "degraded"
+	if reason := productLapse(now, degraded); reason != "" {
+		t.Fatalf("degraded product was withheld: %s", reason)
+	}
+	ended := now
+	for name, lapsed := range map[string]func(*productReadiness){
+		"publication expired":   func(p *productReadiness) { p.publicationUntil = now },
+		"plan expired":          func(p *productReadiness) { p.planUntil = now.Add(-time.Second) },
+		"rate expired":          func(p *productReadiness) { p.rateUntil = now },
+		"entitlement ended":     func(p *productReadiness) { p.entitlementUntil = &ended },
+		"entitlement not begun": func(p *productReadiness) { p.entitlementFrom = later },
+		"not qualified":         func(p *productReadiness) { p.publicationState = "suspended" },
+		"unavailable":           func(p *productReadiness) { p.availability = "unavailable" },
+		"plan not ready":        func(p *productReadiness) { p.planStatus = "draft" },
+	} {
+		readiness := current
+		lapsed(&readiness)
+		if productLapse(now, readiness) == "" {
+			t.Errorf("%s: lapsed product stayed callable", name)
+		}
+	}
+
+	candidate := candidateReadiness{
+		offerState: "active", access: "ready", availability: "available", health: "healthy", commercialState: "ready", qualificationState: "qualified",
+		costUntil: later, commercialUntil: later, qualificationUntil: later, selectionUntil: later,
+	}
+	if reason := candidateLapse(now, candidate); reason != "" {
+		t.Fatalf("current candidate was withheld: %s", reason)
+	}
+	for name, lapsed := range map[string]func(*candidateReadiness){
+		"qualification expired": func(c *candidateReadiness) { c.qualificationUntil = now },
+		"cost expired":          func(c *candidateReadiness) { c.costUntil = now },
+		"commercial expired":    func(c *candidateReadiness) { c.commercialUntil = now },
+		"selection expired":     func(c *candidateReadiness) { c.selectionUntil = now },
+		"offer unhealthy":       func(c *candidateReadiness) { c.health = "unhealthy" },
+		"not qualified":         func(c *candidateReadiness) { c.qualificationState = "failed" },
+	} {
+		readiness := candidate
+		lapsed(&readiness)
+		if candidateLapse(now, readiness) == "" {
+			t.Errorf("%s: lapsed candidate stayed callable", name)
+		}
+	}
+
+	var lapse routeLapse
+	if !errors.As(fmt.Errorf("compile: %w", routeLapse{reason: "qualification evidence expired"}), &lapse) || lapse.reason != "qualification evidence expired" {
+		t.Fatal("a candidate lapse is not recognised as a withheld product")
 	}
 }
