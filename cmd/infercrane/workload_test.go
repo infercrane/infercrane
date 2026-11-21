@@ -44,7 +44,7 @@ func TestWorkloadInitAppliesSelectedServingProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"c170c708c41dac9275d15a8fff4eca08d52bab71", `args: ["--enable-prefix-caching","--max-num-batched-tokens","2048"]`, "strategy: cache-aware", "max_replicas: 2"} {
+	for _, expected := range []string{"c170c708c41dac9275d15a8fff4eca08d52bab71", `args: ["--enable-prefix-caching","--max-num-batched-tokens","2048","--enable-auto-tool-choice","--tool-call-parser","mistral"]`, "strategy: cache-aware", "max_replicas: 2"} {
 		if !strings.Contains(string(content), expected) {
 			t.Fatalf("generated profile missing %q:\n%s", expected, content)
 		}

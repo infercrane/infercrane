@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -210,9 +211,17 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 		proposal.Warnings = append(proposal.Warnings, "Finding the best setup needs the model pinned to an immutable commit; no setups were added to measure.")
 		return proposal, nil
 	}
+	// Tool calling is the model's API contract: setups keep the parsers the
+	// reviewed catalog entry for this exact revision starts the engine with.
+	entry, cataloged := findRecipe(s.Recipes, model)
+	cataloged = cataloged && entry.Revision == revision
 	var experiments []Candidate
 	for _, template := range recipeTemplates() {
-		built, warnings, err := buildRecipeExperiments(template, model, revision, s.Integrations.Compatibility, request)
+		var tools *curatedrecipe.ToolCallingSetup
+		if setup, found := entry.ToolCalling(template.engine, template.version); cataloged && found {
+			tools = &setup
+		}
+		built, warnings, err := buildRecipeExperiments(template, model, revision, tools, s.Integrations.Compatibility, request)
 		if err != nil {
 			return Proposal{}, err
 		}
@@ -238,7 +247,7 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 	return proposal, nil
 }
 
-func buildRecipeExperiments(template recipeTemplate, model, revision string, compatibility []integration.RuntimeCompatibility, request Request) ([]Candidate, []string, error) {
+func buildRecipeExperiments(template recipeTemplate, model, revision string, tools *curatedrecipe.ToolCallingSetup, compatibility []integration.RuntimeCompatibility, request Request) ([]Candidate, []string, error) {
 	if !recipeAcceleratorSupported(template, request.GPU) {
 		return nil, []string{fmt.Sprintf("No reviewed %s setups exist for accelerator %s; none were added.", template.id, request.GPU)}, nil
 	}
@@ -285,7 +294,7 @@ func buildRecipeExperiments(template recipeTemplate, model, revision string, com
 	})
 	candidates := make([]Candidate, 0, len(ranked))
 	for _, entry := range ranked {
-		candidate, buildErr := buildRecipeCandidate(template, entry.arm, entry.priority, model, revision, compatible, request)
+		candidate, buildErr := buildRecipeCandidate(template, entry.arm, entry.priority, model, revision, tools, compatible, request)
 		if buildErr != nil {
 			return nil, nil, buildErr
 		}
@@ -353,7 +362,7 @@ func recipeAcceleratorSupported(template recipeTemplate, gpu string) bool {
 	return contains(template.accelerators, normalized)
 }
 
-func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, model, revision string, compatible integration.RuntimeCompatibility, request Request) (Candidate, error) {
+func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, model, revision string, tools *curatedrecipe.ToolCallingSetup, compatible integration.RuntimeCompatibility, request Request) (Candidate, error) {
 	command := append([]string(nil), template.launcher...)
 	command = append(command,
 		"--model-path", "${MODEL}",
@@ -365,6 +374,9 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		"--mem-fraction-static", "0.90",
 		"--enable-metrics",
 	)
+	if tools != nil {
+		command = append(command, tools.Args...)
+	}
 	command = append(command, arm.args...)
 	workload := runtimecontract.Workload{
 		Image: template.image, Command: command, Protocol: runtimecontract.OpenAIProtocol, Port: 30000,
@@ -403,6 +415,9 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 	if len(arm.requires) > 0 {
 		features = append(features, Feature{Name: "model_config", State: "declared", Source: request.ModelConfigDigest})
 	}
+	if tools != nil {
+		features = append(features, Feature{Name: "tool_calling", State: "reviewed-parser", Source: tools.Profile})
+	}
 
 	required := []string{"runtime readiness and exact served-model identity", "model architecture and accelerator memory fit", "license and access review", "AIPerf " + request.WorkloadProfile + " workload against the untuned starting setup on the same image"}
 	if arm.changesPrecision {
@@ -419,7 +434,7 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 	}
 	limitations := []string{
 		"This setup is an experiment on a pinned runtime image; its flags were exercised on another model and carry no performance claim for this one.",
-		"Reasoning and tool-call parsers are not configured, so model-specific API behavior must be added and verified before production use.",
+		recipeToolCallingLimitation(template, tools),
 		"GPU memory fit and model license/access were supplied by the operator and have not been inferred.",
 	}
 	required, limitations = requireCustomerReplay(request, required, limitations)
@@ -441,4 +456,18 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		CompatibilityState: string(compatible.State), CompatibilityEvidence: compatible.Evidence, Source: source,
 		Features: features, RequiredEvidence: required, Limitations: limitations, Deployment: draft,
 	}, nil
+}
+
+// recipeToolCallingLimitation says how a setup calls tools. Without a reviewed
+// parser the engine refuses tool requests, so the setup cannot serve an
+// application that calls tools.
+func recipeToolCallingLimitation(template recipeTemplate, tools *curatedrecipe.ToolCallingSetup) string {
+	if tools == nil {
+		return "Reasoning and tool-call parsers are not configured, so model-specific API behavior must be added and verified before production use."
+	}
+	limitation := "Tool calls use the parsers of the reviewed " + tools.Profile + " setup for this model."
+	if tools.EngineVersion != template.version {
+		limitation += " That setup runs another " + template.engine + " version, and an engine stops at start on a parser name it does not know."
+	}
+	return limitation
 }
