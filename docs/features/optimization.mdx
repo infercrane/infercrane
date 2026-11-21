@@ -960,9 +960,14 @@ better or worse only when the whole interval lies on one side of no change; othe
 measurable difference. The interval is widened for the number of candidates the run compares with
 its control (Bonferroni): 95% confidence for one candidate, 98.75% for four. So a run of several
 candidates is no more likely to crown a candidate that is really no better than the control. The
-workload's `measured.comparison` records, for throughput, latency, and goodput, the control mean and
-spread, the candidate mean, the change, the floor, the decision, and the method
-(`paired_bracketing_log_ratio`), pairs, comparisons, and confidence. Measurements made before this
+interval also holds the difference between two machines: the control and the candidate always run on
+separate servers, and no pairing in time removes a fixed speed difference between them. Every
+interval adds a machine difference of 0.75% (standard deviation) at the same confidence; see
+[how much machines differ](#how-much-machines-differ). The workload's `measured.comparison` records,
+for throughput, latency, and goodput, the control mean and spread, the candidate mean, the change,
+the floor, the decision, and the method (`paired_bracketing_log_ratio`), pairs, comparisons,
+confidence, and `machine_difference`. Comparisons stored before the machine difference was added
+have none. Measurements made before this
 method (`campaign-interleaved-control-v1`) keep their stored comparison, which used the larger of the
 control-to-control spread and the candidate's own interval.
 
@@ -975,13 +980,82 @@ a real gain. With 2% run-to-run noise, roughly what real GPU runs show:
 | Condition | False wins, 1 candidate | False wins, 4 candidates | Finds +5% | Finds +10% | Windows voided |
 |---|---|---|---|---|---|
 | v1 method, same machine | 0.8% | 2.8% | 42% | 79% | 19% |
-| This method, same machine | 2.6% | 3.1% | 67% | 99% | 0% |
-| This method, machines differ by 2% | 8.6% | 11.3% | 62% | 95% | 0% |
+| This method, same machine | 1.5% | 0.7% | 63% | 99% | 0% |
+| This method, machines differ by 2% | 6.8% | 7.2% | 58% | 95% | 0% |
 
-On one machine the judge keeps false wins near the designed 2.5% and finds far more real gains.
+On one machine the judge keeps false wins below the designed 2.5% and finds far more real gains.
 When the control and the candidate run on different machines whose speed differs by a fixed amount,
-no pairing in time can remove that difference, and false wins rise. A measured win should therefore
-be confirmed on another server before it is trusted. Runs do not do that themselves yet.
+no pairing in time can remove that difference, and false wins rise once it is larger than the
+machine difference the interval holds. That is why a gain is also confirmed on fresh servers before
+it counts.
+
+#### A gain is measured again on fresh servers
+
+When a candidate's window shows a gain on the objective (by the same rule, cost included, that the
+ranking applies), the run does not count it yet. It retires the candidate's server and then the
+control's, provisions each setup's exact revision again on a fresh server, and measures a second
+window of four paired rounds there. The candidate wins only if the second window shows the gain too.
+The ranking then reports the second window's change, which is free of the first window's selection,
+and the reason names both, for example `p95 time to first token changed -36.4% (noise ±4.0%), then
+-32.4% (noise ±5.0%) measured again on fresh servers`. A gain that does not hold is superseded with
+`measured_gain_not_confirmed`.
+
+- The control of a run that evolves a live endpoint serves production traffic, so its server is
+  kept and only the candidate's is retired. A serverless provider places workers itself; its
+  retirement is recorded as `provider_managed`.
+- Retiring a serving machine is never a loss: it does not count against the two lost machines a
+  setup may replace or against the interruption limit. It is recorded in the setup's
+  `machine_replacements` with `purpose: confirmation`, and in the measurement's interruptions as
+  kind `confirmation`, recovered as `machine_retired`.
+- Nothing is retired that the approved cap cannot replace: the replacement is authorized first,
+  with the same one-hour reserve as a lost machine. A setup whose fresh servers the cap does not
+  cover stops with `optimization_confirmation_not_covered`.
+- The measurement keeps the second window in `measured.confirmation`: its runs, control check,
+  paired comparison at the 95% level (it tests the one candidate it confirms), and
+  `fresh_candidate` and `fresh_control`.
+
+`TestJudgeCalibrationWithConfirmation` runs the whole rule, both windows and the ranking's
+decision, on simulated machines, at the run noise and machine differences measured on real H100s
+(below):
+
+| Condition | False wins, 4 candidates, first window only | With the confirmation | Finds +3% | Finds +5% |
+|---|---|---|---|---|
+| Same machine, 0.25% run noise | 0.0% | 0.0% | 100% | 100% |
+| Machines differ by 0.95% (measured H100s) | 5.9% | 0.3% | 86% | 99.9% |
+| Machines differ by 1.5% (its 90% upper bound) | 29% | 4.9% | 68% | 97% |
+| Machines differ by 2%, 0.5% run noise | 36% | 7.5% | 51% | 88% |
+
+#### How much machines differ
+
+On 2026-11-20, eight H100 80GB HBM3 GPUs on Modal served the same setup: Qwen3-8B (`b968826d`, BF16)
+on vLLM 0.22.1 with its defaults. Each ran vLLM's own benchmark client in the same container, so no
+network was in the numbers, with identical work on every machine: 4,800 input and 192 output tokens
+per request, 32 concurrent streams, three runs of 256 requests after a warmup. Modal placed them in
+five regions, on two NVIDIA drivers (610.57.04 and 620.70.06) and on Intel and AMD hosts.
+
+| Metric | Run to run, one machine | Two machines differ (standard deviation) | 90% upper bound |
+|---|---|---|---|
+| Output tokens/s | 0.22% | 0.95% | 1.5% |
+| Time per output token | 0.51% | 1.5% | 2.5% |
+| p95 time to first token | 1.1% | not measurable over run noise | 1.0% |
+| p95 latency | 1.9% | not measurable over run noise | 2.3% |
+
+The machines' mean output throughputs ranged from 923 to 941 tokens/s, 2.0% apart at the
+extremes. The two drivers averaged 927 and 932 tokens/s, inside that spread. The run was billed
+$3.81. The script is `tools/poc-modal/machine_variance.py`; the record, with each machine's GPU,
+driver, region, clocks, and runs, is
+[`h100-machine-variance-modal-2026-11-20.json`](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/h100-machine-variance-modal-2026-11-20.json).
+
+Real GPU runs are so quiet that the machine difference, not run noise, decides false wins. Without a
+machine term, these conditions gave 23% false wins across four candidates even with the
+confirmation. A 0.75% machine difference in each window, the first and the one on fresh servers,
+keeps false wins at or below 5% even at the upper bound, and a +5% gain is still found 97% of the
+time or more. The cost is at small gains: +3% is found 86% of the time at the measured spread.
+
+This was measured for one GPU model, model, runtime, and workload, on one provider. Other GPUs and
+clouds may differ more, and a campaign measured over a network adds each server's own path. A
+gain of a few percent on hardware that has not been measured this way is reported as measured, not
+as proven.
 
 **Failed requests and answer length.** Latency percentiles count only requests that succeeded, and a
 shorter answer finishes sooner and needs fewer tokens. So a setup could look faster or cheaper by
@@ -998,8 +1072,9 @@ together, it comes from the control's own runs on the same workload. These check
 control was measured, also when the control misses the constraints. An answer length a run did not
 record, as in runs measured before it was recorded, is unknown and stops nothing. The persisted
 ranking keeps each candidate's `guard_check`: both sides' requests, failed requests, and answer
-length, and which check fired. Rankings with these checks and the paired comparison record algorithm
-`campaign-paired-control-v4`.
+length, and which check fired. Rankings with these checks, the paired comparison, and the
+confirmation on fresh servers record algorithm `campaign-paired-confirmed-v5`; with the machine
+difference in every interval, `campaign-paired-confirmed-v6`.
 
 **Objective metric.** Each objective ranks on one measured metric, and Lab and the control gate use
 the same one:
@@ -1046,6 +1121,7 @@ a code that says why:
 | `measured_output_length_regression` | Answered more than 5% shorter than the control, for example `answered 18% shorter than the current setup; a speed or cost gain may come from shorter answers` |
 | `measured_candidate_regressed` | Worse than the control by more than the noise floor on the objective, or on throughput, p95 time to first token, or p95 latency in its own window |
 | `measured_no_measurable_difference` | Inside the noise floor on the objective and not measurably worse on any of those outcomes |
+| `measured_gain_not_confirmed` | Measurably better than the control in its first window, but not again on fresh servers. The reason names both changes |
 | `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted, and not shown worse |
 | `measured_candidate_superseded` | Measurably better than the control, but another candidate ranked higher |
 
@@ -1070,7 +1146,8 @@ scraped without a usable result (with AIPerf's reason), or scraped without any c
 preemption metric.
 
 This method sends eleven AIPerf invocations per non-control candidate (two warmups and nine
-measured runs) instead of one, so measurement takes several times longer. The approval window must cover it. Campaign ranking does not use the
+measured runs) instead of one, and a candidate that gains is measured again on two fresh servers,
+eleven more. Measurement takes several times longer than a single benchmark. The approval window must cover it. Campaign ranking does not use the
 [multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
 limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
 
@@ -1118,6 +1195,7 @@ authorized again with a fresh sourced quote: its share of the cap must cover its
 until the approval ends, plus one hour for this and each earlier replacement, at the higher of the
 fresh rate and the rate its first servers were bound to. Approval returns
 `machine_replacements_covered`, the number of lost servers per setup the cap covers, from 0 to 2.
+A confirmation on fresh servers is authorized the same way before anything is retired.
 
 **The run stops cleanly when it cannot recover.** A setup that stops is marked `failed` and its
 servers are removed; nothing waits for the approval to end.

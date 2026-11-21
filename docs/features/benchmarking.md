@@ -159,7 +159,8 @@ which gave every multi-run benchmark a workload of its own and kept it out of ev
 
 Optimization campaigns use a stricter method than a single `infercrane benchmark` command: warmup,
 four candidate runs each paired with the campaign control runs around it, and an interval widened
-for the number of candidates before a gain counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
+for the number of candidates and for the measured difference between two machines before a gain
+counts. See [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates).
 
 InferCrane normalizes the unit carried by each AIPerf latency record to milliseconds and rejects
 unknown units instead of silently mislabeling evidence. Percentiles reconstructed from those records

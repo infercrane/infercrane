@@ -154,6 +154,9 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective, workloadP
 			gate.hold(candidateID, gate.guards[candidateID].Guards, assessment.Reason)
 		case assessment.Decision == DecisionImproved:
 			gate.reasons[candidateID] = "measurably better than the control, but a better-ranked candidate also was: " + assessment.Reason
+		case assessment.Decision == DecisionNotConfirmed:
+			gate.codes[candidateID] = FailureNotConfirmed
+			gate.reasons[candidateID] = "measured better than the control, but the gain did not hold when measured again on fresh servers: " + assessment.Reason
 		case assessment.Decision == DecisionRegressed:
 			gate.codes[candidateID] = FailureRegressed
 			gate.reasons[candidateID] = "worse than the control: " + assessment.Reason
@@ -232,23 +235,15 @@ func assessAgainstControl(candidateID string, row lab.Candidate, controlID strin
 		ratio = *controlCost / *candidateCost
 	}
 	if workload.Measured != nil && workload.Measured.Control.Role == ControlRoleBracketed && workload.Measured.Control.CandidateID == controlID {
-		comparison, found := workload.Measured.Comparison[metric]
+		comparison, found := objectiveComparison(workload.Measured.Comparison, metric, costScaled, ratio)
 		if !found {
 			assessment.Reason = metric + " was not comparable between the interleaved runs"
 			return assessment
 		}
-		if costScaled {
-			comparison.Delta = (1+comparison.Delta)*ratio - 1
-			comparison.Decision = DecisionNoMeasurableDifference
-			if math.Abs(comparison.Delta) > comparison.NoiseFloor {
-				comparison.Decision = DecisionRegressed
-				if comparison.Delta > 0 {
-					comparison.Decision = DecisionImproved
-				}
-			}
-		}
-		assessment.Basis, assessment.Comparison, assessment.Decision = basisInterleaved, &comparison, comparison.Decision
-		assessment.Reason = fmt.Sprintf("%s changed %+.1f%% against a %.1f%% noise floor in interleaved runs", objectiveLabel(metric, costScaled), comparison.Delta*100, comparison.NoiseFloor*100)
+		// A gain in the first window counts only when the candidate gained
+		// again on fresh servers; the second window's change is reported.
+		decision, reported, reason := confirmedDecision(workload.Measured, comparison, metric, objectiveLabel(metric, costScaled), costScaled, ratio)
+		assessment.Basis, assessment.Comparison, assessment.Decision, assessment.Reason = basisInterleaved, &reported, decision, reason
 		return assessment
 	}
 	if workload.Measured != nil && workload.Measured.Control.Role == ControlRoleInvalid && workload.Measured.Control.CandidateID == controlID {

@@ -367,3 +367,68 @@ func TestReplacementIsPricedAtTheBoundRateWhenTheFreshQuoteIsLower(t *testing.T)
 	_, err := h.measure(t)
 	assertPermanentCode(t, err, FailureReplacementNotCovered)
 }
+
+// A confirmation retires the candidate's serving machine on purpose: the
+// removal is a retirement, the replacement is recorded as a confirmation,
+// and the confirmation moves on to the control's server.
+func TestConfirmationRetiresAServingMachineAndReplacesIt(t *testing.T) {
+	h := newRecoveryHarness(t, IntentNewEndpoint, ArmCandidate, 1)
+	measured := h.candidate("candidate-12345678")
+	checkpoint, _ := DecodeMeasurementCheckpoint(measured.MeasurementCheckpointJSON)
+	checkpoint.Interruptions[0].Kind, checkpoint.Interruptions[0].ReplicaID = RunKindConfirmation, "replica-serving-candidate"
+	checkpoint.Confirmation = &ConfirmationState{Phase: ConfirmRetireCandidate}
+	encoded, _ := json.Marshal(checkpoint)
+	for index := range h.store.campaign.Candidates {
+		if h.store.campaign.Candidates[index].ID == measured.ID {
+			h.store.campaign.Candidates[index].MeasurementCheckpointJSON = string(encoded)
+		}
+	}
+
+	_, err := h.measure(t)
+	assertRetryableCode(t, err, "optimization_child_pending")
+	retireKey := childKey("candidate-12345678", "retire-candidat-1")
+	var request workflows.RemoveLostReplicaRequest
+	_ = json.Unmarshal([]byte(h.store.operations[retireKey].RequestJSON), &request)
+	if !request.Retire || request.ReplicaID != "replica-serving-candidate" || h.benchmark.calls != 0 {
+		t.Fatalf("retire request = %+v operations=%v", request, h.store.operations)
+	}
+
+	retired, _ := json.Marshal(workflows.RemoveLostReplicaResult{ReplicaID: "replica-serving-candidate", Retired: true})
+	h.finish(retireKey, string(retired))
+	_, err = h.measure(t)
+	assertRetryableCode(t, err, "optimization_child_pending")
+	entries := DecodeMachineReplacements(h.candidate("candidate-12345678").MachineReplacementsJSON)
+	if len(entries) != 1 || entries[0].Purpose != ReplacementPurposeConfirmation || entries[0].Number != 1 || lostMachineReplacements(entries) != 0 {
+		t.Fatalf("entries = %+v", entries)
+	}
+
+	h.finish(childKey("candidate-12345678", "replace-1"), `{"replicas":1}`)
+	if _, err = h.measure(t); err != nil || h.benchmark.calls != 1 {
+		t.Fatalf("measuring must continue after the retirement: err=%v calls=%d", err, h.benchmark.calls)
+	}
+	resumed, _ := DecodeMeasurementCheckpoint(h.benchmark.checkpoint)
+	if resumed.Pending() != nil || resumed.Interruptions[0].Recovery != RecoveryMachineRetired || resumed.Confirmation.Phase != ConfirmRetireControl {
+		t.Fatalf("resumed checkpoint = %+v confirmation=%+v", resumed.Interruptions, resumed.Confirmation)
+	}
+}
+
+// A retirement the approved cap could not replace never retires anything.
+func TestConfirmationOutsideTheCapRetiresNothing(t *testing.T) {
+	h := newRecoveryHarness(t, IntentNewEndpoint, ArmCandidate, 1)
+	measured := h.candidate("candidate-12345678")
+	checkpoint, _ := DecodeMeasurementCheckpoint(measured.MeasurementCheckpointJSON)
+	checkpoint.Interruptions[0].Kind = RunKindConfirmation
+	checkpoint.Confirmation = &ConfirmationState{Phase: ConfirmRetireCandidate}
+	encoded, _ := json.Marshal(checkpoint)
+	for index := range h.store.campaign.Candidates {
+		if h.store.campaign.Candidates[index].ID == measured.ID {
+			h.store.campaign.Candidates[index].MeasurementCheckpointJSON = string(encoded)
+		}
+	}
+	h.budget.MaxCostUSD = 0.01
+	_, err := h.measure(t)
+	assertPermanentCode(t, err, FailureConfirmationNotCovered)
+	if len(h.store.operations) != 0 {
+		t.Fatalf("a retirement started outside the cap: %v", h.store.operations)
+	}
+}

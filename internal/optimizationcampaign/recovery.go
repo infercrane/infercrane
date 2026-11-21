@@ -52,13 +52,16 @@ const (
 // machine and what was done about it. A given_up entry is a stop marker: the
 // run stopped because this setup, as the control, could not be recovered.
 type MachineReplacement struct {
-	LostReplicaID       string    `json:"lost_replica_id"`
-	Number              int       `json:"number,omitempty"`
-	State               string    `json:"state"`
-	MeasuredCandidateID string    `json:"measured_candidate_id"`
-	OperationID         string    `json:"operation_id,omitempty"`
-	FailureCode         string    `json:"failure_code,omitempty"`
-	At                  time.Time `json:"at"`
+	LostReplicaID       string `json:"lost_replica_id"`
+	Number              int    `json:"number,omitempty"`
+	State               string `json:"state"`
+	MeasuredCandidateID string `json:"measured_candidate_id"`
+	// Purpose is "confirmation" for a server retired so a gain is measured
+	// again on a fresh one; empty for a lost machine.
+	Purpose     string    `json:"purpose,omitempty"`
+	OperationID string    `json:"operation_id,omitempty"`
+	FailureCode string    `json:"failure_code,omitempty"`
+	At          time.Time `json:"at"`
 }
 
 // MachineReplacementRecorder keeps a setup's replacement list. The store
@@ -77,8 +80,21 @@ func DecodeMachineReplacements(raw string) []MachineReplacement {
 	return entries
 }
 
-// MachineReplacementsUsed counts replacements started for a setup; stop
-// markers are not replacements.
+// lostMachineReplacements counts replacements of lost machines, the ones
+// MaxMachineReplacements bounds; retirements for a confirmation are not.
+func lostMachineReplacements(entries []MachineReplacement) int {
+	used := 0
+	for _, entry := range entries {
+		if entry.State != ReplacementGivenUp && entry.Purpose != ReplacementPurposeConfirmation {
+			used++
+		}
+	}
+	return used
+}
+
+// MachineReplacementsUsed counts replacements started for a setup, lost
+// machines and confirmations alike; stop markers are not replacements. It
+// numbers the next replacement.
 func MachineReplacementsUsed(entries []MachineReplacement) int {
 	used := 0
 	for _, entry := range entries {
@@ -223,13 +239,19 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 		}
 		return operations.Permanent(code, cause)
 	}
+	// A confirmation retires a serving machine on purpose; it is neither a
+	// loss nor an interruption the limits below count.
+	confirming := pending.Kind == RunKindConfirmation
 	resolve := func(recovery string) error {
 		resolved := d.now()
 		pending.Recovery, pending.Stage, pending.ResolvedAt = recovery, "", &resolved
+		if confirming {
+			advanceConfirmation(checkpoint, pending.Arm)
+		}
 		return save()
 	}
-	if pending.Sequence > maxMeasurementInterruptions {
-		return giveUp(FailureMeasurementInterrupted, fmt.Errorf("the measurement stopped %d times; the limit is %d", pending.Sequence, maxMeasurementInterruptions), false)
+	if !confirming && lostInterruptions(checkpoint) > maxMeasurementInterruptions {
+		return giveUp(FailureMeasurementInterrupted, fmt.Errorf("the measurement stopped %d times; the limit is %d", lostInterruptions(checkpoint), maxMeasurementInterruptions), false)
 	}
 	draft, err := candidateDraft(owner)
 	if err != nil {
@@ -241,9 +263,23 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 	if owner.DeploymentName == "" || owner.RevisionID == "" {
 		return operations.Permanent("optimization_recovery_invalid", errors.New("interrupted machine's setup has no deployment"))
 	}
+	if confirming && pending.Stage == "" {
+		// Retire nothing the approved cap cannot replace.
+		if err = d.authorizeReplacement(ctx, campaign, owner, draft, budget, MachineReplacementsUsed(DecodeMachineReplacements(owner.MachineReplacementsJSON))+1); err != nil {
+			var failure operations.Failure
+			if errors.As(err, &failure) && !failure.Retryable {
+				return giveUp(FailureConfirmationNotCovered, err, false)
+			}
+			return err
+		}
+	}
 	if pending.Stage == "" || pending.Stage == stageRemoving {
-		request, _ := json.Marshal(workflows.RemoveLostReplicaRequest{TenantID: owner.TenantID, Name: owner.DeploymentName, ReplicaID: pending.ReplicaID, Actor: "optimization-campaign"})
-		removal, _, enqueueErr := d.Store.EnqueueOperation(ctx, domain.Operation{TenantID: owner.TenantID, Kind: workflows.ReplicaRemoveLostKind, ResourceType: "deployment", ResourceName: owner.DeploymentName, IdempotencyKey: childKey(owner.ID, fmt.Sprintf("remove-lost-%s-%d", shortID(measured.ID), pending.Sequence)), RequestJSON: string(request), MaxAttempts: 120})
+		key := fmt.Sprintf("remove-lost-%s-%d", shortID(measured.ID), pending.Sequence)
+		if confirming {
+			key = fmt.Sprintf("retire-%s-%d", shortID(measured.ID), pending.Sequence)
+		}
+		request, _ := json.Marshal(workflows.RemoveLostReplicaRequest{TenantID: owner.TenantID, Name: owner.DeploymentName, ReplicaID: pending.ReplicaID, Actor: "optimization-campaign", Retire: confirming})
+		removal, _, enqueueErr := d.Store.EnqueueOperation(ctx, domain.Operation{TenantID: owner.TenantID, Kind: workflows.ReplicaRemoveLostKind, ResourceType: "deployment", ResourceName: owner.DeploymentName, IdempotencyKey: childKey(owner.ID, key), RequestJSON: string(request), MaxAttempts: 120})
 		if enqueueErr != nil {
 			return executionFailure(enqueueErr)
 		}
@@ -264,7 +300,7 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 		if json.Unmarshal([]byte(removal.ResultJSON), &removed) != nil || removed.ReplicaID != pending.ReplicaID {
 			return giveUp(FailureMachineReplacementFailed, errors.New("lost machine check returned no result for the interrupted machine"), false)
 		}
-		if !removed.Lost {
+		if !removed.Lost && !removed.Retired {
 			return resolve(RecoveryMachineServing)
 		}
 		pending.Stage = stageReplacing
@@ -281,17 +317,22 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 	}
 	if entry == nil {
 		number := MachineReplacementsUsed(entries) + 1
-		if number > MaxMachineReplacements {
-			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup already replaced %d lost machines; the limit is %d", number-1, MaxMachineReplacements), true)
-		}
-		if err = d.authorizeReplacement(ctx, campaign, owner, draft, budget, number); err != nil {
-			var failure operations.Failure
-			if errors.As(err, &failure) && !failure.Retryable {
-				return giveUp(FailureReplacementNotCovered, err, true)
+		if !confirming {
+			if lost := lostMachineReplacements(entries); lost >= MaxMachineReplacements {
+				return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup already replaced %d lost machines; the limit is %d", lost, MaxMachineReplacements), true)
 			}
-			return err
+			if err = d.authorizeReplacement(ctx, campaign, owner, draft, budget, number); err != nil {
+				var failure operations.Failure
+				if errors.As(err, &failure) && !failure.Retryable {
+					return giveUp(FailureReplacementNotCovered, err, true)
+				}
+				return err
+			}
 		}
 		entry = &MachineReplacement{LostReplicaID: pending.ReplicaID, Number: number, State: ReplacementProvisioning, MeasuredCandidateID: measured.ID, At: d.now()}
+		if confirming {
+			entry.Purpose = ReplacementPurposeConfirmation
+		}
 		if err = d.recordReplacement(ctx, recorder, owner, *entry); errors.Is(err, domain.ErrConflict) {
 			return giveUp(FailureMachineLostRepeatedly, fmt.Errorf("this setup reached its limit of %d replaced machines", MaxMachineReplacements), true)
 		} else if err != nil {
@@ -328,12 +369,34 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 			return err
 		}
 	}
+	if confirming {
+		return resolve(RecoveryMachineRetired)
+	}
 	return resolve(RecoveryMachineReplaced)
+}
+
+// lostInterruptions counts the stops a measurement did not choose: every
+// interruption except retirements for a confirmation.
+func lostInterruptions(checkpoint *MeasurementCheckpoint) int {
+	count := 0
+	for _, interruption := range checkpoint.Interruptions {
+		if interruption.Kind != RunKindConfirmation {
+			count++
+		}
+	}
+	return count
 }
 
 func (d CompositeDriver) recordReplacement(ctx context.Context, recorder MachineReplacementRecorder, owner domain.OptimizationCandidateRun, entry MachineReplacement) error {
 	encoded, _ := json.Marshal(entry)
-	if _, err := recorder.RecordOptimizationMachineReplacement(ctx, owner.TenantID, owner.CampaignID, owner.ID, string(encoded), MaxMachineReplacements); err != nil {
+	// The store refuses a new entry once limit entries exist. Retirements for
+	// a confirmation do not use up the lost-machine limit, so they raise it.
+	entries := DecodeMachineReplacements(owner.MachineReplacementsJSON)
+	limit := MaxMachineReplacements + MachineReplacementsUsed(entries) - lostMachineReplacements(entries)
+	if entry.Purpose == ReplacementPurposeConfirmation {
+		limit = MachineReplacementsUsed(entries) + 1
+	}
+	if _, err := recorder.RecordOptimizationMachineReplacement(ctx, owner.TenantID, owner.CampaignID, owner.ID, string(encoded), limit); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			return err
 		}
