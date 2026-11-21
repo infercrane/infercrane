@@ -338,10 +338,20 @@ func TestCatalogProposalLinksRuntimeArgumentsToExactCapabilityEvidence(t *testin
 	foundArguments := false
 	for _, candidate := range proposal.Candidates {
 		foundArguments = foundArguments || len(candidate.Deployment.Runtime.Args) > 0
+		toolCalling := false
 		for _, feature := range candidate.Features {
-			if feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-0.22.1-") {
+			switch {
+			case feature.Name == "tool_calling":
+				// Tool calling is the model's API contract, reviewed with the
+				// catalog entry rather than compiled from a descriptor.
+				toolCalling = strings.HasPrefix(feature.Source, "qwen3-8b/")
+			case feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-0.22.1-"):
 				t.Fatalf("runtime feature lacks exact capability descriptor: %+v", feature)
 			}
+		}
+		args := candidate.Deployment.Runtime.Args
+		if !toolCalling || len(args) < 3 || !slices.Equal(args[len(args)-3:], []string{"--enable-auto-tool-choice", "--tool-call-parser", "hermes"}) {
+			t.Fatalf("Qwen3 8B setup does not keep its reviewed tool calling: features=%+v args=%v", candidate.Features, args)
 		}
 	}
 	if !foundArguments {

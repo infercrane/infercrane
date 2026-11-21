@@ -1218,7 +1218,8 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 	if compatible.Adapter == "kubernetes-dynamo" {
 		features = append(features, Feature{Name: "dynamo_graph", State: "single-mutation-owner", Source: compatible.Evidence})
 	}
-	if contains(profile.RuntimeArgs, "--enable-prefix-caching") {
+	tuningArgs, toolCallingArgs := curatedrecipe.SplitToolCallingArgs(profile.RuntimeArgs)
+	if contains(tuningArgs, "--enable-prefix-caching") {
 		compiled, compileErr := capabilities.Compile(withMechanism(base, optimizationcapability.PrefixCaching, nil))
 		if compileErr != nil {
 			return Candidate{}, compileErr
@@ -1226,8 +1227,8 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 		draft.Runtime.Args = append(draft.Runtime.Args, compiled.Arguments...)
 		features = append(features, Feature{Name: "prefix_caching", State: "enabled", Source: compiled.DescriptorID})
 	}
-	if contains(profile.RuntimeArgs, "--max-num-batched-tokens") {
-		value, valueErr := argumentValue(profile.RuntimeArgs, "--max-num-batched-tokens")
+	if contains(tuningArgs, "--max-num-batched-tokens") {
+		value, valueErr := argumentValue(tuningArgs, "--max-num-batched-tokens")
 		if valueErr != nil {
 			return Candidate{}, valueErr
 		}
@@ -1238,8 +1239,14 @@ func buildCandidate(entry curatedrecipe.Entry, profile curatedrecipe.ServingProf
 		draft.Runtime.Args = append(draft.Runtime.Args, compiled.Arguments...)
 		features = append(features, Feature{Name: "batch_token_budget", State: "configured", Source: compiled.DescriptorID})
 	}
-	if len(profile.RuntimeArgs) != len(draft.Runtime.Args) {
+	if len(tuningArgs) != len(draft.Runtime.Args) {
 		return Candidate{}, errors.New("reviewed profile contains an argument without a capability descriptor")
+	}
+	if len(toolCallingArgs) > 0 {
+		// Tool calling is the model's API contract, reviewed with the catalog
+		// entry; it passes through as written rather than compiled.
+		draft.Runtime.Args = append(draft.Runtime.Args, toolCallingArgs...)
+		features = append(features, Feature{Name: "tool_calling", State: "reviewed-parser", Source: entry.Name + "/" + profile.Name})
 	}
 	required := []string{"runtime readiness and exact served-model identity", "AIPerf " + request.WorkloadProfile + " workload", "fresh provider capacity observation"}
 	if request.MaxHourlyCost != nil || request.Objective == "cost-efficiency" {

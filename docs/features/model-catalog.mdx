@@ -61,6 +61,36 @@ which explicitly describes latency/throughput trade-offs for chunked prefill and
 specific measurement. Benchmark the exact model, GPU, runtime version, and traffic shape before
 promotion; a value that helps one workload can hurt another or increase memory pressure.
 
+## Tool calling
+
+An entry lists `tool-calling` under capabilities only when every one of its profiles starts the
+engine with tool calling on. vLLM refuses requests that carry `tools` unless it runs with
+`--enable-auto-tool-choice` and a `--tool-call-parser`; SGLang needs only the parser. The parser must
+match the format the model's own chat template asks it to write calls in:
+
+| Entry | vLLM 0.22.1 | SGLang 0.5.12 |
+| --- | --- | --- |
+| Qwen3 8B | `--enable-auto-tool-choice --tool-call-parser hermes` | `--tool-call-parser qwen` |
+| Mistral 7B Instruct | `--enable-auto-tool-choice --tool-call-parser mistral` | No profile |
+
+Qwen3 8B's chat template writes each call as JSON inside `<tool_call>` tags, which is the format both
+parsers read. Mistral 7B Instruct v0.3 ships Mistral's own tokenizer files, so vLLM picks Mistral's
+tokenizer for it, and its `mistral` parser reads that format. Neither profile adds a reasoning parser,
+so Qwen3 8B's reasoning stays in the answer text, as before.
+
+Llama 3.1 8B Instruct no longer lists tool calling. vLLM recommends its own Llama 3.1 chat template
+for tool calls, and that file sits at a different path in the NVIDIA and AMD vLLM images, while these
+profiles may run on either. It lists tool calling only after a reviewed setup covers both images.
+
+When InferCrane tests setups to optimize a reviewed model, each setup keeps the tool-call and reasoning
+parsers of the model's reviewed profile on the same engine. The setup's limitations name that
+profile, and say so when it ran another engine version: an engine stops at start on a parser name it
+does not know. A model InferCrane has not reviewed, or another revision of a reviewed one, gets no
+parser, because its chat template is unknown; its setups refuse tool requests and say so.
+
+A healthy tool-call parser is not proof that answers stay correct. Check the tool-call structure your
+application expects on a staging endpoint, as described in [Protocols](/features/protocols).
+
 ## Evidence levels
 
 | Level | What it proves | What it does not prove |
