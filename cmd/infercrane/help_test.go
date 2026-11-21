@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/infercrane/infercrane/internal/config"
@@ -195,5 +196,61 @@ func TestCommandHelpFitsAnEightyColumnTerminal(t *testing.T) {
 				t.Errorf("%s --help option line is %d columns: %q", name, ansi.StringWidth(line), line)
 			}
 		}
+	}
+}
+
+func TestEveryCurrentCommandHasExamplesAndListsItsActions(t *testing.T) {
+	root := newRootCommand(context.Background())
+	for _, spec := range publicCommandSpecs {
+		name := strings.Fields(spec.use)[0]
+		if _, legacy := legacyReplacements[name]; legacy {
+			continue
+		}
+		command, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(command.Example) == "" {
+			t.Errorf("%s help has no example", name)
+		}
+		if strings.Contains(spec.use, "ACTION") && len(commandActions[name]) == 0 && commandLong[name] == "" {
+			t.Errorf("%s takes an ACTION but help does not list them", name)
+		}
+	}
+}
+
+func TestOlderCommandsAreListedLastAndNameTheirReplacement(t *testing.T) {
+	isolatedClientConfig(t)
+	everyday, err := captureStdout(t, func() error { return run(context.Background(), nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := captureStdout(t, func() error { return run(context.Background(), []string{"help", "--all"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := all[strings.Index(all, "Older commands:"):]
+	for name, replacement := range legacyReplacements {
+		if strings.Contains(everyday, "\n  "+name+" ") {
+			t.Errorf("older command %s is on the first screen", name)
+		}
+		if !strings.Contains(older, "\n  "+name+" ") {
+			t.Errorf("older command %s is not under Older commands", name)
+		}
+		help, err := captureStdout(t, func() error { return run(context.Background(), []string{name, "--help"}) })
+		if err != nil || !strings.Contains(help, "older command") || (replacement != "" && !strings.Contains(help, replacement)) {
+			t.Errorf("%s help does not name its replacement %q:\n%s", name, replacement, help)
+		}
+	}
+}
+
+func TestHumanWindowAndTracebackDiagnostics(t *testing.T) {
+	for window, want := range map[time.Duration]string{720 * time.Hour: "30d", 36 * time.Hour: "36h", 90 * time.Minute: "90m", 90 * time.Second: "1m30s"} {
+		if got := humanWindow(window); got != want {
+			t.Errorf("humanWindow(%s) = %q, want %q", window, got, want)
+		}
+	}
+	if outputIsJSON([]string{"qwen", "--output", "json"}) != true || outputIsJSON([]string{"qwen"}) != false {
+		t.Error("outputIsJSON misread --output")
 	}
 }

@@ -25,7 +25,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "login [flags]", short: "Sign in through your browser", section: "start", suggestFor: []string{"signin", "setup"}},
 	{use: "deploy MODEL [flags]", short: "Deploy a model and get an endpoint", section: "start", suggestFor: []string{"run", "create", "up"}},
 	{use: "request ENDPOINT [flags]", short: "Send a test request to an endpoint", section: "start", suggestFor: []string{"chat", "curl", "invoke", "call"}},
-	{use: "models [QUERY] | models inspect NAME | models check OWNER/NAME [flags]", short: "Browse models, or check any Hugging Face model", section: "start", suggestFor: []string{"model"}},
+	{use: "models [QUERY] | models ACTION [arguments] [flags]", short: "Browse models, or check any Hugging Face model", section: "start", suggestFor: []string{"model"}},
 	{use: "doctor [flags]", short: "Check your setup and connection", section: "start"},
 
 	{use: "deployments [flags]", short: "List your deployments", section: "deployments", aliases: []string{"ls"}, suggestFor: []string{"list", "ps", "deployment"}},
@@ -38,7 +38,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "optimize ACTION [arguments]", short: "Find a cheaper, faster setup and prove it", section: "optimize", suggestFor: []string{"optimise", "tune"}},
 	{use: "benchmark DEPLOYMENT [flags]", short: "Measure a deployment's speed", section: "optimize", suggestFor: []string{"bench", "perf"}},
 	{use: "profile ENDPOINT [flags]", short: "See where GPU time goes", section: "optimize", suggestFor: []string{"trace", "profiler"}},
-	{use: "recommend DEPLOYMENT [flags]", short: "Suggest a better setup from measured results", section: "optimize"},
+	{use: "recommend DEPLOYMENT [flags]", short: "Suggest a better setup from measured results", section: "legacy"},
 	{use: "migrate ACTION ENDPOINT [flags]", short: "Test your model against a closed API, then switch", section: "optimize", suggestFor: []string{"migration", "switch"}},
 
 	{use: "inbox [flags]", short: "See what needs your attention", section: "observe", suggestFor: []string{"alerts", "issues"}},
@@ -67,25 +67,25 @@ var publicCommandSpecs = []commandSpec{
 	{use: "endpoint ACTION [arguments]", short: "Create an endpoint and manage its serving plan", section: "serving"},
 	{use: "environment ACTION [arguments]", short: "Manage endpoint environments", section: "serving"},
 	{use: "logical-model ACTION [arguments]", short: "Give a model a stable name across versions", section: "serving"},
-	{use: "events DEPLOYMENT [flags]", short: "List a deployment's events", section: "serving"},
+	{use: "events DEPLOYMENT [flags]", short: "List a deployment's events", section: "legacy"},
 	{use: "route DEPLOYMENT --strategy STRATEGY [flags]", short: "Change how traffic is spread across replicas", section: "serving"},
 	{use: "admission ACTION ENDPOINT [flags]", short: "Limit concurrent requests and queueing", section: "serving"},
 	{use: "slo ACTION DEPLOYMENT [flags]", short: "Set latency and availability targets", section: "serving"},
 	{use: "alert ACTION ENDPOINT [flags]", short: "Send signed webhook alerts", section: "serving"},
-	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve suggested serving plans", section: "serving"},
-	{use: "burst DEPLOYMENT [flags]", short: "Check when traffic can overflow to extra capacity", section: "serving"},
+	{use: "autopilot ACTION SUBJECT [flags]", short: "Create and approve suggested serving plans", section: "legacy"},
+	{use: "burst DEPLOYMENT [flags]", short: "Check when traffic can overflow to extra capacity", section: "legacy"},
 	{use: "external ACTION [arguments]", short: "Control fallback to an external API", section: "serving"},
 	{use: "async ACTION SUBJECT [flags]", short: "Submit long requests and fetch results later", section: "serving"},
-	{use: "session ACTION SUBJECT [flags]", short: "Prefer one replica for a conversation", section: "serving"},
+	{use: "session ACTION SUBJECT [flags]", short: "Prefer one replica for a conversation", section: "legacy"},
 	{use: "sandbox ACTION [arguments]", short: "Give sandboxes short-lived endpoint access", section: "serving"},
 	{use: "operation list | operation [inspect] ID | operation watch ID | operation cancel ID", short: "Follow, resume, or cancel a long-running change", section: "serving", suggestFor: []string{"op", "ops", "operations"}},
 	{use: "inspect DEPLOYMENT [flags]", short: "Show raw deployment and infrastructure details", section: "serving", suggestFor: []string{"describe", "show", "get"}},
 
 	{use: "evaluation ACTION [arguments]", short: "Sign, verify, and attach answer-quality results", section: "evidence", suggestFor: []string{"eval", "evals"}},
 	{use: "passport ACTION [arguments]", short: "Issue and verify signed release records", section: "evidence"},
-	{use: "lab MODEL_IDENTITY [flags]", short: "Compare measured results for a model", section: "evidence"},
-	{use: "recipe create DEPLOYMENT [flags]", short: "Save a deployment's proven setup", section: "evidence"},
-	{use: "recipes [QUERY] [flags]", short: "Find saved setups", section: "evidence"},
+	{use: "lab MODEL_IDENTITY [flags]", short: "Compare measured results for a model", section: "legacy"},
+	{use: "recipe create DEPLOYMENT [flags]", short: "Save a deployment's proven setup", section: "legacy"},
+	{use: "recipes [QUERY] [flags]", short: "Find saved setups", section: "legacy"},
 	{use: "replay DEPLOYMENT [flags]", short: "Record your traffic's shape without its content", section: "evidence"},
 	{use: "capacity [flags]", short: "Show how reliably GPU capacity was available", section: "evidence"},
 	{use: "telemetry collect dcgm|amd DEPLOYMENT [flags]", short: "Collect GPU metrics from DCGM or AMD's exporter", section: "evidence"},
@@ -94,8 +94,8 @@ var publicCommandSpecs = []commandSpec{
 	{use: "orphans [flags]", short: "Find cloud resources InferCrane doesn't manage", section: "evidence"},
 	{use: "integrations [list] [flags]", short: "List connected integrations and what they support", section: "evidence"},
 
-	{use: "init [flags]", short: "Connect to a control plane with an existing key", section: "platform"},
-	{use: "auth status|login|logout [flags]", short: "Sign in, sign out, or show your identity", section: "platform"},
+	{use: "init [flags]", short: "Connect to a control plane with an existing key", section: "legacy"},
+	{use: "auth status|login|logout [flags]", short: "Sign in, sign out, or show your identity", section: "legacy"},
 	{use: "tenant ACTION [arguments]", short: "Manage isolated tenants", section: "platform"},
 	{use: "model-api publish TYPE --file PATH [flags]", short: "Publish a shared Model API contract", section: "platform"},
 	{use: "system instances [flags]", short: "List the running control-plane instances", section: "platform"},
@@ -210,7 +210,7 @@ var commandExamples = map[string]string{
   infercrane optimize propose Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L40S --objective interactive
 
   # Find the best setup for any model pinned to a commit; reads its public config.json
-  infercrane optimize propose acme/model --model-revision COMMIT --provider runpod-pods --gpu H200 --objective throughput --search recipes --allow-model-metadata-network
+  infercrane optimize propose acme/model --model-revision COMMIT --provider runpod-pods --gpu H200 --objective throughput --allow-model-metadata-network
 
   # Check the optional estimator toolchain without provisioning a GPU
   infercrane optimize doctor
@@ -339,11 +339,19 @@ func newLegacyCommand(ctx context.Context, spec commandSpec) *cobra.Command {
 			if containsHelpArgument(args) {
 				return cmd.Help()
 			}
+			noteLegacyCommand(name, args)
 			return runLegacy(ctx, append([]string{name}, args...))
 		},
 	}
 	command.Long = commandLong[name]
 	command.Example = commandExamples[name]
+	if command.Example == "" {
+		command.Example = moreExamples[name]
+	}
+	if replacement, legacy := legacyReplacements[name]; legacy {
+		command.Long = legacyLong(spec.short, replacement)
+	}
+	command.Flags().BoolP("help", "h", false, "show this help")
 	addHelpFlags(command, name)
 	return command
 }
@@ -424,7 +432,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("platform", "", "target image platform")
 		boolFlag("push", "push and record an immutable registry digest")
 		boolFlag("force", "replace an existing project spec")
-		boolFlag("wait", "follow durable deployment progress")
+		boolFlag("wait", "wait and show progress until the deployment is ready")
 		boolFlag("detach", "run a local workload in the background")
 		intFlag("port", 8000, "local loopback port")
 	case "evaluation":
@@ -570,7 +578,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("min", 1, "minimum replicas")
 		intFlag("max", 1, "maximum replicas")
 		if name != "plan" {
-			boolFlag("wait", "follow durable progress to completion")
+			boolFlag("wait", "wait and show progress until it finishes")
 			stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 			stringFlag("idempotency-key", "", "stable safe-retry key")
 			stringFlag("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
@@ -711,9 +719,8 @@ func addHelpFlags(command *cobra.Command, name string) {
 		intFlag("max-candidates", 10, "maximum setups")
 		intFlag("limit", 20, "maximum runs to list")
 		boolFlag("include-simulated", "include simulated compatibility")
-		boolFlag("allow-model-metadata-network", "allow reading public model metadata from Hugging Face for estimates and --search recipes")
-		stringFlag("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
-		stringFlag("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
+		boolFlag("allow-model-metadata-network", "allow reading the model's public config from Hugging Face to plan setups")
+		stringFlag("model-config", "", "local copy of the pinned config.json, to plan setups offline")
 	case "passport":
 		stringFlag("revision", "", "revision ID; defaults to active")
 		stringFlag("file", "", "write the issued passport JSON to a file")
@@ -756,7 +763,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("file", "", "JSON manifest containing one immutable Model API contract")
 	case "rollout":
 		stringFlag("file", "", "candidate DeploymentSpec YAML")
-		boolFlag("wait", "follow durable progress to completion")
+		boolFlag("wait", "wait and show progress until it finishes")
 		stringFlag("wait-timeout", "", "stop watching locally without cancelling the operation")
 		stringFlag("idempotency-key", "", "stable safe-retry key")
 		stringFlag("reason", "", "persisted transition reason")

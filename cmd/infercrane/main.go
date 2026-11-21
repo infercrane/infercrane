@@ -261,12 +261,12 @@ func writeCLIError(w io.Writer, args []string, err error) {
 		renderHumanError(w, t, err)
 		return
 	}
-	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or inspect current durable state before retrying."}
+	detail := map[string]any{"code": "client_error", "category": "client", "message": err.Error(), "retryable": false, "remediation": "Correct the command or check the current state before retrying."}
 	var watcherErr *WatcherStoppedError
 	if errors.As(err, &watcherErr) {
-		code, message := "operation_watch_interrupted", "Operation watch stopped; the durable operation continues safely in the control plane."
+		code, message := "operation_watch_interrupted", "Operation watch stopped; the operation keeps running in the control plane."
 		if errors.Is(watcherErr.Cause, context.DeadlineExceeded) {
-			code, message = "operation_watch_timeout", "Wait timeout reached; the durable operation continues safely in the control plane."
+			code, message = "operation_watch_timeout", "Wait timeout reached; the operation keeps running in the control plane."
 		}
 		detail = map[string]any{
 			"code": code, "category": "operation", "message": message, "retryable": true,
@@ -1022,7 +1022,7 @@ func capacityCommand(ctx context.Context, cfg config.Config, args []string) erro
 	if *output == "json" {
 		return printJSON(response)
 	}
-	fmt.Printf("Capacity intelligence · observed tenant evidence · window %s\n\n", window)
+	fmt.Printf("GPU capacity · last %s\n\n", humanWindow(window))
 	if len(response.Capacity) == 0 {
 		fmt.Println("No capacity operations observed in this window.")
 		return nil
@@ -1067,7 +1067,11 @@ func finOpsCommand(ctx context.Context, cfg config.Config, args []string) error 
 	if *output == "json" {
 		return printJSON(response.Report)
 	}
-	fmt.Printf("FinOps report  %s\nDeployment     %s\nStatus         %s\nKnown cost     %s %s\nAvoidable      %s (unavailable unless directly evidenced)\nEvidence digest %s\n", benchmarkValue(response.Report["id"]), name, benchmarkValue(response.Report["status"]), benchmarkValue(response.Report["known_cost"]), benchmarkValue(response.Report["currency"]), benchmarkValue(response.Report["estimated_avoidable_cost"]), benchmarkValue(response.Report["input_digest"]))
+	knownCost := benchmarkValue(response.Report["known_cost"])
+	if currency := benchmarkValue(response.Report["currency"]); knownCost != "unavailable" && currency != "unavailable" {
+		knownCost += " " + currency
+	}
+	fmt.Printf("Cost report  %s\nDeployment   %s\nStatus       %s\nKnown cost   %s\nAvoidable    %s (shown only when measured)\n", benchmarkValue(response.Report["id"]), name, benchmarkValue(response.Report["status"]), knownCost, benchmarkValue(response.Report["estimated_avoidable_cost"]))
 	return nil
 }
 
@@ -1950,7 +1954,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	minReplicas := fs.Int("min", 1, "minimum replicas")
 	maxReplicas := fs.Int("max", 1, "maximum replicas")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
-	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this long; the operation keeps running")
 	idempotencyKey := fs.String("idempotency-key", "", "safe retry key")
 	computeConnection := fs.String("compute-connection", "", "deploy on your own RunPod account: a verified compute connection name or ID")
 	modelSecret := fs.String("model-secret", "", "saved secret ID with the Hugging Face token for a private or gated model; your provider receives it natively")
@@ -2765,7 +2769,7 @@ func operationListCommand(ctx context.Context, cfg config.Config, args []string)
 		return printJSON(response)
 	}
 	if len(response.Data) == 0 {
-		fmt.Println("No durable operations found.")
+		fmt.Println("No operations yet.")
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -2798,7 +2802,7 @@ func contextCommand(args []string) error {
 			return err
 		}
 		if len(settings.Contexts) == 0 {
-			return errors.New("no contexts configured; run infercrane init")
+			return errors.New("no contexts saved yet; run infercrane login")
 		}
 		names := make([]string, 0, len(settings.Contexts))
 		for name := range settings.Contexts {
@@ -4127,7 +4131,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 	fs := newFlagSet("rollout " + action)
 	output := fs.String("output", "human", "human or json")
 	wait := fs.Bool("wait", false, "wait for the operation to finish")
-	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this duration; the durable operation continues")
+	waitTimeout := fs.Duration("wait-timeout", 0, "stop waiting after this long; the operation keeps running")
 	key := fs.String("idempotency-key", "", "safe retry key")
 	reason := fs.String("reason", "", "persisted reason for the transition")
 	model := fs.String("model", "", "candidate model")
@@ -5437,4 +5441,18 @@ func optimizationPriceEstimate(row config.OptimizationPrice) pricing.Estimate {
 		estimate.GuaranteedUntil = row.ValidUntil
 	}
 	return estimate
+}
+
+// humanWindow writes a window the way people say it: 30d, 24h, 90m.
+func humanWindow(window time.Duration) string {
+	switch {
+	case window >= 24*time.Hour && window%(24*time.Hour) == 0:
+		return strconv.Itoa(int(window/(24*time.Hour))) + "d"
+	case window >= time.Hour && window%time.Hour == 0:
+		return strconv.Itoa(int(window/time.Hour)) + "h"
+	case window >= time.Minute && window%time.Minute == 0:
+		return strconv.Itoa(int(window/time.Minute)) + "m"
+	default:
+		return window.String()
+	}
 }

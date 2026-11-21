@@ -226,6 +226,12 @@ func estimatorEnvironment(temp string, allowNetwork bool) []string {
 
 func boundedDiagnostic(value string) string {
 	value = strings.TrimSpace(value)
+	// A Python traceback ends with the line that names the problem, for
+	// example "ModuleNotFoundError: No module named 'aiconfigurator'".
+	if strings.HasPrefix(value, "Traceback ") {
+		lines := strings.Split(value, "\n")
+		value = strings.TrimSpace(lines[len(lines)-1])
+	}
 	if len(value) > 1000 {
 		return value[:1000] + "…"
 	}
