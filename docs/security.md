@@ -86,6 +86,30 @@ auto-provisions workspaces at sign-up. The grant never extends to InferCrane-man
 capacity or the RunPod supply key. See
 [Let workspaces use operator compute](/provider-setup#let-workspaces-use-operator-compute).
 
+A worker is started with one bearer credential. A worker's address belongs to its workload, which
+can be a workspace's own image, so whatever the control plane sends there is readable by that
+workload. Every call the control plane makes to a worker's address (routing, health checks, engine
+scrapes, direct benchmarks, optimization measurement, answer checks, and playground prompts)
+therefore presents the credential scoped to that worker's workspace and deployment. The operator's
+shared credential is sent only to workers on operator compute that were started with it, never to a
+worker that records a scoped credential and never to a worker in a tenant's account.
+
+- **RunPod Pods**, on the operator's account and on a tenant's, are started with a credential
+  derived from `INFERCRANE_WORKER_CREDENTIAL_KEY` for that workspace and deployment. A Pod never
+  holds `INFERCRANE_API_KEY`, and one deployment's credential opens no other deployment's workers.
+  `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED` is refused at startup without the derivation key.
+  Without the key, only the bootstrap operator can start Pods on the operator's account, and those
+  Pods hold the control-plane worker credential described next.
+- **AWS, Google Cloud, Kubernetes, and SkyPilot** workers read one worker credential the operator
+  provisions for the adapter, and that credential is `INFERCRANE_API_KEY`. Code that runs in such a
+  worker can therefore act as the bootstrap operator. Run only workloads you trust as operators
+  there, and treat an operator compute grant as granting that trust to the workspace.
+- A worker in a tenant's own account that records no scoped credential is not called at all, and
+  a scoped worker whose credential cannot be derived is treated as unhealthy. The control plane
+  does not fall back to the shared credential.
+- While a deployment has older workers on the shared credential and newer ones on a scoped
+  credential, only the scoped workers are routed. Replace the older workers to restore capacity.
+
 Gateway authentication uses an in-memory last-known-good credential snapshot so an established data
 plane does not add PostgreSQL latency or fail immediately during a database outage. Rotation and
 revocation take effect on the next successful snapshot refresh. If immediate revocation is required
@@ -206,8 +230,9 @@ disabled until the operator injects separate `INFERCRANE_CREDENTIAL_ENCRYPTION_K
 is verified before storage, encrypted with AES-256-GCM, and bound through associated data to the
 tenant, provider, and connection name. API responses expose only connection metadata. Provider
 calls decrypt the credential in memory, while worker authentication uses a separate deterministic
-tenant-and-deployment-scoped credential. Operator-owned provider keys, volumes, and provider secret
-references are never copied into customer accounts.
+tenant-and-deployment-scoped credential. That credential, never the control-plane API key, is what
+every direct call to the tenant's worker presents. Operator-owned provider keys, volumes, and
+provider secret references are never copied into customer accounts.
 
 Optimization run notification destinations use the same key. A destination URL can itself be a
 bearer credential (a Slack incoming webhook is one), so the URL and the generated signing secret are

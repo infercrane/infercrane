@@ -631,6 +631,41 @@ func (s *capacityRecordingStore) RecordCapacityOperation(_ context.Context, row 
 	return row, nil
 }
 
+// Operator compute is resolved per deployment when the adapter can start each
+// deployment's workers with their own credential, so the worker key that
+// comes back is the one those workers hold.
+func TestReplicaBackendResolvesOperatorComputePerDeployment(t *testing.T) {
+	shared, scoped, tenantOwned := &fakeReplicaProvider{}, &fakeReplicaProvider{}, &fakeReplicaProvider{}
+	backend := ReplicaBackend{Provider: shared}
+	if provider, _, key, err := backend.resolveProvider(context.Background(), "tenant-a", "", "deployment-a"); err != nil || provider != ReplicaProvider(shared) || key != "" {
+		t.Fatalf("adapter without per-deployment credentials: provider=%v key=%q err=%v", provider, key, err)
+	}
+
+	var seenTenant, seenDeployment string
+	backend.ResolveOperatorProvider = func(_ context.Context, tenant, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error) {
+		seenTenant, seenDeployment = tenant, deploymentID
+		return scoped, nil, "key-of-" + tenant + "-" + deploymentID, nil
+	}
+	backend.ResolveProvider = func(context.Context, string, string, string) (ReplicaProvider, CapacityAdvisor, string, error) {
+		return tenantOwned, nil, "tenant-account-key", nil
+	}
+	provider, _, key, err := backend.resolveProvider(context.Background(), "tenant-a", "", "deployment-a")
+	if err != nil || provider != ReplicaProvider(scoped) || key != "key-of-tenant-a-deployment-a" || seenTenant != "tenant-a" || seenDeployment != "deployment-a" {
+		t.Fatalf("operator compute: provider=%v key=%q err=%v seen=%q/%q", provider, key, err, seenTenant, seenDeployment)
+	}
+	if provider, _, key, err = backend.resolveProvider(context.Background(), "tenant-a", "connection-a", "deployment-a"); err != nil || provider != ReplicaProvider(tenantOwned) || key != "tenant-account-key" {
+		t.Fatalf("tenant compute connection: provider=%v key=%q err=%v", provider, key, err)
+	}
+
+	refused := errors.New("no scoped credential can be derived")
+	backend.ResolveOperatorProvider = func(context.Context, string, string) (ReplicaProvider, CapacityAdvisor, string, error) {
+		return nil, nil, "", refused
+	}
+	if provider, _, _, err = backend.resolveProvider(context.Background(), "tenant-a", "", "deployment-a"); !errors.Is(err, refused) || provider != nil {
+		t.Fatalf("a refused deployment fell back to the shared provider: provider=%v err=%v", provider, err)
+	}
+}
+
 func TestReplicaBackendsResolveByCloudRuntimeAndDurableName(t *testing.T) {
 	first, second := &fakeReplicaProvider{}, &fakeReplicaProvider{}
 	registry, err := NewReplicaBackends(
@@ -799,6 +834,45 @@ func TestTenantComputeConnectionOwnsProviderAndWorkerCredential(t *testing.T) {
 	}
 	if endpoint != "http://tenant-gpu:8000" || inspector.endpoint != endpoint || inspector.credential != "tenant-worker-key" {
 		t.Fatalf("endpoint=%q inspected=%q credential=%q", endpoint, inspector.endpoint, inspector.credential)
+	}
+}
+
+// Managed capacity puts a workspace's own workload on the operator's account.
+// An adapter whose workers all share the operator's credential must never
+// serve it, whichever path submitted the deployment.
+func TestManagedCapacityNeedsAnAdapterThatScopesWorkerCredentials(t *testing.T) {
+	request := CloudRequest{TenantID: "tenant-a", DeploymentID: "deployment-1", RevisionID: "revision-1", Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", GPU: "L40S", GPUCount: 1, BillingMode: "customer_wallet"}
+	shared := &fakeReplicaProvider{}
+	_, _, _, err := ensureCloudReplica(context.Background(), &fakeCloudStore{}, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: shared}, fakeInspector{}, domain.Operation{ID: "operation-1"}, request, 0)
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Code != "managed_worker_credential_unavailable" || failure.Retryable || shared.ensureCalls != 0 {
+		t.Fatalf("a shared-credential adapter served managed capacity: err=%v ensure_calls=%d", err, shared.ensureCalls)
+	}
+
+	// The same adapter still serves the operator's own provider-account work.
+	request.BillingMode = "provider_account"
+	if _, _, _, err = ensureCloudReplica(context.Background(), &fakeCloudStore{}, ReplicaBackend{Name: "sky", Cloud: "runpod", Runtime: "vllm", Provider: shared}, fakeInspector{}, domain.Operation{ID: "operation-1"}, request, 0); errors.As(err, &failure) && failure.Code == "managed_worker_credential_unavailable" {
+		t.Fatalf("provider-account work was refused as managed capacity: %v", err)
+	}
+	if shared.ensureCalls == 0 {
+		t.Fatal("provider-account work never reached the provider")
+	}
+
+	// An adapter that scopes credentials serves managed capacity through its hook.
+	scoped := &fakeReplicaProvider{}
+	request.BillingMode = "customer_wallet"
+	backend := ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: "vllm", Provider: shared, ResolveOperatorProvider: func(_ context.Context, tenant, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error) {
+		if tenant != "tenant-a" || deploymentID != "deployment-1" {
+			t.Fatalf("credential scope=%q/%q", tenant, deploymentID)
+		}
+		return scoped, nil, "scoped-key", nil
+	}}
+	before := shared.ensureCalls
+	if _, _, _, err = ensureCloudReplica(context.Background(), &fakeCloudStore{}, backend, fakeInspector{}, domain.Operation{ID: "operation-1"}, request, 0); errors.As(err, &failure) && failure.Code == "managed_worker_credential_unavailable" {
+		t.Fatalf("a scoping adapter was refused: %v", err)
+	}
+	if scoped.ensureCalls == 0 || shared.ensureCalls != before {
+		t.Fatalf("managed work ran on the shared provider: scoped=%d shared=%d", scoped.ensureCalls, shared.ensureCalls-before)
 	}
 }
 

@@ -155,7 +155,7 @@ func (a API) optimizationCandidateChat(w http.ResponseWriter, r *http.Request) {
 	}
 	backends := make(map[string]optimizationcampaign.BenchmarkBackend, len(a.Backends))
 	for name, backend := range a.Backends {
-		backends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
+		backends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv, WorkerMaster: backend.WorkerMaster}
 	}
 	target, err := optimizationcampaign.CandidateChatTarget(r.Context(), store, backends, candidate)
 	switch {

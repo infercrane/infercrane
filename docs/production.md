@@ -63,8 +63,11 @@ fly checks list -a YOUR_APP_NAME
 ```
 
 To enable the first self-serve InferCrane Cloud lane on Fly after its real-provider qualification,
-add `RUNPOD_API_KEY` and `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` as Fly secrets. The RunPod
-key is the platform's supply credential, not a tenant BYOC credential. Leave the flag absent or
+add `RUNPOD_API_KEY`, `INFERCRANE_WORKER_CREDENTIAL_KEY`, and
+`INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` as Fly secrets. The RunPod
+key is the platform's supply credential, not a tenant BYOC credential. The worker credential key
+gives each managed Pod its own credential; the control plane refuses to start with the flag set and
+the key missing. Leave the flag absent or
 false until current price ingestion, Stripe funding, auto-stop, provider deletion, and settlement
 are all operational.
 
@@ -96,6 +99,16 @@ tenant-and-deployment-scoped worker credentials. Neither is a RunPod credential.
 rotate them through an explicit credential migration and controlled worker replacement. Keep the
 operator `RUNPOD_API_KEY` separate. Customer deployments never receive the control plane's global
 API key.
+
+The same worker credential key scopes every Pod on the operator's own RunPod account, including
+InferCrane Cloud Pods and the bootstrap operator's own. Set it on any control plane that uses the
+RunPod supply key.
+
+Pods started before the key was set, or by a release that did not yet scope operator Pods, still
+hold the control-plane API key. They keep serving and are still reached with that credential. To
+finish the change, replace those deployments' Pods (redeploy, or delete and create), confirm no Pod
+on the RunPod account predates the change, and then rotate `INFERCRANE_API_KEY`. Rotating first
+makes the older Pods unreachable.
 
 The Fly Machine hostname is the default replica identity. Do not set `INFERCRANE_INSTANCE_ID` to
 one shared value: two live replicas with the same identity would violate lease ownership and route

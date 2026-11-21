@@ -149,7 +149,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		return ProviderHandle{}, err
 	}
 	if len(matches) == 1 {
-		if err = validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret); err != nil {
+		if err = validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret, r.WorkerAPIKey); err != nil {
 			return ProviderHandle{}, err
 		}
 		return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
@@ -215,7 +215,7 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 		// and adopt the deterministic name before surfacing a retryable failure.
 		if current, listErr := r.list(ctx); listErr == nil {
 			matches = matchingRunPodRecords(current, name)
-			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret) == nil {
+			if len(matches) == 1 && validateRunPodIntent(matches[0], spec, command, volumeID, hfTokenSecret, r.WorkerAPIKey) == nil {
 				return ProviderHandle{ResourceID: name, ExternalKey: spec.ExternalKey}, nil
 			}
 		}
@@ -259,7 +259,7 @@ func (r RunPodPods) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		"started_at": nullableString(pod.StartedAt), "container_disk_gib": pod.DiskGiB,
 		"cost_per_hour":             rawNumber(pod.CostPerHour),
 		"network_volume":            runPodVolumeEvidence(pod.Mounts.Network),
-		"worker_credential_version": r.WorkerCredentialVersion,
+		"worker_credential_version": r.workerCredentialVersion(*pod),
 	})
 	switch strings.ToUpper(pod.Status) {
 	case "EXITED", "ERROR", "TERMINATED":
@@ -430,6 +430,18 @@ func (r RunPodPods) do(ctx context.Context, method, path string, body, output an
 	return nil
 }
 
+// workerCredentialVersion reports the credential version of one Pod. When
+// RunPod returns the Pod's environment and it carries a different worker
+// credential than this adapter starts Pods with, the Pod predates the scoped
+// credential and is reported without a version, so it keeps being reached
+// with the credential it was started with.
+func (r RunPodPods) workerCredentialVersion(pod runPodRecord) string {
+	if len(pod.Environment) > 0 && pod.Environment["INFERCRANE_WORKER_API_KEY"] != r.WorkerAPIKey {
+		return ""
+	}
+	return r.WorkerCredentialVersion
+}
+
 func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 	matches := make([]runPodRecord, 0, 1)
 	for _, pod := range pods {
@@ -440,9 +452,11 @@ func matchingRunPodRecords(pods []runPodRecord, name string) []runPodRecord {
 	return matches
 }
 
-func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID, hfTokenSecret string) error {
+func validateRunPodIntent(pod runPodRecord, spec ReplicaSpec, command []string, volumeID, hfTokenSecret, workerAPIKey string) error {
 	gpuMismatch := pod.GPU == nil || pod.GPU.Count != spec.GPUCount || (pod.GPU.ID != "" && pod.GPU.ID != RunPodGPUTypeID(spec.GPU))
-	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] == "" || pod.Environment["VLLM_API_KEY"] == "")
+	// A Pod started with another worker credential is not this replica: it
+	// would be routed and checked with a credential it does not accept.
+	credentialMismatch := len(pod.Environment) > 0 && (pod.Environment["INFERCRANE_WORKER_API_KEY"] != workerAPIKey || pod.Environment["VLLM_API_KEY"] != workerAPIKey)
 	secretMismatch := hfTokenSecret != "" && len(pod.Environment) > 0 && pod.Environment["HF_TOKEN"] != "{{ RUNPOD_SECRET_"+hfTokenSecret+" }}"
 	engineMismatch := len(pod.Environment) > 0 && !engineEnvironmentMatches(pod.Environment, spec.RuntimeEnv)
 	requestedDataCenterID := runPodDataCenterConstraint(spec.Region)

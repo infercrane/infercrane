@@ -4416,12 +4416,22 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
+	// Anything that calls a worker directly presents the credential that worker
+	// was started with; the control-plane API key reaches only workers on
+	// operator compute that share it. A development control plane with no
+	// credential at all keeps scraping its local workers without one.
+	var engineCredential func(string, autoscale.Target) string
+	if cfg.APIKey != "" || cfg.WorkerCredentialKey != "" {
+		engineCredential = func(deploymentID string, target autoscale.Target) string {
+			return workercredential.Source{Master: cfg.WorkerCredentialKey, Shared: cfg.APIKey}.Credential(target.TenantID, deploymentID, target.ComputeConnectionID, target.ProviderDetails)
+		}
+	}
 	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, RouterAPIKey: cfg.APIKey, WorkerCredential: func(tenant, deploymentID, version string) string {
 		if version != workercredential.Version {
 			return ""
 		}
 		return workercredential.Derive(cfg.WorkerCredentialKey, tenant, deploymentID)
-	}, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
+	}, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, Credential: engineCredential}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -4908,12 +4918,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		provider.HFTokenSecret = ""
 		return provider, provision.RunPodAvailability{APIKey: providerKey}, workerKey, nil
 	}
+	resolveOperatorRunPod := operatorRunPodResolver(cfg.WorkerCredentialKey, runPodPods, capacity)
 	artifactCacheAdapters["runpod"] = runPodPods
 	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 		// A configured SkyPilot manifest is the default only for the runtimes it
 		// explicitly lists. Native RunPod Pods remains available as an exact
 		// adapter and owns every undeclared runtime.
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity, ResolveProvider: resolveTenantRunPod})
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity, ResolveProvider: resolveTenantRunPod, ResolveOperatorProvider: resolveOperatorRunPod})
 	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
@@ -4995,7 +5006,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	candidateBackends := make(map[string]optimizationcampaign.BenchmarkBackend, len(benchmarkBackends))
 	for name, backend := range benchmarkBackends {
-		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
+		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv, WorkerMaster: backend.WorkerMaster}
 	}
 	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
 	qualitySigner, err := builtinQualitySigner(passportKey, logger)
@@ -5042,7 +5053,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			}
 		}()
 	}
-	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
+	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, Credential: engineCredential}, Fleet: s}
 	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
 	go (&enginetelemetry.Collector{Targets: rec, Recorder: s, Client: client, Logger: logger}).Run(ctx)
 	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
@@ -5087,14 +5098,46 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	return err
 }
 
+// operatorRunPodResolver returns the provider for one deployment on the
+// operator's RunPod account. A Pod there serves one workspace's deployment and
+// may run that workspace's own image, so it is started with a credential
+// scoped to that workspace and deployment and never with the control-plane API
+// key. Without INFERCRANE_WORKER_CREDENTIAL_KEY only the bootstrap operator
+// may start Pods there, on the one credential that operator already holds.
+func operatorRunPodResolver(workerCredentialKey string, pods provision.RunPodPods, capacity workflows.CapacityAdvisor) func(context.Context, string, string) (workflows.ReplicaProvider, workflows.CapacityAdvisor, string, error) {
+	return func(_ context.Context, tenant, deploymentID string) (workflows.ReplicaProvider, workflows.CapacityAdvisor, string, error) {
+		if tenant == "" {
+			// A deployment stored without a workspace belongs to the bootstrap one.
+			tenant = secrets.BootstrapTenant
+		}
+		if workerCredentialKey == "" {
+			if tenant != secrets.BootstrapTenant {
+				return nil, nil, "", errors.New("operator RunPod capacity needs INFERCRANE_WORKER_CREDENTIAL_KEY before another workspace's deployment can run on it")
+			}
+			return pods, capacity, "", nil
+		}
+		workerKey := workercredential.Derive(workerCredentialKey, tenant, deploymentID)
+		if workerKey == "" {
+			return nil, nil, "", errors.New("worker credential derivation needs the deployment's workspace and identity")
+		}
+		provider := pods
+		provider.WorkerAPIKey = workerKey
+		provider.WorkerCredentialVersion = workercredential.Version
+		return provider, capacity, workerKey, nil
+	}
+}
+
 func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetadata {
 	return map[string]controlapi.BackendMetadata{
 		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
 		// Native RunPod Pods expose the InferCrane worker API directly. The
 		// provider credential is only used to create and destroy the pod; direct
 		// revision benchmarks must authenticate with the worker credential just
-		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
-		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
+		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends. A Pod is
+		// started with a credential scoped to its tenant and deployment, so a
+		// benchmark derives that one; APIKey reaches only Pods the bootstrap
+		// operator started without one.
+		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY", WorkerMaster: cfg.WorkerCredentialKey},
 	}
 }
 

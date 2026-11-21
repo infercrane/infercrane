@@ -86,10 +86,13 @@ qualified:
 ```sh
 INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true
 RUNPOD_API_KEY_FILE=/run/secrets/runpod-api-key
+INFERCRANE_WORKER_CREDENTIAL_KEY=...   # at least 32 random bytes
 ```
 
 The entrypoint reads the owner-restricted file and exports the key only inside the control-plane
-process. Stripe test mode should remain enabled until checkout, signed webhook replay, wallet
+process. A managed Pod runs a customer's workload on the platform's RunPod account, so it is started
+with a credential derived for that workspace and deployment and never with the control-plane API
+key. Startup fails when the flag is set and `INFERCRANE_WORKER_CREDENTIAL_KEY` is not. Stripe test mode should remain enabled until checkout, signed webhook replay, wallet
 credit, deployment hold, settlement, and refund behavior pass together.
 
 Fly.io hosts the CPU control plane and stable public gateway. It does not supply GPUs. Customer

@@ -41,6 +41,7 @@ import (
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
+	"github.com/infercrane/infercrane/internal/workercredential"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
@@ -3769,6 +3770,43 @@ func TestBenchmarkNormalizesQualifiedRuntimeCloudAndObservedRegion(t *testing.T)
 	result := store.benchmarks[0]
 	if result.RuntimeVersion != support.DefaultRuntimeVersion || result.Provider != "runpod" || result.Region != "US-CA-1" {
 		t.Fatalf("runtime=%q provider=%q region=%q", result.RuntimeVersion, result.Provider, result.Region)
+	}
+}
+
+// A candidate benchmark calls the replica's own address. The control-plane API
+// key must never be what it presents there.
+func TestCandidateBenchmarkSendsTheReplicaOnlyTheCredentialItWasStartedWith(t *testing.T) {
+	const master = "worker-credential-master-0123456789ab"
+	spec := `{"model":"Qwen/Qwen3-8B","runtime":"vllm","compute_mode":"elastic","gpu":"L40S"}`
+	scoped := `{"provider":"runpod-pods","worker_credential_version":"` + workercredential.Version + `"}`
+	run := func(connection, details string) (*httptest.ResponseRecorder, *fakeBenchmarkRunner) {
+		store := &fakeStore{
+			resolved:  domain.ResolvedDeployment{Deployment: domain.Deployment{ID: "dep", TenantID: "global", Name: "qwen", ActiveRevisionID: "rev-active", CandidateRevisionID: "rev-candidate", ComputeConnectionID: connection}},
+			revisions: []domain.DeploymentRevision{{ID: "rev-active", SpecJSON: spec}, {ID: "rev-candidate", SpecJSON: spec}},
+			replicas:  []domain.Replica{{RevisionID: "rev-candidate", Ordinal: 0, Provider: "runpod-pods", LifecycleState: "ready", Health: "healthy", Endpoint: "https://candidate.invalid", ProviderDetails: details}},
+			artifact:  domain.ModelArtifact{ID: "artifact", Repository: "Qwen/Qwen3-8B", ModelIdentity: "Qwen/Qwen3-8B@commit"},
+		}
+		runner := &fakeBenchmarkRunner{}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/deployments/qwen/benchmarks", strings.NewReader(`{"requests":10,"concurrency":2,"random_seed":42,"revision":"candidate"}`))
+		request.Header.Set("Authorization", "Bearer bootstrap-api-key")
+		response := httptest.NewRecorder()
+		(API{Store: store, APIKey: "bootstrap-api-key", BenchmarkRunner: runner, Backends: map[string]BackendMetadata{"runpod-pods": {APIKey: "bootstrap-api-key", APIKeyEnv: "INFERCRANE_WORKER_API_KEY", WorkerMaster: master}}, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
+		return response, runner
+	}
+
+	response, runner := run("", scoped)
+	if want := workercredential.Derive(master, "global", "dep"); response.Code != http.StatusCreated || runner.config.APIKey != want || runner.config.APIKey == "bootstrap-api-key" {
+		t.Fatalf("scoped replica: response=%d %s credential=%q want %q", response.Code, response.Body.String(), runner.config.APIKey, want)
+	}
+	response, runner = run("connection-a", scoped)
+	if want := workercredential.Derive(master, "global", "dep"); response.Code != http.StatusCreated || runner.config.APIKey != want {
+		t.Fatalf("scoped replica in a tenant account: response=%d credential=%q", response.Code, runner.config.APIKey)
+	}
+	// A replica in a tenant's own account that records no scoped credential is
+	// not benchmarked at all: nothing the control plane holds may be sent to it.
+	response, runner = run("connection-a", `{"provider":"runpod-pods","worker_credential_version":""}`)
+	if response.Code != http.StatusServiceUnavailable || runner.config.Endpoint != "" || runner.config.APIKey != "" {
+		t.Fatalf("unscoped replica in a tenant account was benchmarked: response=%d config=%#v", response.Code, runner.config)
 	}
 }
 

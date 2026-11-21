@@ -58,7 +58,7 @@ func CandidateChatTarget(ctx context.Context, store CandidateChatStore, backends
 	if err != nil {
 		return ChatTarget{}, fmt.Errorf("resolve candidate deployment: %w", err)
 	}
-	target, _, err := directReplica(ctx, store, backends, candidate, resolved.Deployment.ID, draft)
+	target, _, err := directReplica(ctx, store, backends, candidate, resolved.Deployment, draft)
 	if errors.Is(err, errNoDirectEndpoint) {
 		return ChatTarget{}, ErrCandidateUnreachable
 	}

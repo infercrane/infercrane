@@ -3,7 +3,6 @@ package reconcile
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/routes"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/upstreamcredential"
+	"github.com/infercrane/infercrane/internal/workercredential"
 )
 
 type Store interface {
@@ -243,6 +243,7 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				_ = r.Store.Event(ctx, d.ID, target.ID, "replica_"+health, "Target "+target.Name+" became "+health, "")
 			}
 		}
+		healthy = routableTogether(healthy)
 		if hybrid, ok := r.ExternalFallback.(HybridFallback); ok {
 			mode, modeErr := hybrid.OverflowMode(ctx, d)
 			var waiting *float64
@@ -731,33 +732,51 @@ func routeSnapshot(deployment domain.Deployment, targets []domain.Target, upstre
 	return routes.Snapshot{DeploymentID: deployment.ID, RevisionID: deployment.ActiveRevisionID, TenantID: deployment.TenantID, Alias: deployment.Name, UpstreamModel: upstream, RouterURL: endpoint, RouterProcessID: processID, Provider: provider, Runtime: deployment.Runtime, ComputeMode: computeMode, UpstreamAPIKey: routerAPIKey, ProtocolCapabilities: capabilities}
 }
 
-func routeWorkerAPIKey(deployment domain.Deployment, targets []domain.Target, fallback string, derive func(string, string, string) string) string {
-	version := ""
+// routableTogether keeps the workers one router can reach. A router presents a
+// single credential to every worker behind it. While a deployment's older
+// workers still hold the operator's shared credential and its newer ones a
+// scoped credential, the scoped workers are routed and the older ones wait to
+// be replaced, so the shared credential is never sent to a scoped worker.
+func routableTogether(targets []domain.Target) []domain.Target {
+	scoped := make([]domain.Target, 0, len(targets))
 	for _, target := range targets {
-		var evidence struct {
-			WorkerCredentialVersion string `json:"worker_credential_version"`
+		if workercredential.VersionOf(target.ProviderDetails) != "" {
+			scoped = append(scoped, target)
 		}
-		if json.Unmarshal([]byte(target.ProviderDetails), &evidence) != nil || evidence.WorkerCredentialVersion == "" {
-			if deployment.ComputeConnectionID != "" || version != "" {
-				return ""
-			}
+	}
+	if len(scoped) == 0 || len(scoped) == len(targets) {
+		return targets
+	}
+	return scoped
+}
+
+func routeWorkerAPIKey(deployment domain.Deployment, targets []domain.Target, fallback string, derive func(string, string, string) string) string {
+	version, unscoped := "", false
+	for _, target := range targets {
+		targetVersion := workercredential.VersionOf(target.ProviderDetails)
+		if targetVersion == "" {
+			unscoped = true
 			continue
 		}
-		if version != "" && version != evidence.WorkerCredentialVersion {
+		if version != "" && version != targetVersion {
 			return ""
 		}
-		version = evidence.WorkerCredentialVersion
+		version = targetVersion
 	}
-	if version == "" {
+	switch {
+	case version == "":
+		// Only workers on operator compute share the operator's credential.
 		if deployment.ComputeConnectionID != "" {
 			return ""
 		}
 		return fallback
-	}
-	if derive == nil {
+	case unscoped || derive == nil:
+		// One credential cannot open workers that were started with different
+		// ones, and the shared credential is never sent to a scoped worker.
 		return ""
+	default:
+		return derive(deployment.TenantID, deployment.ID, version)
 	}
-	return derive(deployment.TenantID, deployment.ID, version)
 }
 
 // EngineMetricTargets lists healthy self-hosted replicas of running
@@ -822,9 +841,11 @@ func inspectRuntimeTarget(ctx context.Context, inspector integration.RuntimeInsp
 		}
 	}
 	// A tenant compute target is always protected by its deployment-scoped
-	// worker credential. Never downgrade its health probe to an unauthenticated
-	// request when credential evidence or inspector support is missing.
-	if deployment.ComputeConnectionID != "" {
+	// worker credential, and so is any worker that records a scoped one. Never
+	// downgrade such a probe to the inspector's own credential or to an
+	// unauthenticated request when credential evidence or inspector support is
+	// missing.
+	if deployment.ComputeConnectionID != "" || workercredential.VersionOf(target.ProviderDetails) != "" {
 		return false, nil
 	}
 	return inspector.Inspect(ctx, target.URL)
