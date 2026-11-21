@@ -22,90 +22,61 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
 import modal
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from models import MODELS, QWEN3_8B, check_args  # noqa: E402,F401 - check_args is the broker's
+
 APP_NAME = "infercrane-poc-modal-gpu"
 # vLLM 0.22.1, the same pinned image as tools/modal-kernel-poc on PR #229.
 VLLM_IMAGE = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
 VLLM_VERSION = "0.22.1"
-MODEL_ID = "Qwen/Qwen3-8B"
-MODEL_REVISION = "b968826d9c46dd6066d109eabc6255188de91218"
-MODEL_DIR = f"/weights/qwen3-8b-{MODEL_REVISION[:12]}"
+
+
 PORT = 8000
 GPU = "H100!"  # "!" pins an H100; Modal may not substitute an H200
 GPU_CPU, GPU_MEMORY_MIB = 4.0, 24576
-GPU_TIMEOUT_SECONDS = 90 * 60  # hard cap per container
+# Hard cap per container. A campaign keeps every setup serving until it ranks them, and a
+# gain is measured again on fresh servers, so a 27B campaign outlasts the 90 minutes an
+# 8B one needed.
+GPU_TIMEOUT_SECONDS = 150 * 60
 MAX_GPUS = 3
 LEASE_SECONDS = 180
 STARTUP_SECONDS = 15 * 60
-# The same for every setup. vLLM 0.22.1 can mis-detect its vendored DeepGEMM as
-# usable on H100 and fail while warming a BF16 model (tools/modal-kernel-poc).
-SERVER_ENV = {"VLLM_USE_DEEP_GEMM": "0"}
-
-# Arguments a pod may pass to vLLM. Anything else is refused, so a candidate can
-# never ask for more GPUs, another port, or another model.
-VALUE_FLAGS = {"--served-model-name", "--max-model-len", "--quantization", "--kv-cache-dtype", "--max-num-batched-tokens",
-               "--max-num-seqs", "--gpu-memory-utilization", "--block-size", "--seed", "--dtype"}
-SWITCH_FLAGS = {"--enable-prefix-caching", "--no-enable-prefix-caching", "--enable-chunked-prefill", "--no-enable-chunked-prefill",
-                "--async-scheduling", "--calculate-kv-scales"}
 
 app = modal.App(APP_NAME)
 weights = modal.Volume.from_name("infercrane-poc-modal-weights", create_if_missing=True)
 leases = modal.Dict.from_name("infercrane-poc-modal-leases", create_if_missing=True)
-download_image = modal.Image.debian_slim(python_version="3.12").pip_install("huggingface_hub[hf_xet]==1.1.4")
-image = modal.Image.from_registry(VLLM_IMAGE, setup_dockerfile_commands=["RUN ln -sf /usr/bin/python3 /usr/local/bin/python"]).entrypoint([])
+download_image = modal.Image.debian_slim(python_version="3.12").pip_install("huggingface_hub[hf_xet]==1.1.4").add_local_python_source("models")
+image = modal.Image.from_registry(VLLM_IMAGE, setup_dockerfile_commands=["RUN ln -sf /usr/bin/python3 /usr/local/bin/python"]).entrypoint([]).add_local_python_source("models")
 
 
-def check_args(args: list[str], model: str) -> None:
-    """Refuses arguments outside the allowlist; raises ValueError."""
-    if model != MODEL_ID:
-        raise ValueError(f"only {MODEL_ID} is staged on the remote volume, not {model}")
-    index, served = 0, None
-    while index < len(args):
-        flag = args[index]
-        name = flag.split("=", 1)[0]
-        if name in SWITCH_FLAGS and "=" not in flag:
-            index += 1
-            continue
-        if name not in VALUE_FLAGS:
-            raise ValueError(f"vLLM argument {flag!r} is not allowed on the remote GPU")
-        if "=" in flag:
-            value = flag.split("=", 1)[1]
-            index += 1
-        else:
-            if index + 1 >= len(args) or args[index + 1].startswith("--"):
-                raise ValueError(f"vLLM argument {flag} needs a value")
-            value = args[index + 1]
-            index += 2
-        if name == "--served-model-name":
-            served = value
-    if served != model:
-        raise ValueError("--served-model-name must be the lease's model")
-
-
-def server_command(args: list[str]) -> list[str]:
-    return ["vllm", "serve", MODEL_DIR, "--host", "0.0.0.0", "--port", str(PORT), *args]
+def server_command(args: list[str], model: str) -> list[str]:
+    return ["vllm", "serve", MODELS[model].dir, "--host", "0.0.0.0", "--port", str(PORT), *args]
 
 
 @app.function(image=download_image, volumes={"/weights": weights}, cpu=2, memory=8192, timeout=1800, retries=0)
-def download() -> dict[str, object]:
+def download(model_id: str) -> dict[str, object]:
     """Stages the pinned weights on the volume (CPU only, no GPU time)."""
     from huggingface_hub import snapshot_download
 
-    marker = Path(MODEL_DIR) / ".complete"
-    if marker.exists() and marker.read_text() == MODEL_REVISION:
-        return {"downloaded": False, "path": MODEL_DIR}
+    model = MODELS[model_id]
+    marker = Path(model.dir) / ".complete"
+    if marker.exists() and marker.read_text() == model.revision:
+        return {"downloaded": False, "path": model.dir}
     started = time.monotonic()
-    snapshot_download(repo_id=MODEL_ID, revision=MODEL_REVISION, local_dir=MODEL_DIR,
+    snapshot_download(repo_id=model.id, revision=model.revision, local_dir=model.dir,
                       allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "*.jinja"])
-    marker.write_text(MODEL_REVISION)
+    marker.write_text(model.revision)
     weights.commit()
-    files = sorted(p for p in Path(MODEL_DIR).rglob("*") if p.is_file() and ".cache" not in p.parts)
-    return {"downloaded": True, "seconds": round(time.monotonic() - started), "path": MODEL_DIR,
+    files = sorted(p for p in Path(model.dir).rglob("*") if p.is_file() and ".cache" not in p.parts)
+    return {"downloaded": True, "seconds": round(time.monotonic() - started), "path": model.dir,
             "bytes": sum(p.stat().st_size for p in files), "files": [p.name for p in files]}
 
 
@@ -184,12 +155,13 @@ def driver_mismatch(facts: dict, control: dict) -> str:
 
 def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) -> dict:
     started = time.time()
-    _publish(lease_id, {"state": "starting", "container_started_at": started, "dry": dry, "args": args,
-                                 "server_env": SERVER_ENV, "runtime_image": VLLM_IMAGE, "model_revision": MODEL_REVISION})
+    _publish(lease_id, {"state": "starting", "container_started_at": started, "dry": dry, "args": args, "runtime_image": VLLM_IMAGE})
     try:
         check_args(args, model)
     except ValueError as error:
         return _publish(lease_id, {"state": "failed", "error": str(error), "stopped_at": time.time()})
+    server_env = MODELS[model].env
+    _publish(lease_id, {"server_env": server_env, "model_revision": MODELS[model].revision})
     if not dry:
         facts = _gpu_facts()
         _publish(lease_id, {"gpu": f"{facts['name']}, {facts['memory']}, driver {facts['driver']}, CUDA {facts['cuda']}", "gpu_facts": facts,
@@ -199,8 +171,8 @@ def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) 
             # Checked before vLLM starts, so a wrong host costs seconds, not a model load.
             return _publish(lease_id, {"state": "failed", "reason": "driver_mismatch", "error": mismatch, "stopped_at": time.time()})
     log_path = Path("/tmp/server.log")
-    env = dict(os.environ, **SERVER_ENV, VLLM_API_KEY=api_key)
-    command = ["python3", "-c", FAKE_SERVER, str(PORT), api_key, model] if dry else server_command(args)
+    env = dict(os.environ, **server_env, VLLM_API_KEY=api_key)
+    command = ["python3", "-c", FAKE_SERVER, str(PORT), api_key, model] if dry else server_command(args, model)
     with log_path.open("w") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
     reason, error = "", ""
@@ -275,8 +247,95 @@ def serve_dry(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
     return _serve(lease_id, args, api_key, model, dry=True)
 
 
+CHECK_SECONDS = 25 * 60
+# Families of vLLM's /metrics the control plane's engine scrape reads (docs/features/telemetry.md).
+ENGINE_FAMILIES = ("vllm:num_requests_running", "vllm:num_requests_waiting", "vllm:kv_cache_usage_perc", "vllm:request_queue_time_seconds",
+                   "vllm:request_prefill_time_seconds", "vllm:request_decode_time_seconds", "vllm:time_to_first_token_seconds",
+                   "vllm:e2e_request_latency_seconds", "vllm:num_preemptions", "vllm:prefix_cache_queries")
+
+
+def _call(path: str, key: str | None, body: dict | None = None) -> tuple[int, str]:
+    request = urllib.request.Request(f"http://127.0.0.1:{PORT}{path}", data=json.dumps(body).encode() if body else None, method="POST" if body else "GET")
+    request.add_header("Content-Type", "application/json")
+    if key:
+        request.add_header("Authorization", f"Bearer {key}")
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            return response.status, response.read().decode(errors="replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode(errors="replace")
+
+
+def _healthy() -> bool:
+    try:
+        return _call("/health", None)[0] == 200
+    except OSError:
+        return False
+
+
+@app.function(image=image, gpu=GPU, cpu=GPU_CPU, memory=GPU_MEMORY_MIB, volumes={"/weights": weights}, timeout=CHECK_SECONDS, retries=0,
+              single_use_containers=True)
+def check_h100(model_id: str) -> dict:
+    """Starts the model's current setup once and checks what a run relies on: the server
+    starts, refuses a request without its key, answers one with it, calls a tool, and
+    exports the vLLM metrics the control plane reads."""
+    import secrets
+
+    model, started = MODELS[model_id], time.monotonic()
+    args = ["--served-model-name", model.id, *model.current_args]
+    result: dict = {"model": model.id, "revision": model.revision, "args": args, "env": model.env, "gpu_facts": _gpu_facts()}
+    key, log_path = secrets.token_hex(16), Path("/tmp/server.log")
+    with log_path.open("w") as log:
+        process = subprocess.Popen(server_command(args, model.id), stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, **model.env, VLLM_API_KEY=key))
+    try:
+        while process.poll() is None and not _healthy():
+            if time.monotonic() - started > STARTUP_SECONDS:
+                raise TimeoutError(f"server not ready after {STARTUP_SECONDS} s")
+            time.sleep(3)
+        if process.poll() is not None:
+            raise RuntimeError(f"server exited with {process.returncode} while starting")
+        result["startup_seconds"] = round(time.monotonic() - started, 1)
+        result["models_without_key"] = _call("/v1/models", None)[0]
+        result["models_with_key"] = _call("/v1/models", key)[0]
+        chat = {"model": model.id, "max_tokens": 64, "temperature": 0, "messages": [{"role": "user", "content": "Name three primary colors."}],
+                "chat_template_kwargs": {"enable_thinking": False}}
+        code, body = _call("/v1/chat/completions", key, chat)
+        result["chat"] = {"status": code, "body": body[:600]}
+        tool = {"type": "function", "function": {"name": "get_weather", "description": "Current weather for a city",
+                                                 "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}
+        code, body = _call("/v1/chat/completions", key, dict(chat, tools=[tool], messages=[{"role": "user", "content": "What is the weather in Paris?"}], max_tokens=128))
+        result["tool_call"] = {"status": code, "body": body[:800]}
+        metrics = _call("/metrics", key)[1]
+        result["metrics"] = {family: any(line.startswith(family) for line in metrics.splitlines()) for family in ENGINE_FAMILIES}
+    except Exception as failure:  # noqa: BLE001 - recorded, never retried
+        result["error"] = f"{type(failure).__name__}: {str(failure)[-2000:]}"
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    server_log = log_path.read_text(errors="replace")
+    lines = [line for line in server_log.splitlines() if "it/s]" not in line and "s/it]" not in line]  # no progress bars
+    words = ("kv cache", "maximum concurrency", "deepgemm", "deep_gemm", "loading weights took", "model loading took", "torch.compile", "error", "rust", "frontend", "panic", "init engine")
+    result["log_lines"] = [line[-300:] for line in lines if any(word in line.lower() for word in words)][-60:]
+    if result.get("error"):
+        result["log_tail"] = "\n".join(line[-300:] for line in lines[-60:])
+    result["container_seconds"] = round(time.monotonic() - started, 1)
+    return result
+
+
 @app.local_entrypoint()
-def main(action: str = "download") -> None:
-    if action != "download":
-        raise SystemExit("only `download` runs from the command line; the broker starts servers")
-    print(json.dumps(download.remote(), indent=2))
+def main(action: str = "download", model: str = QWEN3_8B.id) -> None:
+    if action == "download":
+        print(json.dumps(download.remote(model), indent=2))
+        return
+    if action != "check":
+        raise SystemExit("only `download` and `check` run from the command line; the broker starts servers")
+    # Spawned and cancelled at its limit: a container that fails while starting is
+    # otherwise retried without end, whatever retries says.
+    call = check_h100.spawn(model)
+    try:
+        print(json.dumps(call.get(timeout=CHECK_SECONDS + 600), indent=2))
+    finally:
+        call.cancel(terminate_containers=True)
