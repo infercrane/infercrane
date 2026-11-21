@@ -96,7 +96,10 @@ InferCrane already has:
 - append-only, versioned retail rate contracts with validity windows;
 - deterministic supply planning with a hard minimum 15% supplier-token margin
   floor; a landed-COGS floor is still required before paid launch;
-- atomic in-memory route generations with last-known-good retention;
+- atomic in-memory route generations with last-known-good retention; a product
+  whose evidence, validity window, or readiness state has lapsed is withheld
+  from the generation while every other product still publishes, and only a
+  malformed or mismatched contract rejects the whole generation;
 - tenant-isolated prepaid reservation before supplier transmission;
 - explicit `reserved -> transmitted -> response_started -> settled` fencing;
 - `pending_reconciliation` for ambiguous usage instead of guessed charges;

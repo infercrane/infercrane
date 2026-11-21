@@ -5,7 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -15,8 +17,9 @@ import (
 
 // RouteSourceStore returns one fully validated, secret-free generation. A
 // malformed durable generation is an error, never a partially usable result.
+// A product that has only lapsed is withheld from the generation instead.
 type RouteSourceStore interface {
-	PublishedModelAPIRoutes(context.Context, time.Time) ([]RouteSource, error)
+	PublishedModelAPIRoutes(context.Context, time.Time) (RouteGeneration, error)
 }
 
 // TargetResolver is the narrow trusted boundary that maps an operator-owned
@@ -185,7 +188,8 @@ func (r *RegistryTargetResolver) ResolveHostedModelCredential(ctx context.Contex
 
 // Publisher periodically compiles a complete generation and swaps it into the
 // request-path Directory atomically. Any source, secret, or validation failure
-// retains the previous known-good snapshot.
+// retains the previous known-good snapshot. Products the store withheld as
+// lapsed are left out, and the change is logged once rather than every cycle.
 type Publisher struct {
 	Store     RouteSourceStore
 	Resolver  TargetResolver
@@ -194,6 +198,9 @@ type Publisher struct {
 	Interval  time.Duration
 	Logger    *slog.Logger
 	Now       func() time.Time
+
+	mu       sync.Mutex
+	withheld string
 }
 
 func (p *Publisher) PublishOnce(ctx context.Context) error {
@@ -205,12 +212,12 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 		now = p.Now
 	}
 	at := now().UTC()
-	sources, err := p.Store.PublishedModelAPIRoutes(ctx, at)
+	generation, err := p.Store.PublishedModelAPIRoutes(ctx, at)
 	if err != nil {
 		return err
 	}
-	routes := make([]PublishedRoute, 0, len(sources))
-	for _, source := range sources {
+	routes := make([]PublishedRoute, 0, len(generation.Sources))
+	for _, source := range generation.Sources {
 		if !source.Entitlement.activeAt(at) || !source.Publication.currentAt(at) || !source.Rate.currentAt(at) {
 			return errors.New("hosted route source is expired or inactive")
 		}
@@ -271,7 +278,42 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 		}
 		routes = append(routes, route)
 	}
-	return p.Directory.Publish(routes)
+	if err := p.Directory.Publish(routes); err != nil {
+		return err
+	}
+	p.reportWithheld(generation.Withheld)
+	return nil
+}
+
+// reportWithheld logs the withheld products when that set changes, so a
+// lapsed product is visible without repeating the same line every cycle.
+func (p *Publisher) reportWithheld(withheld []WithheldRoute) {
+	reasons := map[string]string{}
+	for _, route := range withheld {
+		reasons[route.ProductID] = route.Reason
+	}
+	products := make([]string, 0, len(reasons))
+	for product := range reasons {
+		products = append(products, product)
+	}
+	sort.Strings(products)
+	summary := make([]string, 0, len(products))
+	for _, product := range products {
+		summary = append(summary, product+": "+reasons[product])
+	}
+	current := strings.Join(summary, "; ")
+	p.mu.Lock()
+	changed := current != p.withheld
+	p.withheld = current
+	p.mu.Unlock()
+	if !changed || p.Logger == nil {
+		return
+	}
+	if current == "" {
+		p.Logger.Info("every hosted model API product is callable again")
+		return
+	}
+	p.Logger.Warn("hosted model API products withheld until renewed; other products stay callable", "withheld", current)
 }
 
 func (p *Publisher) Run(ctx context.Context) {

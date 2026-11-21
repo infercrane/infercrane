@@ -17,16 +17,20 @@ import (
 )
 
 // PublishedModelAPIRoutes compiles the complete secret-free hosted routing
-// generation. It intentionally fails the whole generation when any active
-// entitlement points at stale or mismatched control-plane evidence.
-func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]modelapirouting.RouteSource, error) {
+// generation. A product whose evidence or validity window has lapsed, or
+// whose readiness state is not ready, is withheld: it is left out of the
+// generation and named in Withheld, so one lapsed product never takes the
+// others down. Mismatched or malformed control-plane evidence still fails the
+// whole generation, because it means the persisted contract cannot be
+// trusted.
+func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) (modelapirouting.RouteGeneration, error) {
 	if at.IsZero() {
-		return nil, errors.New("route publication time is required")
+		return modelapirouting.RouteGeneration{}, errors.New("route publication time is required")
 	}
 	at = at.UTC()
 	inner, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return nil, err
+		return modelapirouting.RouteGeneration{}, err
 	}
 	tx := &tx{inner}
 	defer tx.Rollback()
@@ -44,7 +48,7 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 	WHERE e.state='active' AND e.valid_from<=? AND (e.valid_until IS NULL OR e.valid_until>?)
 	ORDER BY e.customer_tenant_id,e.product_id`, at, at)
 	if err != nil {
-		return nil, err
+		return modelapirouting.RouteGeneration{}, err
 	}
 	defer rows.Close()
 	type draft struct {
@@ -53,6 +57,10 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 		plan       modelapisupply.Plan
 	}
 	drafts := make([]draft, 0)
+	withheld := make([]modelapirouting.WithheldRoute, 0)
+	withhold := func(source modelapirouting.RouteSource, reason string) {
+		withheld = append(withheld, modelapirouting.WithheldRoute{CustomerTenantID: source.Entitlement.CustomerTenantID, ProductID: source.Entitlement.ProductID, Reason: reason})
+	}
 	for rows.Next() {
 		var source modelapirouting.RouteSource
 		var entitlementUntil, publicationUntil, planUntil sql.NullTime
@@ -70,7 +78,7 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 			&source.Rate.ContractDigest, &source.Rate.InputMicrousdPerMillion, &cachedInput, &source.Rate.OutputMicrousdPerMillion, &source.Rate.ValidFrom, &source.Rate.ValidUntil,
 			&planProtocol, &planSchema, &planDigest, &planStatus, &planJSON, &generatedAt, &planUntil,
 		); err != nil {
-			return nil, err
+			return modelapirouting.RouteGeneration{}, err
 		}
 		source.Publication.ProductID = source.Entitlement.ProductID
 		source.Publication.OperatorTenantID = source.Entitlement.OperatorTenantID
@@ -89,51 +97,63 @@ func (s *Store) PublishedModelAPIRoutes(ctx context.Context, at time.Time) ([]mo
 		}
 		var claims []modelapiproduct.CapabilityClaim
 		if json.Unmarshal([]byte(capabilitiesJSON), &claims) != nil {
-			return nil, fmt.Errorf("hosted product %q has invalid capability contract", source.Entitlement.ProductID)
+			return modelapirouting.RouteGeneration{}, fmt.Errorf("hosted product %q has invalid capability contract", source.Entitlement.ProductID)
 		}
 		operations, capabilityUntil, operationErr := qualifiedOperations(claims, at)
 		if operationErr != nil {
-			return nil, fmt.Errorf("hosted product %q: %w", source.Entitlement.ProductID, operationErr)
+			withhold(source, operationErr.Error())
+			continue
 		}
 		if requestsPerMinute.Valid || tokensPerMinute.Valid || monthlySpend.Valid || source.Entitlement.MaxRequestMicrousd <= 0 || source.Rate.CachedInputMicrousdPerMillion != nil ||
-			publicationState != "qualified" || !publicationUntil.Valid || !at.Before(publicationUntil.Time.UTC()) || activeRateID != source.Rate.ID ||
-			productProtocol != "openai" || (availability != "available" && availability != "degraded") || planProtocol != "openai" || planSchema != modelapisupply.SchemaVersion ||
-			planStatus != modelapisupply.StatusReady || !planUntil.Valid || !at.Before(planUntil.Time.UTC()) || at.Before(source.Entitlement.ValidFrom.UTC()) ||
-			(source.Entitlement.ValidUntil != nil && !at.Before(source.Entitlement.ValidUntil.UTC())) || at.Before(source.Rate.ValidFrom.UTC()) || !at.Before(source.Rate.ValidUntil.UTC()) {
-			return nil, fmt.Errorf("hosted product %q has stale or incompatible publication, entitlement, plan, or rate", source.Entitlement.ProductID)
+			!publicationUntil.Valid || activeRateID != source.Rate.ID || productProtocol != "openai" || planProtocol != "openai" || planSchema != modelapisupply.SchemaVersion || !planUntil.Valid {
+			return modelapirouting.RouteGeneration{}, fmt.Errorf("hosted product %q has incompatible publication, entitlement, plan, or rate", source.Entitlement.ProductID)
+		}
+		if reason := productLapse(at, productReadiness{
+			publicationState: publicationState, availability: availability, planStatus: planStatus,
+			publicationUntil: publicationUntil.Time, planUntil: planUntil.Time,
+			entitlementFrom: source.Entitlement.ValidFrom, entitlementUntil: source.Entitlement.ValidUntil,
+			rateFrom: source.Rate.ValidFrom, rateUntil: source.Rate.ValidUntil,
+		}); reason != "" {
+			withhold(source, reason)
+			continue
 		}
 		var plan modelapisupply.Plan
 		if json.Unmarshal([]byte(planJSON), &plan) != nil || plan.Digest != planDigest || !plan.HasCanonicalDigest() || plan.SchemaVersion != planSchema || plan.ModelID != source.Entitlement.ProductID ||
 			plan.Protocol != planProtocol || plan.Status != modelapisupply.StatusReady || plan.Primary == nil || !plan.ValidUntil.Equal(planUntil.Time.UTC()) || !generatedAt.UTC().Equal(plan.GeneratedAt.UTC()) {
-			return nil, fmt.Errorf("hosted product %q supply plan materialization does not match its persisted contract", source.Entitlement.ProductID)
+			return modelapirouting.RouteGeneration{}, fmt.Errorf("hosted product %q supply plan materialization does not match its persisted contract", source.Entitlement.ProductID)
 		}
 		source.Publication.ValidUntil = earliestTime(publicationUntil.Time, source.Rate.ValidUntil, planUntil.Time, capabilityUntil)
 		source.Publication.EvidenceValidUntil = publicationUntil.Time.UTC()
 		drafts = append(drafts, draft{source: source, operations: operations, plan: plan})
 	}
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return modelapirouting.RouteGeneration{}, err
 	}
 	if err = rows.Close(); err != nil {
-		return nil, err
+		return modelapirouting.RouteGeneration{}, err
 	}
 	sources := make([]modelapirouting.RouteSource, 0, len(drafts))
 	for _, item := range drafts {
 		source := item.source
 		source.Candidates, err = publishedModelAPICandidates(ctx, tx, at, source, item.operations, item.plan)
+		var lapse routeLapse
+		if errors.As(err, &lapse) {
+			withhold(source, lapse.reason)
+			continue
+		}
 		if err != nil {
-			return nil, err
+			return modelapirouting.RouteGeneration{}, err
 		}
 		if len(source.Candidates) == 0 {
-			return nil, fmt.Errorf("hosted product %q has no qualified supply candidate", source.Entitlement.ProductID)
+			return modelapirouting.RouteGeneration{}, fmt.Errorf("hosted product %q has no qualified supply candidate", source.Entitlement.ProductID)
 		}
 		source.Publication.CompatibilityKey = source.Candidates[0].Candidate.CompatibilityKey
 		sources = append(sources, source)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, err
+		return modelapirouting.RouteGeneration{}, err
 	}
-	return sources, nil
+	return modelapirouting.RouteGeneration{Sources: sources, Withheld: withheld}, nil
 }
 
 func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, source modelapirouting.RouteSource, operations []string, plan modelapisupply.Plan) ([]modelapirouting.CandidateSource, error) {
@@ -187,12 +207,17 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 		if !selectionOK || selection.CandidateID != candidate.ID || selection.OfferID != candidate.OfferID || selection.OfferVersion != candidate.OfferVersion ||
 			selection.RetailRateID != rateID || selection.RetailRateVersion != candidateRateVersion || selection.QualificationEvidenceID != qualificationID || selection.Supplier != candidate.Supplier ||
 			selection.SupplierModelID != candidate.SupplierModelID || selection.TupleKey != candidate.CompatibilityKey || expectedPosition != position || rateID != source.Rate.ID || candidateRateVersion != source.Rate.Version ||
-			offerState != "active" || access != "ready" || availability != "available" || health != "healthy" || !observed.Valid || observed.Time.After(at) || !costUntil.Valid || !at.Before(costUntil.Time) ||
-			commercialState != "ready" || !commercialUntil.Valid || !at.Before(commercialUntil.Time) || qualificationState != "qualified" || qualificationTuple != candidate.CompatibilityKey ||
+			!observed.Valid || observed.Time.After(at) || !costUntil.Valid || !commercialUntil.Valid || qualificationTuple != candidate.CompatibilityKey ||
 			qualificationProtocol != candidate.Protocol || qualificationRegion != region || !reflect.DeepEqual(offerCapabilities, qualificationCapabilities) || !evidenceRef.Valid || evidenceRef.String == "" ||
-			!evidenceDigest.Valid || evidenceDigest.String == "" || !qualificationObserved.Valid || qualificationObserved.Time.After(at) || !qualificationUntil.Valid || !at.Before(qualificationUntil.Time) ||
-			selection.ValidUntil.IsZero() || !at.Before(selection.ValidUntil.UTC()) || !supportsPublishedOperations(offerCapabilities, operations) {
+			!evidenceDigest.Valid || evidenceDigest.String == "" || !qualificationObserved.Valid || qualificationObserved.Time.After(at) || !qualificationUntil.Valid ||
+			selection.ValidUntil.IsZero() || !supportsPublishedOperations(offerCapabilities, operations) {
 			return nil, fmt.Errorf("hosted candidate %q does not exactly match current plan, rate, qualification, and evidence", candidate.ID)
+		}
+		if reason := candidateLapse(at, candidateReadiness{
+			offerState: offerState, access: access, availability: availability, health: health, commercialState: commercialState, qualificationState: qualificationState,
+			costUntil: costUntil.Time, commercialUntil: commercialUntil.Time, qualificationUntil: qualificationUntil.Time, selectionUntil: selection.ValidUntil,
+		}); reason != "" {
+			return nil, routeLapse{reason: fmt.Sprintf("candidate %q %s", candidate.ID, reason)}
 		}
 		if bindingCount > 1 {
 			return nil, fmt.Errorf("hosted candidate %q has ambiguous current target bindings", candidate.ID)
@@ -204,7 +229,9 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 			candidate.TargetBindingID, candidate.TargetBindingDigest = bindingID.String, bindingDigest.String
 			item.EndpointReference, item.EndpointConfigDigest = endpointReference.String, endpointConfigDigest.String
 		} else if requiresModelAPITargetBinding(item.Adapter) {
-			return nil, fmt.Errorf("hosted candidate %q has no current immutable target binding", candidate.ID)
+			// Bindings are selected by their validity window, so none means the
+			// last one lapsed (or was never published): withhold the product.
+			return nil, routeLapse{reason: fmt.Sprintf("candidate %q has no current immutable target binding", candidate.ID)}
 		}
 		candidate.Operations = append([]string(nil), operations...)
 		candidate.Qualified, candidate.Available = true, true
@@ -224,6 +251,66 @@ func publishedModelAPICandidates(ctx context.Context, tx *tx, at time.Time, sour
 		}
 	}
 	return candidates, nil
+}
+
+// routeLapse withholds one product from the generation instead of failing it.
+type routeLapse struct{ reason string }
+
+func (l routeLapse) Error() string { return l.reason }
+
+type productReadiness struct {
+	publicationState, availability, planStatus                        string
+	publicationUntil, planUntil, entitlementFrom, rateFrom, rateUntil time.Time
+	entitlementUntil                                                  *time.Time
+}
+
+// productLapse names why a product whose contract is consistent is not
+// callable at `at`: a readiness state is not ready or a validity window has
+// ended. An empty reason means the product is current.
+func productLapse(at time.Time, p productReadiness) string {
+	switch {
+	case p.publicationState != "qualified":
+		return fmt.Sprintf("publication is %q, not qualified", p.publicationState)
+	case p.availability != "available" && p.availability != "degraded":
+		return fmt.Sprintf("product availability is %q", p.availability)
+	case p.planStatus != modelapisupply.StatusReady:
+		return fmt.Sprintf("supply plan is %q, not ready", p.planStatus)
+	case !at.Before(p.publicationUntil.UTC()):
+		return "publication evidence expired"
+	case !at.Before(p.planUntil.UTC()):
+		return "supply plan expired"
+	case at.Before(p.entitlementFrom.UTC()) || (p.entitlementUntil != nil && !at.Before(p.entitlementUntil.UTC())):
+		return "entitlement is outside its validity window"
+	case at.Before(p.rateFrom.UTC()) || !at.Before(p.rateUntil.UTC()):
+		return "retail rate is outside its validity window"
+	}
+	return ""
+}
+
+type candidateReadiness struct {
+	offerState, access, availability, health, commercialState, qualificationState string
+	costUntil, commercialUntil, qualificationUntil, selectionUntil                time.Time
+}
+
+// candidateLapse is productLapse for one supply candidate of a product.
+func candidateLapse(at time.Time, c candidateReadiness) string {
+	switch {
+	case c.offerState != "active" || c.access != "ready" || c.availability != "available" || c.health != "healthy":
+		return fmt.Sprintf("offer is not ready (state %q, access %q, availability %q, health %q)", c.offerState, c.access, c.availability, c.health)
+	case c.commercialState != "ready":
+		return fmt.Sprintf("commercial terms are %q, not ready", c.commercialState)
+	case c.qualificationState != "qualified":
+		return fmt.Sprintf("qualification is %q, not qualified", c.qualificationState)
+	case !at.Before(c.qualificationUntil.UTC()):
+		return "qualification evidence expired"
+	case !at.Before(c.costUntil.UTC()):
+		return "supplier cost expired"
+	case !at.Before(c.commercialUntil.UTC()):
+		return "commercial terms expired"
+	case !at.Before(c.selectionUntil.UTC()):
+		return "supply plan selection expired"
+	}
+	return ""
 }
 
 func requiresModelAPITargetBinding(adapter string) bool {

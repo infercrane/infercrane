@@ -72,6 +72,20 @@ fly logs -a infercrane-control --machine MACHINE_ID
 fly machine status MACHINE_ID -a infercrane-control
 ```
 
+## When evidence lapses
+
+The control plane republishes hosted routes every 15 seconds. A product whose
+evidence has lapsed is withheld: it leaves the catalog and its requests are
+refused, while every other product stays callable. The control plane logs
+`hosted model API products withheld until renewed` with each product and
+reason when that set changes, and `every hosted model API product is callable
+again` when it clears.
+
+A scheduled Machine that never fires looks the same as a renewal that fails.
+After creating one, confirm `fly machine status MACHINE_ID` lists `start` and
+`exit` events about an hour apart. A schedule with only `launch` and `update`
+events has not run.
+
 Fly does not allow a scheduled Machine to be started manually. For a
 deliberate pre-demo renewal, create a separately reviewed one-shot Machine
 from the same immutable image and environment with `--restart no`,
