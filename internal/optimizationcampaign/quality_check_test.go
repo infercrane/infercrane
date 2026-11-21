@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 )
 
 // qualityStoreFixture is the built-in check's view of persistence: deployments
@@ -89,6 +90,9 @@ type answerCompleter struct {
 	mu      sync.Mutex
 	answers map[string]map[string]string
 	calls   map[string]int
+	// refuseTools names endpoints that answer HTTP 400 to a request with
+	// tools, as vLLM does without --enable-auto-tool-choice.
+	refuseTools map[string]bool
 }
 
 func (c *answerCompleter) Complete(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, prompt qualitycheck.Prompt) (qualitycheck.Answer, error) {
@@ -98,6 +102,9 @@ func (c *answerCompleter) Complete(_ context.Context, target qualitycheck.Target
 		c.calls = map[string]int{}
 	}
 	c.calls[target.Endpoint]++
+	if prompt.HasTools() && c.refuseTools[target.Endpoint] {
+		return qualitycheck.Answer{}, fmt.Errorf("prompt %s: %w", prompt.ID, qualitycheck.ErrToolsRefused)
+	}
 	if answer, ok := c.answers[target.Endpoint][prompt.ID]; ok {
 		return qualitycheck.Answer{Content: answer}, nil
 	}
@@ -301,6 +308,48 @@ func TestBuiltinQualityCheckIsInconclusiveWhenTheReferenceGivesNoAnswerText(t *t
 	}
 	if run.store.recorded != 0 {
 		t.Fatalf("recorded %d evidence rows for answers that were never given", run.store.recorded)
+	}
+}
+
+func TestBuiltinQualityCheckLeavesToolCasesUncheckedWhenTheControlRefusesTools(t *testing.T) {
+	run := newQualityCampaign(t, optimizer.Request{})
+	run.completer.refuseTools = map[string]bool{"http://control": true}
+	validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+	if err != nil || !validated.Passed || validated.Inconclusive {
+		t.Fatalf("validation = %+v err=%v", validated, err)
+	}
+	// The five built-in tool cases were never asked of the candidate and
+	// have no score; the 24 answer prompts decide.
+	if run.completer.calls["http://control"] != 29 || run.completer.calls["http://fast"] != 24 {
+		t.Fatalf("calls = %v", run.completer.calls)
+	}
+	for _, deployment := range []string{"qwen-opt-fast", "qwen-opt-control"} {
+		row := run.store.evidence[deployment][0]
+		var distribution qualityevidence.Distribution
+		if err = json.Unmarshal([]byte(row.DistributionJSON), &distribution); err != nil || row.SampleCount != 24 || distribution.ToolCalls == nil || distribution.ToolCalls.NotChecked != 5 || distribution.ToolCalls.Cases != 0 {
+			t.Fatalf("%s evidence = %+v distribution %+v err=%v", deployment, row, distribution.ToolCalls, err)
+		}
+	}
+}
+
+func TestBuiltinQualityCheckBlocksACandidateThatRefusesTools(t *testing.T) {
+	run := newQualityCampaign(t, optimizer.Request{})
+	run.completer.refuseTools = map[string]bool{"http://fast": true}
+	validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+	if err != nil || validated.Passed || validated.FailureCode != FailureQualityRejected {
+		t.Fatalf("validation = %+v err=%v", validated, err)
+	}
+}
+
+func TestBuiltinQualityCheckIsInconclusiveWhenNoCaseCanBeChecked(t *testing.T) {
+	body := []byte(`{"schema":"infercrane.dev/quality-eval-set/v2","name":"agent","version":"1","prompts":[{"id":"weather","prompt":"Weather in Paris?","tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}]}`)
+	digest := qualitycheck.Digest(body)
+	run := newQualityCampaign(t, optimizer.Request{QualityEvalSet: digest})
+	run.store.evalSets = map[string]domain.QualityEvalSet{digest: {Digest: digest, Body: string(body)}}
+	run.completer.refuseTools = map[string]bool{"http://control": true}
+	validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+	if err != nil || !validated.Inconclusive || validated.Passed || validated.FailureCode != FailureQualityNothingChecked || run.store.recorded != 0 {
+		t.Fatalf("validation = %+v err=%v recorded=%d", validated, err, run.store.recorded)
 	}
 }
 

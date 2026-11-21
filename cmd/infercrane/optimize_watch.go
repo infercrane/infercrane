@@ -42,6 +42,7 @@ var watchReasonWords = map[string]string{
 	"quality_gate_rejected":                           "answers changed too much",
 	"quality_reference_unavailable":                   "no reference answers to compare with",
 	"quality_reference_unanswered":                    "the reference gave no answer text to compare with",
+	"quality_nothing_checked":                         "the reference refused tools, and every eval case uses them",
 	"release_guard_rejected":                          "failed the safety check",
 	"release_guard_inconclusive":                      "safety check had too little evidence",
 	"approval_expired_before_activation":              "approval expired before rollout",

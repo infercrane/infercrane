@@ -218,6 +218,10 @@ func (d CompositeDriver) Validate(ctx context.Context, candidateID string, candi
 		// Greedy answers repeat, so retrying cannot help. Answers the
 		// reference never gave never pass.
 		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityReferenceUnanswered}, nil
+	case errors.Is(err, ErrQualityNothingChecked):
+		// The reference keeps refusing tools until it is relaunched, and a
+		// check with no scored case never passes.
+		return ValidationResult{Inconclusive: true, FailureCode: FailureQualityNothingChecked}, nil
 	case err != nil:
 		return ValidationResult{}, operations.Retryable(retryQualityCheckFailed, err)
 	}
