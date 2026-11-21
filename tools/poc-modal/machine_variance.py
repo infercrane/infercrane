@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import modal_gpu  # noqa: E402
 
 SCHEMA = "infercrane.machine-variance/v1"
+MODEL = modal_gpu.QWEN3_8B
 PORT = 8000
 TIMEOUT_SECONDS = 9 * 60  # hard cap per container
 QUEUE_SECONDS = 30 * 60  # a call that has no GPU after this long is cancelled (waiting is not billed)
@@ -110,8 +111,8 @@ def bench(seed: int, prompts: int) -> dict:
     """One benchmark run against the local server, with the GPU sampled while it runs."""
     sampler = subprocess.Popen(["nvidia-smi", "--query-gpu=clocks.sm,power.draw,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits", "-lms", "500"],
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-    command = ["vllm", "bench", "serve", "--backend", "vllm", "--base-url", f"http://127.0.0.1:{PORT}", "--model", modal_gpu.MODEL_ID,
-               "--tokenizer", modal_gpu.MODEL_DIR, "--dataset-name", "random", "--random-input-len", str(INPUT_TOKENS),
+    command = ["vllm", "bench", "serve", "--backend", "vllm", "--base-url", f"http://127.0.0.1:{PORT}", "--model", MODEL.id,
+               "--tokenizer", MODEL.dir, "--dataset-name", "random", "--random-input-len", str(INPUT_TOKENS),
                "--random-output-len", str(OUTPUT_TOKENS), "--random-range-ratio", "0", "--ignore-eos", "--num-prompts", str(prompts),
                "--max-concurrency", str(CONCURRENCY), "--seed", str(seed), "--percentile-metrics", "ttft,tpot,itl,e2el",
                "--metric-percentiles", "50,95", "--save-result", "--result-dir", "/tmp", "--result-filename", f"bench-{seed}.json", "--disable-tqdm"]
@@ -138,8 +139,8 @@ def measure(machine: int) -> dict:
     print(f"machine {machine}: {json.dumps(result['facts'])}", flush=True)
     log_path = Path("/tmp/server.log")
     with log_path.open("w") as log:
-        server = subprocess.Popen(["vllm", "serve", modal_gpu.MODEL_DIR, "--host", "127.0.0.1", "--port", str(PORT), "--served-model-name", modal_gpu.MODEL_ID],
-                                  stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, **modal_gpu.SERVER_ENV))
+        server = subprocess.Popen(["vllm", "serve", MODEL.dir, "--host", "127.0.0.1", "--port", str(PORT), "--served-model-name", MODEL.id],
+                                  stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, **MODEL.env))
     try:
         ready_by = started + STARTUP_SECONDS
         while not _healthy():
@@ -245,8 +246,8 @@ def main(machines: int = 8, budget_usd: float = 0.0, stagger_seconds: int = 20, 
         for _, call, _ in calls:
             call.cancel(terminate_containers=True)
     report = {"schema_version": SCHEMA, "measured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "setup": {"model": modal_gpu.MODEL_ID, "model_revision": modal_gpu.MODEL_REVISION, "runtime_image": modal_gpu.VLLM_IMAGE,
-                        "vllm_version": modal_gpu.VLLM_VERSION, "server_args": ["--served-model-name", modal_gpu.MODEL_ID], "server_env": modal_gpu.SERVER_ENV,
+              "setup": {"model": MODEL.id, "model_revision": MODEL.revision, "runtime_image": modal_gpu.VLLM_IMAGE,
+                        "vllm_version": modal_gpu.VLLM_VERSION, "server_args": ["--served-model-name", MODEL.id], "server_env": MODEL.env,
                         "gpu": modal_gpu.GPU, "cpu": modal_gpu.GPU_CPU, "memory_mib": modal_gpu.GPU_MEMORY_MIB},
               "workload": {"client": "vllm bench serve (same container)", "dataset": "random", "input_tokens": INPUT_TOKENS, "output_tokens": OUTPUT_TOKENS,
                            "ignore_eos": True, "concurrency": CONCURRENCY, "warmup_prompts": WARMUP_PROMPTS, "run_prompts": RUN_PROMPTS,
