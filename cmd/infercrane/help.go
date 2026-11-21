@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/infercrane/infercrane/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Help reads like a short menu: a few everyday sections first, and every
@@ -186,10 +187,10 @@ const usageTemplate = `{{heading "Usage"}}{{if .Runnable}}
   {{rpad .Name .NamePadding }} {{muted .Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
 
 {{heading "Options"}}
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+{{flagUsages .LocalFlags | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
 
 {{heading "Global options"}}
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}
+{{flagUsages .InheritedFlags | trimTrailingWhitespaces}}{{end}}
 
 Docs: ` + cliDocsURL + `
 `
@@ -198,6 +199,9 @@ func init() {
 	cobra.AddTemplateFuncs(map[string]any{
 		"heading": func(text string) string { return helpTheme().heading(text) },
 		"muted":   func(text string) string { return helpTheme().muted(text) },
+		// Option descriptions wrap to the help width, so a long one continues
+		// under its own column instead of breaking mid-word at the edge.
+		"flagUsages": func(flags *pflag.FlagSet) string { return flags.FlagUsagesWrapped(helpTheme().width) },
 		"examples": func(text string) string {
 			t := helpTheme()
 			lines := strings.Split(text, "\n")
