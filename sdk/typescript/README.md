@@ -7,7 +7,7 @@ Typed Node.js client for the InferCrane control API and OpenAI-compatible infere
 For the public beta:
 
 ```bash
-npm install '@infercrane/sdk@1.0.0-rc.3'
+npm install '@infercrane/sdk@1.0.0-rc.4'
 ```
 
 The npm `rc` tag resolves to this prerelease. Stable `1.0.0` remains reserved for the stable release.

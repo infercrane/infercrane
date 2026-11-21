@@ -8,7 +8,7 @@ package has no runtime dependencies and supports Python 3.10 or newer.
 For the public beta:
 
 ```bash
-python -m pip install 'infercrane==1.0.0rc3'
+python -m pip install 'infercrane==1.0.0rc4'
 ```
 
 Use the SDK version from the same InferCrane release as the control plane. Stable `1.0.0` remains
