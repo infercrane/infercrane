@@ -32,6 +32,82 @@ func TestEvaluateIsDeterministicAndConservative(t *testing.T) {
 	}
 }
 
+func TestEvaluateWaitsForMinimumRequestsBeforeMeasurementRejects(t *testing.T) {
+	policy := domain.ReleaseGuardPolicy{Enabled: true, MinimumRequests: 20, MaxTTFTRegressionPercent: 15, MaxLatencyRegressionPercent: 15, MaxErrorRateIncrease: .01, MaxOutputThroughputDropPercent: 15}
+	active := domain.RevisionMetrics{ReadyReplicas: 2, Requests: 500, P95TTFTMS: number(100), P95LatencyMS: number(900), OutputTokensPerSecond: number(50)}
+	// noisy is a canary's first few requests: one failure and one slow
+	// request make every measurement look like a regression.
+	noisy := func(requests int) domain.RevisionMetrics {
+		return domain.RevisionMetrics{ReadyReplicas: 1, Requests: requests, ErrorRate: 1.0 / 3, P95TTFTMS: number(300), P95LatencyMS: number(2000), OutputTokensPerSecond: number(20)}
+	}
+
+	t.Run("below the minimum the canary waits", func(t *testing.T) {
+		result := Evaluate(Input{Policy: policy, Active: active, Candidate: noisy(3)})
+		if result.Decision != "WAIT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "insufficient_requests" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	t.Run("at the minimum the same measurements reject", func(t *testing.T) {
+		result := Evaluate(Input{Policy: policy, Active: active, Candidate: noisy(20)})
+		codes := map[string]bool{}
+		for _, reason := range result.Reasons {
+			codes[reason.Code] = true
+		}
+		if result.Decision != "REJECT" || !codes["error_rate_regression"] || !codes["ttft_regression"] || !codes["latency_regression"] || !codes["output_throughput_regression"] {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	t.Run("an active revision below the minimum also holds measurement", func(t *testing.T) {
+		thin := active
+		thin.Requests = 5
+		if result := Evaluate(Input{Policy: policy, Active: thin, Candidate: noisy(20)}); result.Decision != "WAIT" || result.Reasons[0].Code != "insufficient_requests" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	// Evidence that does not depend on how many requests were served still
+	// rejects on the first evaluation.
+	t.Run("a candidate with no ready replica rejects at once", func(t *testing.T) {
+		candidate := noisy(3)
+		candidate.ReadyReplicas = 0
+		if result := Evaluate(Input{Policy: policy, Active: active, Candidate: candidate}); result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "candidate_not_ready" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	t.Run("incompatible evidence rejects at once", func(t *testing.T) {
+		strict := policy
+		strict.RequireCompatibilityEvidence = true
+		compatible := false
+		candidate := noisy(3)
+		candidate.Compatible = &compatible
+		if result := Evaluate(Input{Policy: strict, Active: active, Candidate: candidate}); result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "compatibility_mismatch" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	t.Run("a sourced cost regression rejects at once", func(t *testing.T) {
+		costed := policy
+		costed.MaxCostRegressionPercent = number(10)
+		activeCost, candidate := active, noisy(3)
+		activeCost.SourcedHourlyCost, candidate.SourcedHourlyCost = number(2), number(3)
+		if result := Evaluate(Input{Policy: costed, Active: activeCost, Candidate: candidate}); result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "cost_regression" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+
+	t.Run("a signed quality block rejects at once", func(t *testing.T) {
+		gated := policy
+		gated.RequireQualityEvidence, gated.MaxQualityRegressionPercent = true, number(3)
+		result := Evaluate(Input{Policy: gated, Active: active, Candidate: noisy(3), QualityEvals: []domain.QualityEvalEvidence{qualityEval("answers", .90, .80)}})
+		if result.Decision != "REJECT" || len(result.Reasons) != 1 || result.Reasons[0].Code != "quality_score_regression" {
+			t.Fatalf("result=%+v", result)
+		}
+	})
+}
+
 func TestEvaluateFailsClosedOnCompatibilitySyntheticAndCost(t *testing.T) {
 	compatible := true
 	costLimit := 10.0
