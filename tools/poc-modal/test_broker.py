@@ -16,7 +16,7 @@ from pathlib import Path
 
 def _stub_modal() -> None:
     def chain(*_args, **_kwargs):
-        return types.SimpleNamespace(pip_install=chain, entrypoint=chain, function=lambda **_: (lambda f: f), local_entrypoint=lambda: (lambda f: f))
+        return types.SimpleNamespace(pip_install=chain, entrypoint=chain, add_local_python_source=chain, function=lambda **_: (lambda f: f), local_entrypoint=lambda: (lambda f: f))
 
     sys.modules["modal"] = types.SimpleNamespace(
         App=chain, FunctionCall=object, forward=None, enable_output=None,
