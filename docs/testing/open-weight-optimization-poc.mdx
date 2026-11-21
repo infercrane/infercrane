@@ -149,6 +149,16 @@ round trip of 28 to 71 ms at the median and about 300 ms at p95. The record, the
 the billing are in
 [`evidence/qwen3-8b-campaign-modal-h100-2026-11-20.json`](./evidence/qwen3-8b-campaign-modal-h100-2026-11-20.json).
 
+Because every setup runs on its own H100, the same day measured how much H100s differ when they
+serve the same setup. `tools/poc-modal/machine_variance.py` ran the current setup on eight H100s in
+five regions, on both drivers, with vLLM's benchmark client in each container. Output throughput
+varied 0.22% between runs on one machine, and two machines differed by 0.95% (standard deviation;
+90% upper bound 1.5%). The driver did not matter beyond that: 927 against 932 tokens/s. The judge
+now holds that difference in every interval; see
+[how much machines differ](/features/optimization#how-much-machines-differ). The record is
+[`evidence/h100-machine-variance-modal-2026-11-20.json`](./evidence/h100-machine-variance-modal-2026-11-20.json);
+it was billed $3.81.
+
 ## Mechanism ladder
 
 Use the cheapest, broadest mechanisms first:
