@@ -82,6 +82,16 @@ policy, measurements, reason codes, revision identities, and evaluation timestam
 
 Missing measurements are not fabricated. Output throughput from request telemetry is the median successful request's output tokens per second of request time, so a canary serving 5% of traffic is compared with the active revision on speed, not on how many tokens each served. It is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
+Request telemetry counts a request as an error of a revision when it ended in an error (an error
+type, no status, or a status of 400 or above), or when it failed over away from that revision on
+a `primary-fallback` endpoint (see
+[when the primary fails mid-request](/features/endpoints#when-the-primary-fails-mid-request)).
+A fallback's answer does not hide the failed attempt: the request is one request and one error of
+the revision it left, and one request of the revision that answered, judged by that answer. TTFT,
+latency and output throughput come only from requests the revision served. Endpoint Release Guard,
+the post-promotion rollback monitor, and the per-binding measurement of a staged switch from a
+closed API all count the same way, the last by the binding the request left.
+
 Endpoint Release Guard never applies one primary deployment's metrics to an arbitrary routing
 graph. It currently qualifies single-primary comparisons, a primary change with an unchanged
 `primary-fallback` graph, and an append-only managed fallback whose immutable policy includes

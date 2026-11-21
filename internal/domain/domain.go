@@ -631,6 +631,10 @@ type InferenceRecord struct {
 	FallbackReason                                       string
 	SessionIDHash, ParentSessionIDHash, SharedPrefixHash string
 	ToolPauseMS                                          *float64
+	// FallbackFromBindingID and FallbackFromRevisionID name the first route a
+	// failed-over request left: the request counts as one request and one
+	// error of that revision, besides being a request of the one that served it.
+	FallbackFromBindingID, FallbackFromRevisionID string
 }
 
 type ReplayTrace struct {

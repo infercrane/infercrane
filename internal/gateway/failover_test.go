@@ -164,6 +164,9 @@ func TestPrimaryFallbackFailsOverBufferedRequestBeforeAnyResponseByte(t *testing
 			if record.BindingID != "closed" || record.DeploymentID != "" || record.StatusCode != http.StatusOK || record.FallbackReason != tc.reason || record.RetryCount != 0 || record.ErrorType != "" {
 				t.Fatalf("record=%#v", record)
 			}
+			if record.FallbackFromBindingID != "owned" || record.FallbackFromRevisionID != "owned-revision" {
+				t.Fatalf("record=%#v", record)
+			}
 			if record.InputTokens == nil || *record.InputTokens != 3 || record.ResponseModel != "closed-model" {
 				t.Fatalf("record usage=%#v", record)
 			}
@@ -191,7 +194,7 @@ func TestFailoverSpendsRetryBudgetOnlyOnTheFirstRoute(t *testing.T) {
 		t.Fatalf("attempt headers=%s", got)
 	}
 	record := records.only(t)
-	if record.BindingID != "closed" || record.StatusCode != http.StatusServiceUnavailable || record.ErrorType != "upstream_unavailable" || record.FallbackReason != "upstream_503" || record.RetryCount != 2 {
+	if record.BindingID != "closed" || record.StatusCode != http.StatusServiceUnavailable || record.ErrorType != "upstream_unavailable" || record.FallbackReason != "upstream_503" || record.RetryCount != 2 || record.FallbackFromBindingID != "owned" || record.FallbackFromRevisionID != "owned-revision" {
 		t.Fatalf("record=%#v", record)
 	}
 }
@@ -211,7 +214,9 @@ func TestFailoverIsBoundedToTwoFurtherRoutes(t *testing.T) {
 	if upstream.count("one") != 1 || upstream.count("two") != 1 || upstream.count("three") != 1 {
 		t.Fatalf("sent=%#v", upstream.sent)
 	}
-	if record := records.only(t); record.BindingID != "three" || record.FallbackReason != "upstream_connection_failed" {
+	// Only the first route left is recorded: the request counts against the
+	// primary's revision, not against every fallback it passed through.
+	if record := records.only(t); record.BindingID != "three" || record.FallbackReason != "upstream_connection_failed" || record.FallbackFromBindingID != "one" || record.FallbackFromRevisionID != "one-revision" {
 		t.Fatalf("record=%#v", record)
 	}
 }
@@ -239,7 +244,7 @@ func TestFailoverLeavesStreamsOtherFailuresAndOtherPoliciesAlone(t *testing.T) {
 			if response.Code != tc.status || upstream.count("closed") != 0 {
 				t.Fatalf("response=%d sent=%#v body=%s", response.Code, upstream.sent, response.Body.String())
 			}
-			if record := records.only(t); record.BindingID != "owned" || record.FallbackReason != "" {
+			if record := records.only(t); record.BindingID != "owned" || record.FallbackReason != "" || record.FallbackFromBindingID != "" || record.FallbackFromRevisionID != "" {
 				t.Fatalf("record=%#v", record)
 			}
 		})
@@ -291,7 +296,7 @@ func TestFailoverStopsWhenTheCallerLeavesOrTheDeadlinePasses(t *testing.T) {
 		if response.Code != http.StatusGatewayTimeout || upstream.count("closed") != 0 {
 			t.Fatalf("response=%d sent=%#v", response.Code, upstream.sent)
 		}
-		if record := records.only(t); record.ErrorType != "request_deadline_exceeded" || record.FallbackReason != "" {
+		if record := records.only(t); record.ErrorType != "request_deadline_exceeded" || record.FallbackReason != "" || record.FallbackFromBindingID != "" {
 			t.Fatalf("record=%#v", record)
 		}
 	})
@@ -328,7 +333,7 @@ func TestManagedExternalFallbackReservesBeforeTransmission(t *testing.T) {
 		if response.Code != http.StatusServiceUnavailable || upstream.count("supplier") != 1 || upstream.count("owned") != 0 || billing.released != 1 {
 			t.Fatalf("response=%d sent=%#v billing=%+v", response.Code, upstream.sent, billing)
 		}
-		if record := records.only(t); record.BindingID != "managed" || record.FallbackReason != "" {
+		if record := records.only(t); record.BindingID != "managed" || record.FallbackReason != "" || record.FallbackFromBindingID != "" {
 			t.Fatalf("record=%#v", record)
 		}
 	})
@@ -343,7 +348,7 @@ func TestManagedExternalFallbackReservesBeforeTransmission(t *testing.T) {
 		if response.Code != http.StatusServiceUnavailable || upstream.count("supplier") != 0 || billing.authorized != 1 || billing.released != 1 {
 			t.Fatalf("response=%d sent=%#v billing=%+v", response.Code, upstream.sent, billing)
 		}
-		if record := records.only(t); record.BindingID != "owned" || record.ErrorType != "upstream_unavailable" || record.FallbackReason != "" {
+		if record := records.only(t); record.BindingID != "owned" || record.ErrorType != "upstream_unavailable" || record.FallbackReason != "" || record.FallbackFromBindingID != "" || record.FallbackFromRevisionID != "" {
 			t.Fatalf("record=%#v", record)
 		}
 	})
@@ -405,8 +410,25 @@ func TestConcurrentRequestsAllFailOverToTheFallback(t *testing.T) {
 		t.Fatalf("records=%d sent=%#v", len(records.records), upstream.sent)
 	}
 	for _, record := range records.records {
-		if record.BindingID != "closed" || record.FallbackReason != "upstream_connection_failed" {
+		if record.BindingID != "closed" || record.FallbackReason != "upstream_connection_failed" || record.FallbackFromBindingID != "owned" || record.FallbackFromRevisionID != "owned-revision" {
 			t.Fatalf("record=%#v", record)
 		}
+	}
+}
+
+func TestFailoverFromABindingWithoutRevisionNamesOnlyTheBinding(t *testing.T) {
+	upstream := newUpstreams(map[string]func(*http.Request) (*http.Response, error){"closed": answerStatus(http.StatusBadGateway), "owned": answerOK(`{"choices":[]}`)})
+	directory := routes.New()
+	primary := endpointRoute("closed", "closed", "closed-model")
+	primary.DeploymentID, primary.RevisionID, primary.ComputeMode = "", "", "external"
+	publishPlan(directory, "primary-fallback", primary, endpointRoute("owned", "owned", "qwen3"))
+	records := &allRecords{}
+	handler := (&Gateway{Routes: directory, APIKey: "secret", Client: upstream.client(), Recorder: records}).Handler()
+	if response := invokeCoder(handler, `{"model":"coder","messages":[]}`); response.Code != http.StatusOK {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	record := records.only(t)
+	if record.BindingID != "owned" || record.RevisionID != "owned-revision" || record.FallbackReason != "upstream_502" || record.FallbackFromBindingID != "closed" || record.FallbackFromRevisionID != "" {
+		t.Fatalf("record=%#v", record)
 	}
 }
