@@ -414,17 +414,41 @@ func TestEdgeSendsSSEKeepAliveWhileUpstreamIsQuiet(t *testing.T) {
 	}
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"qwen/qwen3.8-27b","stream":true}`))
 	request.Header.Set("Authorization", "Bearer secret")
-	recorder := httptest.NewRecorder()
+	recorder := &heartbeatRecorder{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{})}
 	done := make(chan struct{})
 	go func() {
 		handler.ServeHTTP(recorder, request)
 		close(done)
 	}()
-	time.Sleep(20 * time.Millisecond)
+	// The upstream stays quiet until the client has received a heartbeat. A
+	// fixed delay instead lets a loaded host deliver [DONE] before the first
+	// heartbeat timer fires. The timer only keeps a regression from hanging.
+	select {
+	case <-recorder.flushed:
+	case <-time.After(10 * time.Second):
+		close(release)
+		<-done
+		t.Fatalf("no heartbeat flushed while the upstream was quiet (flushed=%t, %d body bytes)", recorder.Flushed, recorder.Body.Len())
+	}
 	close(release)
 	<-done
-	if !strings.Contains(recorder.Body.String(), ": keep-alive\n\n") || !strings.Contains(recorder.Body.String(), "[DONE]") {
-		t.Fatalf("expected heartbeat and completion, got %q", recorder.Body.String())
+	if body := recorder.Body.String(); !strings.HasPrefix(body, ": keep-alive\n\n") || !strings.Contains(body, "data: [DONE]\n\n") {
+		t.Fatalf("expected heartbeat and then completion, got %q", body)
+	}
+}
+
+// heartbeatRecorder closes flushed once an SSE keep-alive comment has been
+// flushed to the client.
+type heartbeatRecorder struct {
+	*httptest.ResponseRecorder
+	flushed chan struct{}
+	once    sync.Once
+}
+
+func (r *heartbeatRecorder) Flush() {
+	r.ResponseRecorder.Flush()
+	if strings.Contains(r.Body.String(), ": keep-alive\n\n") {
+		r.once.Do(func() { close(r.flushed) })
 	}
 }
 
