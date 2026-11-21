@@ -558,8 +558,11 @@ type BenchmarkResult struct {
 	RequestThroughput, OutputTokenThroughput                *float64
 	TTFTP50MS, TTFTP95MS, TPOTP50MS, TPOTP95MS              *float64
 	LatencyP50MS, LatencyP95MS, Goodput, GPUUtilization     *float64
-	CostMetadataJSON                                        string
-	CreatedAt                                               time.Time
+	// Nil when the run could not measure them: p99 needs at least
+	// benchmark.MinP99Samples samples, and buffered runs stream no chunks.
+	TTFTP99MS, TPOTP99MS, LatencyP99MS, StreamGapP99MS, StreamGapMaxMS *float64
+	CostMetadataJSON                                                   string
+	CreatedAt                                                          time.Time
 }
 
 // ModelRecipe is an immutable, content-addressed serving configuration captured
