@@ -46,6 +46,17 @@ const (
 	// control better or worse. Each candidate's interval is widened for the
 	// number of candidates the campaign compares (Bonferroni).
 	familyAlpha = 0.05
+	// machineDifference is the standard deviation of the fixed speed
+	// difference between two servers of the same GPU model. The control and
+	// the candidate always run on separate servers, and pairing in time
+	// cannot remove that difference, so every paired interval adds it. Eight
+	// H100s serving the same setup differed by 0.95% (90% upper bound 1.5%),
+	// against 0.22% between runs on one machine
+	// (docs/testing/evidence/h100-machine-variance-modal-2026-11-20.json).
+	// 0.75% in each window, the first and the one on fresh servers, keeps
+	// false wins across four candidates at or below 5% even at that upper
+	// bound (TestJudgeCalibrationWithConfirmation).
+	machineDifference = 0.0075
 	// ComparisonPaired names the statistic in MetricComparison.Method.
 	ComparisonPaired = "paired_bracketing_log_ratio"
 
@@ -130,10 +141,12 @@ type ControlEvidence struct {
 //
 // With Method ComparisonPaired, each candidate run is divided by the mean of
 // the two control runs around it. Delta is the geometric mean of those
-// ratios minus one, and the noise floor is the half-width of its Student-t
-// interval at Confidence, which is widened for the campaign's Comparisons
-// candidates. A candidate is better or worse only when the whole interval is
-// on one side of no change. Without Method (v1 evidence), the noise floor is
+// ratios minus one, and the noise floor is the half-width of its interval at
+// Confidence, which is widened for the campaign's Comparisons candidates: the
+// Student-t half-width of the ratios combined with MachineDifference, the
+// assumed spread between two servers. Comparisons stored before the machine
+// difference was added have none. A candidate is better or worse only when
+// the whole interval is on one side of no change. Without Method (v1 evidence), the noise floor is
 // the larger of the control-to-control spread and the candidate's own 95%
 // interval half-width, and a delta inside it is no measurable difference.
 // ControlSpread and CandidateUncertainty are reported either way.
@@ -150,6 +163,7 @@ type MetricComparison struct {
 	Pairs                int     `json:"pairs,omitempty"`
 	Comparisons          int     `json:"comparisons,omitempty"`
 	Confidence           float64 `json:"confidence,omitempty"`
+	MachineDifference    float64 `json:"machine_difference,omitempty"`
 }
 
 // MeasuredEvidence is stored under the workload document's "measured" key.
@@ -315,7 +329,8 @@ func comparePairedArms(runs []RunSummary, comparisons int) map[string]MetricComp
 // a Student-t interval at confidence 1 − familyAlpha/comparisons, so across a
 // campaign of comparisons candidates the chance of declaring any copy of the
 // control different is at most familyAlpha. Runs on separate machines can
-// still differ by a fixed amount that pairing in time cannot remove.
+// still differ by a fixed amount that pairing in time cannot remove, so the
+// interval also holds machineDifference.
 func comparePaired(runs []RunSummary, value func(RunSummary) *float64, higherBetter bool, comparisons int) (MetricComparison, bool) {
 	comparisons = max(1, comparisons)
 	positive := func(run RunSummary) (float64, bool) {
@@ -361,7 +376,11 @@ func comparePaired(runs []RunSummary, value func(RunSummary) *float64, higherBet
 		squared += (value - mean) * (value - mean)
 	}
 	confidence := 1 - familyAlpha/float64(comparisons)
-	half := benchmark.StudentTQuantile(1-(1-confidence)/2, len(logs)-1) * math.Sqrt(squared/float64(len(logs)-1)) * pairedStandardErrorScale(len(logs))
+	statistical := benchmark.StudentTQuantile(1-(1-confidence)/2, len(logs)-1) * math.Sqrt(squared/float64(len(logs)-1)) * pairedStandardErrorScale(len(logs))
+	// The machine difference is one fixed draw per window, not run noise, so
+	// it takes the normal quantile at the same confidence and adds in
+	// quadrature.
+	half := math.Hypot(statistical, math.Sqrt2*math.Erfinv(confidence)*machineDifference)
 	controlMean, low, high := 0.0, controls[0], controls[0]
 	for _, value := range controls {
 		controlMean += value
@@ -371,7 +390,7 @@ func comparePaired(runs []RunSummary, value func(RunSummary) *float64, higherBet
 	comparison := MetricComparison{
 		HigherIsBetter: higherBetter, ControlMean: controlMean, ControlSpread: (high - low) / controlMean,
 		Delta: math.Exp(mean) - 1, NoiseFloor: math.Exp(half) - 1, Decision: DecisionNoMeasurableDifference,
-		Method: ComparisonPaired, Pairs: len(logs), Comparisons: comparisons, Confidence: confidence,
+		Method: ComparisonPaired, Pairs: len(logs), Comparisons: comparisons, Confidence: confidence, MachineDifference: machineDifference,
 	}
 	if interval, ok := benchmark.Confidence95(candidates); ok && interval.Mean > 0 {
 		comparison.CandidateMean, comparison.CandidateUncertainty = interval.Mean, (interval.Upper95-interval.Mean)/interval.Mean

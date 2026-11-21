@@ -176,3 +176,24 @@ func TestStyledRootHelpUsesRulesAndKeepsWords(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandHelpFitsAnEightyColumnTerminal(t *testing.T) {
+	for _, name := range []string{"deploy", "optimize", "profile", "telemetry", "workload"} {
+		output, err := captureStdout(t, func() error { return run(context.Background(), []string{name, "--help"}) })
+		if err != nil {
+			t.Fatalf("%s --help: %v", name, err)
+		}
+		inOptions := false
+		for _, line := range strings.Split(output, "\n") {
+			if strings.HasPrefix(line, "Options:") {
+				inOptions = true
+			}
+			if strings.HasPrefix(line, "Docs:") {
+				inOptions = false
+			}
+			if inOptions && ansi.StringWidth(line) > 80 {
+				t.Errorf("%s --help option line is %d columns: %q", name, ansi.StringWidth(line), line)
+			}
+		}
+	}
+}

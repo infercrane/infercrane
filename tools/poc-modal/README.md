@@ -88,6 +88,26 @@ model, and the broker starts the lease again on another host, at most 3 times. T
 container's time stays in the estimate. Each lease's `gpu_facts` and `refused_hosts` are in
 the broker's ledger.
 
+## How much machines differ
+
+`machine_variance.py` measures how much H100s differ when they serve the same setup, which the
+campaign judge must allow for because the control and every candidate run on separate machines.
+It needs only the weights volume from `download`, not the cluster or the broker:
+
+```bash
+uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/machine_variance.py --machines 8 --budget-usd 5.25
+```
+
+Each machine is one Modal container (`H100!`, one call per container, `retries=0`) that serves the
+current setup and benchmarks itself with `vllm bench serve` in the same container: fixed 4,800-token
+inputs and 192-token outputs, 32 concurrent streams, a warmup and three runs of 256 requests. It
+records the GPU, driver, VBIOS, CPU, region, and clocks and power during each run. The run refuses
+to start when machines x the 9-minute container limit x the list rate is above `--budget-usd`, and
+every call is cancelled at its wall-clock limit. One machine takes about 6 minutes, about $0.45.
+The output in `.infercrane/poc-modal/output/` holds every run and the spread per metric: run to run,
+between machines, and the 90% upper bound. The 2026-11-20 result is in
+`docs/testing/evidence/h100-machine-variance-modal-2026-11-20.json`.
+
 ## What the numbers mean
 
 - Throughput and cost per token are H100 numbers. Cost per 1M output tokens uses Modal's H100

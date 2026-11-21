@@ -19,8 +19,9 @@ const (
 
 // RankingAlgorithmVersion is appended to the Lab algorithm version on every
 // persisted campaign ranking. It names the control and noise-floor gate; v3
-// adds the failed-request and answer-length guards.
-const RankingAlgorithmVersion = "campaign-paired-confirmed-v5"
+// adds the failed-request and answer-length guards; v6 adds the difference
+// between two machines to every paired interval.
+const RankingAlgorithmVersion = "campaign-paired-confirmed-v6"
 
 // FailureNoMeasurableDifference marks a candidate whose objective result is
 // inside the measurement noise of the campaign control. It is reported as no
@@ -150,7 +151,7 @@ func RankMeasuredCampaign(campaign domain.OptimizationCampaign, benchmarks []dom
 			reasons[candidateID] = row.ConstraintReasons[0]
 		}
 	}
-	gate := applyControlGate(campaign, proposal.Input.Objective, rows, evidenceToCandidate, byBenchmark, selectedCandidate)
+	gate := applyControlGate(campaign, proposal.Input.Objective, proposal.Input.WorkloadProfile, rows, evidenceToCandidate, byBenchmark, selectedCandidate)
 	selectedCandidate = gate.selected
 	for candidateID, reason := range gate.reasons {
 		reasons[candidateID] = reason

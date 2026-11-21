@@ -201,18 +201,21 @@ func confirmedRate(seed uint64, trials int, scenario judgeScenario, effects []fl
 }
 
 // TestJudgeCalibrationWithConfirmation measures the full rule: a gain counts
-// only when it holds again on fresh servers. Real GPU runs are quiet (the
-// H100 control of 2026-11-20 varied about 0.3% between runs), so machine
-// differences, not run noise, decide false wins there; the 0.5% rows show it.
+// only when it holds again on fresh servers, and every window's interval
+// holds machineDifference. The first three rows are measured H100
+// conditions: eight H100s serving the same setup varied 0.22% between runs
+// on one machine, and two machines differed by 0.95% (90% upper bound 1.5%)
+// (docs/testing/evidence/h100-machine-variance-modal-2026-11-20.json).
 // "First window" is the decision without the confirmation.
 func TestJudgeCalibrationWithConfirmation(t *testing.T) {
-	const trials = 2000
+	const trials = 4000
 	rows := []struct {
 		name     string
 		scenario judgeScenario
 	}{
-		{"0.5% noise, same machine", judgeScenario{Noise: 0.005}},
-		{"0.5% noise, machines differ 1%", judgeScenario{Noise: 0.005, HostBias: 0.01}},
+		{"0.25% noise, same machine", judgeScenario{Noise: 0.0025}},
+		{"0.25% noise, machines differ 0.95%", judgeScenario{Noise: 0.0025, HostBias: 0.0095}},
+		{"0.25% noise, machines differ 1.5%", judgeScenario{Noise: 0.0025, HostBias: 0.015}},
 		{"0.5% noise, machines differ 2%", judgeScenario{Noise: 0.005, HostBias: 0.02}},
 		{"2% noise, same machine", judgeScenario{Noise: 0.02}},
 		{"2% noise, machines differ 2%", judgeScenario{Noise: 0.02, HostBias: 0.02}},
@@ -220,7 +223,7 @@ func TestJudgeCalibrationWithConfirmation(t *testing.T) {
 	type result struct{ first4, aa1, aa4, p3, p5, p10 float64 }
 	results := map[string]result{}
 	var table strings.Builder
-	fmt.Fprintf(&table, "\n%-31s %13s %8s %8s %7s %7s %7s\n", "condition", "first window", "AA x1", "AA x4", "+3%", "+5%", "+10%")
+	fmt.Fprintf(&table, "\n%-36s %13s %8s %8s %7s %7s %7s\n", "condition", "first window", "AA x1", "AA x4", "+3%", "+5%", "+10%")
 	for index, row := range rows {
 		seed := uint64(index+1) * 7000
 		var r result
@@ -231,14 +234,18 @@ func TestJudgeCalibrationWithConfirmation(t *testing.T) {
 		r.p5 = confirmedRate(seed+4, trials, row.scenario, []float64{0.05})
 		r.p10 = confirmedRate(seed+5, trials, row.scenario, []float64{0.10})
 		results[row.name] = r
-		fmt.Fprintf(&table, "%-31s %12.1f%% %7.1f%% %7.1f%% %6.1f%% %6.1f%% %6.1f%%\n", row.name, r.first4*100, r.aa1*100, r.aa4*100, r.p3*100, r.p5*100, r.p10*100)
+		fmt.Fprintf(&table, "%-36s %12.1f%% %7.1f%% %7.1f%% %6.1f%% %6.1f%% %6.1f%%\n", row.name, r.first4*100, r.aa1*100, r.aa4*100, r.p3*100, r.p5*100, r.p10*100)
 	}
 	t.Log(table.String())
-	if r := results["0.5% noise, same machine"]; r.aa4 > 0.01 || r.p3 < 0.9 {
+	if r := results["0.25% noise, same machine"]; r.aa4 > 0.01 || r.p3 < 0.9 {
 		t.Errorf("same machine: false wins %.1f%%, +3%% found %.1f%%", r.aa4*100, r.p3*100)
 	}
-	if r := results["0.5% noise, machines differ 1%"]; r.aa4 > 0.07 || r.aa4 >= r.first4/3 || r.p5 < 0.95 {
-		t.Errorf("machines differ 1%%: false wins %.1f%% (first window %.1f%%), +5%% found %.1f%%", r.aa4*100, r.first4*100, r.p5*100)
+	if r := results["0.25% noise, machines differ 0.95%"]; r.aa4 > 0.01 || r.aa4 > r.first4 || r.p5 < 0.99 {
+		t.Errorf("measured H100 machines: false wins %.1f%% (first window %.1f%%), +5%% found %.1f%%", r.aa4*100, r.first4*100, r.p5*100)
+	}
+	// 5% plus the sampling error of the trials.
+	if r := results["0.25% noise, machines differ 1.5%"]; r.aa4 > 0.055 || r.p5 < 0.95 {
+		t.Errorf("upper bound of the measured machine difference: false wins %.1f%%, +5%% found %.1f%%", r.aa4*100, r.p5*100)
 	}
 	if r := results["2% noise, same machine"]; r.aa4 > 0.01 || r.p10 < 0.95 {
 		t.Errorf("2%% noise: false wins %.1f%%, +10%% found %.1f%%", r.aa4*100, r.p10*100)

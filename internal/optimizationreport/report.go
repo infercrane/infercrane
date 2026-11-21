@@ -26,8 +26,10 @@ import (
 )
 
 const (
-	SchemaVersion    = "infercrane.optimization-report/v1"
-	AlgorithmVersion = "campaign-outcome-report-v2"
+	SchemaVersion = "infercrane.optimization-report/v1"
+	// AlgorithmVersion v3 compares the metric the objective ranked on for the
+	// campaign's workload profile and names it in objective_metric.
+	AlgorithmVersion = "campaign-outcome-report-v3"
 
 	// CPUBanner is shown on every report whose campaign ran on a simulated
 	// accelerator or a CPU. Its numbers are never GPU results.
@@ -79,12 +81,18 @@ const (
 // its input is missing or incomparable. Unknown lists those fields by path.
 // Warnings name every setup that failed more requests or answered shorter
 // than the baseline: a speed or cost gain may come from that.
+// ObjectiveMetric is the measured metric the objective ranked on, and
+// ObjectiveNote says why it is not the objective's usual metric: a latency
+// objective on buffered answers ranks on p95 request latency, because
+// buffered runs measure no first token.
 type Report struct {
 	SchemaVersion        string   `json:"schema_version"`
 	AlgorithmVersion     string   `json:"algorithm_version"`
 	CampaignID           string   `json:"campaign_id"`
 	ModelIdentity        string   `json:"model_identity"`
 	Objective            string   `json:"objective"`
+	ObjectiveMetric      string   `json:"objective_metric,omitempty"`
+	ObjectiveNote        string   `json:"objective_note,omitempty"`
 	Intent               string   `json:"intent"`
 	CampaignState        string   `json:"campaign_state"`
 	Finished             bool     `json:"finished"`
@@ -367,6 +375,14 @@ func Assemble(e Evidence) Report {
 	report := Report{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, CampaignID: campaign.ID, ModelIdentity: campaign.ModelIdentity, Objective: campaign.Objective, Intent: campaign.Intent, CampaignState: campaign.State, Finished: finished(campaign.State)}
 	var proposal optimizer.Proposal
 	proposalOK := json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) == nil
+	objectiveMetric, _ := lab.ObjectiveMetric(campaign.Objective, proposal.Input.WorkloadProfile)
+	if ranked := rankedMetric(campaign, e); ranked != "" && ranked != objectiveMetric.Name {
+		// The stored ranking names the metric it actually compared. One made
+		// before buffered latency objectives ranked on request latency
+		// compared time to first token, and the report must not relabel it.
+		objectiveMetric = lab.Metric{Name: ranked}
+	}
+	report.ObjectiveMetric, report.ObjectiveNote = objectiveMetric.Name, objectiveMetric.Note
 
 	arms := map[string]*arm{}
 	labels := optimizationcampaign.CandidateLabels(campaign)
@@ -396,11 +412,11 @@ func Assemble(e Evidence) Report {
 	kind := report.Outcome.Kind
 	report.Metrics = metrics(kind, baseline, winner, report.SimulatedAccelerator)
 	report.Quality = quality(campaign, kind, baseline, winner, e)
-	report.Noise = noise(campaign.Objective, kind, baseline, winner, arms)
+	report.Noise = noise(objectiveMetric.Name, kind, baseline, winner, arms)
 	report.Monthly = monthly(proposal, proposalOK, kind, report.Metrics, e)
 	report.CurrentAPI = currentAPI(e, report)
 	report.Workload = workload(baseline, winner)
-	report.Candidates = candidateResults(campaign, campaign.Objective, baseline, winner, arms)
+	report.Candidates = candidateResults(campaign, objectiveMetric.Name, baseline, winner, arms)
 	report.Warnings = warnings(report.Candidates)
 	report.Bottleneck = bottleneck(kind, baseline, winner)
 	report.Appendix = appendix(campaign, proposal, proposalOK, baseline, winner, e)
@@ -408,6 +424,19 @@ func Assemble(e Evidence) Report {
 	report.Unknown = unknownFields(report)
 	report.ReportDigest = digest(report)
 	return report
+}
+
+// rankedMetric is the objective metric the campaign's persisted rankings
+// recorded, or "" when none did.
+func rankedMetric(campaign domain.OptimizationCampaign, e Evidence) string {
+	for _, run := range campaign.Candidates {
+		if ranking, found := e.Rankings[run.LabEvaluationID]; run.LabEvaluationID != "" && found {
+			if metric := optimizationcampaign.RankedMetric(ranking); metric != "" {
+				return metric
+			}
+		}
+	}
+	return ""
 }
 
 func finished(state string) bool {
@@ -870,18 +899,8 @@ func fromQualityReport(report releaseguard.QualityReport) Quality {
 	return result
 }
 
-func objectiveSource(objective string) string {
-	switch objective {
-	case lab.ObjectiveLatency, lab.ObjectiveInteractive:
-		return sourceTTFTP95
-	case lab.ObjectiveThroughput, lab.ObjectiveCostEfficiency:
-		return sourceOutputTPS
-	}
-	return ""
-}
-
-func noise(objective, kind string, baseline, winner *arm, arms map[string]*arm) Noise {
-	result := Noise{Basis: BasisUnknown, ObjectiveMetric: objectiveSource(objective), ObjectiveDecision: DecisionUnknown}
+func noise(objectiveMetric, kind string, baseline, winner *arm, arms map[string]*arm) Noise {
+	result := Noise{Basis: BasisUnknown, ObjectiveMetric: objectiveMetric, ObjectiveDecision: DecisionUnknown}
 	switch kind {
 	case OutcomeWinnerSelected:
 		if baseline == nil {
@@ -1059,10 +1078,9 @@ func workload(baseline, winner *arm) Workload {
 	return result
 }
 
-func candidateResults(campaign domain.OptimizationCampaign, objective string, baseline, winner *arm, arms map[string]*arm) []CandidateResult {
+func candidateResults(campaign domain.OptimizationCampaign, metric string, baseline, winner *arm, arms map[string]*arm) []CandidateResult {
 	runs := append([]domain.OptimizationCandidateRun(nil), campaign.Candidates...)
 	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Rank < runs[j].Rank })
-	metric := objectiveSource(objective)
 	out := make([]CandidateResult, 0, len(runs))
 	for _, run := range runs {
 		current := arms[run.ID]
