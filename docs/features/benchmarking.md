@@ -90,13 +90,43 @@ version and workload parameters match exactly.
 
 Each result records the immutable ModelArtifact, runtime and configuration, revision, provider,
 region, GPU type and grounded GPU count, compute mode, workload parameters, TTFT, TPOT, request
-latency, throughput, SLO goodput when declared, errors, timestamp, and exact reproduction command. The persisted command uses
+latency, tail latency and stream stalls (below), throughput, SLO goodput when declared, errors, timestamp, and exact reproduction command. The persisted command uses
 a portable local export prefix rather than the deleted temporary execution directory, and replaces
 the credential with its environment-variable reference. GPU utilization is attached only when
 measured DCGM evidence for the exact immutable revision overlaps the complete benchmark window;
 provider-reported or stale samples remain `null`. Goodput remains `null` without SLO thresholds.
 Cost metadata becomes available only when fresh, revision-bound `deployment_hourly_rate` evidence
 covers the run; otherwise it contains `available: false` and a reason. None are fabricated.
+
+## Tail latency and stream stalls
+
+A p95 hides the requests that hurt most. Each result also stores:
+
+| Field | Meaning |
+| --- | --- |
+| `ttft_p99_ms`, `tpot_p99_ms`, `latency_p99_ms` | p99 of time to first token, time per output token, and request latency |
+| `stream_gap_max_ms` | The longest pause between two streamed chunks that any successful request saw |
+| `stream_gap_p99_ms` | p99 of every pause between streamed chunks across successful requests |
+
+The p99 values use the same nearest-rank definition as p50 and p95. With fewer than 100 samples, a
+nearest-rank p99 is just the slowest sample, so InferCrane stores `null` instead of calling the
+maximum a p99. Run at least 100 requests for a request-level p99. Stream gaps count every pause
+between chunks, so one long streaming request can be enough for `stream_gap_p99_ms`.
+
+Stream gaps come from AIPerf's `inter_chunk_latency` record, which is measured where the client
+receives chunks. A gap includes engine scheduling stalls (such as a preempted request waiting to be
+recomputed) and anything between the engine and the client. With speculative decoding one chunk can
+carry several tokens, so gaps are between chunks, not tokens. Buffered runs stream no chunks and
+keep both stall fields `null`. Failed requests are excluded, the same as for the latency
+percentiles.
+
+An optimization campaign stores the same fields for every run of every arm. When it pools runs into
+one candidate row, it averages the p99 values like the p95 values, but keeps the worst
+`stream_gap_max_ms` across runs. A field missing from any run stays `null` in the pooled row.
+
+When a campaign scrapes the serving engine's own metrics, the summary keeps preemption counters
+first: vLLM's `num_preemptions` and SGLang's `num_retracted_requests`. Engines that expose more cache
+and queue metrics than the summary holds therefore never lose the count that explains a stall.
 
 ## What “fast” means
 

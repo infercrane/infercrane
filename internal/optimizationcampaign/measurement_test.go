@@ -522,3 +522,31 @@ func TestBenchmarkExecutorRetriesTransientControlLookupInsteadOfDowngrading(t *t
 		t.Fatalf("a deleted control was not recorded as unavailable: %+v", evidence.Control)
 	}
 }
+
+// TestAggregatePoolsTailMetrics averages per-run p99s like the p95s, but
+// keeps the worst stall across runs: a client that waited 900 ms in one run
+// waited that long however calm the other runs were.
+func TestAggregatePoolsTailMetrics(t *testing.T) {
+	at := func(value float64) *float64 { return &value }
+	runs := []benchmark.Result{
+		{Requests: 200, Succeeded: 200, TTFTP99MS: at(100), TPOTP99MS: at(10), LatencyP99MS: at(1000), StreamGapP99MS: at(20), StreamGapMaxMS: at(900)},
+		{Requests: 200, Succeeded: 200, TTFTP99MS: at(140), TPOTP99MS: at(14), LatencyP99MS: at(1400), StreamGapP99MS: at(30), StreamGapMaxMS: at(60)},
+	}
+	pooled, _ := aggregate(runs)
+	if pooled.TTFTP99MS == nil || *pooled.TTFTP99MS != 120 || *pooled.TPOTP99MS != 12 || *pooled.LatencyP99MS != 1200 || *pooled.StreamGapP99MS != 25 {
+		t.Fatalf("pooled p99s=%+v", pooled)
+	}
+	if pooled.StreamGapMaxMS == nil || *pooled.StreamGapMaxMS != 900 {
+		t.Fatalf("longest stall=%v, want the worst run's 900 ms", pooled.StreamGapMaxMS)
+	}
+	summary := summarizeRun("candidate", runs[0])
+	if summary.TTFTP99MS == nil || *summary.StreamGapMaxMS != 900 {
+		t.Fatalf("run summary lost tail metrics: %+v", summary)
+	}
+
+	runs[1].TTFTP99MS, runs[1].StreamGapMaxMS = nil, nil
+	partial, _ := aggregate(runs)
+	if partial.TTFTP99MS != nil || partial.StreamGapMaxMS != nil {
+		t.Fatalf("a metric missing from one run was pooled from the others: ttft p99=%v stall=%v", partial.TTFTP99MS, partial.StreamGapMaxMS)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,6 +120,11 @@ type RunSummary struct {
 	TTFTP95MS              *float64                 `json:"ttft_p95_ms,omitempty"`
 	TPOTP95MS              *float64                 `json:"tpot_p95_ms,omitempty"`
 	LatencyP95MS           *float64                 `json:"latency_p95_ms,omitempty"`
+	TTFTP99MS              *float64                 `json:"ttft_p99_ms,omitempty"`
+	TPOTP99MS              *float64                 `json:"tpot_p99_ms,omitempty"`
+	LatencyP99MS           *float64                 `json:"latency_p99_ms,omitempty"`
+	StreamGapP99MS         *float64                 `json:"stream_gap_p99_ms,omitempty"`
+	StreamGapMaxMS         *float64                 `json:"stream_gap_max_ms,omitempty"`
 	Goodput                *float64                 `json:"goodput,omitempty"`
 	OutputTokensPerRequest *float64                 `json:"output_tokens_per_request,omitempty"`
 	ServerMetrics          *benchmark.ServerMetrics `json:"server_metrics,omitempty"`
@@ -505,6 +511,13 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 	pooled.TTFTP50MS, pooled.TTFTP95MS = mean(func(r benchmark.Result) *float64 { return r.TTFTP50MS }), mean(func(r benchmark.Result) *float64 { return r.TTFTP95MS })
 	pooled.TPOTP50MS, pooled.TPOTP95MS = mean(func(r benchmark.Result) *float64 { return r.TPOTP50MS }), mean(func(r benchmark.Result) *float64 { return r.TPOTP95MS })
 	pooled.LatencyP50MS, pooled.LatencyP95MS = mean(func(r benchmark.Result) *float64 { return r.LatencyP50MS }), mean(func(r benchmark.Result) *float64 { return r.LatencyP95MS })
+	pooled.TTFTP99MS, pooled.TPOTP99MS = mean(func(r benchmark.Result) *float64 { return r.TTFTP99MS }), mean(func(r benchmark.Result) *float64 { return r.TPOTP99MS })
+	pooled.LatencyP99MS, pooled.StreamGapP99MS = mean(func(r benchmark.Result) *float64 { return r.LatencyP99MS }), mean(func(r benchmark.Result) *float64 { return r.StreamGapP99MS })
+	// The longest stall is the worst pause across runs, not an average of them.
+	if gaps := samples(results, func(r benchmark.Result) *float64 { return r.StreamGapMaxMS }); len(gaps) == len(results) {
+		longest := slices.Max(gaps)
+		pooled.StreamGapMaxMS = &longest
+	}
 	confidence := map[string]benchmark.ConfidenceInterval{}
 	for _, metric := range comparedMetrics {
 		if interval, ok := benchmark.Confidence95(samples(results, metric.value)); ok {
@@ -518,7 +531,7 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 }
 
 func summarizeRun(arm string, result benchmark.Result) RunSummary {
-	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
+	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, TTFTP99MS: result.TTFTP99MS, TPOTP99MS: result.TPOTP99MS, LatencyP99MS: result.LatencyP99MS, StreamGapP99MS: result.StreamGapP99MS, StreamGapMaxMS: result.StreamGapMaxMS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
 }
 
 func warmupRequests(concurrency int) int {

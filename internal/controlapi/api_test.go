@@ -3422,7 +3422,8 @@ func (f *fakeBenchmarkRunner) Run(_ context.Context, cfg benchmark.Config) (benc
 	f.config = cfg
 	value := 12.5
 	goodput := 4.25
-	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value, Goodput: &goodput}, nil
+	ttftP99, longestStall := 31.5, 240.0
+	return benchmark.Result{Tool: "aiperf", ToolVersion: "0.9.0", Command: "aiperf profile --api-key ${INFERCRANE_API_KEY}", Requests: 10, Succeeded: 10, TTFTP95MS: &value, TTFTP99MS: &ttftP99, StreamGapMaxMS: &longestStall, Goodput: &goodput}, nil
 }
 func TestOperationAPIAuthenticationAndResponse(t *testing.T) {
 	store := &fakeStore{operation: domain.Operation{ID: "op", TenantID: "global", Status: "succeeded", ResultJSON: `{"endpoint_name":"coder-production"}`, MaxAttempts: 5}}
@@ -3692,6 +3693,15 @@ func TestBenchmarkRunsThroughControlPlaneAndPersistsIdentity(t *testing.T) {
 	(API{Store: store, APIKey: "secret", BenchmarkRunner: runner, GatewayURL: "http://gateway", AIPerfBinary: "aiperf"}).Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"model_identity":"Qwen/Qwen3-8B@commit"`) || !strings.Contains(response.Body.String(), `"gpu_count":1`) {
 		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	// Tail metrics the run measured are returned; ones it could not measure stay null.
+	for _, field := range []string{`"ttft_p99_ms":31.5`, `"stream_gap_max_ms":240`, `"tpot_p99_ms":null`, `"stream_gap_p99_ms":null`} {
+		if !strings.Contains(response.Body.String(), field) {
+			t.Fatalf("response is missing %s: %s", field, response.Body.String())
+		}
+	}
+	if row := store.benchmarks; len(row) != 1 || row[0].TTFTP99MS == nil || *row[0].TTFTP99MS != 31.5 || row[0].StreamGapMaxMS == nil || *row[0].StreamGapMaxMS != 240 || row[0].TPOTP99MS != nil {
+		t.Fatalf("tail metrics were not persisted: %#v", row)
 	}
 	if runner.config.APIKey != "secret" || runner.config.RandomSeed != 42 || runner.config.Model != "qwen" || runner.config.Tokenizer != "Qwen/Qwen3-8B" || runner.config.ProfileRuns != 3 || runner.config.WarmupRequests != 4 || runner.config.ProfileRunCooldown != 2*time.Second || runner.config.ArrivalPattern != "poisson" || runner.config.RequestRate != 5 || len(store.benchmarks) != 1 || store.benchmarks[0].GPU != "L40S" || store.benchmarks[0].GPUCount == nil || *store.benchmarks[0].GPUCount != 1 || !strings.Contains(store.benchmarks[0].WorkloadJSON, `"profile_runs":3`) || !strings.Contains(store.benchmarks[0].CostMetadataJSON, `"available":false`) {
 		t.Fatalf("config=%#v benchmarks=%#v", runner.config, store.benchmarks)
