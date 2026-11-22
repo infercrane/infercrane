@@ -179,8 +179,10 @@ is released there, new clients can discover these values without maintaining the
 
 ## Discover available models
 
-Availability and prices can change as capacity and qualification evidence change. Read the live
-catalog instead of copying a stale model list into your application.
+Availability and prices can change as capacity and qualification evidence change. Each model is
+callable only while its qualification evidence is current. When one model's evidence lapses, that
+model leaves the catalog and its requests are refused until it is qualified again; the other models
+stay callable. Read the live catalog instead of copying a stale model list into your application.
 
 ```bash
 curl -fsS https://api.infercrane.com/v1/models \
