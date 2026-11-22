@@ -82,6 +82,13 @@ policy, measurements, reason codes, revision identities, and evaluation timestam
 
 Missing measurements are not fabricated. Output throughput from request telemetry is the median successful request's output tokens per second of request time, so a canary serving 5% of traffic is compared with the active revision on speed, not on how many tokens each served. It is compared only when both revisions report token usage. TTFT is required before acceptance. A candidate with no healthy ready replica is rejected immediately.
 
+Error rate, TTFT, latency, and output speed are measured over requests, so they decide nothing until
+both revisions reach the policy's minimum requests. Before then the decision is `WAIT` with
+`insufficient_requests`: the p95 of three requests is simply the slowest one, and one failed request
+out of three is a 33% error rate, so a canary's first few requests cannot reject it. Evidence that
+does not depend on request count still rejects at once: a candidate with no ready replica,
+incompatible benchmark identity, a sourced cost regression, or a signed quality `BLOCK`.
+
 Endpoint Release Guard never applies one primary deployment's metrics to an arbitrary routing
 graph. It currently qualifies single-primary comparisons, a primary change with an unchanged
 `primary-fallback` graph, and an append-only managed fallback whose immutable policy includes
