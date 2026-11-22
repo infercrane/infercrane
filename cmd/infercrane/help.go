@@ -39,6 +39,7 @@ var helpSections = []helpSection{
 	{id: "serving", title: "More serving tools"},
 	{id: "evidence", title: "Evidence and measurement"},
 	{id: "platform", title: "Platform administration"},
+	{id: "legacy", title: "Older commands"},
 }
 
 // helpTheme styles help written to stdout. Help never prints JSON, and its
@@ -175,7 +176,10 @@ func accountLine(t theme) string {
 // template functions read the help theme when help is rendered.
 const usageTemplate = `{{heading "Usage"}}{{if .Runnable}}
   {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+  {{.CommandPath}} [command]{{end}}{{with actions .}}
+
+{{heading "Actions"}}
+{{.}}{{end}}{{if gt (len .Aliases) 0}}
 
 {{heading "Aliases"}}
   {{.NameAndAliases}}{{end}}{{if .HasExample}}
@@ -199,6 +203,7 @@ func init() {
 	cobra.AddTemplateFuncs(map[string]any{
 		"heading": func(text string) string { return helpTheme().heading(text) },
 		"muted":   func(text string) string { return helpTheme().muted(text) },
+		"actions": func(cmd *cobra.Command) string { return renderActions(helpTheme(), cmd.Name()) },
 		// Option descriptions wrap to the help width, so a long one continues
 		// under its own column instead of breaking mid-word at the edge.
 		"flagUsages": func(flags *pflag.FlagSet) string { return flags.FlagUsagesWrapped(helpTheme().width) },
@@ -360,4 +365,49 @@ func highlightCommands(t theme, text string) string {
 		b.WriteString(part)
 	}
 	return b.String()
+}
+
+// renderActions lists a command's actions as two aligned columns.
+func renderActions(t theme, name string) string {
+	actions := commandActions[name]
+	if len(actions) == 0 {
+		return ""
+	}
+	width := 0
+	for _, action := range actions {
+		width = max(width, lipgloss.Width(action[0]))
+	}
+	lines := make([]string, 0, len(actions))
+	for _, action := range actions {
+		lines = append(lines, "  "+action[0]+strings.Repeat(" ", width-lipgloss.Width(action[0])+3)+t.muted(action[1]))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// legacyLong is the help for an older command: what it does and what to use.
+func legacyLong(short, replacement string) string {
+	if replacement == "" {
+		return short + ".\n\nThis is an older command. It still works, and nothing replaces it yet."
+	}
+	return short + ".\n\nThis is an older command. It still works; use " + replacement + " instead."
+}
+
+// noteLegacyCommand tells a person at a terminal that a command is older and
+// what replaces it. Scripts, pipes, and JSON output never see the note.
+func noteLegacyCommand(name string, args []string) {
+	replacement, legacy := legacyReplacements[name]
+	if !legacy || replacement == "" || outputIsJSON(args) || !styleAllowed(os.Stderr) {
+		return
+	}
+	t := themeFor(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, t.muted("Note: infercrane "+name+" is an older command; use "+replacement+"."))
+}
+
+func outputIsJSON(args []string) bool {
+	for index, arg := range args {
+		if arg == "--output=json" || arg == "-output=json" || ((arg == "--output" || arg == "-output") && index+1 < len(args) && args[index+1] == "json") {
+			return true
+		}
+	}
+	return false
 }

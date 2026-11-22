@@ -204,7 +204,7 @@ func printObserveSnapshot(snapshot observeSnapshot) {
 	if len(snapshot.Admission) > 0 {
 		fmt.Printf("\nADMISSION\n  %s\n", encoded)
 	}
-	fmt.Printf("\nNEXT\n  Send request    infercrane request %s\n  Diagnose        infercrane observe %s --diagnose\n  Open console    infercrane ui\n", snapshot.Name, snapshot.Name)
+	fmt.Printf("\nNEXT\n  Send request    infercrane request %s\n  Diagnose        infercrane observe %s --diagnose\n  Dashboard       infercrane open %s %s\n", snapshot.Name, snapshot.Name, snapshot.Kind, snapshot.Name)
 }
 
 // observeText renders a decoded JSON value for human output. An absent or

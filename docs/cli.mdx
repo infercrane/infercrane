@@ -13,10 +13,25 @@ The CLI talks to the authenticated control-plane API and never opens PostgreSQL 
 
 `infercrane` or `infercrane help` lists the everyday commands in five sections: Get started,
 Deployments, Optimize, Observe, and Configuration. `infercrane help --all` adds the operator tools in
-three more: More serving tools, Evidence and measurement, and Platform administration. Every command
+three more: More serving tools, Evidence and measurement, and Platform administration, and lists
+Older commands last. Every command
 runs and completes in the shell either way; the split only keeps the first screen short.
-`infercrane help COMMAND` and `infercrane COMMAND --help` show one command's usage, examples, and
-options.
+`infercrane help COMMAND` and `infercrane COMMAND --help` show one command's usage, its actions
+when it takes one, examples, and options. Option descriptions wrap at 80 columns.
+
+Older commands still run, but newer ones do their job. Their help says what to use instead, and in a
+terminal they print a one-line note on stderr; scripts and `--output json` never see it.
+
+| Older command | Use instead |
+|---|---|
+| `auth` | `whoami`, `login`, `logout` |
+| `init` | `login`, or set `INFERCRANE_API_KEY` |
+| `events` | `logs` |
+| `recommend`, `recipes` | `optimize propose` |
+| `autopilot`, `recipe` | `optimize` |
+| `lab` | `optimize results` |
+| `burst` | `external` |
+| `session` | nothing yet |
 
 Help also says which control plane the CLI uses, for example `● Using control.example.com · context
 prod`, or `○ Not signed in. Run infercrane login to start.` It reads only the saved configuration

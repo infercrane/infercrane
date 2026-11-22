@@ -81,13 +81,20 @@ func TestFetchPublicModelConfigRejectsUnsafeIdentity(t *testing.T) {
 	}
 }
 
-func TestRecipeSearchRequiresSearchForConfigAndRejectsEstimator(t *testing.T) {
+func TestModelConfigTurnsOnSetupSearchAndEstimatorIsRejected(t *testing.T) {
+	// Giving the model config is the customer's request for the best setup;
+	// they never name the search.
 	request := optimizer.Request{ModelIdentity: "acme/model"}
-	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", "config.json", false, false); err == nil {
-		t.Fatal("--model-config without search was accepted")
+	err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", filepath.Join(t.TempDir(), "config.json"), false, false)
+	if request.Search != optimizer.SearchRecipes || err == nil || !strings.Contains(err.Error(), "read model config") {
+		t.Fatalf("--model-config without --search: search=%q err=%v", request.Search, err)
+	}
+	request = optimizer.Request{ModelIdentity: "acme/model"}
+	if err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", "", false, false); err != nil || request.Search != "" {
+		t.Fatalf("no model config must not search: search=%q err=%v", request.Search, err)
 	}
 	request.Search = optimizer.SearchRecipes
-	_, err := optimizationProposal(context.Background(), request, recipeSearchCatalog(t), "aiconfigurator", "python3", false)
+	_, err = optimizationProposal(context.Background(), request, recipeSearchCatalog(t), "aiconfigurator", "python3", false)
 	if err == nil {
 		t.Fatal("recipe search was combined with the estimator source")
 	}
