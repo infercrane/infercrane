@@ -78,28 +78,18 @@ func (s *Store) BindingRateCard(ctx context.Context, tenant, bindingID string) (
 	return &card, nil
 }
 
-// BindingMetrics reads one binding's served requests in a window, the way
-// RevisionMetrics reads a revision's. ReadyReplicas is the binding's healthy
-// routable targets: one for a healthy external target, the healthy targets
-// of a deployment binding's deployment.
+// BindingMetrics reads one binding's requests in a window, the way
+// RevisionMetrics reads a revision's: a request that failed over away from
+// the binding counts as one of its errors. ReadyReplicas is the binding's
+// healthy routable targets: one for a healthy external target, the healthy
+// targets of a deployment binding's deployment.
 func (s *Store) BindingMetrics(ctx context.Context, tenant string, binding domain.BackendBinding, window time.Duration) (domain.RevisionMetrics, error) {
 	if window <= 0 {
 		return domain.RevisionMetrics{}, errors.New("metrics window must be positive")
 	}
-	var metrics domain.RevisionMetrics
-	var ttft, latency, output sql.NullFloat64
-	err := s.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(AVG(CASE WHEN error_type IS NOT NULL OR status_code IS NULL OR status_code>=400 THEN 1.0 ELSE 0.0 END),0),percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) FILTER (WHERE ttft_ms IS NOT NULL),percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE latency_ms IS NOT NULL),`+requestOutputSpeedSQL+` FROM request_records WHERE tenant_id=? AND binding_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, tenant, binding.ID, window.Seconds()).Scan(&metrics.Requests, &metrics.ErrorRate, &ttft, &latency, &output)
+	metrics, err := s.requestMetrics(ctx, bindingRequests, binding.ID, `tenant_id=? AND started_at>=NOW()-(?*INTERVAL '1 second')`, tenant, window.Seconds())
 	if err != nil {
 		return metrics, err
-	}
-	if ttft.Valid {
-		metrics.P95TTFTMS = &ttft.Float64
-	}
-	if latency.Valid {
-		metrics.P95LatencyMS = &latency.Float64
-	}
-	if output.Valid {
-		metrics.OutputTokensPerSecond = &output.Float64
 	}
 	switch binding.Kind {
 	case "external":

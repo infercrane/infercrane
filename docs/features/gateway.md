@@ -70,8 +70,9 @@ These are what a [migration Proof](./migration.mdx) prices and replays.
   from the in-memory snapshot. Each further binding gets one attempt; only the first spends the
   admission retry budget. Streams, cancelled or timed-out requests, and paid external bindings
   never move. The request record names the binding that answered and sets `fallback_reason`
-  (`upstream_connection_failed` or `upstream_<status>`). See
-  [endpoints](./endpoints.mdx#when-the-primary-fails-mid-request).
+  (`upstream_connection_failed` or `upstream_<status>`), `fallback_from_binding_id` and
+  `fallback_from_revision_id` (the first binding left). Revision and binding metrics count it as
+  an error of what it left. See [endpoints](./endpoints.mdx#when-the-primary-fails-mid-request).
 - Weighted endpoints use smooth weighted round-robin (`routes.Directory.selectLocked`), so short
   windows see the configured share.
 - Client cancellation and upstream disconnects are recorded distinctly.

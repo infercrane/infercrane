@@ -121,9 +121,13 @@ and the caller gets the first binding's error.
 Request telemetry keeps one record per request, attributed to the binding that answered, with
 `fallback_reason` saying why the request left the earlier binding: `upstream_connection_failed`,
 `upstream_502`, `upstream_503` or `upstream_504`. `retry_count` counts retries on the same
-binding only. The failed attempt is not recorded on the binding it left, so Release Guard and
-release monitoring do not count it as that revision's error. Endpoint monitoring's `fallbacks`
-count shows how often that happens, per binding on the binding that answered.
+binding only. The record also names the first binding the request left and that binding's
+revision (`fallback_from_binding_id`, `fallback_from_revision_id`). Release Guard and the release
+monitor count such a request as one request and one error of the revision and binding it left,
+even when the fallback answered, so a flaky primary covered by its fallback still shows its
+errors. Its TTFT, latency and output speed come only from requests it served. When a request
+passes through two failing bindings, only the first is named. Endpoint monitoring's `fallbacks` count
+shows how often requests fail over, per binding on the binding that answered.
 
 Serving plans are immutable and SHA-256 identified. Promotion changes only future route
 acquisitions. A buffered or streaming request remains pinned to the route generation it acquired
