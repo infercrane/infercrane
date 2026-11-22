@@ -114,7 +114,7 @@ func artifactCommand(ctx context.Context, cfg config.Config, args []string) erro
 			fmt.Printf("Provider operation  %s\n", response.Prefetch.ProviderOperationID)
 		}
 		if response.Execution == "not_configured" {
-			fmt.Println("\nNo provider cache adapter is configured here. The durable intent is waiting for an adapter; warming has not started.")
+			fmt.Println("\nNo provider cache adapter is configured here. The request is saved and waits for an adapter; warming has not started.")
 		} else {
 			fmt.Println("\nThis is not cache-hit proof. Wait for a fresh provider observation before planning assumes locality.")
 		}

@@ -25,6 +25,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
@@ -431,6 +432,9 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	if err := validateRequest(request); err != nil {
 		return Proposal{}, err
 	}
+	if err := ValidateMeasurable(request); err != nil {
+		return Proposal{}, err
+	}
 	input, err := json.Marshal(request)
 	if err != nil {
 		return Proposal{}, err
@@ -438,6 +442,7 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	sum := sha256.Sum256(input)
 	proposal := Proposal{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Input: request, InputDigest: hex.EncodeToString(sum[:]), Mutation: "none", SelectionBoundary: "configuration candidates only; benchmark, quality, cost, and Release Guard evidence are required before qualification"}
 	applyWorkloadBoundary(&proposal)
+	applyObjectiveMetric(&proposal)
 	if request.Diagnosis != nil {
 		// Plan every candidate first so the diagnosis ranks the whole set
 		// before the requested bound cuts it.
@@ -1040,6 +1045,41 @@ func applyWorkloadBoundary(proposal *Proposal) {
 	}
 	proposal.Warnings = append(proposal.Warnings, "The public workload prior is day-zero screening evidence. Replace it with representative customer replay before qualification or promotion.")
 	proposal.SelectionBoundary += "; public workload priors cannot qualify or promote a production candidate"
+}
+
+// applyObjectiveMetric warns when the objective ranks on another metric than
+// its usual one, so the substitution is visible before anything is measured.
+func applyObjectiveMetric(proposal *Proposal) {
+	metric, ok := lab.ObjectiveMetric(proposal.Input.Objective, proposal.Input.WorkloadProfile)
+	if !ok || metric.Note == "" {
+		return
+	}
+	proposal.Warnings = append(proposal.Warnings, fmt.Sprintf("Objective %s ranks setups on %s on the %s profile: %s.", proposal.Input.Objective, metric.Label, proposal.Input.WorkloadProfile, metric.Note))
+}
+
+// ValidateMeasurable rejects a limit the request's workload profile can never
+// measure. A non-streaming (buffered) run receives each answer whole, so it
+// measures neither time to first token nor time per output token, and a TTFT
+// or TPOT limit would reject every setup only after the run spent its whole
+// measurement time. It is checked when a proposal is made and when a run is
+// created, not when a stored run is ranked.
+func ValidateMeasurable(request Request) error {
+	request = normalizeRequest(request)
+	profile, err := performanceprofile.Get(request.WorkloadProfile)
+	if err != nil || profile.Streaming {
+		return nil
+	}
+	var limits []string
+	if request.MaxTTFTP95MS != nil {
+		limits = append(limits, "max_ttft_p95_ms")
+	}
+	if request.MaxTPOTP95MS != nil {
+		limits = append(limits, "max_tpot_p95_ms")
+	}
+	if len(limits) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s cannot be measured on the %s profile: it receives each answer whole, so no run measures time to first token or time per output token and every setup would miss the limit; use a streaming profile such as interactive, or drop the limit (latency objectives on %s rank on p95 request latency)", strings.Join(limits, " and "), profile.Name, profile.Name)
 }
 
 func requireCustomerReplay(request Request, required, limitations []string) ([]string, []string) {

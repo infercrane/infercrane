@@ -9,9 +9,12 @@ import (
 	"sort"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/performanceprofile"
 )
 
-const AlgorithmVersion = "inference-lab-v4"
+// AlgorithmVersion v5 ranks latency objectives on a non-streaming workload
+// profile by p95 request latency and names the ranked metric on every row.
+const AlgorithmVersion = "inference-lab-v5"
 
 const (
 	ObjectiveLatency        = "latency"
@@ -19,6 +22,50 @@ const (
 	ObjectiveThroughput     = "throughput"
 	ObjectiveCostEfficiency = "cost-efficiency"
 )
+
+// Metric keys an objective can rank on. They are the benchmark metric names
+// that campaign measurements compare between interleaved runs.
+const (
+	MetricTTFTP95          = "ttft_p95_ms"
+	MetricLatencyP95       = "latency_p95_ms"
+	MetricOutputThroughput = "output_token_throughput"
+)
+
+// BufferedLatencyNote explains why a latency objective on a non-streaming
+// profile ranks on p95 request latency.
+const BufferedLatencyNote = "buffered answers arrive whole, so time to first token is not measured; p95 request latency is the wait a buffered client sees"
+
+// Metric is the measured value an objective ranks on.
+type Metric struct {
+	Name           string
+	Label          string
+	HigherIsBetter bool
+	// CostScaled divides the metric by the sourced hourly cost.
+	CostScaled bool
+	// Note says why the objective ranks on this metric instead of its usual
+	// one. It is empty when the usual metric applies.
+	Note string
+}
+
+// ObjectiveMetric returns the metric an objective ranks on for a workload
+// profile. Latency and interactive rank on p95 time to first token, except on
+// a non-streaming profile such as buffered: AIPerf measures no first token
+// there, and the time a buffered client waits is the whole request, so they
+// rank on p95 request latency. ok is false for an unknown objective.
+func ObjectiveMetric(objective, workloadProfile string) (Metric, bool) {
+	switch objective {
+	case ObjectiveLatency, ObjectiveInteractive:
+		if profile, err := performanceprofile.Get(workloadProfile); err == nil && !profile.Streaming {
+			return Metric{Name: MetricLatencyP95, Label: "p95 request latency", Note: BufferedLatencyNote}, true
+		}
+		return Metric{Name: MetricTTFTP95, Label: "p95 time to first token"}, true
+	case ObjectiveThroughput:
+		return Metric{Name: MetricOutputThroughput, Label: "output tokens per second", HigherIsBetter: true}, true
+	case ObjectiveCostEfficiency:
+		return Metric{Name: MetricOutputThroughput, Label: "output tokens per second per sourced hourly cost", HigherIsBetter: true, CostScaled: true}, true
+	}
+	return Metric{}, false
+}
 
 type Input struct {
 	ModelIdentity   string   `json:"model_identity"`
@@ -56,6 +103,7 @@ type Candidate struct {
 	RequestCount       int             `json:"request_count"`
 	TTFTP95MS          *float64        `json:"ttft_p95_ms,omitempty"`
 	TPOTP95MS          *float64        `json:"tpot_p95_ms,omitempty"`
+	LatencyP95MS       *float64        `json:"latency_p95_ms,omitempty"`
 	OutputTokensSecond *float64        `json:"output_tokens_second,omitempty"`
 	Goodput            *float64        `json:"goodput,omitempty"`
 	ErrorRate          float64         `json:"error_rate"`
@@ -67,7 +115,9 @@ type Candidate struct {
 	Comparable         bool            `json:"comparable"`
 	Selected           bool            `json:"selected"`
 	ObjectiveValue     *float64        `json:"objective_value,omitempty"`
-	SelectionReason    string          `json:"selection_reason,omitempty"`
+	// ObjectiveMetric names the measured metric ObjectiveValue comes from.
+	ObjectiveMetric string `json:"objective_metric,omitempty"`
+	SelectionReason string `json:"selection_reason,omitempty"`
 	// ModelIdentity is set only on a row that served one of the input's
 	// derived artifacts instead of its base model.
 	ModelIdentity string `json:"model_identity,omitempty"`
@@ -82,6 +132,7 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		return domain.LabEvaluation{}, err
 	}
 	digest := sha256.Sum256(inputJSON)
+	metric, knownObjective := ObjectiveMetric(input.Objective, input.WorkloadProfile)
 	admitted := map[string]struct{}{input.ModelIdentity: {}}
 	for _, identity := range input.DerivedModelIdentities {
 		admitted[identity] = struct{}{}
@@ -101,12 +152,14 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		if !json.Valid(cost) {
 			cost = json.RawMessage(`{"available":false}`)
 		}
-		candidate := Candidate{EvidenceClass: "measured", EvidenceID: row.ID, Deployment: row.DeploymentName, Revision: row.RevisionID, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, ComputeMode: row.ComputeMode, RequestCount: row.RequestCount, TTFTP95MS: row.TTFTP95MS, TPOTP95MS: row.TPOTP95MS, OutputTokensSecond: row.OutputTokenThroughput, Goodput: row.Goodput, ErrorRate: errorRate, Cost: cost, WorkloadDigest: workloadDigest, WorkloadProfile: workloadProfile}
+		candidate := Candidate{EvidenceClass: "measured", EvidenceID: row.ID, Deployment: row.DeploymentName, Revision: row.RevisionID, Runtime: row.Runtime, RuntimeVersion: row.RuntimeVersion, Provider: row.Provider, Region: row.Region, GPU: row.GPU, GPUCount: row.GPUCount, ComputeMode: row.ComputeMode, RequestCount: row.RequestCount, TTFTP95MS: row.TTFTP95MS, TPOTP95MS: row.TPOTP95MS, LatencyP95MS: row.LatencyP95MS, OutputTokensSecond: row.OutputTokenThroughput, Goodput: row.Goodput, ErrorRate: errorRate, Cost: cost, WorkloadDigest: workloadDigest, WorkloadProfile: workloadProfile}
 		if row.ModelIdentity != input.ModelIdentity {
 			candidate.ModelIdentity = row.ModelIdentity
 		}
 		candidate.MeetsSLO, candidate.ConstraintReasons = evaluateConstraints(input, candidate)
-		candidate.ObjectiveValue = objectiveValue(input.Objective, candidate)
+		if knownObjective {
+			candidate.ObjectiveValue, candidate.ObjectiveMetric = objectiveValue(metric, candidate), metric.Name
+		}
 		candidates = append(candidates, candidate)
 	}
 	digests := map[string]struct{}{}
@@ -144,16 +197,16 @@ func Evaluate(input Input, evidence []domain.BenchmarkResult) (domain.LabEvaluat
 		if *a == *b {
 			return candidates[i].EvidenceID < candidates[j].EvidenceID
 		}
-		if input.Objective == ObjectiveLatency || input.Objective == ObjectiveInteractive {
-			return *a < *b
+		if metric.HigherIsBetter {
+			return *a > *b
 		}
-		return *a > *b
+		return *a < *b
 	})
 	if comparable {
 		for index := range candidates {
 			if candidates[index].ObjectiveValue != nil && (candidates[index].MeetsSLO == nil || *candidates[index].MeetsSLO) {
 				candidates[index].Selected = true
-				candidates[index].SelectionReason = "best measured " + input.Objective + " among exact-workload candidates"
+				candidates[index].SelectionReason = "best measured " + input.Objective + " (" + metric.Label + ") among exact-workload candidates"
 				break
 			}
 		}
@@ -224,30 +277,28 @@ func evaluateConstraints(input Input, candidate Candidate) (*bool, []string) {
 	return &meets, reasons
 }
 
-func objectiveValue(objective string, candidate Candidate) *float64 {
-	switch objective {
-	case ObjectiveLatency, ObjectiveInteractive:
-		if validMetric(candidate.TTFTP95MS) {
-			return candidate.TTFTP95MS
-		}
-	case ObjectiveThroughput:
-		if validMetric(candidate.OutputTokensSecond) {
-			return candidate.OutputTokensSecond
-		}
-	case ObjectiveCostEfficiency:
-		if !validMetric(candidate.OutputTokensSecond) {
-			return nil
-		}
-		hourly := hourlyCost(candidate.Cost)
-		if !validMetric(hourly) || *hourly <= 0 {
-			return nil
-		}
-		value := *candidate.OutputTokensSecond / *hourly
-		return &value
-	default:
+func objectiveValue(metric Metric, candidate Candidate) *float64 {
+	var value *float64
+	switch metric.Name {
+	case MetricTTFTP95:
+		value = candidate.TTFTP95MS
+	case MetricLatencyP95:
+		value = candidate.LatencyP95MS
+	case MetricOutputThroughput:
+		value = candidate.OutputTokensSecond
+	}
+	if !validMetric(value) {
 		return nil
 	}
-	return nil
+	if !metric.CostScaled {
+		return value
+	}
+	hourly := hourlyCost(candidate.Cost)
+	if !validMetric(hourly) || *hourly <= 0 {
+		return nil
+	}
+	scaled := *value / *hourly
+	return &scaled
 }
 
 func hourlyCost(raw json.RawMessage) *float64 {

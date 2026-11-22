@@ -124,20 +124,22 @@ works for any model it deployed.
 
 ### Find the best setup for a pinned model
 
-To find the best setup for any model pinned to a commit, add `--search recipes`. InferCrane adds
-setups to measure and reads the model's pinned `config.json` to decide which apply, so this does
-not depend on the model name:
+To find the best setup for any model pinned to a commit, let InferCrane read the model's pinned
+`config.json` with `--allow-model-metadata-network`. It then adds setups to measure and uses the
+config to decide which apply, so this does not depend on the model name:
 
 ```bash
 infercrane optimize propose acme/novel-open-model \
   --model-revision 0123456789abcdef0123456789abcdef01234567 \
   --provider runpod-pods --gpu H200 \
   --objective throughput \
-  --search recipes --allow-model-metadata-network
+  --allow-model-metadata-network
 ```
 
-Pass `--model-config config.json` instead to stay offline. Without either, setups that need a
-declared model feature, such as speculative decoding, are skipped and the proposal says why. API
+Pass `--model-config config.json` instead to stay offline. Either one turns on these added setups;
+`--search recipes` is still accepted by scripts that pass it. Without either, setups that need a
+declared model feature, such as speculative decoding, are skipped and the proposal says why. With
+`--source aiconfigurator`, `--allow-model-metadata-network` only feeds the estimator. API
 clients send `search`, `model_features`, and `model_config_digest` on
 `POST /api/v1/optimization/proposals`.
 
@@ -1075,6 +1077,40 @@ ranking keeps each candidate's `guard_check`: both sides' requests, failed reque
 length, and which check fired. Rankings with these checks, the paired comparison, and the
 confirmation on fresh servers record algorithm `campaign-paired-confirmed-v5`; with the machine
 difference in every interval, `campaign-paired-confirmed-v6`.
+
+**Objective metric.** Each objective ranks on one measured metric, and Lab and the control gate use
+the same one:
+
+| Objective | Streaming profile (all but `buffered`) | `buffered` profile |
+|---|---|---|
+| `interactive`, `latency` | p95 time to first token, lower is better | p95 request latency, lower is better |
+| `throughput` | Output tokens per second | Output tokens per second |
+| `cost-efficiency` | Output tokens per second per sourced hourly cost | Output tokens per second per sourced hourly cost |
+
+A buffered run receives each answer whole, so AIPerf measures no first token. The wait a buffered
+client sees is the whole request, so latency objectives rank on p95 request latency there.
+Before Lab `inference-lab-v5`, they ranked on time to first token on every profile, and an
+`interactive` or `latency` run on `buffered` ended `measured_ranking_inconclusive` after spending
+its whole measurement time. The substitution is labelled at each step:
+
+- `optimize propose` and the stored run carry a warning, for example `Objective interactive ranks
+  setups on p95 request latency on the buffered profile: …`.
+- Every Lab row in the persisted ranking names its metric in `objective_metric`. The selection
+  reason names it too, for example `best measured interactive (p95 request latency) among
+  exact-workload candidates`.
+- The report sets `objective_metric` to `latency_p95_ms` and `objective_note` to the reason. Its
+  subtitle reads `goal: interactive, ranked on p95 request latency`. The report takes the metric
+  from the stored ranking when it recorded one, so a run ranked before `inference-lab-v5` still
+  reads `ttft_p95_ms`.
+
+A time-to-first-token or time-per-output-token limit (`--max-ttft-p95-ms`, `--max-tpot-p95-ms`) has
+no substitute: no buffered run measures either, so every setup would miss it. `optimize propose`
+and `optimize create` stop with an error naming the limit before anything is sent. The API answers
+HTTP 422: `invalid_optimization_request` from `POST /api/v1/optimization/proposals` and
+`invalid_optimization_proposal` from `POST /api/v1/optimization/campaigns`, before anything is
+stored or provisioned. Use a streaming profile such as `interactive`, or drop the limit. Without `--profile`,
+the profile comes from the objective: `interactive` for `interactive` and `latency`, `throughput`
+for `throughput` and `cost-efficiency`, both streaming.
 
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric and

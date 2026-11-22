@@ -70,7 +70,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	gpuCount := fs.Int("gpu-count", 1, "GPUs per baseline replica")
 	runtimes := fs.String("runtimes", "", "optional comma-separated runtime allowlist")
 	objective := fs.String("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
-	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective")
+	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective. buffered (non-streaming) ranks interactive and latency on p95 request latency and rejects TTFT and TPOT limits")
 	maxTTFT := fs.String("max-ttft-p95-ms", "", "required measured p95 TTFT")
 	maxTPOT := fs.String("max-tpot-p95-ms", "", "required measured p95 TPOT")
 	maxErrorRate := fs.String("max-error-rate", "", "maximum measured failed-request ratio")
@@ -84,7 +84,8 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	sourceName := fs.String("source", "auto", "where setups come from: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
 	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates and --search recipes")
-	search := fs.String("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
+	// --search stays accepted for scripts; giving the model config turns it on.
+	search := fs.String("search", "", "")
 	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
 	writeDir := fs.String("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for run creation")
@@ -155,7 +156,12 @@ func optimizeCommand(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, *allowMetadataNetwork, diagnosed); err != nil {
+	// An explicit estimator source plans from the estimator alone.
+	searchConfig := *allowMetadataNetwork && strings.TrimSpace(*sourceName) != "aiconfigurator"
+	if strings.TrimSpace(*modelConfig) != "" {
+		searchConfig = *allowMetadataNetwork
+	}
+	if err = applyRecipeSearch(ctx, &request, catalog, *search, *modelConfig, searchConfig, diagnosed); err != nil {
 		return err
 	}
 	var proposal optimizer.Proposal
@@ -920,11 +926,14 @@ const maxFetchedModelConfigBytes = 4 << 20
 func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork, diagnosed bool) error {
 	request.Search = strings.ToLower(strings.TrimSpace(search))
 	if request.Search == "" {
-		if strings.TrimSpace(configPath) == "" {
+		// Giving the model's config is how a customer asks for the best
+		// setup; the search itself is not an option they need to name.
+		hasConfig := strings.TrimSpace(configPath) != "" || allowNetwork
+		if !hasConfig {
 			return nil
 		}
 		if !diagnosed {
-			return errors.New("--model-config requires --search recipes or --diagnosis-endpoint")
+			request.Search = optimizer.SearchRecipes
 		}
 	}
 	var raw []byte

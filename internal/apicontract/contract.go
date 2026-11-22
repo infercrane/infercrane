@@ -959,6 +959,8 @@ func optimizationCampaignReportSchema() map[string]any {
 	return object([]string{"schema_version", "algorithm_version", "campaign_id", "model_identity", "objective", "intent", "campaign_state", "finished", "simulated_accelerator", "outcome", "metrics", "quality", "noise", "monthly", "workload", "candidates", "warnings", "bottleneck", "appendix", "unknown", "report_digest"}, map[string]any{
 		"schema_version": map[string]any{"type": "string", "const": "infercrane.optimization-report/v1"}, "algorithm_version": text,
 		"campaign_id": text, "model_identity": text, "objective": text, "intent": text, "campaign_state": text, "finished": boolean,
+		"objective_metric":      map[string]any{"type": "string", "enum": []string{"ttft_p95_ms", "latency_p95_ms", "output_token_throughput"}, "description": "Measured metric the objective ranked on: p95 time to first token for interactive and latency, p95 request latency for those two on a non-streaming (buffered) profile, and output throughput for throughput and cost-efficiency, which divides it by the sourced hourly cost."},
+		"objective_note":        map[string]any{"type": "string", "description": "Why the objective ranked on another metric than its usual one; absent when it did not."},
 		"simulated_accelerator": map[string]any{"type": "boolean", "description": "True when any setup ran on a simulated accelerator or a CPU. Its numbers prove the pipeline, not GPU speed."},
 		"banner":                map[string]any{"type": "string", "description": "Fixed text every renderer must show: present only for simulated or CPU runs."},
 		"outcome": object([]string{"kind", "headline", "baseline_candidate_id", "baseline_label", "winner_candidate_id", "winner_label", "activated"}, map[string]any{

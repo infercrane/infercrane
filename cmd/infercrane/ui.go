@@ -260,7 +260,7 @@ func (m uiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Action failed"
 			return m, nil
 		}
-		m.notice = "Durable operation queued · " + shortID(msg.operationID)
+		m.notice = "Operation queued · " + shortID(msg.operationID)
 		m.loading = true
 		m.requestSeq++
 		return m, m.load(m.selectedName(), m.requestSeq)
@@ -383,7 +383,7 @@ func (m uiModel) availableActions() []uiAction {
 		return actions
 	}
 	if m.view.ActiveOperation != nil {
-		actions = append([]uiAction{{name: "cancel", label: "Cancel active operation", detail: "Requests cooperative cancellation; infrastructure cleanup remains durable", method: http.MethodPost, path: "/api/v1/operations/" + url.PathEscape(m.view.ActiveOperation.ID) + "/cancel", body: struct{}{}}}, actions...)
+		actions = append([]uiAction{{name: "cancel", label: "Cancel active operation", detail: "Requests cooperative cancellation; cleanup keeps running in the control plane", method: http.MethodPost, path: "/api/v1/operations/" + url.PathEscape(m.view.ActiveOperation.ID) + "/cancel", body: struct{}{}}}, actions...)
 	}
 	candidate := m.view.Deployment.CandidateRevisionID
 	if candidate != "" {
@@ -496,7 +496,7 @@ func (m uiModel) render() string {
 		footer = "←/→ views  1–7 jump  j/k move  ctrl+k actions  ? help  q quit"
 	}
 	if m.help {
-		safety := "Actions show impact, require confirmation, and queue idempotent durable operations."
+		safety := "Actions show impact, require confirmation, and queue operations that are safe to retry."
 		if m.readOnly {
 			safety = "Read-only mode: API mutations are disabled; copyable CLI workflows remain available."
 		}
@@ -554,7 +554,7 @@ func (m uiModel) renderContext(s uiStyles, width int) string {
 	lines := []string{s.title.Render("WORKSPACE"), ""}
 	switch m.tab {
 	case 1:
-		lines = append(lines, s.subtle.Render("Durable execution and recovery."), "", uiRow(s, "Active", boolLabel(m.view.ActiveOperation != nil)))
+		lines = append(lines, s.subtle.Render("Long-running changes and recovery."), "", uiRow(s, "Active", boolLabel(m.view.ActiveOperation != nil)))
 	case 2:
 		lines = append(lines, s.subtle.Render("Revision safety and rollout evidence."), "", uiRow(s, "Candidate", shortID(m.view.Deployment.CandidateRevisionID)), uiRow(s, "Guard", latestGuardDecision(m.view)))
 	case 3:
@@ -565,7 +565,7 @@ func (m uiModel) renderContext(s uiStyles, width int) string {
 	case 5:
 		lines = append(lines, s.subtle.Render("Persisted capacity decisions."), "", uiRow(s, "Bounds", fmt.Sprintf("%d–%d", m.view.Deployment.MinReplicas, m.view.Deployment.MaxReplicas)), uiRow(s, "Decisions", fmt.Sprint(len(m.scaling))))
 	case 6:
-		lines = append(lines, s.subtle.Render("Full durable history; select an event for payload."), "", uiRow(s, "Events", fmt.Sprint(len(m.events))))
+		lines = append(lines, s.subtle.Render("Full history; select an event for its details."), "", uiRow(s, "Events", fmt.Sprint(len(m.events))))
 	default:
 		lines = append(lines, s.subtle.Render("Live health and deterministic explanation."), "", uiRow(s, "Serving", strings.ToUpper(m.view.LifecycleStatus.ServingState)), uiRow(s, "Converged", strings.ToUpper(m.view.LifecycleStatus.ConvergenceState)))
 	}
@@ -742,14 +742,14 @@ func (m uiModel) renderExplanation(s uiStyles, width int) string {
 func (m uiModel) renderOperationView(s uiStyles, width int) string {
 	content := m.renderOperation(s)
 	if m.view.ActiveOperation == nil {
-		return content + "\n\n" + s.title.Render("RECOVERY") + "\n" + s.subtle.Render("No recovery action is needed. Durable state is converged.")
+		return content + "\n\n" + s.title.Render("RECOVERY") + "\n" + s.subtle.Render("No recovery action is needed. Everything matches the desired state.")
 	}
 	op := m.view.ActiveOperation
 	return content + "\n\n" + s.title.Render("RECOVERY") + "\n" +
 		uiRow(s, "Retryable", fmt.Sprint(op.Retryable)) + "\n" +
 		uiRow(s, "Cancel", fmt.Sprint(op.CancelRequested)) + "\n" +
 		uiRow(s, "Resume", "infercrane operation watch "+op.ID) + "\n\n" +
-		s.subtle.Render("Closing this terminal never stops the durable operation. Use ctrl+k for applicable controls.")
+		s.subtle.Render("Closing this terminal never stops the operation. Use ctrl+k for applicable controls.")
 }
 
 func (m uiModel) renderRolloutView(s uiStyles, width int) string {
@@ -883,7 +883,7 @@ func (m uiModel) renderPalette(s uiStyles, background string) string {
 
 func (m uiModel) renderConfirmation(s uiStyles, background string) string {
 	a := m.confirm
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(s.warning).Padding(1, 2).Width(min(72, max(36, m.width-8))).Render(strings.Join([]string{s.warningText.Render("CONFIRM " + strings.ToUpper(a.label)), "", a.detail, "", s.subtle.Render("A durable operation will be persisted. Closing the terminal will not cancel it."), "", s.title.Render("y / enter confirm") + "  " + s.subtle.Render("n / esc cancel")}, "\n"))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(s.warning).Padding(1, 2).Width(min(72, max(36, m.width-8))).Render(strings.Join([]string{s.warningText.Render("CONFIRM " + strings.ToUpper(a.label)), "", a.detail, "", s.subtle.Render("This starts an operation in the control plane. Closing the terminal will not cancel it."), "", s.title.Render("y / enter confirm") + "  " + s.subtle.Render("n / esc cancel")}, "\n"))
 	return background + "\n" + box
 }
 
