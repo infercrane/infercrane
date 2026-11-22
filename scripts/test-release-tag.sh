@@ -11,7 +11,7 @@ cat >"$temporary/repository/.release/version.json" <<'EOF'
 {
   "schema_version": 1,
   "version": "1.0.0",
-  "candidate_tag": "v1.0.0-rc.3",
+  "candidate_tag": "v1.0.0-rc.4",
   "stable_tag": "v1.0.0"
 }
 EOF
@@ -48,7 +48,7 @@ fi
 git -C "$temporary/repository" update-ref refs/remotes/origin/main HEAD
 
 "$temporary/repository/scripts/release-tag.sh" candidate >/dev/null
-test "$(git -C "$temporary/repository" rev-list -n 1 v1.0.0-rc.3)" = \
+test "$(git -C "$temporary/repository" rev-list -n 1 v1.0.0-rc.4)" = \
   "$(git -C "$temporary/repository" rev-parse HEAD)"
 
 "$temporary/repository/scripts/release-tag.sh" stable >/dev/null

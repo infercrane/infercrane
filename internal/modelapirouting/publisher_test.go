@@ -1,8 +1,10 @@
 package modelapirouting
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +15,9 @@ import (
 )
 
 type sourceStoreFake struct {
-	sources []RouteSource
-	err     error
+	sources  []RouteSource
+	withheld []WithheldRoute
+	err      error
 }
 
 type referenceStoreFake struct {
@@ -43,8 +46,8 @@ func (s *secretValueFailIfResolved) Resolve(context.Context, domain.SecretRefere
 	return "", errors.New("strict credentials must not resolve while publishing")
 }
 
-func (s *sourceStoreFake) PublishedModelAPIRoutes(context.Context, time.Time) ([]RouteSource, error) {
-	return s.sources, s.err
+func (s *sourceStoreFake) PublishedModelAPIRoutes(context.Context, time.Time) (RouteGeneration, error) {
+	return RouteGeneration{Sources: s.sources, Withheld: s.withheld}, s.err
 }
 
 type targetResolverFake struct {
@@ -315,5 +318,45 @@ func TestPublisherRetainsPreviousGenerationOnSourceOrSecretFailure(t *testing.T)
 	lease, err = directory.Acquire("customer", "glm-5.3")
 	if err != nil || lease.Candidates[0].Credential != "first-secret" {
 		t.Fatalf("known-good route lost after expiry failure: lease=%#v err=%v", lease, err)
+	}
+}
+
+func TestPublisherWithholdsLapsedProductsAndKeepsTheRestCallable(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	// A fresh directory is the state after a control-plane restart: there is
+	// no previous generation to fall back on.
+	directory := NewDirectory()
+	directory.now = func() time.Time { return now }
+	var logs bytes.Buffer
+	store := &sourceStoreFake{
+		sources:  []RouteSource{sourceFixture(now, "customer")},
+		withheld: []WithheldRoute{{CustomerTenantID: "customer", ProductID: "glm-5.2", Reason: "no current qualified callable capability evidence"}},
+	}
+	resolver := &targetResolverFake{target: ResolvedTarget{Endpoint: "https://supplier.example/v1", Credential: "resolved-secret"}}
+	publisher := &Publisher{Store: store, Resolver: resolver, Directory: directory, Now: func() time.Time { return now },
+		Logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	for range 3 {
+		if err := publisher.PublishOnce(context.Background()); err != nil {
+			t.Fatalf("a withheld product failed the generation: %v", err)
+		}
+	}
+	if _, err := directory.Acquire("customer", "glm-5.3"); err != nil {
+		t.Fatalf("current product was not callable beside a withheld one: %v", err)
+	}
+	if _, err := directory.Acquire("customer", "glm-5.2"); err == nil {
+		t.Fatal("withheld product became callable")
+	}
+	if got := strings.Count(logs.String(), "withheld until renewed"); got != 1 {
+		t.Fatalf("withheld products logged %d times over three unchanged cycles, want once:\n%s", got, logs.String())
+	}
+	if !strings.Contains(logs.String(), "glm-5.2: no current qualified callable capability evidence") {
+		t.Fatalf("withheld log does not name the product and reason:\n%s", logs.String())
+	}
+	store.withheld = nil
+	if err := publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(logs.String(), "callable again"); got != 1 {
+		t.Fatalf("recovery logged %d times, want once:\n%s", got, logs.String())
 	}
 }

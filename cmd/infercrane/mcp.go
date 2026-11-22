@@ -20,7 +20,7 @@ type mcpRequestInput struct {
 }
 
 type mcpOperationInput struct {
-	OperationID string `json:"operation_id" jsonschema:"durable InferCrane operation identifier"`
+	OperationID string `json:"operation_id" jsonschema:"InferCrane operation ID"`
 }
 
 type mcpSearchInput struct {
@@ -68,7 +68,7 @@ func newMCPServer(read controlReader) *mcp.Server {
 		err := read(ctx, "/api/v1/requests/"+url.PathEscape(input.RequestID), &response)
 		return nil, mcpOutput{Data: response}, err
 	})
-	mcp.AddTool(server, &mcp.Tool{Name: "infercrane_inspect_operation", Title: "Inspect durable operation", Description: "Read the state and resume identity of one durable control-plane operation.", Annotations: readOnly}, func(ctx context.Context, _ *mcp.CallToolRequest, input mcpOperationInput) (*mcp.CallToolResult, mcpOutput, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "infercrane_inspect_operation", Title: "Inspect operation", Description: "Read the state of one control-plane operation and how to resume watching it.", Annotations: readOnly}, func(ctx context.Context, _ *mcp.CallToolRequest, input mcpOperationInput) (*mcp.CallToolResult, mcpOutput, error) {
 		var response map[string]any
 		err := read(ctx, "/api/v1/operations/"+url.PathEscape(input.OperationID), &response)
 		return nil, mcpOutput{Data: response}, err

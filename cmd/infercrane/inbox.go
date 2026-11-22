@@ -183,7 +183,7 @@ func endpointInboxItems(endpoint inboxEndpoint) []inboxItem {
 		items = append(items, inboxItem{Severity: severity, Code: code, ResourceKind: "endpoint", ResourceName: endpoint.Name, Summary: fmt.Sprintf("Persisted endpoint state is %s.", emptyAs(state, "unknown")), Evidence: "endpoint.observed_state", Next: "infercrane observe " + endpoint.Name + " --diagnose", UpdatedAt: endpoint.UpdatedAt})
 	}
 	if endpoint.CandidateServingPlanID != "" {
-		items = append(items, inboxItem{Severity: "warning", Code: "endpoint_candidate_requires_review", ResourceKind: "endpoint", ResourceName: endpoint.Name, Summary: "A candidate serving plan is staged and requires an explicit Guard decision or operator action.", Evidence: "endpoint.candidate_serving_plan_id", Next: "infercrane endpoint guard " + endpoint.Name, UpdatedAt: endpoint.UpdatedAt})
+		items = append(items, inboxItem{Severity: "warning", Code: "endpoint_candidate_requires_review", ResourceKind: "endpoint", ResourceName: endpoint.Name, Summary: "A new serving plan is staged and waits for you to roll it out or reject it.", Evidence: "endpoint.candidate_serving_plan_id", Next: "infercrane endpoint guard " + endpoint.Name, UpdatedAt: endpoint.UpdatedAt})
 	}
 	return items
 }
@@ -202,7 +202,7 @@ func deploymentInboxItems(deployment deploymentSummary) []inboxItem {
 		items = append(items, inboxItem{Severity: severity, Code: code, ResourceKind: "deployment", ResourceName: deployment.Name, Summary: fmt.Sprintf("Persisted deployment state is %s.", emptyAs(state, "unknown")), Evidence: "deployment.observed_state", Next: "infercrane observe " + deployment.Name, UpdatedAt: deployment.UpdatedAt})
 	}
 	if deployment.CandidateRevisionID != "" {
-		items = append(items, inboxItem{Severity: "warning", Code: "deployment_candidate_requires_review", ResourceKind: "deployment", ResourceName: deployment.Name, Summary: "An immutable candidate revision requires an explicit Guard decision or operator action.", Evidence: "deployment.candidate_revision_id", Next: "infercrane rollout inspect " + deployment.Name, UpdatedAt: deployment.UpdatedAt})
+		items = append(items, inboxItem{Severity: "warning", Code: "deployment_candidate_requires_review", ResourceKind: "deployment", ResourceName: deployment.Name, Summary: "A new revision is staged and waits for you to roll it out or reject it.", Evidence: "deployment.candidate_revision_id", Next: "infercrane rollout inspect " + deployment.Name, UpdatedAt: deployment.UpdatedAt})
 	}
 	return items
 }
