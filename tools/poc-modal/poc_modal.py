@@ -820,7 +820,13 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
         # The control plane splits the approved amount across setups and requires each share
         # to cover its rate for the whole approval window. It is the control plane's ceiling
         # at the stated rate, not the money spent; the broker cap above bounds that.
-        approval = round(GPU_HOURLY_USD * APPROVAL_HOURS * len(doc["candidates"]) * 1.05, 2)
+        # Each share must also cover the hour the control plane reserves for every machine
+        # it replaces: the fresh server a gain is measured again on (the current setup gets
+        # one for every other setup that gains) and up to two machines lost to the provider.
+        # Without that room the first setup that gained failed with
+        # optimization_confirmation_not_covered instead of being measured again.
+        replacements = len(doc["candidates"]) - 1 + 2
+        approval = round(GPU_HOURLY_USD * (APPROVAL_HOURS + replacements) * len(doc["candidates"]) * 1.05, 2)
         approved = lambda: poc.campaign_record(campaign).get("state") != "awaiting_approval"  # noqa: E731
         poc.cli("optimize", "approve", campaign, "--max-cost-usd", str(approval), "--expires-in", f"{APPROVAL_HOURS}h", repeatable=False, landed=approved)
         log("approve", f"campaign approved up to ${approval} at the stated {poc.ACCELERATOR} rate (${GPU_HOURLY_USD}/h, {APPROVAL_HOURS} h window); real spend stays under the broker cap")
