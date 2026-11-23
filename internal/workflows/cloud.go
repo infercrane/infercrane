@@ -1504,7 +1504,10 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 	if replica.LifecycleState != "failed" {
 		details := observation.Details
 		if request.Retire {
-			details = "retired so its revision is measured again on a fresh machine"
+			// Replica details are stored as JSON. A plain sentence here made
+			// PostgreSQL refuse the update, so a retirement never finished and
+			// no gain was measured again on a fresh machine.
+			details = `{"retired":"so its revision is measured again on a fresh machine"}`
 		}
 		if details == "" {
 			details = replica.ProviderDetails
