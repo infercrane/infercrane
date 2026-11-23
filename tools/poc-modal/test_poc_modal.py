@@ -278,6 +278,23 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(poc_modal.stream_usage(stream[:3]), (None, False))  # the server went away mid-answer
         self.assertEqual(poc_modal.stream_usage([b"data: not json\n", b"data: [DONE]\n"]), (None, True))
 
+    def test_a_run_can_name_the_nvidia_driver_its_servers_must_have(self) -> None:
+        saved = dict(poc_modal.RUN)
+        try:
+            poc_modal.RUN.update(stand_in=False, driver=None)
+            self.assertNotIn("--driver", poc_modal.broker_command(38.0, False, 16))
+            poc_modal.RUN.update(driver="620.70.06")
+            command = poc_modal.broker_command(38.0, False, 16)
+            self.assertEqual(command[command.index("--driver") + 1], "620.70.06")
+            self.assertEqual(command[command.index("--max-starts") + 1], "16")
+            # A stand-in has no GPU and so no driver to hold it to.
+            self.assertNotIn("--driver", poc_modal.broker_command(1.0, True, 16))
+            poc_modal.RUN.update(stand_in="local")
+            self.assertNotIn("--driver", poc_modal.broker_command(1.0, "local", 16))
+        finally:
+            poc_modal.RUN.clear()
+            poc_modal.RUN.update(saved)
+
     def test_the_fresh_servers_decide_the_copy(self) -> None:
         first_only = {"comparison": {"output_token_throughput": {"decision": "improved"}}}
         self.assertEqual(poc_modal.objective_decision(first_only), "improved")

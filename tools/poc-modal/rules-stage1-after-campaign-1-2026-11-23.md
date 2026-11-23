@@ -97,6 +97,23 @@ planner-only check's answer were known when this was added. Nothing above change
 - **What "answers matched" means is stated with every result**: the mean of 24 word-overlap
   scores on short prompts, not a comparison of exact text.
 
+## Added after campaign 2's first start was stopped, before any campaign 2 traffic
+
+Added 2026-11-23; the commit's timestamp is the record. Campaign 2 was started at 12:08:47 CET and
+stopped by hand at 12:13:13, while its first server was still loading the model: no request had
+been sent, the planner had not been asked, nothing was measured.
+
+- **Campaign 2 names the NVIDIA driver its servers must have: 620.70.06** (`--driver`). The first
+  file's rule is "all on one NVIDIA driver (the broker pins the first host's and refuses
+  others)". The stopped start's first host had 610.57.04, which 5 of this track's 16 first
+  landings on H100 hosts had today; the other 11, and every server of campaign 1, had
+  620.70.06. A campaign of four setups needs up to nine servers on one driver, and a run pinned
+  to the driver fewer hosts carry can use up its starts looking for them late in the run. Naming
+  the driver changes which hosts are refused, not what is measured, and puts both campaigns on
+  the same driver.
+- The run's limit on server starts is 16, was 12, for the same reason. The dollar cap bounds
+  the spend.
+
 ## Two product findings behind these changes (not fixed here)
 
 - The planner decides between its low-load and its loaded plans from one latest reading of

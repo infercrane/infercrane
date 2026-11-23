@@ -41,6 +41,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -134,7 +135,7 @@ DOCUMENTED_LABEL = "The publisher's documented speculation option"
 CANDIDATE_SLOTS = 2
 CANDIDATES: list = []
 # What this run measures with. Set by configure() and by `run`'s flags.
-RUN = {"traffic": "mooncake-words", "shape": "mooncake", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1}
+RUN = {"traffic": "mooncake-words", "shape": "mooncake", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1, "driver": None}
 
 
 def configure(engine: str | None = None, gpu: str | None = None, current_setup: str = "publisher") -> None:
@@ -295,7 +296,12 @@ def broker_command(budget: float, dry: bool, max_starts: int) -> list[str]:
                "--budget-usd", str(budget), "--listen", f"127.0.0.1:{BROKER_PORT}", "--ledger", str(LEDGER), "--max-starts", str(max_starts)]
     if RUN["stand_in"] == "local":
         return command + ["--local", "--local-host", BROKER_HOST]
-    return command + (["--dry"] if dry else [])
+    if dry:
+        return command + ["--dry"]
+    # Every setup of a run serves on one NVIDIA driver. Named here, it is the run's choice;
+    # left out, it is whatever the first host happens to have, and a run pinned to a driver
+    # few hosts carry spends its starts looking for them.
+    return command + (["--driver", RUN["driver"]] if RUN.get("driver") else [])
 
 
 class BrokerProcess:
@@ -391,15 +397,37 @@ def harness_version() -> dict:
     return {"commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(git("status", "--porcelain", "--", "tools", "internal", "cmd"))}
 
 
+def deployed(name: str) -> bool:
+    listing = poc.api("GET", "/api/v1/deployments")
+    rows = listing.get("data", listing.get("deployments", [])) if isinstance(listing, dict) else listing
+    return any((row.get("name") if isinstance(row, dict) else row) == name for row in rows)
+
+
 def remove_leftover_baseline() -> None:
     """A run that stops before its traffic shape is recorded leaves the current setup
     deployed. The next run could not deploy it ("deployment gpu-baseline already exists"),
-    and the old pod would ask the new broker for a server of its own."""
-    listing = poc.api("GET", "/api/v1/deployments")
-    rows = listing.get("data", listing.get("deployments", [])) if isinstance(listing, dict) else listing
-    if any((row.get("name") if isinstance(row, dict) else row) == poc.BASELINE for row in rows):
-        log("deploy", f"removing {poc.BASELINE}, left deployed by an earlier run that did not finish")
+    and the old pod would ask the new broker for a server of its own. A run stopped while
+    that server was still starting also leaves the deploy itself unresolved, and the
+    product refuses to delete a deployment with an unresolved operation, so that is
+    cancelled first."""
+    if not deployed(poc.BASELINE):
+        return
+    log("deploy", f"removing {poc.BASELINE}, left deployed by an earlier run that did not finish")
+    try:
+        listing = json.loads(poc.cli("operation", "list", "--limit", "50", "--output", "json"))
+    except (SystemExit, json.JSONDecodeError):
+        listing = []
+    rows = listing.get("data", listing.get("operations", [])) if isinstance(listing, dict) else listing
+    for row in rows:
+        if row.get("resource_name") == poc.BASELINE and row.get("status") in ("queued", "pending", "running", "waiting"):
+            log("deploy", f"cancelling its unresolved {row.get('kind')} first")
+            poc.cli("operation", "cancel", row["id"], check=False)
+    deadline = time.monotonic() + 120
+    while deployed(poc.BASELINE):
         poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
+        if time.monotonic() > deadline:
+            fail(f"{poc.BASELINE} from an earlier run could not be removed; see `infercrane operation list`")
+        time.sleep(5)
 
 
 def deploy_baseline() -> None:
@@ -909,7 +937,8 @@ def laptop_load() -> dict:
 def run_settings(text: prompt_corpus.Corpus | None) -> dict:
     """What this run measures with, kept in its record and compared on --reuse-capture."""
     return {"traffic": RUN["traffic"], "shape": RUN["shape"], "requests_at_once": next(level for level, name in LOAD_PROFILES.items() if name == PROFILE), "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
-            "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR}
+            "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR,
+            "driver": RUN.get("driver") or "the first host's"}
 
 
 def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool, planner_only: bool = False) -> None:
@@ -943,9 +972,11 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool,
     log("laptop", f"load average {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs at the start; a campaign wants a quiet laptop")
     # Worst case with real text: the traffic server, four campaign servers (current setup,
     # two setups to try, the copy), and two fresh servers for every setup whose gain is
-    # measured again, the copy included if its first window errs: eleven. One more for a
-    # server Modal preempts. The dollar cap, not this count, bounds the spend.
-    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=2 if planner_only else 12 if text else 6)
+    # measured again, the copy included if its first window errs: eleven. Five more for a
+    # server Modal preempts and for starts that end on hosts with another NVIDIA driver
+    # (a start has four tries; in the first campaign two starts used all of theirs). The
+    # dollar cap, not this count, bounds the spend.
+    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=2 if planner_only else 16 if text else 6)
     log("broker", f"stand-in servers on the laptop, at most {CANDIDATE_SLOTS + 2} at once; no Modal, nothing is spent" if RUN["stand_in"] == "local" else
         f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
     try:
@@ -1328,6 +1359,7 @@ def main() -> int:
     parser.add_argument("--shape", choices=sorted(SHAPES), default="mooncake", help="scale the trace's lengths to a traffic shape: the trace as it is, or the medians of the product's public interactive, long-prefill and decode-heavy shapes")
     parser.add_argument("--requests-at-once", type=int, choices=sorted(LOAD_PROFILES), default=32, help="the load every measured run of the campaign holds (its benchmark profile's concurrency)")
     parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
+    parser.add_argument("--driver", help="the NVIDIA driver every server of the run must have, for example 620.70.06 (default: the first host's); a host with another one is refused before the model loads")
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
     parser.add_argument("--planner-setups", type=int, choices=(0, 1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text); 0, with real text only, records its plan and measures the speculation setup alone")
     parser.add_argument("--smoke", action="store_true", help="shrink the traffic so the whole path costs a few dollars; the judge keeps its rounds")
@@ -1345,7 +1377,9 @@ def main() -> int:
         up(corpus)
         return 0
     held = (state().get("corpus") or {}).get("digest")
-    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False,
+    if args.driver and not re.fullmatch(r"\d+(\.\d+)+", args.driver):
+        fail(f"--driver takes a driver version such as 620.70.06, not {args.driver!r}")
+    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False, driver=args.driver,
                planner_setups=args.planner_setups if args.planner_setups is not None else (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
     if args.command in ("run", "ask-planner") and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:

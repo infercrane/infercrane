@@ -133,6 +133,12 @@ and also reports the drafted and accepted tokens of one longer answer. The 2026-
 both setups on vLLM 0.34.0 and one H100, including the one that did not start, are in
 `docs/testing/evidence/qwen38-27b-fp8-h100-vllm034-serving-check-2026-11-23.json`.
 
+Every setup of a run serves on one NVIDIA driver, because a different driver alone can change
+speed. By default that is the first host's; `--driver 620.70.06` names it instead. A host with
+another driver is refused before the model loads and the server is started again elsewhere (four
+tries a start). Name the driver most hosts carry: a run pinned to a rarer one spends its starts
+looking for hosts.
+
 ### Smoke run and stand-in run
 
 `--smoke` proves a paid campaign's path for a few dollars: 40 requests of at most 6,000 input
