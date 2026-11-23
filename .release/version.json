@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "2.0.1",
-  "candidate_tag": "v2.0.1-rc.1",
-  "stable_tag": "v2.0.1"
+  "version": "2.0.2",
+  "candidate_tag": "v2.0.2-rc.1",
+  "stable_tag": "v2.0.2"
 }

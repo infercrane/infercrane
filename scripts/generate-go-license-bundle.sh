@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 output=${1:-"$root/.release/generated-licenses/go"}
-tool=github.com/google/go-licenses/v2@v2.0.1
+tool=github.com/google/go-licenses/v2@v2.0.2
 
 case "$output" in
   /*) ;;

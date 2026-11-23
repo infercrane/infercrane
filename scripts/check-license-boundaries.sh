@@ -35,7 +35,7 @@ grep -Fq 'SPDX SBOM' THIRD_PARTY_NOTICES.md
 grep -Fq 'THIRD_PARTY_LICENSES/' THIRD_PARTY_NOTICES.md
 
 test -x scripts/generate-go-license-bundle.sh
-grep -Fq 'github.com/google/go-licenses/v2@v2.0.1' scripts/generate-go-license-bundle.sh
+grep -Fq 'github.com/google/go-licenses/v2@v2.0.2' scripts/generate-go-license-bundle.sh
 grep -Fq './scripts/generate-go-license-bundle.sh .release/generated-licenses/go' .goreleaser.yaml
 grep -Fq 'dst: THIRD_PARTY_LICENSES' .goreleaser.yaml
 grep -Fq 'THIRD_PARTY_LICENSES/gopkg.in/yaml.v3/NOTICE' scripts/verify-release-artifacts.sh
@@ -47,7 +47,7 @@ test -f packaging/container/THIRD_PARTY_COMPONENTS.md
 test -f packaging/container/licenses/aws-cli-LICENSE.txt
 test -f images/vllm-runpod/THIRD_PARTY_COMPONENTS.md
 
-go run github.com/google/go-licenses/v2@v2.0.1 check \
+go run github.com/google/go-licenses/v2@v2.0.2 check \
   --ignore github.com/infercrane/infercrane \
   --allowed_licenses=Apache-2.0,MIT,BSD-3-Clause \
   ./cmd/infercrane

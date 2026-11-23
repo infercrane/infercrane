@@ -12,7 +12,7 @@ base image and where their redistributed license material can be inspected.
 | SkyPilot with RunPod support | `SKYPILOT_VERSION` | Apache-2.0 | Python distribution license files |
 | NVIDIA AIPerf | `AIPERF_VERSION` | Apache-2.0 | Python distribution license and attribution files |
 | Hugging Face Hub and Xet support | `HUGGINGFACE_HUB_VERSION` | Apache-2.0 and dependency-specific terms | isolated Python distribution license files |
-| AWS CLI v2 | `AWS_CLI_VERSION` and archive checksum | Apache-2.0 and bundled dependency terms | `/usr/share/licenses/infercrane/runtime-components/aws-cli-LICENSE.txt` |
+| AWS CLI v2 | `AWS_CLI_VERSION` and source archive checksum | Apache-2.0 and bundled dependency terms | `/usr/share/licenses/infercrane/runtime-components/aws-cli-LICENSE.txt` |
 | Google Cloud CLI | `GCLOUD_CLI_VERSION` and archive checksum | Apache-2.0 and bundled dependency terms | `/usr/local/google-cloud-sdk/LICENSE` and its `third_party` license tree |
 | kubectl | `KUBECTL_VERSION` and binary checksum | Apache-2.0 | `/usr/share/licenses/infercrane/LICENSE` plus this inventory |
 
