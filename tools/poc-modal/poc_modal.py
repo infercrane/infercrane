@@ -1290,9 +1290,10 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "gpu": "stand-in servers on the laptop (no GPU, no model, no Modal)" if settings.get("stand_in") == "local" else "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in")
                       else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
-               "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
+               "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE,
+                        "trace": "none: the requests are a fast-track map cell's own" if (current.get("traffic") or {}).get("source") == "map_cell" else "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
-                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"),
+                        "trace_license": None if (current.get("traffic") or {}).get("source") == "map_cell" else "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"),
                         "reasoning": "as the map's cell says; see traffic.reasoning" if (current.get("traffic") or {}).get("source") == "map_cell" else REASONING_NOTE},
                "measured_from": "the control plane in a kind cluster on the laptop; the stand-in servers run on the same laptop, so no request leaves it" if settings.get("stand_in") == "local"
                                 else "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
