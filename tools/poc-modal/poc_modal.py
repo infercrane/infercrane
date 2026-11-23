@@ -405,6 +405,43 @@ def deployed(name: str) -> bool:
     return any((row.get("name") if isinstance(row, dict) else row) == name for row in rows)
 
 
+def cancel_baseline_operations() -> None:
+    """Cancels the current setup's unresolved operations: the product refuses to delete a
+    deployment that has one, and a `deploy --wait` on it never returns by itself."""
+    try:
+        listing = json.loads(poc.cli("operation", "list", "--limit", "50", "--output", "json"))
+    except (SystemExit, json.JSONDecodeError):
+        listing = []
+    rows = listing.get("data", listing.get("operations", [])) if isinstance(listing, dict) else listing
+    for row in rows:
+        if row.get("resource_name") == poc.BASELINE and row.get("status") in ("queued", "pending", "running", "waiting"):
+            log("deploy", f"cancelling its unresolved {row.get('kind')}")
+            poc.cli("operation", "cancel", row["id"], check=False)
+
+
+# A lease that failed is followed by a new one within seconds when the broker will start
+# another server (a refused host, a preempted container). After this long without one, none
+# comes: the engine failed to start, or the run's starts are used up.
+DEAD_END_SECONDS = 90
+
+
+def server_dead_end(since: float) -> str:
+    """Why the broker will start no server for this run any more, or "" while one can
+    still come. Read from the broker's ledger: a lease requested since `since` failed and
+    no lease is live."""
+    try:
+        leases = [lease for lease in json.loads(LEDGER.read_text()).get("leases") or [] if lease.get("requested_at", 0) >= since]
+    except (OSError, json.JSONDecodeError):
+        return ""
+    if not leases or any(lease.get("state") in ("requested", "starting", "ready", "stopping") for lease in leases):
+        return ""
+    last = leases[-1]
+    if last.get("state") != "failed":
+        return ""
+    error = " ".join(str(last.get("error") or "").split())
+    return f"{len(leases)} start{'s' if len(leases) != 1 else ''}, the last ended with {last.get('reason') or 'an error'}: {error[-500:]}"
+
+
 def remove_leftover_baseline() -> None:
     """A run that stops before its traffic shape is recorded leaves the current setup
     deployed. The next run could not deploy it ("deployment gpu-baseline already exists"),
@@ -415,15 +452,7 @@ def remove_leftover_baseline() -> None:
     if not deployed(poc.BASELINE):
         return
     log("deploy", f"removing {poc.BASELINE}, left deployed by an earlier run that did not finish")
-    try:
-        listing = json.loads(poc.cli("operation", "list", "--limit", "50", "--output", "json"))
-    except (SystemExit, json.JSONDecodeError):
-        listing = []
-    rows = listing.get("data", listing.get("operations", [])) if isinstance(listing, dict) else listing
-    for row in rows:
-        if row.get("resource_name") == poc.BASELINE and row.get("status") in ("queued", "pending", "running", "waiting"):
-            log("deploy", f"cancelling its unresolved {row.get('kind')} first")
-            poc.cli("operation", "cancel", row["id"], check=False)
+    cancel_baseline_operations()
     deadline = time.monotonic() + 120
     while deployed(poc.BASELINE):
         poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
@@ -443,7 +472,29 @@ def deploy_baseline() -> None:
     # The key names this run. A key of the spec alone made a second run in the same cluster
     # a replay of the first run's deploy, after that run had removed the deployment: nothing
     # was deployed and every replayed request got a 404.
-    poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}-{state()['run_id']}", "--wait", capture=False)
+    # `deploy --wait` returns when the server serves. When no server can come any more it
+    # would wait for its own timeout with nothing rented, so the wait is watched: seen on
+    # 2026-11-23, twice, with both starts refused on a named driver and with an engine
+    # that ran into its own 600 s startup limit while the weights loaded slowly.
+    since, failure = time.time() - 5, []
+
+    def deploy() -> None:
+        try:
+            poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}-{state()['run_id']}", "--wait", capture=False)
+        except SystemExit as error:
+            failure.append(error)
+
+    waiting, dead_since = threading.Thread(target=deploy, daemon=True), None
+    waiting.start()
+    while waiting.is_alive():
+        waiting.join(timeout=5)
+        why = server_dead_end(since)
+        dead_since = (dead_since or time.monotonic()) if why else None
+        if dead_since and time.monotonic() - dead_since >= DEAD_END_SECONDS:
+            cancel_baseline_operations()
+            fail(f"the current setup's server did not start and the broker starts no other ({why})")
+    if failure:
+        raise failure[0]
 
 
 def chat_request(row: dict, index: int, input_scale: float, output_scale: float, max_input: int, max_output: int,

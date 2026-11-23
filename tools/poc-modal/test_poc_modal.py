@@ -16,6 +16,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import corpus  # noqa: E402
@@ -380,6 +381,38 @@ class HoldTest(unittest.TestCase):
 
 SESSIONS = [{"id": f"s{number}", "context": f"context {number}", "questions": [{"text": f"question {number}.{index}", "tokens": 3, "max_tokens": 100 + index} for index in range(4)]}
             for number in range(6)]
+
+
+class DeadEndTest(unittest.TestCase):
+    """A run whose server cannot come any more ends instead of waiting for the deploy's
+    own timeout with nothing rented."""
+
+    def ledger(self, leases: list[dict]) -> str:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            path.write_text(json.dumps({"leases": leases}))
+            with mock.patch.object(poc_modal, "LEDGER", path):
+                return poc_modal.server_dead_end(since=100.0)
+
+    def test_no_dead_end_before_a_lease_or_while_one_is_live(self) -> None:
+        self.assertEqual(self.ledger([]), "")
+        self.assertEqual(self.ledger([{"state": "starting", "requested_at": 120.0}]), "")
+        self.assertEqual(self.ledger([{"state": "failed", "requested_at": 120.0, "reason": "driver_mismatch"}, {"state": "requested", "requested_at": 130.0}]), "")
+
+    def test_a_failed_start_with_no_live_lease_is_a_dead_end(self) -> None:
+        why = self.ledger([{"state": "failed", "requested_at": 120.0, "reason": "driver_mismatch", "error": "driver 610 differs"},
+                           {"state": "failed", "requested_at": 130.0, "reason": "error", "error": "RuntimeError: server exited with 1 while starting:\n engine input registration timed out after 600s"}])
+        self.assertIn("2 starts", why)
+        self.assertIn("timed out after 600s", why)
+        self.assertNotIn("\n", why)
+
+    def test_an_earlier_run_s_leases_and_a_released_server_do_not_count(self) -> None:
+        self.assertEqual(self.ledger([{"state": "failed", "requested_at": 50.0, "reason": "error"}]), "")
+        self.assertEqual(self.ledger([{"state": "stopped", "requested_at": 120.0, "reason": "released"}]), "")
+
+    def test_an_unreadable_ledger_is_not_a_dead_end(self) -> None:
+        with mock.patch.object(poc_modal, "LEDGER", Path("/nonexistent/ledger.json")):
+            self.assertEqual(poc_modal.server_dead_end(since=0.0), "")
 
 
 class MapCellTest(unittest.TestCase):
