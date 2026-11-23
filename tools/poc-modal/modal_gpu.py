@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -32,7 +33,7 @@ from pathlib import Path
 import modal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from models import ACCELERATOR, ACCELERATOR_VARIABLE, ENGINE, ENGINE_VARIABLE, MODELS, QWEN3_8B, check_args, speculates  # noqa: E402,F401 - check_args is the broker's
+from models import ACCELERATOR, ACCELERATOR_VARIABLE, ENGINE, ENGINE_VARIABLE, MODELS, QWEN3_8B, check_args, speculates, with_change  # noqa: E402,F401 - check_args is the broker's
 
 APP_NAME = "infercrane-poc-modal-gpu"
 VLLM_IMAGE, VLLM_VERSION = ENGINE.image, ENGINE.version
@@ -384,17 +385,19 @@ def _healthy() -> bool:
 
 @app.function(image=image, gpu=GPU, cpu=GPU_CPU, memory=GPU_MEMORY_MIB, volumes={"/weights": weights}, timeout=CHECK_SECONDS, retries=0,
               single_use_containers=True)
-def check_gpu(model_id: str, setup: str = "current") -> dict:
+def check_gpu(model_id: str, setup: str = "current", change: list[str] | None = None) -> dict:
     """Starts one setup of the model once and checks what a run relies on: the server
     starts, refuses a request without its key, answers one with it, calls a tool, and
     exports the vLLM metrics the control plane reads. setup is "current" (the publisher's
     command on the run's engine) or "speculation" (that command with the publisher's
-    documented speculation option), which must also draft and accept tokens."""
+    documented speculation option), which must also draft and accept tokens. change is
+    one change on top of the current setup, as vLLM arguments: a setup the planner
+    proposed, checked before a campaign rents servers for it."""
     import secrets
 
     model, started = MODELS[model_id], time.monotonic()
-    args = ["--served-model-name", model.id, *(model.speculation_args if setup == "speculation" else model.current_args)]
-    result: dict = {"model": model.id, "revision": model.revision, "setup": setup, "args": args, "env": model.env, "engine": ENGINE.key, "runtime_image": VLLM_IMAGE,
+    args = ["--served-model-name", model.id, *(model.speculation_args if setup == "speculation" else with_change(model.current_args, [], change or []))]
+    result: dict = {"model": model.id, "revision": model.revision, "setup": setup, "change": change or [], "args": args, "env": model.env, "engine": ENGINE.key, "runtime_image": VLLM_IMAGE,
                     "gpu_type": ACCELERATOR.key, "gpu_facts": _gpu_facts()}
     key, log_path = secrets.token_hex(16), Path("/tmp/server.log")
     with log_path.open("w") as log:
@@ -446,7 +449,7 @@ def check_gpu(model_id: str, setup: str = "current") -> dict:
 
 
 @app.local_entrypoint()
-def main(action: str = "download", model: str = QWEN3_8B.id, setup: str = "current") -> None:
+def main(action: str = "download", model: str = QWEN3_8B.id, setup: str = "current", change: str = "") -> None:
     if action == "download":
         print(json.dumps(download.remote(model), indent=2))
         return
@@ -454,9 +457,19 @@ def main(action: str = "download", model: str = QWEN3_8B.id, setup: str = "curre
         raise SystemExit("only `download` and `check` run from the command line (check takes --setup current or speculation); the broker starts servers")
     if setup == "speculation" and not MODELS[model].publisher_speculation:
         raise SystemExit(f"{model} has no publisher-documented speculation option in models.py")
+    changed = shlex.split(change)
+    if changed:
+        # --change="--kv-cache-dtype fp8": the current setup with one change. Only what a
+        # campaign's server may be started with (the broker's allowlist) is checked.
+        if setup != "current":
+            raise SystemExit("--change applies to the current setup; leave --setup out")
+        try:
+            check_args(["--served-model-name", model, *with_change(MODELS[model].current_args, [], changed)], model)
+        except ValueError as error:
+            raise SystemExit(f"a campaign could not start this setup either: {error}") from error
     # Spawned and cancelled at its limit: a container that fails while starting is
     # otherwise retried without end, whatever retries says.
-    call = check_gpu.spawn(model, setup)
+    call = check_gpu.spawn(model, setup, changed)
     try:
         print(json.dumps(call.get(timeout=CHECK_SECONDS + 600), indent=2))
     finally:

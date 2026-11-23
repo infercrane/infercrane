@@ -121,7 +121,12 @@ one GPU before paying for a campaign:
 export INFERCRANE_POC_ENGINE=vllm-0.34.0   # and INFERCRANE_POC_GPU=H200 for an H200
 uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/modal_gpu.py::main --action check --model Qwen/Qwen3.8-27B-FP8
 uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/modal_gpu.py::main --action check --model Qwen/Qwen3.8-27B-FP8 --setup speculation
+uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/modal_gpu.py::main --action check --model Qwen/Qwen3.8-27B-FP8 --change="--kv-cache-dtype fp8"
 ```
+
+`--change` checks the current setup with one change, written as vLLM arguments: a setup the
+planner proposed, before a campaign rents servers for it. Only arguments a campaign's server may
+be started with are accepted.
 
 `--setup speculation` starts the publisher's command with its documented speculation option
 and also reports the drafted and accepted tokens of one longer answer. The 2026-11-23 checks of
