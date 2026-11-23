@@ -2,8 +2,9 @@
 
 Modal is not an InferCrane provider. This app only gives the local PoC's
 model server pods (internal/testtools/modal-gpu-proxy) a real GPU behind them:
-one H100 container per lease, running the pinned vLLM image with exactly the
-arguments the pod was started with, reachable through a Modal tunnel.
+one GPU container per lease, running the run's pinned vLLM image with exactly
+the arguments the pod was started with, reachable through a Modal tunnel. The
+engine image and the GPU type are the run's (models.ENGINE, models.ACCELERATOR).
 
 Every container stops when the first of these happens:
   - the broker sets the lease's stop flag (the pod was deleted),
@@ -31,22 +32,21 @@ from pathlib import Path
 import modal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from models import MODELS, QWEN3_8B, check_args  # noqa: E402,F401 - check_args is the broker's
+from models import ACCELERATOR, ACCELERATOR_VARIABLE, ENGINE, ENGINE_VARIABLE, MODELS, QWEN3_8B, check_args, speculates  # noqa: E402,F401 - check_args is the broker's
 
 APP_NAME = "infercrane-poc-modal-gpu"
-# vLLM 0.22.1, the same pinned image as tools/modal-kernel-poc on PR #229.
-VLLM_IMAGE = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
-VLLM_VERSION = "0.22.1"
+VLLM_IMAGE, VLLM_VERSION = ENGINE.image, ENGINE.version
 
 
 PORT = 8000
-GPU = "H100!"  # "!" pins an H100; Modal may not substitute an H200
+GPU = ACCELERATOR.modal_gpu
 GPU_CPU, GPU_MEMORY_MIB = 4.0, 24576
 # Hard cap per container. A campaign keeps every setup serving until it ranks them, and a
 # gain is measured again on fresh servers, so a 27B campaign outlasts the 90 minutes an
 # 8B one needed.
 GPU_TIMEOUT_SECONDS = 150 * 60
-MAX_GPUS = 3
+# The current setup, two setups to try and the copy of the current setup.
+MAX_GPUS = 4
 LEASE_SECONDS = 180
 STARTUP_SECONDS = 15 * 60
 
@@ -54,7 +54,10 @@ app = modal.App(APP_NAME)
 weights = modal.Volume.from_name("infercrane-poc-modal-weights", create_if_missing=True)
 leases = modal.Dict.from_name("infercrane-poc-modal-leases", create_if_missing=True)
 download_image = modal.Image.debian_slim(python_version="3.12").pip_install("huggingface_hub[hf_xet]==1.1.4").add_local_python_source("models")
-image = modal.Image.from_registry(VLLM_IMAGE, setup_dockerfile_commands=["RUN ln -sf /usr/bin/python3 /usr/local/bin/python"]).entrypoint([]).add_local_python_source("models")
+# The image carries the run's engine and GPU type, so the module resolves the same ones
+# inside the container as on the laptop.
+image = (modal.Image.from_registry(VLLM_IMAGE, setup_dockerfile_commands=["RUN ln -sf /usr/bin/python3 /usr/local/bin/python"]).entrypoint([])
+         .env({ENGINE_VARIABLE: ENGINE.key, ACCELERATOR_VARIABLE: ACCELERATOR.key}).add_local_python_source("models"))
 
 
 def server_command(args: list[str], model: str) -> list[str]:
@@ -80,11 +83,46 @@ def download(model_id: str) -> dict[str, object]:
             "bytes": sum(p.stat().st_size for p in files), "files": [p.name for p in files]}
 
 
-# A stand-in server for the dry run: same lifecycle and tunnel, no GPU.
+# A stand-in server for the dry run and the stand-in campaign: same lifecycle and tunnel,
+# no GPU and no model. It answers with filler words at a fixed pace, reports token usage,
+# and exports the vLLM metric families the control plane and AIPerf read, so a whole
+# campaign can be rehearsed for cents. A stand-in started with --speculative-config
+# writes two words a step and counts drafted and accepted tokens, so the path that
+# carries speculation evidence is exercised. Nothing it reports is a measurement.
 FAKE_SERVER = r'''
-import json, sys
+import json, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port, key, model = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+speculating = "--speculative-config" in sys.argv[4:]
+STEP, PER_STEP, MAX_WORDS = 0.02, (2 if speculating else 1), 64
+BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+lock = threading.Lock()
+count = {"running": 0, "requests": 0, "prompt": 0, "generation": 0, "drafts": 0, "draft_tokens": 0, "accepted_tokens": 0}
+histograms = {name: {"buckets": [0] * len(BUCKETS), "sum": 0.0, "count": 0} for name in
+              ("request_queue_time_seconds", "request_prefill_time_seconds", "request_decode_time_seconds", "time_to_first_token_seconds", "e2e_request_latency_seconds")}
+def observe(name, value):
+    row = histograms[name]
+    row["sum"] += value; row["count"] += 1
+    for index, bound in enumerate(BUCKETS):
+        if value <= bound: row["buckets"][index] += 1
+def metrics():
+    label = '{model_name="%s"}' % model
+    lines = []
+    with lock:
+        for name, kind, value in (("num_requests_running", "gauge", count["running"]), ("num_requests_waiting", "gauge", 0), ("kv_cache_usage_perc", "gauge", 0.0),
+                                  ("prompt_tokens_total", "counter", count["prompt"]), ("generation_tokens_total", "counter", count["generation"]),
+                                  ("request_success_total", "counter", count["requests"]), ("num_preemptions_total", "counter", 0),
+                                  ("prefix_cache_queries_total", "counter", count["prompt"]), ("prefix_cache_hits_total", "counter", 0)):
+            lines += ["# TYPE vllm:%s %s" % (name, kind), "vllm:%s%s %s" % (name, label, value)]
+        if speculating:
+            for name in ("drafts", "draft_tokens", "accepted_tokens"):
+                lines += ["# TYPE vllm:spec_decode_num_%s_total counter" % name, "vllm:spec_decode_num_%s_total%s %s" % (name, label, count[name])]
+        for name, row in histograms.items():
+            lines.append("# TYPE vllm:%s histogram" % name)
+            for bound, total in zip(BUCKETS, row["buckets"]):
+                lines.append('vllm:%s_bucket{model_name="%s",le="%s"} %s' % (name, model, bound, total))
+            lines += ['vllm:%s_bucket{model_name="%s",le="+Inf"} %s' % (name, model, row["count"]), "vllm:%s_sum%s %s" % (name, label, row["sum"]), "vllm:%s_count%s %s" % (name, label, row["count"])]
+    return "\n".join(lines) + "\n"
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     def log_message(self, *a): pass
@@ -93,7 +131,7 @@ class H(BaseHTTPRequestHandler):
         self.send_response(code); self.send_header("Content-Type", kind); self.send_header("Content-Length", str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_GET(self):
         if self.path == "/health": return self.send(200, "")
-        if self.path == "/metrics": return self.send(200, "vllm:num_requests_waiting 0\nvllm:kv_cache_usage_perc 0\n", "text/plain")
+        if self.path == "/metrics": return self.send(200, metrics(), "text/plain; version=0.0.4")
         if self.path == "/v1/models":
             if self.headers.get("Authorization") != "Bearer " + key: return self.send(401, "{}")
             return self.send(200, json.dumps({"object": "list", "data": [{"id": model, "object": "model"}]}))
@@ -101,12 +139,40 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         if self.headers.get("Authorization") != "Bearer " + key: return self.send(401, "{}")
-        if body.get("stream"):
-            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
-            for chunk in ('data: {"choices":[{"index":0,"delta":{"content":"dry"}}]}\n\n', "data: [DONE]\n\n"):
-                data = chunk.encode(); self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data)); self.wfile.flush()
-            self.wfile.write(b"0\r\n\r\n"); return
-        self.send(200, json.dumps({"object": "chat.completion", "model": model, "choices": [{"index": 0, "message": {"role": "assistant", "content": "dry"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}))
+        text = " ".join(str(message.get("content") or "") for message in body.get("messages") or [])
+        prompt = max(1, len(text.split()) * 4 // 3)
+        limit = body.get("max_completion_tokens") or body.get("max_tokens") or 16
+        words = max(1, min(int(limit), MAX_WORDS))
+        started = time.monotonic()
+        with lock: count["running"] += 1
+        try:
+            usage = {"prompt_tokens": prompt, "completion_tokens": words, "total_tokens": prompt + words}
+            time.sleep(STEP)  # the prompt
+            first = time.monotonic() - started
+            if body.get("stream"):
+                self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+                def chunk(payload):
+                    data = ("data: " + payload + "\n\n").encode(); self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data)); self.wfile.flush()
+                base = {"id": "stand-in", "object": "chat.completion.chunk", "model": model}
+                for index in range(words):
+                    if index % PER_STEP == 0 and index: time.sleep(STEP)
+                    chunk(json.dumps(dict(base, choices=[{"index": 0, "delta": {"role": "assistant", "content": "dry "}, "finish_reason": None}])))
+                chunk(json.dumps(dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": "length" if words < int(limit) else "stop"}])))
+                if (body.get("stream_options") or {}).get("include_usage"): chunk(json.dumps(dict(base, choices=[], usage=usage)))
+                chunk("[DONE]"); self.wfile.write(b"0\r\n\r\n"); self.wfile.flush()
+            else:
+                time.sleep(STEP * (words // PER_STEP))
+                self.send(200, json.dumps({"id": "stand-in", "object": "chat.completion", "model": model, "usage": usage,
+                                           "choices": [{"index": 0, "message": {"role": "assistant", "content": "dry " * words}, "finish_reason": "stop"}]}))
+        finally:
+            elapsed = time.monotonic() - started
+            with lock:
+                count["running"] -= 1; count["requests"] += 1; count["prompt"] += prompt; count["generation"] += words
+                if speculating:
+                    steps = (words + 1) // 2
+                    count["drafts"] += steps; count["draft_tokens"] += 3 * steps; count["accepted_tokens"] += words - steps
+                observe("request_queue_time_seconds", 0.0); observe("request_prefill_time_seconds", first); observe("time_to_first_token_seconds", first)
+                observe("request_decode_time_seconds", max(0.0, elapsed - first)); observe("e2e_request_latency_seconds", elapsed)
 ThreadingHTTPServer(("0.0.0.0", port), H).serve_forever()
 '''
 
@@ -172,7 +238,7 @@ def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) 
             return _publish(lease_id, {"state": "failed", "reason": "driver_mismatch", "error": mismatch, "stopped_at": time.time()})
     log_path = Path("/tmp/server.log")
     env = dict(os.environ, **server_env, VLLM_API_KEY=api_key)
-    command = ["python3", "-c", FAKE_SERVER, str(PORT), api_key, model] if dry else server_command(args, model)
+    command = ["python3", "-c", FAKE_SERVER, str(PORT), api_key, model, *args] if dry else server_command(args, model)
     with log_path.open("w") as log:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env)
     reason, error = "", ""
@@ -238,11 +304,13 @@ def _stop_reason(lease_id: str, started: float) -> str:
 
 @app.function(image=image, gpu=GPU, cpu=GPU_CPU, memory=GPU_MEMORY_MIB, volumes={"/weights": weights}, timeout=GPU_TIMEOUT_SECONDS,
               retries=0, max_containers=MAX_GPUS, scaledown_window=2)
-def serve_h100(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
+def serve_gpu(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
     return _serve(lease_id, args, api_key, model, dry=False)
 
 
-@app.function(image=image, cpu=0.5, memory=1024, timeout=20 * 60, retries=0, max_containers=2, scaledown_window=2)
+# The stand-in. One lease for `poc_modal.py dry`, or a whole stand-in campaign: as many
+# servers at once as a real run, each for as long as a campaign keeps a setup serving.
+@app.function(image=image, cpu=0.5, memory=1024, timeout=GPU_TIMEOUT_SECONDS, retries=0, max_containers=MAX_GPUS, scaledown_window=2)
 def serve_dry(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
     return _serve(lease_id, args, api_key, model, dry=True)
 
@@ -252,6 +320,28 @@ CHECK_SECONDS = 25 * 60
 ENGINE_FAMILIES = ("vllm:num_requests_running", "vllm:num_requests_waiting", "vllm:kv_cache_usage_perc", "vllm:request_queue_time_seconds",
                    "vllm:request_prefill_time_seconds", "vllm:request_decode_time_seconds", "vllm:time_to_first_token_seconds",
                    "vllm:e2e_request_latency_seconds", "vllm:num_preemptions", "vllm:prefix_cache_queries")
+# The counters speculation acceptance is read from. The publisher's page says to read them
+# before trusting a speed: throughput alone cannot tell a working drafter from one that
+# loaded and was ignored.
+SPECULATION_COUNTERS = ("vllm:spec_decode_num_drafts", "vllm:spec_decode_num_draft_tokens", "vllm:spec_decode_num_accepted_tokens")
+CHECK_SETUPS = ("current", "speculation")
+
+
+def speculation_counters(metrics: str) -> dict:
+    """Totals of the speculation counters in a /metrics page, summed over label sets;
+    a counter the server does not export is absent, never zero."""
+    totals: dict = {}
+    for line in metrics.splitlines():
+        if line.startswith("#") or " " not in line:
+            continue
+        name, value = line.rsplit(" ", 1)
+        family = name.split("{", 1)[0].removesuffix("_total")
+        if family in SPECULATION_COUNTERS:
+            try:
+                totals[family] = totals.get(family, 0.0) + float(value)
+            except ValueError:
+                continue
+    return totals
 
 
 def _call(path: str, key: str | None, body: dict | None = None) -> tuple[int, str]:
@@ -275,15 +365,18 @@ def _healthy() -> bool:
 
 @app.function(image=image, gpu=GPU, cpu=GPU_CPU, memory=GPU_MEMORY_MIB, volumes={"/weights": weights}, timeout=CHECK_SECONDS, retries=0,
               single_use_containers=True)
-def check_h100(model_id: str) -> dict:
-    """Starts the model's current setup once and checks what a run relies on: the server
+def check_gpu(model_id: str, setup: str = "current") -> dict:
+    """Starts one setup of the model once and checks what a run relies on: the server
     starts, refuses a request without its key, answers one with it, calls a tool, and
-    exports the vLLM metrics the control plane reads."""
+    exports the vLLM metrics the control plane reads. setup is "current" (the publisher's
+    command on the run's engine) or "speculation" (that command with the publisher's
+    documented speculation option), which must also draft and accept tokens."""
     import secrets
 
     model, started = MODELS[model_id], time.monotonic()
-    args = ["--served-model-name", model.id, *model.current_args]
-    result: dict = {"model": model.id, "revision": model.revision, "args": args, "env": model.env, "gpu_facts": _gpu_facts()}
+    args = ["--served-model-name", model.id, *(model.speculation_args if setup == "speculation" else model.current_args)]
+    result: dict = {"model": model.id, "revision": model.revision, "setup": setup, "args": args, "env": model.env, "engine": ENGINE.key, "runtime_image": VLLM_IMAGE,
+                    "gpu_type": ACCELERATOR.key, "gpu_facts": _gpu_facts()}
     key, log_path = secrets.token_hex(16), Path("/tmp/server.log")
     with log_path.open("w") as log:
         process = subprocess.Popen(server_command(args, model.id), stdout=log, stderr=subprocess.STDOUT, env=dict(os.environ, **model.env, VLLM_API_KEY=key))
@@ -305,8 +398,16 @@ def check_h100(model_id: str) -> dict:
                                                  "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}
         code, body = _call("/v1/chat/completions", key, dict(chat, tools=[tool], messages=[{"role": "user", "content": "What is the weather in Paris?"}], max_tokens=128))
         result["tool_call"] = {"status": code, "body": body[:800]}
+        if speculates(args):
+            # Enough real writing for the drafter to show itself.
+            code, body = _call("/v1/chat/completions", key, dict(chat, max_tokens=384, messages=[{"role": "user", "content": "Explain in plain words why the sea has tides, in about two hundred words."}]))
+            result["long_answer"] = {"status": code, "body": body[:400]}
         metrics = _call("/metrics", key)[1]
         result["metrics"] = {family: any(line.startswith(family) for line in metrics.splitlines()) for family in ENGINE_FAMILIES}
+        if speculates(args):
+            counters = speculation_counters(metrics)
+            drafted, accepted = counters.get("vllm:spec_decode_num_draft_tokens"), counters.get("vllm:spec_decode_num_accepted_tokens")
+            result["speculation"] = {"counters": counters, "acceptance": round(accepted / drafted, 4) if drafted and accepted is not None else None}
     except Exception as failure:  # noqa: BLE001 - recorded, never retried
         result["error"] = f"{type(failure).__name__}: {str(failure)[-2000:]}"
     finally:
@@ -326,15 +427,17 @@ def check_h100(model_id: str) -> dict:
 
 
 @app.local_entrypoint()
-def main(action: str = "download", model: str = QWEN3_8B.id) -> None:
+def main(action: str = "download", model: str = QWEN3_8B.id, setup: str = "current") -> None:
     if action == "download":
         print(json.dumps(download.remote(model), indent=2))
         return
-    if action != "check":
-        raise SystemExit("only `download` and `check` run from the command line; the broker starts servers")
+    if action != "check" or setup not in CHECK_SETUPS:
+        raise SystemExit("only `download` and `check` run from the command line (check takes --setup current or speculation); the broker starts servers")
+    if setup == "speculation" and not MODELS[model].publisher_speculation:
+        raise SystemExit(f"{model} has no publisher-documented speculation option in models.py")
     # Spawned and cancelled at its limit: a container that fails while starting is
     # otherwise retried without end, whatever retries says.
-    call = check_h100.spawn(model)
+    call = check_gpu.spawn(model, setup)
     try:
         print(json.dumps(call.get(timeout=CHECK_SECONDS + 600), indent=2))
     finally:

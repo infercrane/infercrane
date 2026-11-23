@@ -333,3 +333,27 @@ func TestPromptCorpusFileIsValidatedAndContentAddressed(t *testing.T) {
 		t.Fatal("an unrendered trace accepted a corpus")
 	}
 }
+
+// The rehearsal corpus the Modal harness ships is read by this parser and by
+// the harness's own (tools/poc-modal/corpus.py), so the two agree on the format.
+func TestPromptCorpusReadsTheHarnessRehearsalCorpus(t *testing.T) {
+	corpus, err := LoadPromptCorpus(filepath.Join("..", "..", "tools", "poc-modal", "testdata", "stand-in-corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := corpus.Identity()
+	if identity.License != "Apache-2.0" || identity.Passages != 12 || identity.Prompts != 9 || !strings.HasPrefix(identity.Tokenizer, "Qwen/Qwen3.8-27B-FP8@") {
+		t.Fatalf("identity=%+v", identity)
+	}
+	synthetic, err := NewAIPerfTrace(agenticTrace(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace, err := synthetic.WithPromptCorpus(corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows := corpusRendered(t, trace, 1); len(rows) != 5 || !strings.HasSuffix(rows[0].Messages[1].Content, "?") {
+		t.Fatalf("rows=%d", len(rows))
+	}
+}

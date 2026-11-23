@@ -1,0 +1,565 @@
+{
+  "schema_version": "infercrane.planner-plans-evidence/v1",
+  "recorded": "2026-11-23",
+  "what": "The setups the diagnosis planner proposes for one model, with the reason for each, before and after rule set v5. Computed by calling the planner (optimizer.CatalogSource.Propose) with the request `tools/poc-modal/poc_modal.py` sends through `infercrane optimize propose --diagnosis-endpoint`. No GPU and no endpoint were involved.",
+  "limits": [
+    "The diagnoses are constructed (a decode-bound window at a stated number of running requests), not measured on a server; a real endpoint's diagnosis decides which case applies.",
+    "A plan orders what to measure. Priority and expected benefit are planning priors, never a measured or predicted gain.",
+    "The plans say nothing about whether a setup starts or is faster; that is what a campaign measures."
+  ],
+  "request": {
+    "model_identity": "Qwen/Qwen3.8-27B-FP8",
+    "model_revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+    "provider": "kubernetes",
+    "gpu": "H100",
+    "runtimes": [
+      "vllm"
+    ],
+    "objective": "throughput",
+    "workload_profile": "throughput",
+    "max_candidates": 6,
+    "include_simulated": true
+  },
+  "model_config": {
+    "source": "https://huggingface.co/Qwen/Qwen3.8-27B-FP8/raw/c3a462cc3d38cf351f3b26cbd763469eeb74ef81/config.json",
+    "digest": "sha256:74227dd615bf1ea975aa676bdf355a0379858c12f394b5365cd9dfa5fc2c70bc",
+    "features": [
+      "native_mtp"
+    ],
+    "declares": "text_config.mtp_num_hidden_layers = 1, a native prediction head"
+  },
+  "publisher_documented_speculation": {
+    "args": [
+      "--speculative-config",
+      "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+    ],
+    "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.md?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-23)"
+  },
+  "before": {
+    "rules_version": "diagnosis-technique-rules-v4",
+    "finding": "No speculation setup at 12 or 32 running requests, with or without the model config. Only the low-concurrency finding (at most 4 running requests per server) chose speculation; it was skipped unless the caller passed --model-config, because --allow-model-metadata-network was ignored together with --diagnosis-endpoint; and the derived setup drafted 1 token, not the publisher's 3.",
+    "plans": {
+      "decode_bound_32_running_6000_token_prompts": [
+        "batch-budget (priority 60): --max-num-seqs 2048 --max-num-batched-tokens 16384",
+        "fp8-weights (60): skipped, the weights already look quantized"
+      ],
+      "decode_bound_12_running_6000_token_prompts": [
+        "batch-budget (60): --max-num-seqs 2048 --max-num-batched-tokens 16384",
+        "fp8-weights (60): skipped, the weights already look quantized"
+      ],
+      "low_concurrency_4_running": [
+        "speculative-mtp (90): skipped as the harness asked (config not read); with the config declared, --speculative-config {\"method\":\"mtp\",\"num_speculative_tokens\":1}",
+        "speculative-draft-model (88), fp8-weights (85), int4-weights (82), right-sizing (50): skipped"
+      ]
+    }
+  },
+  "after": {
+    "rules_version": "diagnosis-technique-rules-v5",
+    "finding": "With the model config read (the harness now passes --allow-model-metadata-network), every decode-bound case proposes exactly the publisher's documented speculation option. It ranks first up to 16 running requests per server and after the FP8 KV cache above that on prompts of 7,000 tokens or more.",
+    "plans": {
+      "decode_bound_12_running_6000_token_prompts/config_not_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 12
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: larger batches.",
+        "techniques": [
+          {
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 80,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's pinned config was not read or declares no native prediction head, which this technique needs.",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "decode_bound_12_running_6000_token_prompts/config_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 12
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: speculative decoding with the model's own prediction head, larger batches.",
+        "techniques": [
+          {
+            "args": [
+              "--speculative-config",
+              "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+            ],
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 80,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 3,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 12 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "decode_bound_32_running_6000_token_prompts/config_not_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 32
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: larger batches.",
+        "techniques": [
+          {
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 65,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's pinned config was not read or declares no native prediction head, which this technique needs.",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "decode_bound_32_running_6000_token_prompts/config_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 32
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: speculative decoding with the model's own prediction head, larger batches.",
+        "techniques": [
+          {
+            "args": [
+              "--speculative-config",
+              "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+            ],
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 65,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 3,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "decode_bound_32_running_9000_token_prompts/config_not_read": {
+        "signals": {
+          "mean_input_tokens": 9000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 32
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: FP8 KV cache, larger batches.",
+        "techniques": [
+          {
+            "args": [
+              "--kv-cache-dtype",
+              "fp8"
+            ],
+            "expected_benefit": "medium",
+            "label": "FP8 KV cache",
+            "priority": 70,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server on long contexts, so reading each request's KV cache dominates; an FP8 KV cache halves those bytes.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "fp8-kv-cache"
+          },
+          {
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 65,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's pinned config was not read or declares no native prediction head, which this technique needs.",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 3,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "decode_bound_32_running_9000_token_prompts/config_read": {
+        "signals": {
+          "mean_input_tokens": 9000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 32
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: FP8 KV cache, speculative decoding with the model's own prediction head, larger batches.",
+        "techniques": [
+          {
+            "args": [
+              "--kv-cache-dtype",
+              "fp8"
+            ],
+            "expected_benefit": "medium",
+            "label": "FP8 KV cache",
+            "priority": 70,
+            "rank": 2,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server on long contexts, so reading each request's KV cache dominates; an FP8 KV cache halves those bytes.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "fp8-kv-cache"
+          },
+          {
+            "args": [
+              "--speculative-config",
+              "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+            ],
+            "expected_benefit": "medium",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 65,
+            "rank": 3,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "speculative-mtp"
+          },
+          {
+            "args": [
+              "--max-num-seqs",
+              "2048",
+              "--max-num-batched-tokens",
+              "16384"
+            ],
+            "expected_benefit": "low",
+            "label": "Larger batches",
+            "priority": 60,
+            "rank": 4,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so larger batches share each read of the model across more requests.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "",
+            "technique": "batch-budget"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "FP8 weights",
+            "priority": 60,
+            "reason": "Writing answers takes 85% of p95 request time with 32 requests running per server, so smaller weights move fewer bytes per step.",
+            "rules": [
+              "bottleneck.decode"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          }
+        ]
+      },
+      "low_concurrency_4_running/config_not_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 4
+        },
+        "state": "no_actionable_findings",
+        "summary": "The diagnosis points at writing answers, but none of the changes it chose applies here, so only the starting setup is measured; each change says why.",
+        "techniques": [
+          {
+            "expected_benefit": "high",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 90,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; predicting several tokens per step cuts the number of those reads.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "The model's pinned config was not read or declares no native prediction head, which this technique needs.",
+            "technique": "speculative-mtp"
+          },
+          {
+            "expected_benefit": "high",
+            "label": "Speculative decoding with a draft model",
+            "priority": 88,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; predicting several tokens per step cuts the number of those reads.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "InferCrane has no reviewed draft model paired with this model yet, so no setup was added.",
+            "technique": "speculative-draft-model"
+          },
+          {
+            "expected_benefit": "high",
+            "label": "FP8 weights",
+            "priority": 85,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; smaller weights mean fewer bytes read per token.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          },
+          {
+            "expected_benefit": "medium",
+            "label": "4-bit weights",
+            "priority": 82,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; smaller weights mean fewer bytes read per token.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "4-bit weights come only from reviewed publisher checkpoints, which serve different model files; a campaign cannot rank those against the starting setup yet.",
+            "technique": "int4-weights"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "A smaller or cheaper GPU",
+            "priority": 50,
+            "reason": "Only 4 requests ran at once per server, so the GPU may be larger than this traffic needs.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "Few requests run at once, so this GPU may be larger than the traffic needs. Comparing GPUs needs capacity measured at your SLO, which is planned as a separate run.",
+            "technique": "right-sizing"
+          }
+        ]
+      },
+      "low_concurrency_4_running/config_read": {
+        "signals": {
+          "mean_input_tokens": 6000,
+          "p95_generation": 5200,
+          "p95_latency": 6100,
+          "runtime_requests_running_per_replica": 4
+        },
+        "state": "applied",
+        "summary": "The diagnosis points at writing answers. Trying, in order: speculative decoding with the model's own prediction head.",
+        "techniques": [
+          {
+            "args": [
+              "--speculative-config",
+              "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+            ],
+            "expected_benefit": "high",
+            "label": "Speculative decoding with the model's own prediction head",
+            "priority": 90,
+            "rank": 2,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; predicting several tokens per step cuts the number of those reads.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "",
+            "technique": "speculative-mtp"
+          },
+          {
+            "expected_benefit": "high",
+            "label": "Speculative decoding with a draft model",
+            "priority": 88,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; predicting several tokens per step cuts the number of those reads.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "InferCrane has no reviewed draft model paired with this model yet, so no setup was added.",
+            "technique": "speculative-draft-model"
+          },
+          {
+            "expected_benefit": "high",
+            "label": "FP8 weights",
+            "priority": 85,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; smaller weights mean fewer bytes read per token.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "The model's weights already look quantized, so FP8 weights would not apply.",
+            "technique": "fp8-weights"
+          },
+          {
+            "expected_benefit": "medium",
+            "label": "4-bit weights",
+            "priority": 82,
+            "reason": "Only 4 requests ran at once per server (threshold 4), so writing each token waits on reading the model from memory; smaller weights mean fewer bytes read per token.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "4-bit weights come only from reviewed publisher checkpoints, which serve different model files; a campaign cannot rank those against the starting setup yet.",
+            "technique": "int4-weights"
+          },
+          {
+            "expected_benefit": "low",
+            "label": "A smaller or cheaper GPU",
+            "priority": 50,
+            "reason": "Only 4 requests ran at once per server, so the GPU may be larger than this traffic needs.",
+            "rules": [
+              "decode.low_concurrency"
+            ],
+            "skipped": "Few requests run at once, so this GPU may be larger than the traffic needs. Comparing GPUs needs capacity measured at your SLO, which is planned as a separate run.",
+            "technique": "right-sizing"
+          }
+        ]
+      }
+    }
+  },
+  "known_misses": [
+    "\"Larger batches\" derives --max-num-seqs 2048 on an H100. vLLM 0.22.1 cannot start this model with more than 818 requests at once on one H100 (48 of its 64 layers keep a recurrent state per running request). The planner reads no per-model limit on requests at once, so it still proposes the setup; the harness skips it and records why. Not fixed here.",
+    "The planner's starting setup is the engine's defaults, not the endpoint's own command; the harness applies each proposed change to the publisher's command.",
+    "The publisher also documents two external drafters (DFlash2, DSpark). The planner has no reviewed draft model for this model and records speculative-draft-model as skipped."
+  ]
+}

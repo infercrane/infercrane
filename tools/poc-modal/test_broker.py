@@ -16,7 +16,7 @@ from pathlib import Path
 
 def _stub_modal() -> None:
     def chain(*_args, **_kwargs):
-        return types.SimpleNamespace(pip_install=chain, entrypoint=chain, add_local_python_source=chain, function=lambda **_: (lambda f: f), local_entrypoint=lambda: (lambda f: f))
+        return types.SimpleNamespace(pip_install=chain, entrypoint=chain, env=chain, add_local_python_source=chain, function=lambda **_: (lambda f: f), local_entrypoint=lambda: (lambda f: f))
 
     sys.modules["modal"] = types.SimpleNamespace(
         App=chain, FunctionCall=object, forward=None, enable_output=None,
@@ -98,7 +98,12 @@ class AllowlistTest(unittest.TestCase):
                        ["--no-async-scheduling"], ["--seed", "1"]):
             with self.subTest(change=change):
                 modal_gpu.check_args(base + change, model.id)
-        for change in (["--tensor-parallel-size", "2"], ["--api-server-count", "8"], ["--speculative-config", '{"method":"mtp","num_speculative_tokens":1}'], ["--mm-encoder-tp-mode", "x"]):
+        # Speculation with the model's own prediction head needs no draft weights; whether a
+        # run may measure it is the driver's decision (it needs traffic with real text).
+        modal_gpu.check_args(base + list(model.publisher_speculation), model.id)
+        for change in (["--tensor-parallel-size", "2"], ["--api-server-count", "8"], ["--speculative-config", '{"method":"mtp","num_speculative_tokens":9}'],
+                       ["--speculative-config", '{"method":"dflash","model":"incoai/Qwen3.8-27B-DFlash2","num_speculative_tokens":7}'],
+                       ["--speculative-config", '{"method":"mtp","num_speculative_tokens":3,"model":"other/draft"}'], ["--speculative-config", "mtp"], ["--mm-encoder-tp-mode", "x"]):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 modal_gpu.check_args(base + change, model.id)
 
@@ -122,12 +127,12 @@ class DriverPinTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
-        self.saved = (modal_gpu.leases, modal_gpu.serve_h100)
-        modal_gpu.leases, modal_gpu.serve_h100 = _Store(), types.SimpleNamespace(spawn=lambda *a: _Call())
+        self.saved = (modal_gpu.leases, modal_gpu.serve_gpu)
+        modal_gpu.leases, modal_gpu.serve_gpu = _Store(), types.SimpleNamespace(spawn=lambda *a: _Call())
         self.broker = broker.Broker("token", 30.0, 3, 6, Path(self.dir.name) / "ledger.json", dry=False)
 
     def tearDown(self) -> None:
-        modal_gpu.leases, modal_gpu.serve_h100 = self.saved
+        modal_gpu.leases, modal_gpu.serve_gpu = self.saved
         self.dir.cleanup()
 
     def lease(self) -> dict:

@@ -9,12 +9,16 @@
     poc_modal.py download      stage the pinned weights on a Modal volume (CPU only)
     poc_modal.py dry           one lease through the broker, tunnel and proxy on a Modal CPU
                                container with a stand-in server (no GPU)
-    poc_modal.py run           the publisher's command on an H100 as the current setup, Mooncake
+    poc_modal.py run           the publisher's command on a GPU as the current setup, Mooncake
                                replay through the gateway; while it runs, the product's planner
                                chooses what to try from the endpoint's own diagnosis; Replay
-                               capture; a campaign of the current setup, the planner's first
-                               choice, and a copy of the current setup that must not win; the
-                               built-in answer check and ranking. Stops at the proposal.
+                               capture; a campaign of the current setup, the planner's choice,
+                               and a copy of the current setup that must not win; the built-in
+                               answer check and ranking. Stops at the proposal.
+                               --traffic real-text composes every request from a prompt corpus
+                               of real text, so speculative setups are measured, not skipped.
+                               --smoke shrinks the traffic so the whole path costs a few dollars.
+                               --stand-in runs the same path on CPU stand-in servers for cents.
     poc_modal.py down          delete the cluster and registry
 
 Development only. Modal is not an InferCrane provider: the control plane runs its
@@ -45,6 +49,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "poc-local"))
 sys.path.insert(0, str(HERE))
+import corpus as prompt_corpus  # noqa: E402
 import models  # noqa: E402
 import poc  # noqa: E402
 
@@ -53,17 +58,17 @@ MODAL_CLIENT = "modal==1.6.4"
 # The same table the GPU side enforces; the broker refuses any other model or argument.
 MODEL = models.QWEN38_27B_FP8
 MODEL_ID, MODEL_REVISION = MODEL.id, MODEL.revision
-VLLM_IMAGE = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
-ENGINE_VERSION = "vllm-openai-0.22.1-953d3a06"
-# Modal list price for one H100 SXM5, $0.001097 per second (modal.com/pricing, read
-# 2026-11-20). GPU only: the container's CPU and memory are billed on top and are in the
-# broker's estimate and Modal's billing report, not in this rate.
-H100_HOURLY_USD = round(0.001097 * 3600, 4)
 APPROVAL_HOURS = 3
 BROKER_PORT = 18095
 BROKER_HOST = "host.docker.internal"  # the Mac host as seen from kind pods (Docker Desktop)
 PROFILE, OBJECTIVE = "throughput", "throughput"  # 32 concurrent streams per measured run
 MAX_INPUT_TOKENS = 30000  # the traffic shape of the 2026-11-20 run; Qwen3.8 serves 262,144 positions
+# A smoke run proves a paid campaign's path for a few dollars. The judge keeps its four
+# paired rounds and its fresh-server confirmation (the product has no shorter mode: with
+# one pair it cannot decide), so the traffic shrinks instead: fewer and shorter requests,
+# spread over long enough for the control plane's engine scrape (every 30 s) to see a
+# loaded server twice.
+SMOKE = {"requests": 40, "max_input_tokens": 6000, "max_output_tokens": 128, "spread_seconds": 150.0}
 
 # Same names as the laptop PoC but separate resources, so both can exist at once.
 poc.STATE_DIR = ROOT / ".infercrane" / "poc-modal"
@@ -75,9 +80,6 @@ poc.NODE = f"{poc.CLUSTER}-control-plane"
 poc.REGISTRY = "infercrane-gpu-poc-registry"
 poc.REGISTRY_PORT = 5002
 poc.CONTROL_PLANE_IMAGE = "infercrane-gpu-poc/control-plane:dev"
-poc.ACCELERATOR_RESOURCE = "infercrane.dev/modal-h100-lease"
-poc.ACCELERATOR = "H100"
-poc.NOMINAL_HOURLY_USD = H100_HOURLY_USD
 poc.APPROVAL_HOURS = APPROVAL_HOURS
 poc.API_PORT = 18081
 poc.BASELINE = "gpu-baseline"
@@ -88,14 +90,42 @@ poc.MOONCAKE_BLOCK_TOKENS = 512
 STATE_DIR, OUTPUT, log, fail = poc.STATE_DIR, poc.OUTPUT, poc.log, poc.fail
 LEDGER = STATE_DIR / "broker-ledger.json"
 
-CONTROL = ("Your current setup (the publisher's vLLM command)", "publisher-command", MODEL.current_args)
-# The same setup again on its own server. It must never win: if it does, the judge crowned
-# a difference between two machines, and the run proves nothing. Only the sampling seed
-# differs, which gives it its own identity and does not change its speed.
-COPY = ("A copy of your current setup (must not win)", "publisher-command-copy", [*MODEL.current_args, "--seed", "1"])
-# The broker runs three servers at once: the current setup, the planner's first choice, and the copy.
-PLANNER_SETUPS = 1
-CANDIDATES = [CONTROL]
+CURRENT_SETUPS = ("publisher", "publisher-speculation")
+TRAFFIC = ("mooncake-words", "real-text")
+DOCUMENTED_LABEL = "The publisher's documented speculation option"
+# The broker runs four servers at once: the current setup, two setups to try, and the copy.
+CANDIDATE_SLOTS = 2
+CANDIDATES: list = []
+# What this run measures with. Set by configure() and by `run`'s flags.
+RUN = {"traffic": "mooncake-words", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1}
+
+
+def configure(engine: str | None = None, gpu: str | None = None, current_setup: str = "publisher") -> None:
+    """Sets the run's engine image, GPU type and current setup. The GPU rate is Modal's
+    list price for the GPU alone: the container's CPU and memory are billed on top and are
+    in the broker's estimate and Modal's billing report, not in this rate."""
+    global VLLM_IMAGE, ENGINE_VERSION, GPU_HOURLY_USD, CONTROL, COPY
+    models.select(engine or models.ENGINE.key, gpu or models.ACCELERATOR.key)
+    VLLM_IMAGE, ENGINE_VERSION = models.ENGINE.image, models.ENGINE.label
+    GPU_HOURLY_USD = round(models.ACCELERATOR.usd_per_second * 3600, 4)
+    poc.ACCELERATOR = models.ACCELERATOR.key
+    poc.ACCELERATOR_RESOURCE = f"infercrane.dev/modal-{models.ACCELERATOR.key.lower()}-lease"
+    poc.NOMINAL_HOURLY_USD = GPU_HOURLY_USD
+    RUN["current_setup"] = current_setup
+    if current_setup == "publisher-speculation":
+        if not MODEL.publisher_speculation:
+            fail(f"{MODEL_ID} has no publisher-documented speculation option in models.py")
+        CONTROL = ("Your current setup (the publisher's vLLM command with its documented speculation option)", "publisher-speculation", MODEL.speculation_args)
+    else:
+        CONTROL = ("Your current setup (the publisher's vLLM command)", "publisher-command", MODEL.current_args)
+    # The same setup again on its own server. It must never win: if it does, the judge
+    # crowned a difference between two machines, and the run proves nothing. Only the
+    # sampling seed differs, which gives it its own identity and does not change its speed.
+    COPY = ("A copy of your current setup (must not win)", f"{CONTROL[1]}-copy", [*CONTROL[2], "--seed", "1"])
+    CANDIDATES[:] = [CONTROL]
+
+
+configure()
 
 
 def sh(*command: str, **kwargs) -> str:
@@ -125,32 +155,68 @@ def proxy_image() -> str:
 
 
 def advertise_leases(count: int) -> None:
-    """The node advertises one schedulable slot per remote H100 the broker may run, labeled
-    H100 because the work runs on an H100; the resource name says it is a Modal lease."""
+    """The node advertises one schedulable slot per remote GPU the broker may run, labeled
+    with the GPU type the work runs on; the resource name says it is a Modal lease."""
     poc.kubectl("label", "node", poc.NODE, f"{poc.ACCELERATOR_LABEL}={poc.ACCELERATOR}", "--overwrite")
     escaped = poc.ACCELERATOR_RESOURCE.replace("~", "~0").replace("/", "~1")
     patch = json.dumps([{"op": "add", "path": f"/status/capacity/{escaped}", "value": str(count)},
                         {"op": "add", "path": f"/status/allocatable/{escaped}", "value": str(count)}])
     sh("kubectl", "--context", poc.CONTEXT, "patch", "node", poc.NODE, "--subresource=status", "--type=json", "-p", patch, quiet=True)
     for _ in range(30):
-        if "modal-h100-lease" in poc.kubectl("get", "node", poc.NODE, "-o", "jsonpath={.status.allocatable}"):
+        if poc.ACCELERATOR_RESOURCE.split("/", 1)[1] in poc.kubectl("get", "node", poc.NODE, "-o", "jsonpath={.status.allocatable}"):
             break
         time.sleep(1)
     else:
         fail("the node did not report the Modal lease resource as allocatable")
-    log("setup", f"node advertises {count} x {poc.ACCELERATOR_RESOURCE} (one per remote H100 the broker may run)")
+    log("setup", f"node advertises {count} x {poc.ACCELERATOR_RESOURCE} (one per remote {poc.ACCELERATOR} the broker may run)")
 
 
 def rate_card() -> str:
     now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     stamp = lambda moment: moment.isoformat().replace("+00:00", "Z")  # noqa: E731
-    row = {"cloud": "kubernetes", "region": "", "gpu": poc.ACCELERATOR, "gpu_count": 1, "replicas": 1, "hourly_usd": H100_HOURLY_USD, "currency": "USD",
-           "source": "operator-rate-card/modal-h100-sxm5-list-2026-11-20", "authority": "account_contract", "cost_scope": "instance_total",
+    row = {"cloud": "kubernetes", "region": "", "gpu": poc.ACCELERATOR, "gpu_count": 1, "replicas": 1, "hourly_usd": GPU_HOURLY_USD, "currency": "USD",
+           "source": f"operator-rate-card/modal-{poc.ACCELERATOR.lower()}-list-{models.ACCELERATOR.price_read}", "authority": "account_contract", "cost_scope": "instance_total",
            "observed_at": stamp(now - dt.timedelta(minutes=5)), "valid_until": stamp(now + dt.timedelta(days=7))}
     return json.dumps([row], separators=(",", ":"))
 
 
-def up() -> None:
+# Where the control plane reads the run's prompt corpus: a directory of the kind node,
+# mounted read-only into the control plane pod. A ConfigMap would cap the corpus at 1 MiB.
+NODE_CORPUS_DIR, POD_CORPUS = "/var/lib/infercrane-poc-corpus", "/etc/infercrane-corpus/prompt-corpus.json"
+CORPUS_VARIABLE = "INFERCRANE_REPLAY_PROMPT_CORPUS_FILE"
+
+
+def mount_corpus(path: Path | None) -> None:
+    """Gives the control plane the prompt corpus, or takes it away. With a corpus the
+    product composes every replayed campaign request from it; without one AIPerf
+    synthesizes the text, as before."""
+    if path is None:
+        poc.kubectl("-n", poc.NAMESPACE, "set", "env", "deploy/infercrane", f"{CORPUS_VARIABLE}-")
+        save({"corpus": None})
+        return
+    text = prompt_corpus.load(path)
+    sh("docker", "exec", poc.NODE, "mkdir", "-p", NODE_CORPUS_DIR, quiet=True)
+    sh("docker", "cp", str(path), f"{poc.NODE}:{NODE_CORPUS_DIR}/prompt-corpus.json", quiet=True)
+    sh("docker", "exec", poc.NODE, "chmod", "644", f"{NODE_CORPUS_DIR}/prompt-corpus.json", quiet=True)
+    patch = {"spec": {"template": {"spec": {
+        "volumes": [{"name": "prompt-corpus", "hostPath": {"path": NODE_CORPUS_DIR, "type": "Directory"}}],
+        "containers": [{"name": "infercrane", "env": [{"name": CORPUS_VARIABLE, "value": POD_CORPUS}],
+                        "volumeMounts": [{"name": "prompt-corpus", "mountPath": str(Path(POD_CORPUS).parent), "readOnly": True}]}]}}}}
+    poc.kubectl("-n", poc.NAMESPACE, "patch", "deploy", "infercrane", "--type=strategic", "-p", json.dumps(patch))
+    save({"corpus": text.identity})
+    log("setup", f"prompt corpus for replay measurement: {text.identity['name']} · {text.identity['license']} · {text.identity['passages']} passages · {text.digest[:19]}…")
+
+
+def corpus_in_control_plane(text: prompt_corpus.Corpus) -> None:
+    """Fails unless the running control plane composes its replay from exactly this
+    corpus: the same bytes on the node, and the setting on the deployment."""
+    setting = poc.kubectl("-n", poc.NAMESPACE, "get", "deploy", "infercrane", "-o", f"jsonpath={{.spec.template.spec.containers[0].env[?(@.name=='{CORPUS_VARIABLE}')].value}}", check=False).strip()
+    digest = sh("docker", "exec", poc.NODE, "sha256sum", f"{NODE_CORPUS_DIR}/prompt-corpus.json", capture=True, check=False).split(" ", 1)[0].strip()
+    if setting != POD_CORPUS or f"sha256:{digest}" != text.digest:
+        fail(f"the control plane does not hold this prompt corpus ({text.digest[:19]}…); run `poc_modal.py up --corpus {text.path}` first")
+
+
+def up(corpus: Path | None = None) -> None:
     for tool in ("docker", "kubectl", "go", "curl", "uv"):
         if not shutil.which(tool):
             fail(f"{tool} is required")
@@ -159,7 +225,7 @@ def up() -> None:
     kind = poc.kind_binary()
     poc.ensure_registry()
     poc.ensure_cluster(kind)
-    advertise_leases(3)
+    advertise_leases(CANDIDATE_SLOTS + 2)
     image = proxy_image()
     save({"model_image": image})
     log("setup", "building the control plane image")
@@ -174,6 +240,7 @@ def up() -> None:
                        "ACCELERATOR_RESOURCE": poc.ACCELERATOR_RESOURCE, "ACCELERATOR_LABEL": poc.ACCELERATOR_LABEL, "PRICES_JSON": rate_card()}.items():
         rendered = rendered.replace(f"@@{key}@@", value)
     subprocess.run(["kubectl", "--context", poc.CONTEXT, "apply", "-f", "-"], input=rendered, text=True, check=True, capture_output=True)
+    mount_corpus(corpus)
     log("setup", "starting Postgres and the InferCrane control plane in the cluster")
     poc.kubectl("-n", poc.NAMESPACE, "rollout", "status", "deploy/postgres", "--timeout=300s")
     poc.kubectl("-n", poc.NAMESPACE, "rollout", "restart", "deploy/infercrane")
@@ -199,22 +266,31 @@ class BrokerProcess:
         self.log_path = STATE_DIR / ("broker-dry.log" if dry else "broker.log")
         self.process = subprocess.Popen(broker_command(budget, dry, max_starts), stdout=self.log_path.open("a"), stderr=subprocess.STDOUT, cwd=ROOT, start_new_session=True)
         save({"broker_pid": self.process.pid})
-        for _ in range(120):
+        # The broker's port is open before its Modal app is up, and the app's first start
+        # with a new engine image unpacks about 10 GB on Modal, so the first answer can take
+        # many minutes. No container runs meanwhile, so the wait costs nothing.
+        deadline, told = time.monotonic() + 25 * 60, False
+        while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 fail(f"the broker exited: {self.log_path.read_text()[-1500:]}")
             try:
-                self.request("GET", "/v1/ledger")
+                self.request("GET", "/v1/ledger", timeout=5)
                 return
-            except (urllib.error.URLError, ConnectionError):
-                time.sleep(1)
-        fail("the broker did not start")
+            except (urllib.error.URLError, OSError):
+                if not told and time.monotonic() > deadline - 24 * 60:
+                    told = True
+                    log("broker", f"waiting for the broker's Modal app (a new engine image is built once; see {self.log_path})")
+                time.sleep(2)
+        self.process.kill()
+        save({"broker_pid": None})
+        fail(f"the broker did not start within 25 minutes: {self.log_path.read_text()[-1500:]}")
 
-    def request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def request(self, method: str, path: str, body: dict | None = None, timeout: float = 60) -> dict:
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(f"http://127.0.0.1:{BROKER_PORT}{path}", method=method, data=data)
         request.add_header("Authorization", f"Bearer {state()['api_key']}")
         request.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read()
         return json.loads(raw) if raw else {}
 
@@ -264,6 +340,10 @@ def runtime(args: list[str]) -> dict:
     return {"engine": "custom-oci", "version": ENGINE_VERSION, "args": args, "workload": workload()}
 
 
+def server_kind() -> str:
+    return "CPU stand-in" if RUN["stand_in"] else poc.ACCELERATOR
+
+
 def deploy_baseline() -> None:
     spec = {"apiVersion": "infercrane.dev/v1", "kind": "Deployment", "name": poc.BASELINE, "model": {"id": MODEL_ID, "revision": MODEL_REVISION}, "runtime": runtime(list(CONTROL[2])),
             "compute": {"mode": "elastic"}, "resources": {"gpu": poc.ACCELERATOR, "gpu_count": 1}, "provider": {"cloud": "kubernetes", "adapter": "kubernetes", "region": ""},
@@ -271,38 +351,58 @@ def deploy_baseline() -> None:
     path = STATE_DIR / "baseline.yaml"
     path.write_text(json.dumps(spec, indent=2))
     digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
-    log("deploy", f"current setup: {MODEL_ID} with its publisher's vLLM command ({' '.join(CONTROL[2])}), one H100 ({poc.BASELINE}); first start loads the image and weights")
+    log("deploy", f"current setup: {MODEL_ID} on {ENGINE_VERSION} ({' '.join(CONTROL[2])}), one {server_kind()} ({poc.BASELINE}); first start loads the image and weights")
     poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}", "--wait", capture=False)
 
 
-def replay_mooncake(requests_total: int, input_scale: int, max_output: int, workers: int, progress: dict) -> dict:
+def replay_mooncake(requests_total: int, input_scale: int, max_output: int, workers: int, progress: dict, max_input: int = MAX_INPUT_TOKENS,
+                    spread_seconds: float | None = None, text: prompt_corpus.Corpus | None = None) -> dict:
     """Replays the first rows of the Mooncake trace through the gateway at their recorded
-    arrival times. Inputs are scaled 1/input_scale and capped to fit the model. progress
-    counts the requests that finished, for the planner waiting on a loaded server."""
+    arrival times (stretched over spread_seconds when given). Inputs are scaled
+    1/input_scale and capped to fit the model. progress counts the requests that
+    finished, for the planner waiting on a loaded server.
+
+    The trace has no content. Without a corpus the prompts are words generated from its
+    prefix block hashes and answers are forced to their recorded length. With one, every
+    request is real text composed from the corpus (corpus.compose), the same prefix
+    blocks share the same passages, and answers end where the model ends them, capped at
+    the recorded length."""
     rows = poc.mooncake_rows()[:requests_total]
     start = rows[0]["timestamp"]
+    stretch = spread_seconds / max(1.0, (rows[-1]["timestamp"] - start) / 1000) if spread_seconds else 1.0
     block = max(1, poc.MOONCAKE_BLOCK_TOKENS // input_scale)
-    log("traffic", f"replaying {len(rows)} requests from the Mooncake (Kimi) production trace at their recorded arrival times: shared prefixes kept, inputs scaled 1/{input_scale}, capped at {MAX_INPUT_TOKENS} tokens")
+    what = f"real text from the prompt corpus “{text.identity['name']}” ({text.identity['license']})" if text else "prompts are generated words"
+    log("traffic", f"replaying {len(rows)} requests from the Mooncake (Kimi) production trace at their recorded arrival times"
+        f"{f' stretched over {spread_seconds:.0f} s' if spread_seconds else ''}: shared prefixes kept, inputs scaled 1/{input_scale}, capped at {max_input} tokens; {what}")
     key, began, failures = state()["api_key"], time.monotonic(), []
-    sent = {"input_words": 0, "max_tokens": 0}
+    sent = {"input_words": 0, "max_tokens": 0, "planned_input_tokens": 0}
 
-    def one(row: dict) -> int:
-        delay = (row["timestamp"] - start) / 1000 - (time.monotonic() - began)
+    def one(indexed: tuple[int, dict]) -> int:
+        index, row = indexed
+        delay = (row["timestamp"] - start) / 1000 * stretch - (time.monotonic() - began)
         if delay > 0:
             time.sleep(delay)
-        target = min(MAX_INPUT_TOKENS, max(8, row["input_length"] // input_scale))
-        words: list[str] = []
-        for hash_id in row.get("hash_ids") or [row["timestamp"]]:
-            words += poc.block_text(hash_id, block)
-        words = (words + poc.block_text(row["timestamp"], target))[:target]
-        shared, unique = words[:-block] or words[:1], words[-block:]
+        target = min(max_input, max(8, row["input_length"] // input_scale))
         output = max(1, min(max_output, row["output_length"]))
-        sent["input_words"] += len(words)
+        hash_ids = row.get("hash_ids") or [row["timestamp"]]
+        body = {"model": poc.BASELINE, "stream": False, "temperature": 0, "max_tokens": output}
+        if text is None:
+            words: list[str] = []
+            for hash_id in hash_ids:
+                words += poc.block_text(hash_id, block)
+            words = (words + poc.block_text(row["timestamp"], target))[:target]
+            shared, unique = words[:-block] or words[:1], words[-block:]
+            sent["input_words"] += len(words)
+            body |= {"ignore_eos": True, "messages": [{"role": "system", "content": " ".join(shared)}, {"role": "user", "content": " ".join(unique)}]}
+        else:
+            # Only the blocks the capped request still covers, so a capped row keeps its
+            # leading prefix and drops its tail, as the word replay does.
+            body["messages"], planned = prompt_corpus.compose(text, hash_ids[:max(1, -(-target // block))], target, block, index)
+            sent["planned_input_tokens"] += planned
+            sent["input_words"] += sum(len(message["content"].split()) for message in body["messages"])
         sent["max_tokens"] += output
-        body = {"model": poc.BASELINE, "stream": False, "temperature": 0, "max_tokens": output, "ignore_eos": True,
-                "messages": [{"role": "system", "content": " ".join(shared)}, {"role": "user", "content": " ".join(unique)}]}
         request = urllib.request.Request(f"http://127.0.0.1:{poc.API_PORT}/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
-        session = (row.get("hash_ids") or [0])[0]
+        session = hash_ids[0] if row.get("hash_ids") else 0
         for header, value in {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-InferCrane-Session-ID": f"mooncake-{session}", "X-InferCrane-Parent-Session-ID": "mooncake-replay"}.items():
             request.add_header(header, value)
         try:
@@ -316,14 +416,16 @@ def replay_mooncake(requests_total: int, input_scale: int, max_output: int, work
         return int((payload.get("usage") or {}).get("completion_tokens", 0))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        tokens = sum(pool.map(one, rows))
+        tokens = sum(pool.map(one, enumerate(rows)))
     seconds = time.monotonic() - began
     note = f" · {len(failures)} of {len(rows)} requests failed ({', '.join(sorted(set(failures)))})" if failures else ""
     log("traffic", f"done in {seconds:.0f} s: {tokens} output tokens reported by the server{note} · trace: kvcache-ai/Mooncake FAST'25 (Apache-2.0)")
     if len(failures) > len(rows) // 2:
         fail("most replayed requests failed; check the gateway and the model server before measuring")
     return {"requests": len(rows), "failed": len(failures), "seconds": round(seconds, 1), "output_tokens": tokens, "input_words_sent": sent["input_words"],
-            "input_scale": input_scale, "max_input_tokens": MAX_INPUT_TOKENS, "max_output_tokens": max_output}
+            "input_scale": input_scale, "max_input_tokens": max_input, "max_output_tokens": max_output, "spread_seconds": spread_seconds,
+            "text": {"source": "operator_corpus", "corpus": text.identity, "planned_input_tokens": sent["planned_input_tokens"], "answers": "end where the model ends them, capped at the recorded length"}
+            if text else {"source": "generated_words", "answers": "forced to the recorded length (ignore_eos)"}}
 
 
 def pod_get(pod: str, path: str) -> str:
@@ -389,7 +491,9 @@ class Planner:
                 time.sleep(10)
             self.proposal = json.loads(poc.cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", poc.ACCELERATOR,
                                                "--runtimes", "vllm", "--objective", OBJECTIVE, "--profile", PROFILE, "--max-candidates", "6",
-                                               "--diagnosis-endpoint", poc.BASELINE, "--include-simulated", "--output", "json"))
+                                               # The pinned config.json says whether the model has its own
+                                               # prediction head; without it the planner skips speculation.
+                                               "--diagnosis-endpoint", poc.BASELINE, "--allow-model-metadata-network", "--include-simulated", "--output", "json"))
         except (SystemExit, Exception) as failure:  # noqa: BLE001 - reported by finish()
             self.error = f"{type(failure).__name__}: {failure}"
 
@@ -405,8 +509,13 @@ class Planner:
 def plan(proposal: dict) -> list[dict]:
     """Turns the planner's setups into campaign setups. Each of the planner's setups is its
     starting setup with one change, chosen by a diagnosis rule; the same change is applied
-    to the publisher's command. A setup the remote GPU cannot run as measured is skipped
-    with the reason, and the copy of the current setup is added last."""
+    to the current setup. A setup the remote GPU cannot run as measured is skipped with
+    the reason, and the copy of the current setup is added last.
+
+    Speculative decoding is measured only when the traffic has real text. Then the
+    publisher's documented speculation option is always one of the measured setups,
+    whether or not the planner proposed it: it is the baseline a result has to beat, and
+    the record says which of the two happened."""
     diagnosis = proposal.get("diagnosis") or {}
     log("diagnose", f"{diagnosis.get('state', 'no diagnosis')}: {diagnosis.get('summary') or diagnosis.get('primary_bottleneck') or 'the planner recorded no summary'}")
     start_id = (proposal.get("starting_point") or {}).get("candidate_id")
@@ -414,51 +523,78 @@ def plan(proposal: dict) -> list[dict]:
     if start is None:
         fail(f"the planner's proposal has no starting setup: {json.dumps(proposal)[:600]}")
     start_runtime = start["deployment"]["runtime"]
-    record, chosen = [], [CONTROL]
+    real_text = RUN["traffic"] == "real-text"
+    record, runnable = [], []
     for candidate in proposal["candidates"]:
         if candidate["id"] == start_id:
             continue
         reason, deployment = candidate.get("reason") or {}, candidate["deployment"]
         runtime_doc = deployment["runtime"]
         args = models.with_change(CONTROL[2], start_runtime.get("args") or [], runtime_doc.get("args") or [])
-        row = {"label": reason.get("label") or candidate.get("configuration_profile"), "rules": reason.get("rules", []), "summary": reason.get("summary", ""),
+        row = {"label": reason.get("label") or candidate.get("configuration_profile"), "technique": reason.get("technique"), "priority": reason.get("priority"),
+               "rules": reason.get("rules", []), "summary": reason.get("summary", ""),
                "evidence": reason.get("evidence", []), "planner_args": runtime_doc.get("args") or [], "args": args}
         skipped = ""
         if (deployment.get("resources") or {}).get("gpu_count", 1) != 1 or (deployment.get("provider") or {}).get("adapter") != "kubernetes":
             skipped = "it needs more than one GPU or another provider adapter"
         elif (runtime_doc.get("env") or {}) != (start_runtime.get("env") or {}):
             skipped = "it changes the engine's environment, which every setup of a run shares"
-        elif any(flag == "--speculative-config" for flag, _ in models.parse(args)):
-            skipped = "speculative decoding: the replayed traffic has no real text, so draft acceptance would not be honest"
+        elif models.speculates(args) and not real_text:
+            skipped = "speculative decoding: the replayed traffic has no real text, so draft acceptance would not be honest (run with --traffic real-text)"
         elif args == list(CONTROL[2]):
             skipped = "the current setup already makes this change"
         elif MODEL.max_num_seqs and int(dict(models.parse(args)).get("--max-num-seqs") or 0) > MODEL.max_num_seqs:
             skipped = f"vLLM cannot start it on one H100: {MODEL.id} fits at most {MODEL.max_num_seqs} requests at once"
-        elif len(chosen) > PLANNER_SETUPS:
-            skipped = f"only the planner's first {PLANNER_SETUPS} setup fits next to the current setup and its copy"
+        elif any(args == other["args"] for other in runnable):
+            skipped = "a setup ranked higher already makes this change"
         else:
             try:
                 models.check_args(["--served-model-name", MODEL_ID, *args], MODEL_ID)
             except ValueError as error:
                 skipped = f"the remote GPU refuses it: {error}"
         row["skipped"] = skipped
+        row["profile"] = candidate.get("configuration_profile") or "planner-setup"
         record.append(row)
         if skipped:
             log("plan", f"skip “{row['label']}”: {skipped}")
-            continue
-        chosen.append((row["label"], candidate.get("configuration_profile") or "planner-setup", args))
+        else:
+            runnable.append(row)
+    slots = max(1, min(RUN["planner_setups"], CANDIDATE_SLOTS))
+    measured = runnable[:slots]
+    documented = None
+    if real_text and MODEL.publisher_speculation and not models.speculates(CONTROL[2]):
+        own = next((row for row in runnable if row["args"] == MODEL.speculation_args), None)
+        documented = {"args": MODEL.speculation_args, "source": MODEL.speculation_source, "proposed_by_planner": own is not None,
+                      "planner_rank": runnable.index(own) + 1 if own else None}
+        if own is None or own not in measured:
+            measured = measured[:CANDIDATE_SLOTS - 1]
+            if own is not None:
+                measured.append(own)
+    for row in runnable:
+        if row not in measured:
+            row["skipped"] = f"only the planner's first {len(measured)} setup{'s fit' if len(measured) != 1 else ' fits'} next to the current setup and its copy"
+            log("plan", f"skip “{row['label']}”: {row['skipped']}")
+    chosen = [CONTROL]
+    for row in measured:
+        chosen.append((row["label"], row.pop("profile"), row["args"]))
         log("plan", f"try “{row['label']}”: {row['summary'] or ', '.join(row['rules'])}  [change: {' '.join(row['planner_args'])}]")
+    for row in record:
+        row.pop("profile", None)
+    if documented and not documented["proposed_by_planner"]:
+        chosen.append((DOCUMENTED_LABEL, "publisher-speculation", MODEL.speculation_args))
+        log("plan", f"also measure “{DOCUMENTED_LABEL}”: the planner did not propose it, and it is the baseline a result has to beat  [change: {' '.join(MODEL.publisher_speculation)}]")
     if len(chosen) > 1:
         chosen.append(COPY)
         log("plan", f"also measure “{COPY[0]}”: it must not win, or the run proves nothing")
     CANDIDATES[:] = chosen
     save({"plan": [{"label": label, "profile": profile, "args": args} for label, profile, args in chosen],
-          "planner": {"diagnosis": diagnosis, "input_diagnosis": (proposal.get("input") or {}).get("diagnosis"), "setups": record}})
+          "planner": {"diagnosis": diagnosis, "input_diagnosis": (proposal.get("input") or {}).get("diagnosis"), "model_features": (proposal.get("input") or {}).get("model_features"),
+                      "setups": record, "documented_speculation": documented}})
     return record
 
 
 def proposal(digest: str) -> dict:
-    # Kubernetes + H100 + vLLM has no live qualification row, so the planner only offers it
+    # Kubernetes + this GPU + vLLM has no live qualification row, so the planner only offers it
     # as a simulated path (as the laptop PoC's SIMULATED-CPU). The harness replaces the
     # runtime with the proxy workload anyway; the template supplies the campaign's shape.
     base = json.loads(poc.cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", poc.ACCELERATOR, "--objective", OBJECTIVE,
@@ -474,7 +610,7 @@ def proposal(digest: str) -> dict:
         deployment["name"] = poc.OPTIMIZED
         deployment["runtime"] = runtime(args)
         deployment["resources"] = dict(deployment.get("resources") or {}, gpu=poc.ACCELERATOR, gpu_count=1)
-        # One H100 per setup: the comparison is per GPU, and the broker runs at most three.
+        # One GPU per setup: the comparison is per GPU, and the broker runs at most four.
         deployment["scaling"] = dict(deployment.get("scaling") or {}, min_replicas=1, max_replicas=1)
         identity = hashlib.sha256(json.dumps({"profile": profile, "deployment": deployment}, sort_keys=True).encode()).hexdigest()
         candidate = json.loads(json.dumps(template)) | {"id": identity, "rank": rank, "configuration_profile": profile, "deployment": deployment}
@@ -498,6 +634,31 @@ def campaign_create(doc: dict) -> str:
     return campaign
 
 
+DRAFT_TOKENS, ACCEPTED_TOKENS = "vllm:spec_decode_num_draft_tokens", "vllm:spec_decode_num_accepted_tokens"
+
+
+def speculation_evidence(measured: dict) -> dict | None:
+    """Drafted and accepted tokens per arm of a measurement, summed over its runs, from the
+    engine counters the product stored with each run (AIPerf's server-metrics export). An
+    arm whose runs carry no such counters is absent: unknown, never zero. Throughput alone
+    cannot tell a working drafter from one that loaded and was ignored."""
+    arms: dict = {}
+    for window, runs in (("first", measured.get("runs") or []), ("fresh_servers", (measured.get("confirmation") or {}).get("runs") or [])):
+        for run in runs:
+            metrics = (run.get("server_metrics") or {}).get("metrics") or {}
+            drafted = ((metrics.get(DRAFT_TOKENS) or {}).get("stats") or {}).get("total")
+            accepted = ((metrics.get(ACCEPTED_TOKENS) or {}).get("stats") or {}).get("total")
+            if drafted is None or accepted is None:
+                continue
+            arm = arms.setdefault(f"{run.get('arm', 'candidate')}/{window}", {"draft_tokens": 0.0, "accepted_tokens": 0.0, "runs": 0})
+            arm["draft_tokens"] += drafted
+            arm["accepted_tokens"] += accepted
+            arm["runs"] += 1
+    for arm in arms.values():
+        arm["acceptance"] = round(arm["accepted_tokens"] / arm["draft_tokens"], 4) if arm["draft_tokens"] else None
+    return arms or None
+
+
 def benchmark_row(candidate: dict) -> dict | None:
     try:
         rows = poc.api("GET", f"/api/v1/deployments/{candidate['deployment_name']}/benchmarks")
@@ -512,7 +673,8 @@ def benchmark_row(candidate: dict) -> dict | None:
     keys = ("output_token_throughput", "request_throughput", "ttft_p50_ms", "ttft_p95_ms", "tpot_p95_ms", "latency_p50_ms", "latency_p95_ms", "request_count", "succeeded", "failed", "duration_seconds", "goodput")
     out = {key: row.get(key) for key in keys}
     measured = workload_doc.get("measured") or {}
-    out |= {"output_tps": row.get("output_token_throughput"), "comparison": measured.get("comparison") or {},
+    out |= {"speculation": speculation_evidence(measured), "prompt_text": (workload_doc.get("replay") or {}).get("prompt_text"),
+            "output_tps": row.get("output_token_throughput"), "comparison": measured.get("comparison") or {},
             "confirmation": (measured.get("confirmation") or {}).get("comparison"),
             "confidence_95": workload_doc.get("confidence_95"), "concurrency": workload_doc.get("concurrency"), "request_count_per_run": workload_doc.get("request_count_per_run"),
             "profile_runs": workload_doc.get("profile_runs"), "workload_source": workload_doc.get("workload_source")}
@@ -547,19 +709,43 @@ def wait_for_lease_end(broker: BrokerProcess, pod_prefix: str, timeout_s: int = 
     fail(f"remote GPUs still running after the {pod_prefix} pods stopped; stop them with: poc_modal.py stop-gpus")
 
 
-def run_campaign(budget: float, requests_total: int, reuse_capture: bool) -> None:
+def run_settings(text: prompt_corpus.Corpus | None) -> dict:
+    """What this run measures with, kept in its record and compared on --reuse-capture."""
+    return {"traffic": RUN["traffic"], "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
+            "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR}
+
+
+def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool) -> None:
     if not state().get("model_image"):
         fail("run `poc_modal.py up` first")
     previous = state()
+    text = None
+    if RUN["traffic"] == "real-text":
+        try:
+            text = prompt_corpus.load(RUN["corpus"])
+        except (OSError, ValueError) as error:
+            fail(f"--traffic real-text needs a prompt corpus: {error}")
+        corpus_in_control_plane(text)
+    elif (previous.get("corpus") or {}).get("digest"):
+        fail("the control plane holds a prompt corpus, so it would measure real text; run with --traffic real-text, or `poc_modal.py up` without --corpus")
+    if not MODEL.setup.checked and not RUN["stand_in"]:
+        log("model", f"{MODEL_ID} has no recorded serving check on {models.ENGINE.key}; run `modal_gpu.py::main --action check` before paying for a campaign")
+    smoke = SMOKE if RUN["smoke"] else {}
+    requests_total = requests_total or smoke.get("requests", 200)
+    settings = run_settings(text)
     publisher_check()
     if reuse_capture and not (previous.get("capture_digest") and previous.get("plan") and previous.get("diagnosis")):
         fail("--reuse-capture needs an earlier run's recorded traffic shape and diagnosis")
+    if reuse_capture and {key: value for key, value in (previous.get("run") or {}).items() if key != "stand_in"} != {key: value for key, value in settings.items() if key != "stand_in"}:
+        fail("--reuse-capture needs the same traffic, corpus, engine, GPU type and current setup as the run that recorded the traffic")
     poc.port_forward()
     poc.reset_previous()  # clears the plan and diagnosis; a reused capture keeps its own
     kept = {key: previous.get(key) for key in ("capture_digest", "plan", "diagnosis", "traffic", "planner")} if reuse_capture else {"traffic": None, "capture_digest": None, "planner": None}
-    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8)} | kept)
-    broker = BrokerProcess(budget, dry=False, max_starts=6)
-    log("broker", f"remote H100s capped at ${budget:.2f} for this run (estimate from Modal list prices), at most 3 at once")
+    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings} | kept)
+    # A gain is measured again on fresh servers, which a setup that speculates is more
+    # likely to need, so a real-text run may start more servers in total.
+    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=10 if text else 6)
+    log("broker", f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
     try:
         check_broker_reachable()
         if reuse_capture:
@@ -569,13 +755,14 @@ def run_campaign(budget: float, requests_total: int, reuse_capture: bool) -> Non
         else:
             deploy_baseline()
             planner = Planner(requests_total)
-            traffic = replay_mooncake(requests_total, input_scale=2, max_output=512, workers=96, progress=planner.progress)
+            traffic = replay_mooncake(requests_total, input_scale=2, max_output=smoke.get("max_output_tokens", 512), workers=96, progress=planner.progress,
+                                      max_input=smoke.get("max_input_tokens", MAX_INPUT_TOKENS), spread_seconds=smoke.get("spread_seconds"), text=text)
             save({"traffic": traffic})
             plan(planner.finish())
             diagnosis = state().get("planner")
             digest = poc.capture_replay()
             save({"capture_digest": digest})
-            log("deploy", f"removing {poc.BASELINE}: its traffic shape is recorded, and its H100 is not needed for the campaign")
+            log("deploy", f"removing {poc.BASELINE}: its traffic shape is recorded, and its server is not needed for the campaign")
             poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
             wait_for_lease_end(broker, poc.BASELINE)
         if len(CANDIDATES) < 2:
@@ -591,10 +778,10 @@ def run_campaign(budget: float, requests_total: int, reuse_capture: bool) -> Non
         # The control plane splits the approved amount across setups and requires each share
         # to cover its rate for the whole approval window. It is the control plane's ceiling
         # at the stated rate, not the money spent; the broker cap above bounds that.
-        approval = round(H100_HOURLY_USD * APPROVAL_HOURS * len(doc["candidates"]) * 1.05, 2)
+        approval = round(GPU_HOURLY_USD * APPROVAL_HOURS * len(doc["candidates"]) * 1.05, 2)
         approved = lambda: poc.campaign_record(campaign).get("state") != "awaiting_approval"  # noqa: E731
         poc.cli("optimize", "approve", campaign, "--max-cost-usd", str(approval), "--expires-in", f"{APPROVAL_HOURS}h", repeatable=False, landed=approved)
-        log("approve", f"campaign approved up to ${approval} at the stated H100 rate (${H100_HOURLY_USD}/h, {APPROVAL_HOURS} h window); real spend stays under the broker cap")
+        log("approve", f"campaign approved up to ${approval} at the stated {poc.ACCELERATOR} rate (${GPU_HOURLY_USD}/h, {APPROVAL_HOURS} h window); real spend stays under the broker cap")
         record = watch(campaign, labels)
         finish(record, labels, broker)
     finally:
@@ -654,9 +841,10 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
         quality = candidate.get("quality") or {}
         tps = metrics.get("output_tps")
         rows.append({"label": label, "candidate_id": candidate["id"], "state": candidate.get("state"), "failure_code": candidate.get("failure_code"),
+                     "speculation": metrics.get("speculation"), "prompt_text_corpus": ((metrics.get("prompt_text") or {}).get("corpus") or {}).get("digest"),
                      "output_tokens_per_second": tps, "request_throughput": metrics.get("request_throughput"), "ttft_p95_ms": metrics.get("ttft_p95_ms"),
                      "latency_p95_ms": metrics.get("latency_p95_ms"), "tpot_p95_ms": metrics.get("tpot_p95_ms"),
-                     "usd_per_million_output_tokens": (H100_HOURLY_USD / (tps * 3600) * 1_000_000) if tps else None,
+                     "usd_per_million_output_tokens": (GPU_HOURLY_USD / (tps * 3600) * 1_000_000) if tps and not RUN["stand_in"] else None,
                      "answer_match": quality.get("score"), "answer_check": quality.get("state"), "answer_check_source": quality.get("source"),
                      "comparison": metrics.get("comparison"), "confirmation": metrics.get("confirmation"), "runs": metrics.get("profile_runs"), "requests_per_run": metrics.get("request_count_per_run"),
                      "concurrency": metrics.get("concurrency"), "succeeded": metrics.get("succeeded"), "failed": metrics.get("failed")})
@@ -668,20 +856,44 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
         decision = "no campaign: the planner chose nothing the remote GPU can measure for this traffic"
     if copy_won:
         decision = "no decision: the copy of the current setup measured better than the current setup, so the judge crowned a machine difference"
-    summary = {"schema_version": "infercrane.poc-modal-result/v2", "campaign_id": campaign, "campaign_state": record.get("state"), "decision": decision,
+    settings, warnings, text_check = current.get("run") or run_settings(None), [], None
+    plan_args = {row["label"]: row["args"] for row in current.get("plan") or []}
+    measured_rows = [row for row in rows if row["output_tokens_per_second"] is not None]
+    if settings.get("corpus"):
+        # The campaign must have composed its requests from this run's corpus; a control
+        # plane that fell back to synthetic text measured another workload.
+        seen = sorted({row["prompt_text_corpus"] or "synthetic text" for row in measured_rows})
+        text_check = {"expected": settings["corpus"]["digest"], "measured_on": seen, "ok": seen in ([], [settings["corpus"]["digest"]])}
+        if not text_check["ok"]:
+            decision = "no decision: the campaign did not measure on this run's prompt corpus"
+    for row in measured_rows:
+        if models.speculates(plan_args.get(row["label"]) or []):
+            own = [arm for name, arm in (row["speculation"] or {}).items() if name.startswith("candidate/")]
+            if not own:
+                warnings.append(f"“{row['label']}” speculates but its runs carry no acceptance counters: a working drafter cannot be told from one that loaded and was ignored")
+            elif not any(arm["accepted_tokens"] for arm in own):
+                warnings.append(f"“{row['label']}” drafted tokens and none was accepted")
+    if settings.get("stand_in"):
+        decision = f"stand-in servers, no model and no GPU: “{decision}” is the pipeline's answer to scripted speeds, not a measurement"
+    summary = {"schema_version": "infercrane.poc-modal-result/v3", "campaign_id": campaign, "campaign_state": record.get("state"), "decision": decision,
+               "run": settings, "prompt_text_check": text_check, "warnings": warnings,
                "copy_of_current_setup": {"must_not_win": True, "won": copy_won, "state": copy and copy["state"], "failure_code": copy and copy["failure_code"],
                                          "objective_decision": copy and objective_decision(copy)} if copy else None,
                "model": {"id": MODEL_ID, "revision": MODEL_REVISION, "chosen_by": "poc_modal.py choose-model: most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits one H100"},
                "current_setup": {"args": CONTROL[2], "env": MODEL.env, "publisher_args": list(MODEL.publisher_args), "publisher_env": MODEL.publisher_env,
                                  "added_args": list(MODEL.added_args), "added_because": MODEL.added_because, "source": MODEL.source}, "planner": current.get("planner"),
-               "runtime_image": VLLM_IMAGE, "gpu": "1 x NVIDIA H100 SXM5 80GB on Modal (gpu=\"H100!\")",
-               "rate": {"usd_per_hour": H100_HOURLY_USD, "basis": "Modal list price, H100 SXM5, GPU only, read 2026-11-20"},
+               "runtime_image": VLLM_IMAGE, "engine": models.ENGINE.key,
+               "gpu": "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in") else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
+               "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
                "load": {"profile": PROFILE, "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, inputs scaled 1/2, capped",
-                        "traffic": current.get("traffic")},
+                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": broker.ledger()}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
-    lines = [f"Traffic: Mooncake (Kimi) production trace replay · model {MODEL_ID} · vLLM 0.22.1 · one H100 per setup on Modal", ""]
+    text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
+    lines = [f"Traffic: Mooncake (Kimi) production trace replay, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup on Modal", ""]
+    if settings.get("stand_in"):
+        lines += ["STAND-IN SERVERS: no model and no GPU ran. Every speed below is scripted; this run proves the path only.", ""]
     if copy:
         lines += [("The copy of the current setup measured better: this run proves nothing." if copy_won else
                    "The copy of the current setup did not win, as it must not."), ""]
@@ -691,10 +903,14 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
         lines.append(row["label"])
         lines.append(f"   {('%.0f' % tps) if tps else '-'} output tok/s · p95 latency {('%.0f ms' % row['latency_p95_ms']) if row['latency_p95_ms'] else '-'} · "
                      f"p95 TTFT {('%.0f ms' % row['ttft_p95_ms']) if row['ttft_p95_ms'] else '-'} · ${('%.3f' % cost) if cost else '-'} per 1M output tokens · answers {match}")
+        for name, arm in (row["speculation"] or {}).items():
+            if name.startswith("candidate/") and arm["acceptance"] is not None:
+                lines.append(f"   speculation ({name.split('/', 1)[1].replace('_', ' ')} window): {arm['acceptance']:.0%} of {arm['draft_tokens']:.0f} drafted tokens accepted")
         if row is not rows[0]:
             lines.append(f"   {poc.words(row['state'] or '', row['failure_code'])}")
+    lines += [f"Warning: {warning}" for warning in warnings]
     lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal).",
-              f"Costs use Modal's H100 list price (${H100_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
+              f"Costs use Modal's {poc.ACCELERATOR} list price (${GPU_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
               f"Full record: {path}"]
     width = max(len(line) for line in lines) + 2
     print("\n╭" + "─" * width + "╮")
@@ -856,12 +1072,30 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("choose-model", "up", "download", "dry", "run", "stop-gpus", "down"))
     parser.add_argument("--budget-usd", type=float, default=9.0, help="hard cap on the run's remote GPU spend (estimate from Modal list prices)")
-    parser.add_argument("--requests", type=int, default=200, help="Mooncake rows to replay through the gateway")
+    parser.add_argument("--requests", type=int, help="Mooncake rows to replay through the gateway (default 200, or 40 with --smoke)")
     parser.add_argument("--reuse-capture", action="store_true", help="skip the baseline and replay; campaign on the traffic shape the last run recorded")
+    parser.add_argument("--engine", choices=sorted(models.ENGINES), default=models.ENGINE.key, help="the vLLM image every setup of the run serves with, pinned by digest")
+    parser.add_argument("--gpu", choices=sorted(models.ACCELERATORS), default=models.ACCELERATOR.key, help="the GPU type every setup of the run serves on")
+    parser.add_argument("--traffic", choices=TRAFFIC, default="mooncake-words", help="real-text composes every request from --corpus, so speculative setups are measured")
+    parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
+    parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
+    parser.add_argument("--planner-setups", type=int, choices=(1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text)")
+    parser.add_argument("--smoke", action="store_true", help="shrink the traffic so the whole path costs a few dollars; the judge keeps its rounds")
+    parser.add_argument("--stand-in", action="store_true", help="CPU stand-in servers instead of GPUs: the same path for cents, and no measurement")
     args = parser.parse_args()
     os.chdir(ROOT)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    {"choose-model": choose_model, "up": up, "download": download, "dry": dry, "stop-gpus": stop_gpus, "down": down}.get(args.command, lambda: run_campaign(args.budget_usd, args.requests, args.reuse_capture))()
+    configure(args.engine, args.gpu, args.current_setup)
+    corpus = args.corpus.resolve() if args.corpus else None
+    if args.command == "up":
+        up(corpus)
+        return 0
+    held = (state().get("corpus") or {}).get("digest")
+    RUN.update(traffic=args.traffic, smoke=args.smoke, stand_in=args.stand_in, planner_setups=args.planner_setups or (2 if args.traffic == "real-text" else 1),
+               corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
+    if args.command == "run" and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:
+        fail("the control plane holds another prompt corpus than the rehearsal one; name it with --corpus")
+    {"choose-model": choose_model, "download": download, "dry": dry, "stop-gpus": stop_gpus, "down": down}.get(args.command, lambda: run_campaign(args.budget_usd, args.requests, args.reuse_capture))()
     return 0
 
 

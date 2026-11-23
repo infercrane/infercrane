@@ -37,9 +37,10 @@ import modal_gpu  # noqa: E402
 
 import modal  # noqa: E402
 
-# Modal list prices (modal.com/pricing, read 2026-11-20): H100 SXM5 $0.001097/s,
-# $0.0000131 per physical core per second, $0.00000222 per GiB per second.
-H100_PER_SECOND = 0.001097
+# Modal list prices (modal.com/pricing): the GPU's rate is the run's accelerator's
+# (models.ACCELERATORS), plus $0.0000131 per physical core per second and $0.00000222 per
+# GiB per second (read 2026-11-20).
+GPU_PER_SECOND = modal_gpu.ACCELERATOR.usd_per_second
 CORE_PER_SECOND = 0.0000131
 GIB_PER_SECOND = 0.00000222
 POD_SILENCE_SECONDS = 120
@@ -54,7 +55,7 @@ MAX_DRIVER_RETRIES = 3
 def rate_per_second(dry: bool) -> float:
     if dry:
         return 0.5 * CORE_PER_SECOND + 1 * GIB_PER_SECOND
-    return H100_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
+    return GPU_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
 
 
 class Broker:
@@ -119,7 +120,7 @@ class Broker:
         lease["deadline"] = deadline
         with self.modal_lock:
             modal_gpu.leases.put(f"ctl:{lease_id}", self.control(now, deadline))
-            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
+            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_gpu
             self.calls[lease_id] = function.spawn(lease_id, list(args), lease["api_key"], model)
         with self.lock:
             lease["state"], lease["call_id"] = "starting", self.calls[lease_id].object_id
@@ -149,7 +150,7 @@ class Broker:
         with self.modal_lock:
             modal_gpu.leases.put(f"st:{lease['lease_id']}", {"state": "requested"})
             modal_gpu.leases.put(f"ctl:{lease['lease_id']}", self.control(now, float(lease.get("deadline", now + modal_gpu.GPU_TIMEOUT_SECONDS))))
-            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
+            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_gpu
             self.calls[lease["lease_id"]] = function.spawn(lease["lease_id"], list(lease["args"]), lease["api_key"], lease["model"])
         with self.lock:
             lease["state"], lease["call_id"] = "starting", self.calls[lease["lease_id"]].object_id
@@ -287,7 +288,8 @@ class Broker:
                 row["estimated_usd"] = round(row["seconds"] * self.rate, 4)
                 rows.append(row)
             return {"schema_version": "infercrane.poc-modal-ledger/v1", "dry": self.dry, "budget_usd": self.budget,
-                    "rate_usd_per_second": self.rate, "rate_basis": "Modal list price: H100 SXM5 + container CPU and memory requests",
+                    "rate_usd_per_second": self.rate, "rate_basis": f"Modal list price: {modal_gpu.ACCELERATOR.description} + container CPU and memory requests",
+                    "engine": modal_gpu.ENGINE.key, "runtime_image": modal_gpu.VLLM_IMAGE, "gpu_type": modal_gpu.ACCELERATOR.key,
                     "billing_basis": f"from the container's reported start minus {START_MARGIN_SECONDS} s (from the request until the start is known) to its end",
                     "estimated_usd": round(self.spend(now), 4), "exhausted": self.exhausted, "started_at": self.started,
                     "updated_at": now, "leases": rows}
@@ -382,7 +384,7 @@ def main() -> int:
     broker = Broker(token, args.budget_usd, args.max_gpus, args.max_starts, Path(args.ledger), args.dry, args.driver)
     host, port = args.listen.rsplit(":", 1)
     server = ThreadingHTTPServer((host, int(port)), handler(broker))
-    kind = "dry run (CPU stand-in)" if args.dry else "H100"
+    kind = "CPU stand-in servers" if args.dry else f"{modal_gpu.ACCELERATOR.key} with {modal_gpu.ENGINE.key}"
     log(f"{kind}: cap ${args.budget_usd:.2f}, at most {args.max_gpus} at once and {args.max_starts} in total, ${broker.rate * 3600:.4f}/h each; listening on {args.listen}")
     def interrupt(*_: object) -> None:
         raise KeyboardInterrupt
