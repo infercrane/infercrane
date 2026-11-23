@@ -123,7 +123,9 @@ uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/modal_gpu.py::
 ```
 
 `--setup speculation` starts the publisher's command with its documented speculation option
-and also reports the drafted and accepted tokens of one longer answer.
+and also reports the drafted and accepted tokens of one longer answer. The 2026-11-23 checks of
+both setups on vLLM 0.34.0 and one H100, including the one that did not start, are in
+`docs/testing/evidence/qwen38-27b-fp8-h100-vllm034-serving-check-2026-11-23.json`.
 
 ### Smoke run and stand-in run
 

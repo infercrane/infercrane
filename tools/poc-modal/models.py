@@ -176,7 +176,7 @@ QWEN38_27B_FP8 = Model("Qwen/Qwen3.8-27B-FP8", "c3a462cc3d38cf351f3b26cbd763469e
                                env={"VLLM_USE_RUST_FRONTEND": "1"}, added_args=("--max-num-seqs", "512"),
                                added_because=("vLLM 0.34.0 does not start the publisher's command on one H100: max_num_seqs 1024 exceeds the 904 recurrent-state (Mamba) cache blocks, "
                                               "and vLLM asks for at most 904. A campaign holds at most 32 requests at once, so 512 changes nothing it measures."),
-                               max_num_seqs=904),
+                               max_num_seqs=904, checked="2026-11-23"),
                        },
                        # The recipe page's own line: "Add --speculative-config
                        # '{"method":"mtp","num_speculative_tokens":3}' for MTP." It also documents
