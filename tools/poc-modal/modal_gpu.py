@@ -42,10 +42,15 @@ VLLM_IMAGE, VLLM_VERSION = ENGINE.image, ENGINE.version
 PORT = 8000
 GPU = ACCELERATOR.modal_gpu
 GPU_CPU, GPU_MEMORY_MIB = 4.0, 24576
-# Hard cap per container. A campaign keeps every setup serving until it ranks them, and a
-# gain is measured again on fresh servers, so a 27B campaign outlasts the 90 minutes an
-# 8B one needed.
-GPU_TIMEOUT_SECONDS = 150 * 60
+# Hard cap per container, and the last of five stops. A container ends itself when its
+# lease is released, when the lease is not renewed for LEASE_SECONDS, when the lease store
+# is unreachable that long, and at the broker's budget deadline for the lease; and every
+# container ends when the broker's app stops. So a forgotten server is stopped by the
+# lease and the dollar cap, not by this. A campaign keeps every setup that gained serving
+# until it ranks them, and a gain is measured again on fresh servers, so one server can
+# live for most of a campaign; Modal ending it mid-campaign replaces a machine under a
+# measurement. This is therefore well above the longest campaign planned (about 3.25 h).
+GPU_TIMEOUT_SECONDS = 6 * 60 * 60
 # The current setup, two setups to try and the copy of the current setup.
 MAX_GPUS = 4
 LEASE_SECONDS = 180

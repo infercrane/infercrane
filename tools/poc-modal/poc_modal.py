@@ -65,7 +65,10 @@ MODAL_CLIENT = "modal==1.6.4"
 # The same table the GPU side enforces; the broker refuses any other model or argument.
 MODEL = models.QWEN38_27B_FP8
 MODEL_ID, MODEL_REVISION = MODEL.id, MODEL.revision
-APPROVAL_HOURS = 3
+# How long the product's approval for a campaign holds. An approval that ends mid-campaign
+# ends the campaign. The first campaign on H100s took 92 minutes with three setups at 80
+# seconds a turn; four setups with two gains on longer prompts can pass three hours.
+APPROVAL_HOURS = 6
 BROKER_PORT = 18095
 BROKER_HOST = "host.docker.internal"  # the Mac host as seen from kind pods (Docker Desktop)
 PROFILE, OBJECTIVE = "throughput", "throughput"  # 32 concurrent streams per measured run
