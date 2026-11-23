@@ -931,6 +931,59 @@ the profile concurrency. Replay records which requests share system messages but
 messages are, so one shared block is assumed. Tool pauses, parent-session links, and reuse of earlier
 assistant output are not modeled.
 
+**Real text from a prompt corpus.** By default AIPerf fills each prompt block with a random slice of
+its built-in text. That is enough to compare batching, caching, and precision, and it cannot measure a
+setup whose speed depends on what the model writes: speculative decoding is fast only when its
+drafted tokens are accepted, and a model answering a random slice of text does not write what it
+writes for a real task. An operator can therefore give the control plane a prompt corpus, a file of
+real passages with questions about them and standalone prompts:
+
+```bash
+export INFERCRANE_REPLAY_PROMPT_CORPUS_FILE=/etc/infercrane/prompt-corpus.json
+```
+
+```json
+{
+  "schema_version": "infercrane.prompt-corpus/v1",
+  "name": "support articles, public",
+  "license": "CC-BY-4.0",
+  "source": "https://example.com/datasets/support-articles at revision 4f2a9c1",
+  "tokenizer": "Qwen/Qwen3.8-27B-FP8",
+  "passages": [
+    {"tokens": 412, "text": "A whole passage...",
+     "questions": [{"tokens": 19, "text": "A question this passage answers"}]}
+  ],
+  "prompts": [{"tokens": 37, "text": "A standalone prompt that needs no context"}]
+}
+```
+
+With a corpus, every campaign bound to a Replay digest composes its requests from it. Each request
+is a system message of whole passages and one user message with a question about one of those
+passages. A request too short for a passage sends the standalone prompt nearest in length. The
+structure of the trace stays: request order, output lengths, which requests share a leading block,
+and which session turns resend their history. A block two requests share holds the same passages in
+both, so the shared prefix is the same text. Passages are never cut, so a request's length follows its
+recorded length to the nearest passage, under the token counts the file states for its `tokenizer`;
+the control plane has no tokenizer of its own. Passages repeat across requests, so each request opens
+with a short line derived from the run and its first block. Requests that share that block share the
+line; no other two requests start alike, in one run or across runs, so a server's prefix cache reuses
+only what the trace recorded.
+
+The workload's `replay` identity then carries `prompt_text`: the source `operator_corpus`, the
+corpus's SHA-256 digest, name, license, source, and tokenizer, the mean prompt length it planned, and
+how many requests sent a standalone prompt. `input_token_lengths` becomes
+`input_token_lengths_to_the_nearest_passage`. The corpus is part of the workload identity, so results
+on corpus text are never ranked against results on synthetic text or on another corpus. Its text
+appears in no stored evidence.
+
+The corpus is the operator's file and holds only what the operator put in it. It is not built from
+traffic: the gateway still records token counts and timing and never prompts or answers, and prompt
+content from customer traffic remains `not_preserved`. Use text you may send to every candidate
+server, state its license, and count `tokens` with the served model's tokenizer. A file that is set
+but unreadable, malformed, or without a license, tokenizer, passages, questions, or standalone
+prompts stops the control plane at start instead of falling back to synthetic text. The file may hold
+up to 64 MiB and 20,000 passages. Without the setting nothing changes.
+
 **Runs.** Each server receives warmup requests (twice the concurrency, between 16 and 256) before
 measurement, and each candidate runs four independent AIPerf invocations. Every invocation gets its own
 seed and, for a replay, its own prompt-block namespace, drawn from a random base for each

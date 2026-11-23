@@ -16,6 +16,7 @@ import (
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/releaseguard"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -86,6 +87,9 @@ type CompositeDriver struct {
 	// checks it before any provider mutation, so a campaign that cannot
 	// replay its trace fails before it spends.
 	Replays ReplayTraceSource
+	// PromptCorpus is the same corpus the benchmark executor renders with, so
+	// a trace it cannot render fails here too.
+	PromptCorpus *replay.PromptCorpus
 	// Migration decides the candidates of a migration campaign against the
 	// closed API they would replace.
 	Migration MigrationChecker
@@ -99,7 +103,7 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 	if err != nil {
 		return ProvisionResult{}, err
 	}
-	if _, err = resolveBoundReplay(ctx, d.Replays, candidate.TenantID, campaignRequest(campaign)); err != nil {
+	if _, err = resolveBoundReplay(ctx, d.Replays, candidate.TenantID, campaignRequest(campaign), d.PromptCorpus); err != nil {
 		var failure operations.Failure
 		if errors.As(err, &failure) {
 			return ProvisionResult{}, failure
