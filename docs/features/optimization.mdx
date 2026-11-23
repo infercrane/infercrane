@@ -998,6 +998,13 @@ created, including when the control is measured again inside another candidate's
 measurement is retried. The base is kept as `measured.invocation_base`. The candidate's stored metrics
 are the mean of its four runs, with Student-t 95% intervals in `confidence_95`.
 
+Output tokens are every token the model generated, as the server counted them, reasoning tokens
+included: a model that reasons before it answers writes those tokens at the same speed and its
+server bills them as output. The workload records this as `output_token_basis`. Results stored
+before reasoning tokens were counted carry no such field, belong to another workload identity, and
+are never ranked against results that have it; for a model served with a reasoning parser those
+older results understated output throughput, down to zero when an answer was all reasoning.
+
 **Control.** The control is the proposal's starting point: the untuned control arm when the proposal
 includes one, otherwise the highest-ranked compatible candidate. It is measured first. While its deployment is
 serving, every other candidate is measured interleaved with it, as control, candidate, control,

@@ -19,6 +19,12 @@ import (
 
 const AIPerfVersion = "0.12.0"
 
+// OutputTokenBasis names what output token counts and throughput count: every
+// token the model generated, reasoning tokens included. Campaign evidence
+// carries it in its workload identity, so results measured before reasoning
+// tokens were counted are never ranked against results that count them.
+const OutputTokenBasis = "generated_tokens_including_reasoning"
+
 type Config struct {
 	Binary, Endpoint, APIKey, APIKeyEnv, Model, Tokenizer string
 	Requests, Concurrency, InputTokens, OutputTokens      int
@@ -60,10 +66,11 @@ type Result struct {
 	TTFTP50MS, TTFTP95MS        *float64
 	TPOTP50MS, TPOTP95MS        *float64
 	LatencyP50MS, LatencyP95MS  *float64
-	// OutputTokensPerRequest is the mean server-reported output token count
-	// of a successful request. It is nil unless every successful request
-	// reported a count, so a partial count never stands in for the mean.
-	// Failed requests are not in it; Failed counts them.
+	// OutputTokensPerRequest is the mean server-reported count of tokens a
+	// successful request generated, reasoning tokens included. It is nil
+	// unless every successful request reported a count, so a partial count
+	// never stands in for the mean. Failed requests are not in it; Failed
+	// counts them. OutputTokenThroughput counts the same tokens.
 	OutputTokensPerRequest *float64
 	Confidence             map[string]ConfidenceInterval
 	// ServerMetrics is nil unless Config.ServerMetrics was set.
@@ -427,7 +434,17 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 					return Result{}, err
 				}
 			}
-			if err := appendMetric("output_token_count", &outputTokens); err != nil {
+			// Every token the model wrote counts, reasoning included: a model
+			// that reasons before it answers writes those tokens at the same
+			// speed and its server bills them as output. AIPerf reports them
+			// together as output_sequence_length; its output_token_count
+			// leaves reasoning out and is absent when an answer was all
+			// reasoning, which made such a run's throughput zero.
+			generated := "output_sequence_length"
+			if _, ok := row.Metrics[generated]; !ok {
+				generated = "output_token_count"
+			}
+			if err := appendMetric(generated, &outputTokens); err != nil {
 				return Result{}, err
 			}
 			if cfg.TTFTSLOMS > 0 && !observedSLOMetrics["time_to_first_token"] {

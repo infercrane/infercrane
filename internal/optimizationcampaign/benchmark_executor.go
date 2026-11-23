@@ -154,7 +154,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 		"profile_runs": measurementRunsPerArm, "warmup_requests": plan.warmup, "concurrency": plan.concurrency,
 		"random_seed": measurementSeed, "seed_policy": "unique_per_invocation", "measurement_method": MeasurementMethod,
 		"profile": profile.Name, "profile_version": performanceprofile.Version, "ttft_slo_ms": plan.ttftSLO, "tpot_slo_ms": plan.tpotSLO,
-		"server_token_count": true, "revision_selector": revision.ID, "direct_revision_validation": true,
+		"server_token_count": true, "output_token_basis": benchmark.OutputTokenBasis, "revision_selector": revision.ID, "direct_revision_validation": true,
 		"confidence_95": confidence, "measured": measured.evidence,
 	}
 	if plan.trace != nil {
