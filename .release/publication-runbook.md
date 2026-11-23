@@ -47,7 +47,7 @@ Complete every item before creating the stable tag:
 10. Increase free disk space to at least the qualification harness minimum, then run the complete
     clean-clone RC qualification. Archive the report by commit and tag.
 
-Terraform Registry publication is not part of v2.0.0. Candidate and stable GitHub releases attach
+Terraform Registry publication is not part of v2.0.1. Candidate and stable GitHub releases attach
 multi-platform provider ZIPs and checksums for explicit local installation. Registry publication
 requires the provider to first move to a separate,
 public, lowercase `infercrane/terraform-provider-infercrane` repository with Registry-formatted
@@ -99,16 +99,16 @@ an entry is a security review decision; remove entries when a fixed build ships.
 
 1. Run `make release-tag-check` and `make release-tag-stable` in the qualified candidate checkout.
    The stable-tag guard requires the stable tag to point to the exact candidate commit.
-2. Push only `v2.0.0`. Do not rebuild from a different commit and do not move either tag.
+2. Push only `v2.0.1`. Do not rebuild from a different commit and do not move either tag.
 3. Wait for the stable tag workflow. Confirm all jobs pass and the GitHub release remains a draft.
 4. Download and independently verify the stable archives, licenses/notices, checksums, SBOMs,
    formula, wheel, npm tarball, SDK checksum manifest, image digest, vulnerability scan, and
-   attestations. Confirm all embedded/package versions are exactly `2.0.0` and all release assets
+   attestations. Confirm all embedded/package versions are exactly `2.0.1` and all release assets
    originate from the stable tag commit.
 
 ## Publish
 
-1. In GitHub Actions, run `publish release` with input `v2.0.0`.
+1. In GitHub Actions, run `publish release` with input `v2.0.1`.
 2. Approve the protected `stable-publication` environment only after reviewing the preflight output.
    The workflow refuses a private repository, disabled organization 2FA, an unprotected environment,
    an RC/mismatched tag, a non-draft release, incomplete artifacts, checksum failures, or artifact
@@ -127,11 +127,11 @@ From a clean machine with no repository checkout:
 ```bash
 brew install infercrane/tap/infercrane
 infercrane version
-python -m pip install 'infercrane==2.0.0'
-npm install '@infercrane/sdk@2.0.0'
-docker pull ghcr.io/infercrane/infercrane:v2.0.0
+python -m pip install 'infercrane==2.0.1'
+npm install '@infercrane/sdk@2.0.1'
+docker pull ghcr.io/infercrane/infercrane:v2.0.1
 gh attestation verify --repo infercrane/infercrane \
-  oci://ghcr.io/infercrane/infercrane:v2.0.0
+  oci://ghcr.io/infercrane/infercrane:v2.0.1
 ```
 
 Then update the README and quickstart install sections in one release-follow-up change: replace the

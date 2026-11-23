@@ -12,7 +12,7 @@ body:
     attributes:
       label: InferCrane version
       description: Run `infercrane version` or provide the exact commit.
-      placeholder: v2.0.0 or commit SHA
+      placeholder: v2.0.1 or commit SHA
     validations:
       required: true
   - type: textarea
