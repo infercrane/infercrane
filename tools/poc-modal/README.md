@@ -91,6 +91,16 @@ Apache-2.0 on their dataset cards), so both runs use the same text. That corpus 
 repository; the one that is, `testdata/stand-in-corpus.json`, is a dozen short passages written
 for it and is too small to measure with: a long request repeats passages.
 
+### Traffic shape
+
+`--shape` scales the trace's lengths so their medians land on one of the product's public
+workload shapes (medians of the Chutes data): `interactive` (3,919 tokens in, 295 out),
+`long-prefill` (7,897 in, 295 out) or `decode-heavy` (3,919 in, 1,377 out). The trace's
+spread, arrival times and shared prefixes stay. The default, `mooncake`, is the trace as the
+2026-11-20 run replayed it: inputs halved, outputs capped at 512. In the first 200 rows half
+the answers are 35 tokens or shorter, so that shape says little about a setup that only
+speeds up writing.
+
 ### Engine version and GPU type
 
 `--engine vllm-0.34.0` serves every setup with vLLM 0.34.0, the newest release on 2026-11-23,

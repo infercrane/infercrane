@@ -69,6 +69,24 @@ MAX_INPUT_TOKENS = 30000  # the traffic shape of the 2026-11-20 run; Qwen3.8 ser
 # spread over long enough for the control plane's engine scrape (every 30 s) to see a
 # loaded server twice.
 SMOKE = {"requests": 40, "max_input_tokens": 6000, "max_output_tokens": 128, "spread_seconds": 150.0}
+# Traffic shapes: the median input and output tokens of a request. "mooncake" is the trace
+# as the 2026-11-20 run replayed it (inputs halved, outputs capped at 512). The other three
+# are the product's public workload shapes, medians of the Chutes data (CC BY 4.0;
+# internal/performanceprofile public-interactive, public-long-prefill, public-decode-heavy).
+# The trace's rows are scaled so their medians land there; its spread, arrival times and
+# shared prefixes stay.
+SHAPES = {"mooncake": None, "interactive": (3919, 295), "long-prefill": (7897, 295), "decode-heavy": (3919, 1377)}
+
+
+def shape_scales(shape: str, rows: list[dict]) -> dict:
+    """How to scale the trace's rows for a traffic shape: divisors for input and output
+    lengths, and the cap on output tokens."""
+    if SHAPES[shape] is None:
+        return {"input_scale": 2.0, "output_scale": 1.0, "max_output_tokens": 512}
+    median = lambda values: sorted(values)[len(values) // 2]  # noqa: E731
+    target_input, target_output = SHAPES[shape]
+    return {"input_scale": median([row["input_length"] for row in rows]) / target_input, "output_scale": median([row["output_length"] for row in rows]) / target_output,
+            "max_output_tokens": min(4096, 4 * target_output)}
 
 # Same names as the laptop PoC but separate resources, so both can exist at once.
 poc.STATE_DIR = ROOT / ".infercrane" / "poc-modal"
@@ -97,7 +115,7 @@ DOCUMENTED_LABEL = "The publisher's documented speculation option"
 CANDIDATE_SLOTS = 2
 CANDIDATES: list = []
 # What this run measures with. Set by configure() and by `run`'s flags.
-RUN = {"traffic": "mooncake-words", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1}
+RUN = {"traffic": "mooncake-words", "shape": "mooncake", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1}
 
 
 def configure(engine: str | None = None, gpu: str | None = None, current_setup: str = "publisher") -> None:
@@ -355,12 +373,13 @@ def deploy_baseline() -> None:
     poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}", "--wait", capture=False)
 
 
-def replay_mooncake(requests_total: int, input_scale: int, max_output: int, workers: int, progress: dict, max_input: int = MAX_INPUT_TOKENS,
-                    spread_seconds: float | None = None, text: prompt_corpus.Corpus | None = None) -> dict:
+def replay_mooncake(requests_total: int, input_scale: float, max_output: int, workers: int, progress: dict, max_input: int = MAX_INPUT_TOKENS,
+                    spread_seconds: float | None = None, text: prompt_corpus.Corpus | None = None, output_scale: float = 1.0) -> dict:
     """Replays the first rows of the Mooncake trace through the gateway at their recorded
-    arrival times (stretched over spread_seconds when given). Inputs are scaled
-    1/input_scale and capped to fit the model. progress counts the requests that
-    finished, for the planner waiting on a loaded server.
+    arrival times (stretched over spread_seconds when given). Input lengths are divided
+    by input_scale and capped to fit the model, output lengths by output_scale and capped
+    at max_output. progress counts the requests that finished, for the planner waiting
+    on a loaded server.
 
     The trace has no content. Without a corpus the prompts are words generated from its
     prefix block hashes and answers are forced to their recorded length. With one, every
@@ -370,10 +389,10 @@ def replay_mooncake(requests_total: int, input_scale: int, max_output: int, work
     rows = poc.mooncake_rows()[:requests_total]
     start = rows[0]["timestamp"]
     stretch = spread_seconds / max(1.0, (rows[-1]["timestamp"] - start) / 1000) if spread_seconds else 1.0
-    block = max(1, poc.MOONCAKE_BLOCK_TOKENS // input_scale)
+    block = max(1, round(poc.MOONCAKE_BLOCK_TOKENS / input_scale))
     what = f"real text from the prompt corpus “{text.identity['name']}” ({text.identity['license']})" if text else "prompts are generated words"
     log("traffic", f"replaying {len(rows)} requests from the Mooncake (Kimi) production trace at their recorded arrival times"
-        f"{f' stretched over {spread_seconds:.0f} s' if spread_seconds else ''}: shared prefixes kept, inputs scaled 1/{input_scale}, capped at {max_input} tokens; {what}")
+        f"{f' stretched over {spread_seconds:.0f} s' if spread_seconds else ''}: shared prefixes kept, inputs divided by {input_scale:.2f} and capped at {max_input} tokens, outputs divided by {output_scale:.2f} and capped at {max_output}; {what}")
     key, began, failures = state()["api_key"], time.monotonic(), []
     sent = {"input_words": 0, "max_tokens": 0, "planned_input_tokens": 0}
 
@@ -382,8 +401,8 @@ def replay_mooncake(requests_total: int, input_scale: int, max_output: int, work
         delay = (row["timestamp"] - start) / 1000 * stretch - (time.monotonic() - began)
         if delay > 0:
             time.sleep(delay)
-        target = min(max_input, max(8, row["input_length"] // input_scale))
-        output = max(1, min(max_output, row["output_length"]))
+        target = min(max_input, max(8, round(row["input_length"] / input_scale)))
+        output = max(1, min(max_output, round(row["output_length"] / output_scale)))
         hash_ids = row.get("hash_ids") or [row["timestamp"]]
         body = {"model": poc.BASELINE, "stream": False, "temperature": 0, "max_tokens": output}
         if text is None:
@@ -423,7 +442,7 @@ def replay_mooncake(requests_total: int, input_scale: int, max_output: int, work
     if len(failures) > len(rows) // 2:
         fail("most replayed requests failed; check the gateway and the model server before measuring")
     return {"requests": len(rows), "failed": len(failures), "seconds": round(seconds, 1), "output_tokens": tokens, "input_words_sent": sent["input_words"],
-            "input_scale": input_scale, "max_input_tokens": max_input, "max_output_tokens": max_output, "spread_seconds": spread_seconds,
+            "input_scale": round(input_scale, 4), "output_scale": round(output_scale, 4), "max_input_tokens": max_input, "max_output_tokens": max_output, "spread_seconds": spread_seconds,
             "text": {"source": "operator_corpus", "corpus": text.identity, "planned_input_tokens": sent["planned_input_tokens"], "answers": "end where the model ends them, capped at the recorded length"}
             if text else {"source": "generated_words", "answers": "forced to the recorded length (ignore_eos)"}}
 
@@ -714,7 +733,7 @@ def wait_for_lease_end(broker: BrokerProcess, pod_prefix: str, timeout_s: int = 
 
 def run_settings(text: prompt_corpus.Corpus | None) -> dict:
     """What this run measures with, kept in its record and compared on --reuse-capture."""
-    return {"traffic": RUN["traffic"], "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
+    return {"traffic": RUN["traffic"], "shape": RUN["shape"], "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
             "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR}
 
 
@@ -758,8 +777,11 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
         else:
             deploy_baseline()
             planner = Planner(requests_total)
-            traffic = replay_mooncake(requests_total, input_scale=2, max_output=smoke.get("max_output_tokens", 512), workers=96, progress=planner.progress,
-                                      max_input=smoke.get("max_input_tokens", MAX_INPUT_TOKENS), spread_seconds=smoke.get("spread_seconds"), text=text)
+            scales = shape_scales(RUN["shape"], poc.mooncake_rows()[:requests_total])
+            traffic = replay_mooncake(requests_total, input_scale=scales["input_scale"], max_output=smoke.get("max_output_tokens", scales["max_output_tokens"]), workers=96,
+                                      progress=planner.progress, max_input=smoke.get("max_input_tokens", MAX_INPUT_TOKENS), spread_seconds=smoke.get("spread_seconds"), text=text,
+                                      output_scale=scales["output_scale"])
+            traffic["shape"] = RUN["shape"]
             save({"traffic": traffic})
             plan(planner.finish())
             diagnosis = state().get("planner")
@@ -888,13 +910,14 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "runtime_image": VLLM_IMAGE, "engine": models.ENGINE.key,
                "gpu": "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in") else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
-               "load": {"profile": PROFILE, "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, inputs scaled 1/2, capped",
+               "load": {"profile": PROFILE, "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
+                        "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
                         "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": broker.ledger()}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
     text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
-    lines = [f"Traffic: Mooncake (Kimi) production trace replay, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup on Modal", ""]
+    lines = [f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup on Modal", ""]
     if settings.get("stand_in"):
         lines += ["STAND-IN SERVERS: no model and no GPU ran. Every speed below is scripted; this run proves the path only.", ""]
     if copy:
@@ -1080,6 +1103,7 @@ def main() -> int:
     parser.add_argument("--engine", choices=sorted(models.ENGINES), default=models.ENGINE.key, help="the vLLM image every setup of the run serves with, pinned by digest")
     parser.add_argument("--gpu", choices=sorted(models.ACCELERATORS), default=models.ACCELERATOR.key, help="the GPU type every setup of the run serves on")
     parser.add_argument("--traffic", choices=TRAFFIC, default="mooncake-words", help="real-text composes every request from --corpus, so speculative setups are measured")
+    parser.add_argument("--shape", choices=sorted(SHAPES), default="mooncake", help="scale the trace's lengths to a traffic shape: the trace as it is, or the medians of the product's public interactive, long-prefill and decode-heavy shapes")
     parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
     parser.add_argument("--planner-setups", type=int, choices=(1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text)")
@@ -1094,7 +1118,7 @@ def main() -> int:
         up(corpus)
         return 0
     held = (state().get("corpus") or {}).get("digest")
-    RUN.update(traffic=args.traffic, smoke=args.smoke, stand_in=args.stand_in, planner_setups=args.planner_setups or (2 if args.traffic == "real-text" else 1),
+    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in, planner_setups=args.planner_setups or (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
     if args.command == "run" and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:
         fail("the control plane holds another prompt corpus than the rehearsal one; name it with --corpus")

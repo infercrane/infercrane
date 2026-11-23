@@ -44,7 +44,12 @@ A campaign that keeps the current setup is a result and is reported like any oth
 - **The copy:** the current setup again on its own server with only `--seed 1` added. If the
   judge calls it better, the campaign has no decision.
 - **Traffic:** the first 200 rows of the Mooncake FAST'25 trace (Apache-2.0) at their recorded
-  arrival times, inputs scaled 1/2 and capped at 30,000 tokens, outputs capped at 512 tokens.
+  arrival times, with their shared prefixes. One campaign per traffic shape (`--shape`); a
+  shape scales the rows so their median input and output lengths land on the medians of the
+  product's public workload shapes (Chutes data, CC BY 4.0), keeping the trace's spread:
+  `interactive` 3,919 in and 295 out, `long-prefill` 7,897 in and 295 out, `decode-heavy`
+  3,919 in and 1,377 out. Inputs are capped at 30,000 tokens and outputs at four times the
+  median (4,096 at most).
   Text from the prompt corpus `fast-track-v1-corpus.json`, sha256
   `4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7`: 1,500 CNN/DailyMail
   articles and 1,000 OpenAssistant oasst1 prompts, the same text the fast-track map measures

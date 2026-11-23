@@ -251,6 +251,16 @@ class EvidenceTest(unittest.TestCase):
         self.assertGreaterEqual(poc_modal.SMOKE["spread_seconds"], 90)  # and two engine scrapes 30 s apart
         self.assertLess(poc_modal.SMOKE["max_input_tokens"], poc_modal.MAX_INPUT_TOKENS)
 
+    def test_a_traffic_shape_moves_the_medians_and_keeps_the_spread(self) -> None:
+        rows = [{"input_length": value, "output_length": value // 20} for value in (2000, 4000, 6000, 8000, 40000)]
+        self.assertEqual(poc_modal.shape_scales("mooncake", rows), {"input_scale": 2.0, "output_scale": 1.0, "max_output_tokens": 512})
+        scales = poc_modal.shape_scales("decode-heavy", rows)
+        self.assertAlmostEqual(6000 / scales["input_scale"], 3919)
+        self.assertAlmostEqual(300 / scales["output_scale"], 1377)
+        self.assertAlmostEqual((40000 / scales["input_scale"]) / (2000 / scales["input_scale"]), 20)  # the spread stays
+        self.assertEqual(scales["max_output_tokens"], 4096)
+        self.assertEqual(poc_modal.shape_scales("interactive", rows)["max_output_tokens"], 1180)
+
     def test_the_fresh_servers_decide_the_copy(self) -> None:
         first_only = {"comparison": {"output_token_throughput": {"decision": "improved"}}}
         self.assertEqual(poc_modal.objective_decision(first_only), "improved")
