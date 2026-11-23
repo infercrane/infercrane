@@ -67,6 +67,23 @@ func TestApplyRecipeSearchUsesNetworkOnlyWhenAllowed(t *testing.T) {
 	if requests != 1 || len(request.ModelFeatures) != 1 {
 		t.Fatalf("metadata was not applied: requests=%d request=%+v", requests, request)
 	}
+
+	// A plan from an endpoint's diagnosis reads the pinned config the same
+	// way, so a rule that needs a declared model feature can apply; without
+	// the opt-in it stays offline, and without a diagnosis nothing is read.
+	diagnosed := optimizer.Request{ModelIdentity: "acme/model", ModelRevision: revision}
+	if err := applyRecipeSearch(context.Background(), &diagnosed, recipeSearchCatalog(t), "", "", false, true); err != nil || requests != 1 || len(diagnosed.ModelFeatures) != 0 {
+		t.Fatalf("a diagnosed plan used the network without opt-in: requests=%d request=%+v err=%v", requests, diagnosed, err)
+	}
+	if err := applyRecipeSearch(context.Background(), &diagnosed, recipeSearchCatalog(t), "", "", true, false); err != nil || requests != 1 || len(diagnosed.ModelFeatures) != 0 {
+		t.Fatalf("a plan without a diagnosis or search read model metadata: requests=%d request=%+v err=%v", requests, diagnosed, err)
+	}
+	if err := applyRecipeSearch(context.Background(), &diagnosed, recipeSearchCatalog(t), "", "", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(diagnosed.ModelFeatures) != 1 || diagnosed.ModelFeatures[0] != optimizer.FeatureNativeMTP || diagnosed.ModelConfigDigest == "" || diagnosed.Search != "" {
+		t.Fatalf("a diagnosed plan did not read the pinned config: requests=%d request=%+v", requests, diagnosed)
+	}
 }
 
 func TestFetchPublicModelConfigRejectsUnsafeIdentity(t *testing.T) {

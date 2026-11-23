@@ -704,10 +704,13 @@
       "must_not_propose": [
         "speculative-mtp"
       ],
+      "expected_skipped": [
+        "speculative-mtp"
+      ],
       "categories": [
         "decode_high_concurrency"
       ],
-      "why": "Decode took 85% of p95 latency with 64 requests running per server on 9,000-token contexts. Each step reads one copy of the weights but 64 long KV caches, so halving KV bytes with an FP8 KV cache comes first. For a throughput goal, larger batches share each weight read across more requests; FP8 weights are the weaker lever and follow. The low-concurrency rule did not fire, so speculation is not chosen."
+      "why": "Decode took 85% of p95 latency with 64 requests running per server on 9,000-token contexts. Each step reads one copy of the weights but 64 long KV caches, so halving KV bytes with an FP8 KV cache comes first. For a throughput goal, larger batches share each weight read across more requests; FP8 weights are the weaker lever and follow. Rule set v5 also chooses speculation with the model's own prediction head in a decode-bound window, behind the FP8 KV cache at this load; this model's config declares no prediction head, so it is recorded as skipped and no setup applies it."
     },
     {
       "id": "h100-high-concurrency-short-context-no-fp8-kv",
@@ -749,10 +752,109 @@
         "batch-budget",
         "speculative-mtp"
       ],
+      "expected_skipped": [
+        "speculative-mtp"
+      ],
       "categories": [
         "decode_high_concurrency"
       ],
-      "why": "Decode-bound at 64 running requests, but on 1,500-token contexts and with no KV pressure. Below about 7k tokens of context BF16 KV has measured slightly better token latency, so an FP8 KV cache is not chosen. The goal is interactive, so larger batches, which raise latency, are not chosen either. FP8 weights remain."
+      "why": "Decode-bound at 64 running requests, but on 1,500-token contexts and with no KV pressure. Below about 7k tokens of context BF16 KV has measured slightly better token latency, so an FP8 KV cache is not chosen. The goal is interactive, so larger batches, which raise latency, are not chosen either. FP8 weights remain. Rule set v5 chooses speculation with the model's own prediction head here too, and records it as skipped because this model's config declares no prediction head."
+    },
+    {
+      "id": "h100-decode-12-running-native-head-speculation-first",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "throughput",
+        "max_candidates": 4,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 12,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 3000
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ],
+        "model_features": [
+          "native_mtp"
+        ],
+        "model_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "speculative-mtp",
+        "batch-budget",
+        "fp8-weights"
+      ],
+      "must_not_propose": [
+        "fp8-kv-cache"
+      ],
+      "categories": [
+        "decode_high_concurrency"
+      ],
+      "why": "Decode took 85% of p95 latency with 12 requests running per server, above the low-concurrency limit of 4, on 3,000-token contexts, and the model's config declares a native prediction head. Each drafted token that is accepted saves a step, so speculation with three drafted tokens leads at up to 16 running requests; before rule set v5 only the low-concurrency rule chose it, so this window proposed no speculation at all. Larger batches and FP8 weights follow as in the other decode-bound plans, and the contexts are too short for an FP8 KV cache."
+    },
+    {
+      "id": "h100-decode-64-running-long-context-native-head-speculation-after-fp8-kv",
+      "request": {
+        "model_identity": "acme/novel-open-model",
+        "provider": "runpod-pods",
+        "gpu": "H100",
+        "objective": "throughput",
+        "max_candidates": 5,
+        "diagnosis": {
+          "source": "endpoint_readiness",
+          "endpoint": "chat-production",
+          "algorithm_version": "monitoring-stage-triage-v2",
+          "window_start": "2026-11-17T00:00:00Z",
+          "window_end": "2026-11-17T01:00:00Z",
+          "state": "profile-ready",
+          "primary_bottleneck": "decode-and-generation",
+          "confidence": "stage-and-engine-level",
+          "findings": [],
+          "signals": {
+            "runtime_requests_running_per_replica": 64,
+            "p95_generation": 5200,
+            "p95_latency": 6100,
+            "mean_input_tokens": 9000
+          }
+        },
+        "model_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runtimes": [
+          "vllm"
+        ],
+        "model_features": [
+          "native_mtp"
+        ],
+        "model_config_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+      },
+      "expected_state": "applied",
+      "expected_order": [
+        "control",
+        "fp8-kv-cache",
+        "speculative-mtp",
+        "batch-budget",
+        "fp8-weights"
+      ],
+      "categories": [
+        "decode_high_concurrency"
+      ],
+      "why": "The long-context decode task with a model whose config declares a native prediction head. At 64 running requests on 9,000-token contexts the FP8 KV cache still comes first. Speculation is measured next: a drafted token is verified in the same step as every other request's tokens, so its gain shrinks as load rises, and above 16 running requests it is planned behind the FP8 KV cache and ahead of larger batches. The plan orders the measurement; it does not predict a gain at this load."
     },
     {
       "id": "b200-low-concurrency-checkpoint-not-rankable",

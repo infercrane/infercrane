@@ -223,9 +223,9 @@ what to collect, such as serving-engine metrics, before planning again.
 | Long prompts (`prefill.long_input`, or a first-token bottleneck with prompts of 1,024 tokens or more) | Bigger prompt chunks | `--max-num-batched-tokens 16384` (`--chunked-prefill-size 16384`) |
 | Shared system prompts reused poorly (`prefix.low_reuse`) | Prefix caching if the starting setup turned it off; prefix-aware scheduling | removes `--no-enable-prefix-caching` (`--disable-radix-cache`); SGLang only: `--schedule-policy lpm` |
 | Tensor cores busy (`gpu.compute_bound`) | FP8 weights | `--quantization fp8` |
-| Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights | `--speculative-config {"method":"mtp","num_speculative_tokens":1}` (NEXTN with one step); `--quantization fp8` |
+| Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights | `--speculative-config {"method":"mtp","num_speculative_tokens":3}` (NEXTN with two steps and three draft tokens); `--quantization fp8` |
 | Memory busy, tensor cores idle (`gpu.memory_bandwidth_bound`) | FP8 weights; FP8 KV cache on contexts of 7,000 tokens or more | as above |
-| Writing answers with many requests running per server | FP8 KV cache on contexts of 7,000 tokens or more; larger batches for a throughput or cost goal; FP8 weights | as above |
+| Writing answers with more than four requests running per server | Speculation with the model's own prediction head: first with up to 16 requests running per server, after the FP8 KV cache above that or when concurrency is not reported; FP8 KV cache on contexts of 7,000 tokens or more; larger batches for a throughput or cost goal; FP8 weights | as above |
 | Attention kernels ≥ 40% of profiled GPU time, on contexts of 7,000 tokens or more, in a capture without a trace analysis | FP8 KV cache | as above |
 | Matrix-multiply kernels ≥ 50% of profiled GPU time | FP8 weights | as above |
 | Trace: GPU idle waiting on host launches ≥ 10% of the time (`gpu.idle_host_bound`) | CUDA graphs sized to your batches, then preparing the next step while the GPU runs this one | removes `--enforce-eager` (`--disable-cuda-graph`); vLLM only: `--max-cudagraph-capture-size` a quarter above the running requests per server, when they exceed what vLLM captures by default; removes `--no-async-scheduling` (`--disable-overlap-schedule`) |
@@ -238,8 +238,13 @@ what to collect, such as serving-engine metrics, before planning again.
 
 Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
 When several rules choose the same change, it keeps its strongest priority plus a small bonus for
-each rule that agrees. Speculation is chosen only at low concurrency, where it pays, and never with
-n-gram drafts, which need repeated text and turn vLLM's async scheduling off. An FP8 KV cache is
+each rule that agrees. Speculation is chosen whenever writing answers is the bottleneck and uses three
+drafted tokens: one drafted token writes at most two tokens a step. Its gain shrinks as more requests
+run at once, because a drafted token is verified in the same step as every other request's tokens,
+so above 16 running requests per server it is measured after an FP8 KV cache rather than first, and
+the run decides at your load. It is never planned with n-gram drafts, which need repeated text and
+turn vLLM's async scheduling off. A run's traffic must carry real text for its result to mean
+anything: see [real text from a prompt corpus](#how-a-campaign-measures-candidates). An FP8 KV cache is
 chosen only when the KV cache limits the server or contexts are long: below about 7,000 tokens BF16
 KV has measured slightly better token latency.
 
@@ -286,7 +291,8 @@ A chosen change is skipped, and the proposal records why, when:
   MI300X, MI325X, MI350X, or MI355X; see [AMD Instinct GPUs](/integrations/amd-instinct#how-the-optimizer-plans-on-amd)),
   for FP8 weights and the FP8 KV cache;
 - the model's pinned config was not read or declares no native prediction head, for speculation
-  (pass `--model-config config.json` to declare it);
+  (pass `--allow-model-metadata-network` to read the pinned `config.json` from Hugging Face, or
+  `--model-config config.json` to stay offline);
 - the change needs a draft model or a 4-bit publisher checkpoint. No draft model is paired with a
   model yet. A [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves different
   model files, and a run cannot yet rank setups that serve different files, so it is left out;

@@ -17,7 +17,7 @@ import (
 // DiagnosisRulesVersion identifies the rule set that maps a diagnosis to the
 // techniques worth measuring. A change to a rule, priority, gate, or flag
 // value changes this version.
-const DiagnosisRulesVersion = "diagnosis-technique-rules-v4"
+const DiagnosisRulesVersion = "diagnosis-technique-rules-v5"
 
 // Techniques the diagnosis rule set can choose. A technique is one change to
 // the starting setup; its candidate is measured against that setup.
@@ -79,6 +79,12 @@ const (
 	// and lower weight precision are not proposed.
 	speculationMinimumBillions = 1.0
 	precisionMinimumBillions   = 1.5
+	// speculationLoadedRunning is the running requests per server up to which
+	// speculation in a decode-bound window is planned ahead of the other
+	// decode changes. A drafted token is verified in the same step as the
+	// tokens of every other running request, so the gain shrinks as more
+	// requests run at once; above this it is planned behind an FP8 KV cache.
+	speculationLoadedRunning = 16
 	// rooflineCoverageFloor is the share of matrix-multiply time a trace must
 	// have placed on the roofline before its memory- or compute-bound verdict
 	// chooses anything.
@@ -158,8 +164,11 @@ var techniques = map[string]technique{
 		args: map[string][]runtimeArg{"vllm": {{"--max-num-seqs", ""}}, "sglang": {{"--max-running-requests", ""}}}},
 	TechniqueSpeculativeMTP: {id: TechniqueSpeculativeMTP, label: "Speculative decoding with the model's own prediction head", speculative: true, modelFeature: FeatureNativeMTP,
 		args: map[string][]runtimeArg{
-			"vllm":   {{"--speculative-config", `{"method":"mtp","num_speculative_tokens":1}`}},
-			"sglang": {{"--speculative-algorithm", "NEXTN"}, {"--speculative-num-steps", "1"}, {"--speculative-eagle-topk", "1"}, {"--speculative-num-draft-tokens", "2"}},
+			// Three drafted tokens. One drafted token writes at most two tokens a
+			// step, and the publishers of models with a prediction head document
+			// three or more.
+			"vllm":   {{"--speculative-config", `{"method":"mtp","num_speculative_tokens":3}`}},
+			"sglang": {{"--speculative-algorithm", "NEXTN"}, {"--speculative-num-steps", "2"}, {"--speculative-eagle-topk", "1"}, {"--speculative-num-draft-tokens", "3"}},
 		}},
 	TechniqueSpeculativeDraft: {id: TechniqueSpeculativeDraft, label: "Speculative decoding with a draft model", speculative: true,
 		outOfScope: "InferCrane has no reviewed draft model paired with this model yet, so no setup was added."},
@@ -549,7 +558,11 @@ func prefillOutcome(d Diagnosis) *ruleOutcome {
 
 // decodeOutcome covers a decode-bound window the low-concurrency rule does not
 // explain: many requests running per server, or concurrency not reported.
-// Speculation is chosen only at low concurrency, where it pays.
+// Speculation with the model's own prediction head is chosen here too: first
+// up to speculationLoadedRunning requests per server, and behind an FP8 KV
+// cache above that or when concurrency is not reported, because its gain
+// shrinks as load rises. A model without a prediction head skips it with
+// that reason.
 func decodeOutcome(d Diagnosis, longContext, throughputGoal bool) *ruleOutcome {
 	if d.PrimaryBottleneck != optimizationreadiness.BottleneckDecode {
 		return nil
@@ -568,6 +581,12 @@ func decodeOutcome(d Diagnosis, longContext, throughputGoal bool) *ruleOutcome {
 		cause += fmt.Sprintf(" with %s running per server", requestWords(running))
 	}
 	var picks []techniquePick
+	speculate := cause + ", so predicting several tokens per step cuts the steps each answer takes. The gain shrinks as more requests run at once, so it is measured at your load."
+	if known && running <= speculationLoadedRunning {
+		picks = append(picks, techniquePick{TechniqueSpeculativeMTP, 80, speculate})
+	} else {
+		picks = append(picks, techniquePick{TechniqueSpeculativeMTP, 65, speculate})
+	}
 	if known && longContext {
 		picks = append(picks, techniquePick{TechniqueFP8KVCache, 70, cause + " on long contexts, so reading each request's KV cache dominates; an FP8 KV cache halves those bytes."})
 	}

@@ -198,13 +198,17 @@ A task fails when any of these differ from the expectation:
 | `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
 | `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
 
-Current result: 31 of 31 plans as reviewed, rule set `diagnosis-technique-rules-v4`. Version 2
+Current result: 33 of 33 plans as reviewed, rule set `diagnosis-technique-rules-v5`. Version 2
 widened the FP8 gate to the reviewed AMD Instinct GPUs; two MI300X tasks check that the same
 diagnosis chooses the same plan there and that RunPod's MI300X name resolves to its 192 GB memory.
 Version 3 reads the trace analysis of a GPU profile capture; six `gpu_trace` tasks check it.
 Version 4 adds AMD's AITER kernels for vLLM on reviewed AMD Instinct GPUs
 (`accelerator.kernels_off_by_default`); five `accelerator_kernels` tasks check where it is chosen
 and where it must not be, and the two earlier MI300X tasks now also forbid it.
+Version 5 also chooses speculation with the model's own prediction head when writing answers is
+the bottleneck above four running requests, with three drafted tokens instead of one; two
+`decode_high_concurrency` tasks check its place in the order at 12 and at 64 running requests, and
+the two earlier decode tasks record it as skipped for a model that declares no prediction head.
 
 | Task | Diagnosis | Expected setups after the control |
 | --- | --- | --- |
@@ -220,6 +224,8 @@ and where it must not be, and the two earlier MI300X tasks now also forbid it.
 | `rtx4090-short-prompts-collect-engine-metrics` | First-token bound, 278-token prompts, no engine metrics | Nothing; asks for engine metrics |
 | `h100-high-concurrency-long-context-decode` | 64 running, 9,000-token contexts, throughput goal | FP8 KV cache, larger batches, FP8 weights |
 | `h100-high-concurrency-short-context-no-fp8-kv` | 64 running, 1,500-token contexts, interactive goal | FP8 weights only |
+| `h100-decode-12-running-native-head-speculation-first` | 12 running, 3,000-token contexts, prediction head declared, throughput goal | Speculation with three drafted tokens, larger batches, FP8 weights |
+| `h100-decode-64-running-long-context-native-head-speculation-after-fp8-kv` | 64 running, 9,000-token contexts, prediction head declared, throughput goal | FP8 KV cache, speculation, larger batches, FP8 weights |
 | `b200-low-concurrency-checkpoint-not-rankable` | Two running on B200 | FP8 weights; the NVFP4 checkpoint is left out |
 | `h200-pinned-image-kv-fp8-first` | Evictions on the pinned SGLang image | The image's FP8 KV cache setup |
 | `h200-pinned-image-low-concurrency-speculation-first` | 1.5 running, prediction head declared | The image's speculation setups |
@@ -254,7 +260,7 @@ the rule table before you run the planner, and record the reason in `why`. Categ
 `decode_high_concurrency`, `gpu_profile`, `gpu_trace`, `not_ready`, `reliability`,
 `recorded_gpu_run`, `publisher_checkpoint`, `pinned_image_setups`, and `accelerator_kernels`, and
 the test fails if any of them loses its last task. A change to a rule, priority, or flag value must
-bump the rule set version (now `diagnosis-technique-rules-v4`) and explain each changed expectation
+bump the rule set version (now `diagnosis-technique-rules-v5`) and explain each changed expectation
 in its task's `why`.
 
 ## Limits

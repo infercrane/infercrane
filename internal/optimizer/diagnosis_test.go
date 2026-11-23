@@ -741,3 +741,75 @@ func TestProposalValidationRejectsUnreviewedEngineEnvironment(t *testing.T) {
 		}
 	}
 }
+
+// A decode-bound window above the low-concurrency limit also chooses
+// speculation with the model's own prediction head: first while few enough
+// requests run that most drafted tokens save a step, behind an FP8 KV cache
+// above that, and never as a setup when the model declares no head.
+func TestDecodeBoundWindowChoosesSpeculationWithTheModelsPredictionHead(t *testing.T) {
+	decode := func(running, meanInput float64) *Diagnosis {
+		return testDiagnosis(optimizationreadiness.BottleneckDecode, map[string]float64{
+			optimizationreadiness.SignalRunningPerReplica: running, "p95_generation": 5200, "p95_latency": 6100, "mean_input_tokens": meanInput,
+		})
+	}
+	withHead := func(diagnosis *Diagnosis) Proposal {
+		t.Helper()
+		request := genericRequest("H100", diagnosis)
+		request.Objective, request.MaxCandidates = "throughput", 5
+		request.ModelFeatures, request.ModelConfigDigest = []string{FeatureNativeMTP}, recipeTestDigest
+		proposal, err := catalogSource(t).Propose(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = ValidateProposal(proposal); err != nil {
+			t.Fatal(err)
+		}
+		return proposal
+	}
+
+	loaded := withHead(decode(12, 3000))
+	if order := strings.Join(reasonOrder(loaded), ","); order != "control,"+TechniqueSpeculativeMTP+","+TechniqueBatchBudget+","+TechniqueFP8Weights {
+		t.Fatalf("12 running requests: order=%s", order)
+	}
+	speculation := loaded.Candidates[1]
+	if args := strings.Join(speculation.Deployment.Runtime.Args, " "); args != `--speculative-config {"method":"mtp","num_speculative_tokens":3}` {
+		t.Fatalf("the speculation setup must carry three drafted tokens and nothing else: %s", args)
+	}
+	planned := plannedTechnique(t, loaded, TechniqueSpeculativeMTP)
+	if planned.Priority != 80 || !contains(planned.Rules, RuleBottleneckDecode) || !strings.Contains(planned.Reason, "12 requests running per server") || !strings.Contains(planned.Reason, "shrinks as more requests run at once") || !contains(speculation.RequiredEvidence, "output parity and speculative acceptance evidence") {
+		t.Fatalf("planned=%+v evidence=%v", planned, speculation.RequiredEvidence)
+	}
+
+	// At the limit speculation still leads; one request more and a long
+	// context puts the FP8 KV cache first.
+	if atLimit := withHead(decode(speculationLoadedRunning, 9000)); reasonOrder(atLimit)[1] != TechniqueSpeculativeMTP {
+		t.Fatalf("%d running requests: order=%v", speculationLoadedRunning, reasonOrder(atLimit))
+	}
+	busy := withHead(decode(32, 9000))
+	if order := strings.Join(reasonOrder(busy), ","); order != "control,"+TechniqueFP8KVCache+","+TechniqueSpeculativeMTP+","+TechniqueBatchBudget+","+TechniqueFP8Weights {
+		t.Fatalf("32 running requests on long contexts: order=%s", order)
+	}
+	if planned = plannedTechnique(t, busy, TechniqueSpeculativeMTP); planned.Priority != 65 || planned.ExpectedBenefit != "medium" {
+		t.Fatalf("planned=%+v", planned)
+	}
+
+	// Concurrency not reported: speculation is still measured, not first.
+	unknown := withHead(testDiagnosis(optimizationreadiness.BottleneckDecode, map[string]float64{"p95_generation": 5200, "p95_latency": 6100}))
+	if planned = plannedTechnique(t, unknown, TechniqueSpeculativeMTP); planned.Priority != 65 || len(planned.CandidateIDs) != 1 {
+		t.Fatalf("unknown concurrency planned=%+v", planned)
+	}
+
+	headless, err := catalogSource(t).Propose(context.Background(), genericRequest("H100", decode(12, 3000)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planned = plannedTechnique(t, headless, TechniqueSpeculativeMTP); !strings.Contains(planned.Skipped, "prediction head") || len(planned.CandidateIDs) != 0 || contains(reasonOrder(headless), TechniqueSpeculativeMTP) {
+		t.Fatalf("a model without a declared head got a speculation setup: %+v order=%v", planned, reasonOrder(headless))
+	}
+
+	// The low-concurrency rule keeps the choice to itself below its limit.
+	low := withHead(lowConcurrencyDiagnosis())
+	if planned = plannedTechnique(t, low, TechniqueSpeculativeMTP); planned.Priority != 90 || contains(planned.Rules, RuleBottleneckDecode) {
+		t.Fatalf("low concurrency planned=%+v", planned)
+	}
+}
