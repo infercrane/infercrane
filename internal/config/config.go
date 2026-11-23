@@ -21,6 +21,7 @@ import (
 
 type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment    string
+	ReplayPromptCorpusFile                                                                                                string
 	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                        string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                       string
 	CredentialEncryptionKey, CredentialEncryptionKeyReference                                                             string
@@ -549,6 +550,7 @@ func load(requireAPIKey bool) (Config, error) {
 		APIKey:                              env("INFERCRANE_API_KEY", ""),
 		RouterBinary:                        env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
 		AIPerfBinary:                        env("INFERCRANE_AIPERF_BINARY", "aiperf"),
+		ReplayPromptCorpusFile:              env("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", ""),
 		PassportSigningKeyFile:              env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
 		InstanceID:                          env("INFERCRANE_INSTANCE_ID", hostname),
 		Environment:                         env("INFERCRANE_ENV", "development"),
@@ -731,6 +733,9 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
+	}
+	if config.ReplayPromptCorpusFile != "" && !filepath.IsAbs(config.ReplayPromptCorpusFile) {
+		return Config{}, errors.New("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE must be an absolute path")
 	}
 	if config.GPUPriceSyncInterval != 0 && (config.GPUPriceSyncInterval < time.Minute || config.GPUPriceSyncInterval > 24*time.Hour) {
 		return Config{}, fmt.Errorf("INFERCRANE_GPU_PRICE_SYNC_SECONDS must be 0 or between 60 and 86400")

@@ -83,7 +83,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	workloadFingerprint := fs.String("workload-fingerprint", "", "content-free observed workload fingerprint")
 	sourceName := fs.String("source", "auto", "where setups come from: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
-	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates and --search recipes")
+	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates, --search recipes, and --diagnosis-endpoint")
 	search := fs.String("search", "", "find the best setup for your model by adding setups to measure; supported value: recipes")
 	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
 	writeDir := fs.String("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
@@ -915,12 +915,16 @@ var (
 
 const maxFetchedModelConfigBytes = 4 << 20
 
-// applyRecipeSearch records what the pinned model config declares. The network
-// is used only when the operator explicitly allowed metadata lookup.
+// applyRecipeSearch records what the pinned model config declares, for
+// --search recipes and for a plan from an endpoint's diagnosis: a diagnosis
+// rule can choose a change, such as speculation with the model's own
+// prediction head, that applies only when the config declares the feature.
+// The network is used only when the operator explicitly allowed metadata
+// lookup.
 func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork, diagnosed bool) error {
 	request.Search = strings.ToLower(strings.TrimSpace(search))
 	if request.Search == "" {
-		if strings.TrimSpace(configPath) == "" {
+		if strings.TrimSpace(configPath) == "" && !(diagnosed && allowNetwork) {
 			return nil
 		}
 		if !diagnosed {

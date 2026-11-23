@@ -105,6 +105,12 @@ func (f *fakeCloudStore) SetReplicaProviderIdentity(_ context.Context, id, reque
 	return nil
 }
 func (f *fakeCloudStore) ObserveReplica(_ context.Context, id, lifecycle, endpoint, health, details string, observed time.Time) error {
+	// The store keeps replica details in a JSONB column, and PostgreSQL
+	// refuses anything else. The fake refuses it too, so a caller that passes
+	// a plain sentence fails here instead of only against a real database.
+	if details != "" && !json.Valid([]byte(details)) {
+		return fmt.Errorf("ERROR: invalid input syntax for type json (SQLSTATE 22P02): %q", details)
+	}
 	if replica, ok := f.replicas[id]; ok {
 		f.replica = replica
 	}

@@ -368,3 +368,29 @@ func TestRunReportsMissingAIPerf(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+// A model that reasons before it answers writes reasoning tokens at the same
+// speed as answer tokens, and its server bills both as output. AIPerf reports
+// them together as output_sequence_length; output_token_count leaves the
+// reasoning out and is missing when an answer was all reasoning. Reading only
+// the latter gave such a run no output throughput at all (Qwen3.8-27B with a
+// reasoning parser and answers capped at 128 tokens, 2026-11-23).
+func TestParseRecordsCountsReasoningTokensAsGeneratedOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"request_latency":{"value":2000},"output_sequence_length":{"value":128},"reasoning_token_count":{"value":128}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":5000000000},"metrics":{"request_latency":{"value":4000},"output_sequence_length":{"value":100},"output_token_count":{"value":40},"reasoning_token_count":{"value":60}}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := parseRecords(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Succeeded != 2 || result.OutputTokensPerRequest == nil || *result.OutputTokensPerRequest != 114 {
+		t.Fatalf("generated tokens per request = %v, want 114 (reasoning included): %#v", result.OutputTokensPerRequest, result)
+	}
+	if result.OutputTokenThroughput == nil || *result.OutputTokenThroughput != 57 {
+		t.Fatalf("output throughput = %v, want 228 tokens over 4 s", result.OutputTokenThroughput)
+	}
+}

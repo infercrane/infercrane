@@ -3,6 +3,8 @@ package optimizationcampaign
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,8 +35,12 @@ const (
 // scripted measured values in order. Trace files are read during the call
 // because the executor deletes its staging directory afterwards.
 type scriptedAIPerf struct {
-	configs    []benchmark.Config
-	traces     [][][]int
+	configs []benchmark.Config
+	traces  [][][]int
+	// lines keeps each staged trace as written, and leftover names a staged
+	// trace of an earlier invocation that still existed during a later one.
+	lines      [][]string
+	leftover   []string
 	throughput map[string][]float64
 	ttft       map[string][]float64
 	// failed and answerTokens script each measured run's failed requests
@@ -47,15 +53,25 @@ type scriptedAIPerf struct {
 }
 
 func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchmark.Result, error) {
+	for _, earlier := range r.configs {
+		if earlier.InputFile != "" && earlier.InputFile != config.InputFile {
+			if _, err := os.Stat(earlier.InputFile); err == nil {
+				r.leftover = append(r.leftover, earlier.InputFile)
+			}
+		}
+	}
 	r.configs = append(r.configs, config)
 	var hashes [][]int
+	var lines []string
 	if config.InputFile != "" {
 		file, err := os.Open(config.InputFile)
 		if err != nil {
 			return benchmark.Result{}, err
 		}
 		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), 4<<20)
 		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
 			var row struct {
 				HashIDs []int `json:"hash_ids"`
 			}
@@ -68,6 +84,7 @@ func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchm
 		file.Close()
 	}
 	r.traces = append(r.traces, hashes)
+	r.lines = append(r.lines, lines)
 	if r.calls == nil {
 		r.calls = map[string]int{}
 	}
@@ -417,6 +434,117 @@ func TestBenchmarkExecutorReplaysBoundTraceWithFreshPrefixNamespacePerInvocation
 	other, _ := second.run(t)
 	if lab.WorkloadDigest(row.WorkloadJSON) != lab.WorkloadDigest(other.WorkloadJSON) {
 		t.Fatal("two measurements of one bound trace produced different workload digests")
+	}
+}
+
+func promptCorpusFixture(t *testing.T) *replay.PromptCorpus {
+	t.Helper()
+	passages := make([]map[string]any, 0, 24)
+	for index := range 24 {
+		passages = append(passages, map[string]any{"tokens": 300, "text": fmt.Sprintf("passage-%d", index), "questions": []map[string]any{{"tokens": 12, "text": fmt.Sprintf("question-%d", index)}}})
+	}
+	body, err := json.Marshal(map[string]any{"schema_version": replay.PromptCorpusSchemaVersion, "name": "fixture corpus", "license": "CC-BY-4.0", "source": "https://example.test/corpus@rev",
+		"tokenizer": "example/tokenizer", "passages": passages, "prompts": []map[string]any{{"tokens": 20, "text": "prompt-20"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := replay.ParsePromptCorpus(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return corpus
+}
+
+func TestBenchmarkExecutorComposesBoundTraceFromThePromptCorpus(t *testing.T) {
+	trace, corpus := boundReplayTrace(t), promptCorpusFixture(t)
+	request := optimizer.Request{WorkloadSource: optimizer.WorkloadSourceCustomerObserved, WorkloadFingerprint: "sha256:" + trace.ShapeDigest}
+	fixture := newExecutorFixture(t, request)
+	fixture.executor.Replays, fixture.executor.PromptCorpus = replaySourceFixture{trace: trace}, corpus
+	row, workload := fixture.run(t)
+	if len(fixture.runner.configs) != 11 || len(fixture.runner.leftover) != 0 {
+		t.Fatalf("invocations=%d, staged traces left during later invocations=%v", len(fixture.runner.configs), fixture.runner.leftover)
+	}
+	type message struct{ Role, Content string }
+	chains := map[string]int{}
+	for index, lines := range fixture.runner.lines {
+		if config := fixture.runner.configs[index]; config.DatasetType != replay.AIPerfDatasetType || len(lines) != 3 {
+			t.Fatalf("invocation %d did not replay the bound trace: %+v lines=%d", index, config, len(lines))
+		}
+		var systems []string
+		for _, line := range lines {
+			var staged struct {
+				Messages     []message `json:"messages"`
+				OutputLength int       `json:"output_length"`
+				InputLength  *int      `json:"input_length"`
+			}
+			if err := json.Unmarshal([]byte(line), &staged); err != nil || len(staged.Messages) != 2 || staged.InputLength != nil || staged.OutputLength == 0 || !strings.HasPrefix(staged.Messages[1].Content, "question-") {
+				t.Fatalf("invocation %d staged a row without corpus text: %s err=%v", index, line, err)
+			}
+			systems = append(systems, staged.Messages[0].Content)
+		}
+		chain, first, found := strings.Cut(systems[0], "\n\n")
+		// The session's second turn resends the first prompt's whole blocks, and
+		// the third request shares the system prefix block.
+		if !found || !strings.HasPrefix(systems[1], chain+"\n\n"+strings.Join(strings.Split(first, "\n\n")[:2], "\n\n")) || !strings.HasPrefix(systems[2], chain+"\n\npassage-0") {
+			t.Fatalf("invocation %d lost the trace's prefix and session structure: %q", index, systems)
+		}
+		if previous, reused := chains[chain]; reused {
+			t.Fatalf("invocations %d and %d open their requests alike, so one could reuse the other's cache", previous, index)
+		}
+		chains[chain] = index
+	}
+	replayIdentity, _ := workload["replay"].(map[string]any)
+	promptText, _ := replayIdentity["prompt_text"].(map[string]any)
+	recorded, _ := promptText["corpus"].(map[string]any)
+	if workload["workload_source"] != "customer_replay" || promptText["source"] != replay.PromptTextOperatorCorpus || recorded["digest"] != corpus.Identity().Digest || recorded["license"] != "CC-BY-4.0" {
+		t.Fatalf("replay identity=%v", replayIdentity)
+	}
+	if strings.Contains(row.WorkloadJSON, "passage-0") || strings.Contains(row.WorkloadJSON, "question-0") || strings.Contains(row.ReproductionCommand, "passage-0") {
+		t.Fatalf("corpus text reached the stored evidence: %s", row.WorkloadJSON)
+	}
+	// The same trace on synthetic text is another workload for Lab, and two
+	// runs on one corpus are the same.
+	synthetic := newExecutorFixture(t, request)
+	synthetic.executor.Replays = replaySourceFixture{trace: trace}
+	other, _ := synthetic.run(t)
+	again := newExecutorFixture(t, request)
+	again.executor.Replays, again.executor.PromptCorpus = replaySourceFixture{trace: trace}, corpus
+	same, _ := again.run(t)
+	if lab.WorkloadDigest(row.WorkloadJSON) == lab.WorkloadDigest(other.WorkloadJSON) || lab.WorkloadDigest(row.WorkloadJSON) != lab.WorkloadDigest(same.WorkloadJSON) {
+		t.Fatal("the prompt corpus is not part of the workload identity")
+	}
+}
+
+func TestMeasurementIdentityNamesThePromptCorpusOnlyWhenOneIsUsed(t *testing.T) {
+	rendered, err := replay.NewAIPerfTrace(boundReplayTrace(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := rendered.WithPromptCorpus(promptCorpusFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, control := armTarget{candidateID: "candidate", revisionID: "revision"}, ControlEvidence{Role: ControlRoleBracketed, CandidateID: "control", RevisionID: "control-revision"}
+	plan := loadPlan{tokenizer: "example/model", requests: 3, concurrency: 4, warmup: 16, streaming: true}
+	without := measurementIdentity(target, control, plan, "profile@1", "fingerprint")
+	plan.trace = &rendered
+	if measurementIdentity(target, control, plan, "profile@1", "fingerprint") != without {
+		t.Fatal("a synthetic replay changed the checkpoint identity, so stored checkpoints would not resume")
+	}
+	// The identity of a measurement without a corpus is the one stored
+	// before corpora existed.
+	legacy, _ := json.Marshal(map[string]any{
+		"method": MeasurementMethod, "candidate": "candidate", "candidate_revision": "revision", "control_role": ControlRoleBracketed, "control": "control", "control_revision": "control-revision",
+		"profile": "profile@1", "tokenizer": "example/model", "requests": 3, "concurrency": 4, "input_tokens": 0, "output_tokens": 0, "warmup": 16, "streaming": true,
+		"ttft_slo": 0.0, "tpot_slo": 0.0, "replay": "fingerprint",
+	})
+	sum := sha256.Sum256(legacy)
+	if without != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatalf("identity without a corpus changed: %s", without)
+	}
+	plan.trace = &composed
+	if measurementIdentity(target, control, plan, "profile@1", "fingerprint") == without {
+		t.Fatal("a measurement on corpus text could resume a checkpoint measured on synthetic text")
 	}
 }
 

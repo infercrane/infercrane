@@ -138,13 +138,19 @@ func DecodeMeasurementCheckpoint(raw string) (MeasurementCheckpoint, bool) {
 // checkpoint from another candidate revision, control, or load is never
 // resumed.
 func measurementIdentity(candidate armTarget, control ControlEvidence, plan loadPlan, profile, fingerprint string) string {
-	encoded, _ := json.Marshal(map[string]any{
+	identity := map[string]any{
 		"method": MeasurementMethod, "candidate": candidate.candidateID, "candidate_revision": candidate.revisionID,
 		"control_role": control.Role, "control": control.CandidateID, "control_revision": control.RevisionID,
 		"profile": profile, "tokenizer": plan.tokenizer, "requests": plan.requests, "concurrency": plan.concurrency,
 		"input_tokens": plan.inputTokens, "output_tokens": plan.outputTokens, "warmup": plan.warmup, "streaming": plan.streaming,
 		"ttft_slo": plan.ttftSLO, "tpot_slo": plan.tpotSLO, "replay": fingerprint,
-	})
+	}
+	// Runs on another prompt text are another load. The key is absent
+	// without a corpus, so checkpoints stored before corpora existed resume.
+	if plan.trace != nil && plan.trace.Properties.PromptText != nil {
+		identity["prompt_corpus"] = plan.trace.Properties.PromptText.Corpus.Digest
+	}
+	encoded, _ := json.Marshal(identity)
 	sum := sha256.Sum256(encoded)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

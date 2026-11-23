@@ -193,6 +193,14 @@ calls the models make during the check are compared in memory and never executed
 validates their arguments against the JSON Schema the eval set declares, with no loader, so a
 schema's remote `$ref` is refused at upload and validation fetches nothing.
 
+A prompt corpus for replay measurement (`INFERCRANE_REPLAY_PROMPT_CORPUS_FILE`, see
+[how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates)) is a
+file the operator places on the control plane's disk. InferCrane reads it at start and never writes
+to it, never adds traffic to it, and never stores it in PostgreSQL. Its text goes only to the
+servers a Replay-bound campaign measures, through a staged AIPerf input that is readable by the
+control plane's user alone and deleted when its run ends. Stored evidence names the corpus by its
+SHA-256 digest, name, license, source, and tokenizer, never by its text.
+
 Durable async inference is the explicit exception. It remains disabled until an operator injects
 `INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.
 Request and result bodies are stored only as AES-256-GCM ciphertext bound to tenant and job identity.

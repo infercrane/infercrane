@@ -859,3 +859,19 @@ func TestOptimizationPricesAcceptOwnedClusterRateCardOnlyForKubernetes(t *testin
 		t.Fatalf("plain manual price did not stay advisory: prices=%+v err=%v", prices, err)
 	}
 }
+
+func TestReplayPromptCorpusFileIsOptionalAndAbsolute(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	config, err := Load()
+	if err != nil || config.ReplayPromptCorpusFile != "" {
+		t.Fatalf("a prompt corpus was configured by default: %q err=%v", config.ReplayPromptCorpusFile, err)
+	}
+	t.Setenv("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", "corpus.json")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_REPLAY_PROMPT_CORPUS_FILE") {
+		t.Fatalf("a relative prompt corpus path was accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", "/etc/infercrane/corpus.json")
+	if config, err = Load(); err != nil || config.ReplayPromptCorpusFile != "/etc/infercrane/corpus.json" {
+		t.Fatalf("config=%q err=%v", config.ReplayPromptCorpusFile, err)
+	}
+}

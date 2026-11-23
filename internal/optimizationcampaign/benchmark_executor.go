@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -38,17 +39,21 @@ type AIPerfRunner interface {
 
 // BenchmarkExecutor measures the exact candidate revision directly. It never
 // relies on a mutable production route and never copies production prompts.
-// A customer-observed campaign replays its bound content-free Replay trace;
+// A customer-observed campaign replays its bound content-free Replay trace,
+// with text from the operator's prompt corpus when one is configured;
 // other campaigns send the versioned synthetic profile. Each server is warmed,
 // every arm runs measurementRunsPerArm times, and when the campaign control is
 // live it is measured in the same window, interleaved with the candidate.
 // Persisted evidence includes exact artifact, runtime, provider, workload,
 // control comparison, and sourced-cost identities.
 type BenchmarkExecutor struct {
-	Store        BenchmarkStore
-	Runner       AIPerfRunner
-	Costs        CostAuthority
-	Replays      ReplayTraceSource
+	Store   BenchmarkStore
+	Runner  AIPerfRunner
+	Costs   CostAuthority
+	Replays ReplayTraceSource
+	// PromptCorpus is the operator's real text for replay measurement; nil
+	// leaves the prompt text to AIPerf's synthetic generator.
+	PromptCorpus *replay.PromptCorpus
 	Backends     map[string]BenchmarkBackend
 	AIPerfBinary string
 	Now          func() time.Time
@@ -149,7 +154,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 		"profile_runs": measurementRunsPerArm, "warmup_requests": plan.warmup, "concurrency": plan.concurrency,
 		"random_seed": measurementSeed, "seed_policy": "unique_per_invocation", "measurement_method": MeasurementMethod,
 		"profile": profile.Name, "profile_version": performanceprofile.Version, "ttft_slo_ms": plan.ttftSLO, "tpot_slo_ms": plan.tpotSLO,
-		"server_token_count": true, "revision_selector": revision.ID, "direct_revision_validation": true,
+		"server_token_count": true, "output_token_basis": benchmark.OutputTokenBasis, "revision_selector": revision.ID, "direct_revision_validation": true,
 		"confidence_95": confidence, "measured": measured.evidence,
 	}
 	if plan.trace != nil {
@@ -364,7 +369,7 @@ func (e BenchmarkExecutor) loadPlan(ctx context.Context, campaign domain.Optimiz
 	request := campaignRequest(campaign)
 	plan := loadPlan{tokenizer: artifact.Repository, requests: profile.Requests, concurrency: profile.Concurrency, inputTokens: profile.InputTokens, outputTokens: profile.OutputTokens, streaming: profile.Streaming, ttftSLO: campaignTTFTSLO(campaign), tpotSLO: campaignTPOTSLO(campaign)}
 	plan.warmup = warmupRequests(plan.concurrency)
-	rendered, err := resolveBoundReplay(ctx, e.Replays, campaign.TenantID, request)
+	rendered, err := resolveBoundReplay(ctx, e.Replays, campaign.TenantID, request, e.PromptCorpus)
 	if err != nil {
 		return loadPlan{}, err
 	}

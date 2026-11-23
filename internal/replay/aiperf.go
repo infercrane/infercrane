@@ -64,6 +64,9 @@ type TraceProperties struct {
 	SessionTurnsReusingPrompt int      `json:"session_turns_reusing_prompt"`
 	Preserved                 []string `json:"preserved"`
 	NotPreserved              []string `json:"not_preserved"`
+	// PromptText is set only when the prompt text is not AIPerf's synthetic
+	// text: it names the operator's corpus the requests were composed from.
+	PromptText *PromptText `json:"prompt_text,omitempty"`
 }
 
 type aiperfRow struct {
@@ -71,10 +74,14 @@ type aiperfRow struct {
 	blocks        []int
 }
 
-// AIPerfTrace is a content-free AIPerf rendering of one stored Replay trace.
+// AIPerfTrace is an AIPerf rendering of one stored Replay trace. The trace is
+// content-free: AIPerf synthesizes the prompt text unless WithPromptCorpus
+// supplied an operator's corpus to compose it from.
 type AIPerfTrace struct {
 	rows        []aiperfRow
 	localBlocks int
+	corpus      *PromptCorpus
+	corpusRows  []corpusRow
 	Properties  TraceProperties
 }
 
@@ -192,6 +199,9 @@ func (t AIPerfTrace) Requests() int { return len(t.rows) }
 func (t AIPerfTrace) Write(w io.Writer, namespace int) error {
 	if namespace < 0 || t.localBlocks < 1 {
 		return errors.New("AIPerf trace namespace must be nonnegative and the trace must be rendered")
+	}
+	if t.corpus != nil {
+		return t.writeCorpus(w, namespace)
 	}
 	offset := namespace * t.localBlocks
 	buffered := bufio.NewWriter(w)

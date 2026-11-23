@@ -259,6 +259,9 @@ func (i *invocations) run(ctx context.Context, target armTarget, requests int) (
 		if err = errors.Join(writeErr, closeErr); err != nil {
 			return benchmark.Result{}, fmt.Errorf("stage replay trace: %w", err)
 		}
+		// A pass composed from a prompt corpus holds its full text, so each
+		// staged file is removed as soon as its invocation ends.
+		defer os.Remove(path)
 		config.InputFile, config.DatasetType = path, replay.AIPerfDatasetType
 		config.Timeout = replayInvocationTimeout
 	}
@@ -569,8 +572,9 @@ func ControlKept(campaign domain.OptimizationCampaign) bool {
 // resolveBoundReplay returns the verified AIPerf rendering of the Replay trace
 // a customer-observed campaign is bound to, or nil when none is bound. Missing,
 // malformed, or tampered traces are permanent failures; a store error stays
-// retryable.
-func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant string, request optimizer.Request) (*replay.AIPerfTrace, error) {
+// retryable. With an operator's prompt corpus the requests are composed from
+// its text; without one AIPerf synthesizes the text.
+func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant string, request optimizer.Request, corpus *replay.PromptCorpus) (*replay.AIPerfTrace, error) {
 	digest, bound, err := boundReplayDigest(request)
 	if err != nil {
 		return nil, operations.Permanent("optimization_replay_unavailable", err)
@@ -591,6 +595,11 @@ func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant st
 	rendered, err := replay.NewAIPerfTrace(trace)
 	if err != nil {
 		return nil, operations.Permanent("optimization_replay_invalid", err)
+	}
+	if corpus != nil {
+		if rendered, err = rendered.WithPromptCorpus(corpus); err != nil {
+			return nil, operations.Permanent("optimization_replay_invalid", err)
+		}
 	}
 	return &rendered, nil
 }

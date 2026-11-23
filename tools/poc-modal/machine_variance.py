@@ -217,9 +217,9 @@ def analyze(results: list[dict]) -> dict:
 
 
 def rate_per_second() -> float:
-    from broker import CORE_PER_SECOND, GIB_PER_SECOND, H100_PER_SECOND
+    from broker import CORE_PER_SECOND, GIB_PER_SECOND, GPU_PER_SECOND
 
-    return H100_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
+    return GPU_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
 
 
 @app.local_entrypoint()

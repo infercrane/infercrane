@@ -74,6 +74,7 @@ import (
 	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/requestquota"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -4993,14 +4994,25 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for name, backend := range benchmarkBackends {
 		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
 	}
-	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
+	// A configured prompt corpus that cannot be read stops the start: falling
+	// back to synthetic text would measure another workload than the operator
+	// asked for.
+	var promptCorpus *replay.PromptCorpus
+	if cfg.ReplayPromptCorpusFile != "" {
+		if promptCorpus, err = replay.LoadPromptCorpus(cfg.ReplayPromptCorpusFile); err != nil {
+			return fmt.Errorf("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE: %w", err)
+		}
+		identity := promptCorpus.Identity()
+		logger.Info("replay measurement composes prompts from the operator's corpus", "name", identity.Name, "digest", identity.Digest, "license", identity.License, "passages", identity.Passages, "prompts", identity.Prompts)
+	}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, PromptCorpus: promptCorpus, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
 	qualitySigner, err := builtinQualitySigner(passportKey, logger)
 	if err != nil {
 		return err
 	}
 	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
 	migrationCheck := optimizationcampaign.MigrationQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Credentials: closedAPICredentials{upstreamCredentials}, Signer: qualitySigner}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s}
+	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s, PromptCorpus: promptCorpus}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}
