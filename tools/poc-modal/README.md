@@ -190,6 +190,20 @@ work as for `run`. About ten minutes of one GPU.
 python3 tools/poc-modal/poc_modal.py ask-planner --traffic real-text --shape interactive --requests 100 --corpus "$CORPUS" --engine vllm-0.34.0 --budget-usd 2
 ```
 
+With `--cell` the planner is asked about one cell of the fast-track map instead of the trace
+replay: the product sees that cell's own requests, closed loop at the cell's load, sent as the
+map's load generator sends them (one user message, a shared-prefix session's requests in order
+from one worker, reasoning off unless the cell leaves it on). `--cells` names the map's cell file
+and `--cell-prompts` the prompt file the cell names, which is checked against the cell file's
+sha256; `--cells-sha256` is the hash the cell file itself must have. The cell sets the load, so `--shape`, `--traffic`, `--corpus` and `--requests-at-once`
+play no part. 128 requests at once exists for this command only.
+`--current-setup publisher-speculation` starts the check from the publisher's command with its
+documented speculation option, to see what the planner names on top of it.
+
+```bash
+python3 tools/poc-modal/poc_modal.py ask-planner --cell prefix/32 --cells "$CELLS" --cells-sha256 "$CELLS_SHA256" --cell-prompts "$PROMPTS_V2" --engine vllm-0.34.0 --budget-usd 2
+```
+
 ### What a run measures
 
 - **The model** is the most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits

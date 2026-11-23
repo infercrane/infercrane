@@ -4,10 +4,12 @@ become campaign setups. Nothing runs remotely and nothing is written to the run 
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -374,6 +376,114 @@ class HoldTest(unittest.TestCase):
         planner.hold(32)
         self.assertEqual(planner.finish(), {"candidates": []})
         self.assertEqual(planner.asked, "after the hold ended, without windowed engine measurements")
+
+
+SESSIONS = [{"id": f"s{number}", "context": f"context {number}", "questions": [{"text": f"question {number}.{index}", "tokens": 3, "max_tokens": 100 + index} for index in range(4)]}
+            for number in range(6)]
+
+
+class MapCellTest(unittest.TestCase):
+    """`ask-planner --cell`: the planner is asked while one cell of the fast-track map runs,
+    with that cell's own requests sent the way the map's load generator sends them."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.saved = {name: getattr(poc_modal, name) for name in ("send_chat", "state")}
+        poc_modal.state = lambda: {"api_key": "key"}
+        root = Path(self.dir.name)
+        self.prompts = root / "prompts.json"
+        self.prompts.write_text(json.dumps({"kinds": {"prefix": {"levels": {"4": SESSIONS}}, "output": {"levels": {"4": [{"content": "write long", "max_tokens": 900}]}},
+                                                      "short": {"levels": {"4": [{"content": "hello"}]}}}}))
+        digest = hashlib.sha256(self.prompts.read_bytes()).hexdigest()
+        self.cells = root / "cells.json"
+        self.cells.write_text(json.dumps({"stagger_seed": 20261123, "warmup_seconds": 30.0, "files": {"v2": {"sha256": digest}, "other": {"sha256": "0" * 64}}, "cells": [
+            {"key": "two-slices", "kind": "short", "requests_at_once": 4, "file": "v2", "paths": [["kinds", "short", "levels", "4"], ["kinds", "output", "levels", "4"]], "max_tokens": 295, "reasoning": "off"},
+            {"key": "prefix/4", "kind": "prefix", "requests_at_once": 4, "file": "v2", "path": ["kinds", "prefix", "levels", "4"], "max_tokens": "per request, in the file", "reasoning": "off"},
+            {"key": "output/4", "kind": "output", "requests_at_once": 4, "file": "v2", "path": ["kinds", "output", "levels", "4"], "max_tokens": "per request, in the file", "reasoning": "off", "warmup_seconds": 60.0},
+            {"key": "short/4/reasoning", "kind": "short", "requests_at_once": 4, "file": "v2", "path": ["kinds", "short", "levels", "4"], "max_tokens": 295, "reasoning": "on (the server's default)"},
+            {"key": "short/12", "kind": "short", "requests_at_once": 12, "file": "v2", "path": ["kinds", "short", "levels", "4"], "max_tokens": 295, "reasoning": "off"},
+            {"key": "wrong-file", "kind": "short", "requests_at_once": 4, "file": "other", "path": ["kinds", "short", "levels", "4"], "max_tokens": 295, "reasoning": "off"}]}))
+
+    def tearDown(self) -> None:
+        for name, value in self.saved.items():
+            setattr(poc_modal, name, value)
+        self.dir.cleanup()
+
+    def test_a_cell_becomes_the_requests_the_map_sends(self) -> None:
+        prefix = poc_modal.load_cell(self.cells, "prefix/4", self.prompts)
+        self.assertEqual((prefix["kind"], prefix["requests_at_once"], prefix["reasoning"], len(prefix["chains"])), ("prefix", 4, False, 6))
+        self.assertEqual(prefix["chains"][2][:2], [("context 2\n\nquestion 2.0", 100), ("context 2\n\nquestion 2.1", 101)])
+        self.assertEqual(poc_modal.load_cell(self.cells, "output/4", self.prompts)["chains"], [[("write long", 900)]])
+        short = poc_modal.load_cell(self.cells, "short/4/reasoning", self.prompts)
+        self.assertEqual((short["chains"], short["reasoning"]), ([[("hello", 295)]], True))
+        off = poc_modal.cell_body("hello", 295, reasoning=False)
+        self.assertEqual((off["messages"], off["max_tokens"], off["temperature"], off["stream"], off["chat_template_kwargs"]),
+                         ([{"role": "user", "content": "hello"}], 295, 0, True, {"enable_thinking": False}))
+        self.assertNotIn("chat_template_kwargs", poc_modal.cell_body("hello", 295, reasoning=True))
+        # A cell may read several slices of its file; they are sent in the order named.
+        self.assertEqual(poc_modal.load_cell(self.cells, "two-slices", self.prompts)["chains"], [[("hello", 295)], [("write long", 295)]])
+
+    def test_each_workers_first_answer_is_cut_by_the_cells_seeded_share(self) -> None:
+        shares = poc_modal.stagger_shares(4, "20261123:prefix/4")
+        self.assertEqual(sorted(shares), [0.125, 0.375, 0.625, 0.875])
+        self.assertEqual(shares, poc_modal.stagger_shares(4, "20261123:prefix/4"))  # the seed fixes the order
+        self.assertNotEqual(shares, poc_modal.stagger_shares(4, "20261123:output/4"))
+        self.assertEqual(poc_modal.load_cell(self.cells, "prefix/4", self.prompts)["first_shares"], shares)
+
+    def test_a_cell_is_refused_with_another_prompt_file_or_a_load_the_planner_has_no_profile_for(self) -> None:
+        for key in ("wrong-file", "short/12", "no-such-cell"):
+            with self.subTest(key=key), self.assertRaises(SystemExit):
+                poc_modal.load_cell(self.cells, key, self.prompts)
+
+    def test_the_planner_is_asked_no_sooner_than_the_cells_warm_up(self) -> None:
+        self.assertEqual(poc_modal.load_cell(self.cells, "prefix/4", self.prompts)["ask_after_seconds"], poc_modal.HOLD_BEFORE_ASK_SECONDS)  # the file's 30 s is under the hold's 45
+        self.assertEqual(poc_modal.load_cell(self.cells, "output/4", self.prompts)["ask_after_seconds"], 60.0)  # a cell's own warm-up
+
+    def test_the_cell_file_is_read_by_the_hash_it_was_fixed_with(self) -> None:
+        digest = hashlib.sha256(self.cells.read_bytes()).hexdigest()
+        self.assertEqual(poc_modal.load_cell(self.cells, "prefix/4", self.prompts, f"sha256:{digest}")["cells_sha256"], digest)
+        with self.assertRaises(SystemExit):
+            poc_modal.load_cell(self.cells, "prefix/4", self.prompts, "0" * 64)
+
+    def test_the_cells_requests_run_closed_loop_with_sessions_in_order(self) -> None:
+        sent, lock, running, peak, stop = [], threading.Lock(), [0], [0], threading.Event()
+
+        def send(body: dict, session: str, key: str) -> tuple[int, str]:
+            with lock:
+                running[0] += 1
+                peak[0] = max(peak[0], running[0])
+                sent.append((session, threading.current_thread().name, body["messages"][0]["content"], body["max_tokens"], body.get("chat_template_kwargs")))
+            time.sleep(0.02)
+            with lock:
+                running[0] -= 1
+            return 7, ""
+
+        poc_modal.send_chat = send
+        threading.Timer(0.5, stop.set).start()
+        record = poc_modal.cell_load(poc_modal.load_cell(self.cells, "prefix/4", self.prompts), stop.is_set)
+        self.assertEqual((peak[0], record["requests_at_once"], record["failed"], record["reasoning"], record["cell"]), (4, 4, 0, "off", "prefix/4"))
+        self.assertEqual(record["requests"], len(sent))
+        self.assertTrue(record["list_started_again"])  # six sessions do not last half a second
+        self.assertTrue(all(extra == {"enable_thinking": False} for *_, extra in sent))
+        by_session: dict[str, list] = {}
+        by_worker: dict[str, list] = {}
+        for session, worker, content, limit, _ in sent:
+            number = int(content.rsplit(".", 1)[1])
+            by_session.setdefault(session, []).append((worker, number))
+            by_worker.setdefault(worker, []).append((number, limit))
+        for session, rows in by_session.items():
+            self.assertEqual(len({worker for worker, _ in rows}), 1, session)  # one worker per session
+            numbers = [number for _, number in rows]
+            self.assertEqual(numbers, list(range(numbers[0], numbers[0] + len(numbers))), session)  # in order
+        # Worker n starts its first session at question n, and that first request's answer
+        # limit is cut by worker n's share; every later request keeps its question's limit.
+        shares = poc_modal.stagger_shares(4, "20261123:prefix/4")
+        self.assertTrue(record["first_requests_cut"])
+        self.assertEqual({rows[0][0] for rows in by_worker.values()}, {0, 1, 2, 3})
+        for rows in by_worker.values():
+            (first_question, first_limit), later = rows[0], rows[1:]
+            self.assertEqual(first_limit, max(1, round((100 + first_question) * shares[first_question])))
+            self.assertTrue(all(limit == 100 + number for number, limit in later))
 
 
 if __name__ == "__main__":

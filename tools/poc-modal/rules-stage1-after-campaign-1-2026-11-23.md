@@ -114,6 +114,68 @@ been sent, the planner had not been asked, nothing was measured.
 - The run's limit on server starts is 16, was 12, for the same reason. The dollar cap bounds
   the spend.
 
+## Added before the first cell-driven planner check
+
+Added 2026-11-23; the commit's timestamp is the record. No cell-driven check had run. Known when
+this was added, and written down in the runs' internal result notes, not here: the results of
+campaign 1 and campaign 2, the two planner-only checks on the trace replay, the fast track's
+result on H200, and a first signal from the map's H100 measurements (one server per setup),
+including its cells at 128 requests at once. That signal and campaign 2 are why the checks at
+128 come first and why a check can start from the documented speculation option.
+
+`poc_modal.py ask-planner --cell KEY` asks the planner while one cell of the fast-track map
+runs. A cell is a kind of traffic at a load (for example `prefix/32`); the map measures every
+setup on each cell next to the server.
+
+- **What the product sees:** that cell's own requests and nothing else, from the prompt file the
+  cell names (checked by sha256), sent the way the map's load generator sends them: one user
+  message, temperature 0, streamed, a fixed number of workers each sending its next request when
+  its last answer ends; a shared-prefix session's requests one after another from one worker,
+  worker n starting its first session at question n modulo the session's length; the model's
+  reasoning switched off or left on as the cell says. No trace replay, no recorded shape, no
+  campaign. Nothing is measured.
+- **When the planner is asked:** once the control plane holds windowed engine measurements and
+  the cell's load has run for at least 45 seconds, or for the cell's own warm-up when that is
+  longer (the map measures a cell only after its warm-up), on a fresh server that has seen no
+  other traffic. The load goes on until the planner has answered; limit 300 seconds, as for the
+  hold. Each worker's first answer limit is cut by the cell's seeded share, as the map cuts it.
+- **Which cell file:** the one the fast track's rules for the map name by sha256. The check is
+  given that hash and refuses a file with another one; the result records it.
+- **Why the reasoning switch follows the cell:** the planner's verdict rests on shares of
+  request time and on answer length, and reasoning changes both. The campaigns leave reasoning
+  on because the product's traffic record does not keep the switch; the cells say it themselves.
+- **What the answers are for:** one table. Per cell: the planner's first proposal this GPU can
+  run, with its rule and reason, next to the setup the map measured as fastest in that cell. A
+  hit is the same setup. Which cells are checked is decided before any of their answers is
+  known, every check that ran is in the table, and a check is repeated only under the rule
+  above (it failed to ask), with both attempts shown.
+- **What differs from the map's own measurement, stated with the table:** the check's requests
+  go through the product's gateway and a tunnel from a laptop, and the planner reads about one to
+  two minutes of load; the map's generator runs next to the server and measures a 90-second
+  window after 30 seconds of warm-up. The check says what the planner proposes for that traffic.
+  It does not re-measure the cell.
+- At 128 requests at once the planner is asked with the product's 128-concurrency profile. No
+  campaign runs at 128.
+- **The current setup of a check is one of two**, named with `--current-setup`: the publisher's
+  command (`publisher`) or that command with its documented speculation option
+  (`publisher-speculation`). They are the map's setups 1 and 2: the same flags, values,
+  environment and image tag; only the place of `--max-num-seqs 512` in the command differs.
+- **Order, fixed before any answer is known:** first `short/128` and `output/128` with the
+  documented speculation option as the current setup; then the same two cells with the
+  publisher's command; then cells at 4 and 32. The budget for all of them is $8; a cell that
+  would pass it is not run.
+- **How a row is read.**
+  - Current setup the publisher's command: the planner's first proposal this GPU's argument
+    check accepts, next to the setup the map measured as fastest in that cell. A hit is the same
+    setup, by the map's full result for that cell and not by its first signal.
+  - Current setup the documented speculation option: the row records what the planner names on
+    top of it (an FP8 KV cache, fewer draft tokens, fewer requests at once, anything else).
+    That is a proposal, not a result. It becomes a hit only if the map measures that setup in
+    the same cell and it is faster than the documented option there; unmeasured, it is reported
+    as unmeasured.
+  - "This GPU can run it" means the argument check passed. A setup no server has started (for
+    example speculation with an FP8 KV cache) is reported as not yet started anywhere.
+
 ## Two product findings behind these changes (not fixed here)
 
 - The planner decides between its low-load and its loaded plans from one latest reading of

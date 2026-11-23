@@ -77,7 +77,9 @@ PROFILE, OBJECTIVE = "throughput", "throughput"  # 32 concurrent streams per mea
 # bound to recorded traffic takes nothing else from the profile, so these three built-in
 # profiles are three load levels; the objective stays output throughput. The product has
 # no profile with 12 at once.
-LOAD_PROFILES = {32: "throughput", 8: "balanced", 4: "long-context"}
+# The product's benchmark profile for each load. 128 is the load of its overload profile and is
+# for `ask-planner` only: no campaign has been rehearsed or measured at it.
+LOAD_PROFILES = {32: "throughput", 8: "balanced", 4: "long-context", 128: "overload"}
 MAX_INPUT_TOKENS = 30000  # the traffic shape of the 2026-11-20 run; Qwen3.8 serves 262,144 positions
 # A smoke run proves a paid campaign's path for a few dollars. The judge keeps its four
 # paired rounds and its fresh-server confirmation (the product has no shorter mode: with
@@ -135,7 +137,7 @@ DOCUMENTED_LABEL = "The publisher's documented speculation option"
 CANDIDATE_SLOTS = 2
 CANDIDATES: list = []
 # What this run measures with. Set by configure() and by `run`'s flags.
-RUN = {"traffic": "mooncake-words", "shape": "mooncake", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1, "driver": None}
+RUN = {"traffic": "mooncake-words", "shape": "mooncake", "corpus": None, "smoke": False, "stand_in": False, "current_setup": "publisher", "planner_setups": 1, "driver": None, "cell": None}
 
 
 def configure(engine: str | None = None, gpu: str | None = None, current_setup: str = "publisher") -> None:
@@ -482,11 +484,11 @@ def chat_request(row: dict, index: int, input_scale: float, output_scale: float,
     return body, sent
 
 
-def send_chat(body: dict, session: int, key: str) -> tuple[int, str]:
+def send_chat(body: dict, session: int | str, key: str) -> tuple[int, str]:
     """Sends one streamed chat request through the gateway and reads it to its end. Returns
     the output tokens the server reported, and why the request failed ("" when it did not)."""
     request = urllib.request.Request(f"http://127.0.0.1:{poc.API_PORT}/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
-    for header, value in {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-InferCrane-Session-ID": f"mooncake-{session}", "X-InferCrane-Parent-Session-ID": "mooncake-replay"}.items():
+    for header, value in {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-InferCrane-Session-ID": session if isinstance(session, str) else f"mooncake-{session}", "X-InferCrane-Parent-Session-ID": "mooncake-replay"}.items():
         request.add_header(header, value)
     try:
         with urllib.request.urlopen(request, timeout=600) as response:
@@ -585,6 +587,128 @@ def hold_load(requests_total: int, at_once: int, input_scale: float, max_output:
             "ask_after_seconds": HOLD_BEFORE_ASK_SECONDS, "limit_seconds": HOLD_LIMIT_SECONDS}
 
 
+def load_cell(cells_path: Path, key: str, prompts_path: Path, cells_sha256: str = "") -> dict:
+    """One cell of the fast-track map: its kind, its load, its reasoning switch, and its own
+    requests. The prompt file must be the one the cell names, by sha256; the cell file
+    itself is checked against cells_sha256 when one is given, because the map's cells are
+    fixed by that hash and the file on disk has changed more than once."""
+    cells_body = cells_path.read_bytes()
+    cells_digest = hashlib.sha256(cells_body).hexdigest()
+    if cells_sha256 and cells_digest != cells_sha256.lower().removeprefix("sha256:"):
+        fail(f"{cells_path} has sha256 {cells_digest[:12]}…, not the {cells_sha256[:12]}… this check was told to read")
+    document = json.loads(cells_body)
+    cell = next((entry for entry in document.get("cells", []) if entry.get("key") == key), None)
+    if cell is None:
+        fail(f"{cells_path.name} has no cell {key!r}; it has {', '.join(entry['key'] for entry in document.get('cells', []))}")
+    if int(cell["requests_at_once"]) not in LOAD_PROFILES:
+        fail(f"cell {key} runs {cell['requests_at_once']} requests at once; the planner can be asked at {sorted(LOAD_PROFILES)}")
+    body = prompts_path.read_bytes()
+    digest, expected = hashlib.sha256(body).hexdigest(), document["files"][cell["file"]]["sha256"]
+    if digest != expected:
+        fail(f"{prompts_path} is not the prompt file cell {key} names: sha256 {digest[:12]}…, the cell's file is {expected[:12]}…")
+    prompts, entries = json.loads(body), []
+    for path in cell.get("paths") or [cell["path"]]:  # a cell may read several slices of its file, in order
+        part = prompts
+        for step in path:
+            part = part[step]
+        entries += part
+    limit = cell["max_tokens"] if isinstance(cell["max_tokens"], int) else 0
+    at_once, seed = int(cell["requests_at_once"]), document.get("stagger_seed")
+    # The map measures a cell after its warm-up (the file's, or the cell's own). The planner
+    # is asked no sooner than that, and never sooner than a hold would be.
+    warmup = float(cell.get("warmup_seconds") or document.get("warmup_seconds") or 0)
+    return {"key": key, "kind": cell["kind"], "requests_at_once": at_once, "reasoning": not str(cell["reasoning"]).startswith("off"),
+            "ask_after_seconds": max(HOLD_BEFORE_ASK_SECONDS, warmup), "warmup_seconds": warmup,
+            "chains": cell_chains(entries, limit), "first_shares": stagger_shares(at_once, f"{seed}:{key}") if seed else None, "stagger_seed": seed,
+            "prompts_sha256": digest, "cells_sha256": cells_digest}
+
+
+def stagger_shares(workers: int, seed: str) -> list[float]:
+    """The share of its answer limit each worker's first request gets, as the map's load
+    generator cuts it (tools/fast-track-map, setups.stagger_shares): evenly spaced between
+    0 and 1, in a seeded order, so workers that start together do not end their first
+    answers together and move in waves."""
+    import random
+
+    shares = [(position + 0.5) / workers for position in range(workers)]
+    random.Random(seed).shuffle(shares)
+    return shares
+
+
+def cell_chains(entries: list[dict], max_tokens: int) -> list[list[tuple[str, int]]]:
+    """A cell's entries as the map's load generator sends them (tools/fast-track-map,
+    runner.chains): a session is its requests in order, each its context, a blank line and
+    one question, with that question's answer limit; a plain prompt is a session of one."""
+    built = []
+    for entry in entries:
+        if "context" in entry:
+            built.append([(entry["context"] + "\n\n" + question["text"], question.get("max_tokens") or max_tokens) for question in entry["questions"]])
+        else:
+            built.append([(entry["content"], max_tokens or entry["max_tokens"])])
+    return built
+
+
+def cell_body(content: str, max_tokens: int, reasoning: bool) -> dict:
+    """The request the map sends (loadgen.chat_body): one user message, temperature 0,
+    streamed, the model's reasoning switched off unless the cell leaves it on."""
+    body = {"model": poc.BASELINE, "messages": [{"role": "user", "content": content}], "max_tokens": max_tokens, "temperature": 0,
+            "stream": True, "stream_options": {"include_usage": True}}
+    if not reasoning:
+        body["chat_template_kwargs"] = {"enable_thinking": False}
+    return body
+
+
+def cell_load(cell: dict, until: Callable[[], bool]) -> dict:
+    """Runs a map cell's own requests through the gateway until the planner has answered,
+    the way the map's load generator runs them next to the server (loadgen.run_level): a
+    fixed number of workers, each sending its next request when its last answer ends; a
+    session's requests one after another from one worker; worker n starts its first
+    session at question n modulo the session's length, and its first request's answer
+    limit is cut by the cell's share for that worker. Like that generator it starts the list
+    again if it runs out, and the record says whether it did."""
+    chains, at_once = cell["chains"], cell["requests_at_once"]
+    key, began, lock = state()["api_key"], time.monotonic(), threading.Lock()
+    count = {"next": 0, "sent": 0, "failed": 0, "output_tokens": 0}
+    log("traffic", f"map cell {cell['key']}: its own {sum(len(chain) for chain in chains)} requests ({cell['kind']}), {at_once} at once, closed loop, reasoning {'on' if cell['reasoning'] else 'off'}, until the planner has been asked")
+
+    def worker(number: int) -> None:
+        opening, first_request = True, True
+        while not until() and time.monotonic() - began < HOLD_LIMIT_SECONDS:
+            with lock:
+                index = count["next"]
+                count["next"] += 1
+            chain = chains[index % len(chains)]
+            begin, opening = (number % len(chain) if opening else 0), False
+            for content, limit in chain[begin:]:
+                if until() or time.monotonic() - began >= HOLD_LIMIT_SECONDS:
+                    return
+                if first_request and cell.get("first_shares"):
+                    limit = max(1, round(limit * cell["first_shares"][number]))
+                first_request = False
+                tokens, failure = send_chat(cell_body(content, limit, cell["reasoning"]), f"cell-{index}", key)
+                with lock:
+                    count["sent"] += 1
+                    count["failed"] += bool(failure)
+                    count["output_tokens"] += tokens
+                if failure:
+                    time.sleep(0.2)  # a refusing server must not turn the loop into a busy spin
+
+    threads = [threading.Thread(target=worker, args=(number,), daemon=True) for number in range(at_once)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    seconds = time.monotonic() - began
+    log("traffic", f"cell load ended after {seconds:.0f} s: {count['sent']} requests, {count['failed']} failed")
+    if count["failed"] > count["sent"] // 2:
+        fail("most of the cell's requests failed; check the gateway and the model server")
+    return {"source": "map_cell", "cell": cell["key"], "kind": cell["kind"], "requests_at_once": at_once, "reasoning": "on" if cell["reasoning"] else "off",
+            "requests": count["sent"], "failed": count["failed"], "output_tokens": count["output_tokens"], "seconds": round(seconds, 1),
+            "sessions_started": count["next"], "list_started_again": count["next"] > len(chains), "first_requests_cut": bool(cell.get("first_shares")), "stagger_seed": cell.get("stagger_seed"),
+            "prompts_sha256": cell["prompts_sha256"], "cells_sha256": cell["cells_sha256"],
+            "ask_after_seconds": cell["ask_after_seconds"], "cell_warmup_seconds": cell["warmup_seconds"], "limit_seconds": HOLD_LIMIT_SECONDS}
+
+
 def stream_usage(lines) -> tuple[dict | None, bool]:
     """Reads a streamed chat completion to its end. Returns the token usage the server
     reported, and whether the stream finished with its [DONE] line; a stream cut before
@@ -652,9 +776,10 @@ class Planner:
         self.error: str = ""
         self.thread = threading.Thread(target=self.run, daemon=True)
 
-    def hold(self, at_once: int) -> None:
-        """Called as the hold begins."""
-        self.hold_at_once, self.hold_started = at_once, time.monotonic()
+    def hold(self, at_once: int, what: str = "the server was held", ask_after: float | None = None) -> None:
+        """Called as the load the planner is asked under begins."""
+        self.hold_at_once, self.hold_started, self.what = at_once, time.monotonic(), what
+        self.ask_after = HOLD_BEFORE_ASK_SECONDS if ask_after is None else ask_after
         self.thread.start()
 
     def run(self) -> None:
@@ -668,8 +793,8 @@ class Planner:
                 if self.hold_over.is_set():
                     self.asked = "after the hold ended" + ("" if measured else ", without windowed engine measurements")
                     break
-                if measured and held >= HOLD_BEFORE_ASK_SECONDS:
-                    self.asked = f"while the server was held at {self.hold_at_once} requests at once, {held:.0f} s into the hold"
+                if measured and held >= self.ask_after:
+                    self.asked = f"while {self.what} at {self.hold_at_once} requests at once, {held:.0f} s into the hold"
                     break
                 time.sleep(PLANNER_POLL_SECONDS)
             self.proposal = json.loads(poc.cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", poc.ACCELERATOR,
@@ -732,7 +857,7 @@ def plan(proposal: dict) -> list[dict]:
     if start is None:
         fail(f"the planner's proposal has no starting setup: {json.dumps(proposal)[:600]}")
     start_runtime = start["deployment"]["runtime"]
-    real_text = RUN["traffic"] == "real-text"
+    real_text = RUN["traffic"] in ("real-text", "map-cell")
     record, runnable = [], []
     for candidate in proposal["candidates"]:
         if candidate["id"] == start_id:
@@ -936,7 +1061,8 @@ def laptop_load() -> dict:
 
 def run_settings(text: prompt_corpus.Corpus | None) -> dict:
     """What this run measures with, kept in its record and compared on --reuse-capture."""
-    return {"traffic": RUN["traffic"], "shape": RUN["shape"], "requests_at_once": next(level for level, name in LOAD_PROFILES.items() if name == PROFILE), "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
+    return {"traffic": RUN["traffic"], "shape": f"map cell {RUN['cell']['key']}" if RUN.get("cell") else RUN["shape"],
+            "requests_at_once": next(level for level, name in LOAD_PROFILES.items() if name == PROFILE), "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
             "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR,
             "driver": RUN.get("driver") or "the first host's"}
 
@@ -952,7 +1078,7 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool,
         except (OSError, ValueError) as error:
             fail(f"--traffic real-text needs a prompt corpus: {error}")
         corpus_in_control_plane(text)
-    elif (previous.get("corpus") or {}).get("digest"):
+    elif (previous.get("corpus") or {}).get("digest") and not RUN.get("cell"):  # a cell's planner check measures nothing
         fail("the control plane holds a prompt corpus, so it would measure real text; run with --traffic real-text, or `poc_modal.py up` without --corpus")
     if not MODEL.setup.checked and not RUN["stand_in"]:
         log("model", f"{MODEL_ID} has no recorded serving check on {models.ENGINE.key}; run `modal_gpu.py::main --action check` before paying for a campaign")
@@ -985,6 +1111,19 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool,
             digest, diagnosis = previous["capture_digest"], previous["diagnosis"]
             CANDIDATES[:] = [(row["label"], row["profile"], row["args"]) for row in previous["plan"]]
             log("capture", f"reusing the recorded traffic shape sha256:{digest[:12]}… and its diagnosis: {', '.join(row['label'] for row in previous['plan'][1:])}")
+        elif RUN.get("cell"):
+            # The planner is asked about one cell of the fast-track map: the product sees
+            # that cell's own requests, at the cell's load, and nothing else.
+            deploy_baseline()
+            planner, digest = Planner(), ""
+            planner.hold(RUN["cell"]["requests_at_once"], "the cell's own requests ran", RUN["cell"]["ask_after_seconds"])
+            save({"traffic": cell_load(RUN["cell"], until=planner.done.is_set)})
+            plan(planner.finish())
+            save({"planner": (state().get("planner") or {}) | {"asked": planner.asked}})
+            diagnosis = state().get("planner")
+            log("deploy", f"removing {poc.BASELINE}: the planner has answered")
+            poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
+            wait_for_lease_end(broker, poc.BASELINE)
         else:
             deploy_baseline()
             scales = shape_scales(RUN["shape"], poc.mooncake_rows()[:requests_total])
@@ -1153,14 +1292,17 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
                "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
-                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"), "reasoning": REASONING_NOTE},
+                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"),
+                        "reasoning": "as the map's cell says; see traffic.reasoning" if (current.get("traffic") or {}).get("source") == "map_cell" else REASONING_NOTE},
                "measured_from": "the control plane in a kind cluster on the laptop; the stand-in servers run on the same laptop, so no request leaves it" if settings.get("stand_in") == "local"
                                 else "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "laptop": {"at_start": current.get("laptop_at_start"), "at_end": laptop_load()},
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": ledger}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
     text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
-    lines = [f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup{'' if settings.get('stand_in') == 'local' else ' on Modal'}", ""]
+    cell_traffic = current.get("traffic") if (current.get("traffic") or {}).get("source") == "map_cell" else None
+    lines = [(f"Traffic: the fast-track map's cell {cell_traffic['cell']}: its own requests, {cell_traffic['requests_at_once']} at once, closed loop, reasoning {cell_traffic['reasoning']}"
+              if cell_traffic else f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words}") + f" · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup{'' if settings.get('stand_in') == 'local' else ' on Modal'}", ""]
     if settings.get("stand_in"):
         lines += ["STAND-IN SERVERS: no model and no GPU ran. Every speed below is scripted; this run proves the path only.", ""]
     if copy:
@@ -1185,12 +1327,13 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
         if not proposals:
             lines.append("   none")
     lines += [f"Warning: {warning}" for warning in warnings]
-    lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal).",
-              "No cost and no latency from this run means anything: the stand-in servers ran on the laptop." if settings.get("stand_in") == "local" else
-              f"Costs use Modal's {poc.ACCELERATOR} list price (${GPU_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
-              "Tokens per second count reasoning tokens; requests leave the model's reasoning on. Answers: word overlap on 24 short prompts;",
-              "a guard against broken answers, not a check that long answers keep their exact text.",
-              f"Full record: {path}"]
+    lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal)."]
+    if record.get("state") != "planner_only":  # a planner-only check has no speed, cost or answers to explain
+        lines += ["No cost and no latency from this run means anything: the stand-in servers ran on the laptop." if settings.get("stand_in") == "local" else
+                  f"Costs use Modal's {poc.ACCELERATOR} list price (${GPU_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
+                  "Tokens per second count reasoning tokens; requests leave the model's reasoning on. Answers: word overlap on 24 short prompts;",
+                  "a guard against broken answers, not a check that long answers keep their exact text."]
+    lines += [f"Full record: {path}"]
     width = max(len(line) for line in lines) + 2
     print("\n╭" + "─" * width + "╮")
     for line in lines:
@@ -1357,7 +1500,11 @@ def main() -> int:
     parser.add_argument("--gpu", choices=sorted(models.ACCELERATORS), default=models.ACCELERATOR.key, help="the GPU type every setup of the run serves on")
     parser.add_argument("--traffic", choices=TRAFFIC, default="mooncake-words", help="real-text composes every request from --corpus, so speculative setups are measured")
     parser.add_argument("--shape", choices=sorted(SHAPES), default="mooncake", help="scale the trace's lengths to a traffic shape: the trace as it is, or the medians of the product's public interactive, long-prefill and decode-heavy shapes")
-    parser.add_argument("--requests-at-once", type=int, choices=sorted(LOAD_PROFILES), default=32, help="the load every measured run of the campaign holds (its benchmark profile's concurrency)")
+    parser.add_argument("--requests-at-once", type=int, choices=sorted(LOAD_PROFILES), default=32, help="the load every measured run of the campaign holds (its benchmark profile's concurrency); 128 is for ask-planner only")
+    parser.add_argument("--cell", help="ask-planner only: one cell of the fast-track map (for example prefix/32); the planner is asked while that cell's own requests run at the cell's load")
+    parser.add_argument("--cells", type=Path, help="with --cell: the map's cell file (fast-track-map-cells-*.json)")
+    parser.add_argument("--cell-prompts", type=Path, help="with --cell: the prompt file the cell names; checked against the cell file's sha256")
+    parser.add_argument("--cells-sha256", default="", help="with --cell: the sha256 the cell file must have (the map's cells are fixed by it)")
     parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
     parser.add_argument("--driver", help="the NVIDIA driver every server of the run must have, for example 620.70.06 (default: the first host's); a host with another one is refused before the model loads")
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
@@ -1376,10 +1523,20 @@ def main() -> int:
     if args.command == "up":
         up(corpus)
         return 0
+    cell = None
+    if args.cell:
+        if args.command != "ask-planner" or not (args.cells and args.cell_prompts):
+            fail("--cell is for ask-planner, with --cells and --cell-prompts")
+        cell = load_cell(args.cells.resolve(), args.cell, args.cell_prompts.resolve(), args.cells_sha256)
+        # The cell says its load; a traffic shape or a corpus has no part in it.
+        args.requests_at_once, args.traffic, corpus = cell["requests_at_once"], "map-cell", None
+        PROFILE = LOAD_PROFILES[args.requests_at_once]
+    if args.command == "run" and args.requests_at_once == 128:
+        fail("128 requests at once is for ask-planner; no campaign has been rehearsed at it")
     held = (state().get("corpus") or {}).get("digest")
     if args.driver and not re.fullmatch(r"\d+(\.\d+)+", args.driver):
         fail(f"--driver takes a driver version such as 620.70.06, not {args.driver!r}")
-    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False, driver=args.driver,
+    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False, driver=args.driver, cell=cell,
                planner_setups=args.planner_setups if args.planner_setups is not None else (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
     if args.command in ("run", "ask-planner") and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:

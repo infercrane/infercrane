@@ -507,6 +507,9 @@ def main() -> int:
     server = ThreadingHTTPServer((host, int(port)), handler(broker))
     kind = "stand-in servers on this machine" if args.local else "CPU stand-in servers" if args.dry else f"{modal_gpu.ACCELERATOR.key} with {modal_gpu.ENGINE.key}"
     log(f"{kind}: cap ${args.budget_usd:.2f}, at most {args.max_gpus} at once and {args.max_starts} in total, ${broker.rate * 3600:.4f}/h each; listening on {args.listen}")
+    if broker.required_driver:
+        # Named by the run, so no first host pins it and the line that says so is never written.
+        log(f"every setup of this run must serve on NVIDIA driver {broker.required_driver} (named by the run)")
     def interrupt(*_: object) -> None:
         raise KeyboardInterrupt
 
