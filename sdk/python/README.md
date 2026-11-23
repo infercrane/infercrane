@@ -5,14 +5,11 @@ package has no runtime dependencies and supports Python 3.10 or newer.
 
 ## Install
 
-For the public beta:
-
 ```bash
-python -m pip install 'infercrane==1.0.0rc4'
+python -m pip install 'infercrane==2.0.0'
 ```
 
-Use the SDK version from the same InferCrane release as the control plane. Stable `1.0.0` remains
-reserved for the stable release.
+Use the SDK version from the same InferCrane release as the control plane.
 
 ## Configure
 

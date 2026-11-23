@@ -46,7 +46,7 @@ These steps are for InferCrane maintainers. Nobody needs them to run or operate 
 so they live here and not in the published documentation.
 
 Validate packaging metadata without publishing with `make release-check`. With `syft` installed,
-`make release-artifacts RELEASE_TAG=v1.0.0` creates and verifies four exact-version archives,
+`make release-artifacts RELEASE_TAG=v2.0.0` creates and verifies four exact-version archives,
 checksums, archive SBOMs, and a generated Homebrew formula under `dist/`. It pushes no tag, image,
 package, or release. Publication follows the [publication runbook](.release/publication-runbook.md).
 

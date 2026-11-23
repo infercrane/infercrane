@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS builder
-ARG INFERCRANE_VERSION=1.0.0
+ARG INFERCRANE_VERSION=2.0.0
 WORKDIR /build
 COPY go.mod go.sum ./
 # Keep the module cache in the builder layer. The same builder image is used as
@@ -33,7 +33,7 @@ FROM builder AS test
 RUN --mount=type=cache,target=/go/pkg/mod go test -race -count=1 ./... \
     && go vet ./...
 
-FROM python:3.12-slim-bookworm@sha256:0f5b26b9518d002b6173fd61daad821fa340635ebfec5bba471013f9ca114579 AS runtime
+FROM python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 ARG TARGETARCH
 ARG VLLM_ROUTER_VERSION=0.1.15
 ARG SKYPILOT_VERSION=0.13.0
@@ -45,18 +45,30 @@ ARG SKYPILOT_VERSION=0.13.0
 ARG SKYPILOT_EXTRAS=runpod,vast
 ARG HUGGINGFACE_HUB_VERSION=1.24.0
 ARG AIPERF_VERSION=0.12.0
-ARG AWS_CLI_VERSION=2.27.41
-ARG AWS_CLI_AMD64_SHA256=15daae6cc803984064e3d4be9cfd07c4ae8ea703633c0a0b67acc6e321f706a3
-ARG AWS_CLI_ARM64_SHA256=2c6ed21cf7cff0a7d77118c69bee867128bf4c588db7b5c044ffba5faeb6ccde
+ARG AWS_CLI_VERSION=2.42.1
+ARG AWS_CLI_AMD64_SHA256=ff2631c32c5db291b099600f404bc493454ec66c125ff4604625da90480c1f47
+ARG AWS_CLI_ARM64_SHA256=98f5f03bb6508a06ce9d9d6d2db97932dce735f3b7ad85616324a95edf4b815f
 ARG GCLOUD_CLI_VERSION=577.0.0
 ARG GCLOUD_CLI_AMD64_SHA256=0b32d330446ce7b0f57f253e7efab4636c18fb1f87a3ac31c6c3f2a2a697525e
 ARG GCLOUD_CLI_ARM64_SHA256=dbac26bdf80d72b5d13538e3a215dcbfe2781edfd2d69723effbeef3839cffb8
-ARG KUBECTL_VERSION=v1.36.0
-ARG KUBECTL_AMD64_SHA256=123d8c8844f46b1244c547fffb3c17180c0c26dac9890589fe7e67763298748e
-ARG KUBECTL_ARM64_SHA256=9f9d9c44a7b5264515ac9da5991584e2395bd50662e651132337e7b4d0c56f8f
+ARG KUBECTL_VERSION=v1.37.2
+ARG KUBECTL_AMD64_SHA256=c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
+ARG KUBECTL_ARM64_SHA256=fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509
+# Two pinned tools hold vulnerable dependencies; replace them in place after the resolver runs.
+# AIPerf 0.12.0 pins Pillow 12.2 (critical advisories fixed in 13.0). AIPerf uses Pillow only to
+# synthesize image prompts, which InferCrane benchmarks never send. vastai 1.0.0 caps cryptography at
+# 46.0.4 (CVE-2026-39892, fixed in the 46.0.7 patch release). Drop each override when the AIPerf pin
+# moves to 0.14 or vastai-sdk resolves a newer vastai.
+ARG PILLOW_VERSION=13.0.0
+ARG CRYPTOGRAPHY_VERSION=46.0.7
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install --no-install-recommends -y build-essential ca-certificates curl git openssh-client rsync unzip \
+	&& python -m pip install --no-cache-dir --upgrade pip \
 	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[${SKYPILOT_EXTRAS}]==${SKYPILOT_VERSION}" "fastapi<0.145" "vastai-sdk>=1.0,<2" "aiperf==${AIPERF_VERSION}" \
+	&& python -m pip install --no-cache-dir --no-deps "pillow==${PILLOW_VERSION}" "cryptography==${CRYPTOGRAPHY_VERSION}" \
+	&& python -c "import sky, cryptography, PIL" \
+	&& aiperf --version \
 	&& python -m venv /opt/infercrane-huggingface \
 	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}"
 RUN case "$TARGETARCH" in \

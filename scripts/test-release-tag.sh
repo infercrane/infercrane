@@ -10,9 +10,9 @@ cp "$root/scripts/release-tag.sh" "$temporary/repository/scripts/release-tag.sh"
 cat >"$temporary/repository/.release/version.json" <<'EOF'
 {
   "schema_version": 1,
-  "version": "1.0.0",
-  "candidate_tag": "v1.0.0-rc.4",
-  "stable_tag": "v1.0.0"
+  "version": "2.0.0",
+  "candidate_tag": "v2.0.0-rc.1",
+  "stable_tag": "v2.0.0"
 }
 EOF
 
@@ -48,11 +48,11 @@ fi
 git -C "$temporary/repository" update-ref refs/remotes/origin/main HEAD
 
 "$temporary/repository/scripts/release-tag.sh" candidate >/dev/null
-test "$(git -C "$temporary/repository" rev-list -n 1 v1.0.0-rc.4)" = \
+test "$(git -C "$temporary/repository" rev-list -n 1 v2.0.0-rc.1)" = \
   "$(git -C "$temporary/repository" rev-parse HEAD)"
 
 "$temporary/repository/scripts/release-tag.sh" stable >/dev/null
-test "$(git -C "$temporary/repository" rev-list -n 1 v1.0.0)" = \
+test "$(git -C "$temporary/repository" rev-list -n 1 v2.0.0)" = \
   "$(git -C "$temporary/repository" rev-parse HEAD)"
 
 if "$temporary/repository/scripts/release-tag.sh" candidate >/dev/null 2>&1; then
