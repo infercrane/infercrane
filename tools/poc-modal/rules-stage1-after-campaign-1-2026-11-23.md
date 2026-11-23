@@ -192,6 +192,22 @@ while the weights loaded slowly. No answer of that check or of the fourth exists
 - **The cell checks name no NVIDIA driver from here on.** They measure nothing; the row says
   which driver the host had.
 
+## Added before the cell checks at 32
+
+Added 2026-11-23; the commit's timestamp is the record. Known when this was added, in the runs'
+internal notes: the answers of the four cell checks at 128 and the map's result for every cell,
+which is final for the publisher's two documented setups. None of the checks below had run on a
+GPU; each had been rehearsed once on stand-in servers.
+
+- **Four checks, in this order, each from the publisher's command:** `short/32`, `output/32`,
+  `prefix/32`, `long/32`. No cells at 4: the map has the same winner there as at 32.
+- **How a row is read**, as fixed above for the publisher's command: the planner's first
+  proposal that passes the argument check, next to the setup the map measured as fastest in
+  that cell. A hit is the same setup. If the planner puts first a setup the map did not
+  measure, the row says so and says that the measured winner was not put first; that setup
+  stays unmeasured.
+- **If two of them in a row fail to start, the rest are not run.**
+
 ## Two product findings behind these changes (not fixed here)
 
 - The planner decides between its low-load and its loaded plans from one latest reading of
