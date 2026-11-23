@@ -18,7 +18,8 @@
                                --traffic real-text composes every request from a prompt corpus
                                of real text, so speculative setups are measured, not skipped.
                                --smoke shrinks the traffic so the whole path costs a few dollars.
-                               --stand-in runs the same path on CPU stand-in servers for cents.
+                               --stand-in runs the same path on CPU stand-in servers for cents;
+                               --stand-in local runs them on this machine, with no Modal.
     poc_modal.py down          delete the cluster and registry
 
 Development only. Modal is not an InferCrane provider: the control plane runs its
@@ -283,6 +284,8 @@ def up(corpus: Path | None = None) -> None:
 def broker_command(budget: float, dry: bool, max_starts: int) -> list[str]:
     command = ["uv", "run", "--quiet", "--no-project", "--with", MODAL_CLIENT, "python", str(HERE / "broker.py"), "--token-file", str(poc.STATE_FILE),
                "--budget-usd", str(budget), "--listen", f"127.0.0.1:{BROKER_PORT}", "--ledger", str(LEDGER), "--max-starts", str(max_starts)]
+    if RUN["stand_in"] == "local":
+        return command + ["--local", "--local-host", BROKER_HOST]
     return command + (["--dry"] if dry else [])
 
 
@@ -368,7 +371,18 @@ def runtime(args: list[str]) -> dict:
 
 
 def server_kind() -> str:
-    return "CPU stand-in" if RUN["stand_in"] else poc.ACCELERATOR
+    return {"local": "stand-in (on this machine)", "modal": "CPU stand-in"}.get(RUN["stand_in"], poc.ACCELERATOR)
+
+
+def remove_leftover_baseline() -> None:
+    """A run that stops before its traffic shape is recorded leaves the current setup
+    deployed. The next run could not deploy it ("deployment gpu-baseline already exists"),
+    and the old pod would ask the new broker for a server of its own."""
+    listing = poc.api("GET", "/api/v1/deployments")
+    rows = listing.get("data", listing.get("deployments", [])) if isinstance(listing, dict) else listing
+    if any((row.get("name") if isinstance(row, dict) else row) == poc.BASELINE for row in rows):
+        log("deploy", f"removing {poc.BASELINE}, left deployed by an earlier run that did not finish")
+        poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
 
 
 def deploy_baseline() -> None:
@@ -416,7 +430,12 @@ def replay_mooncake(requests_total: int, input_scale: float, max_output: int, wo
         target = min(max_input, max(8, round(row["input_length"] / input_scale)))
         output = max(1, min(max_output, round(row["output_length"] / output_scale)))
         hash_ids = row.get("hash_ids") or [row["timestamp"]]
-        body = {"model": poc.BASELINE, "stream": False, "temperature": 0, "max_tokens": output}
+        # Streamed, as chat traffic is and as the campaign's measured requests are (its
+        # load profiles stream), so the planner diagnoses the server under the kind of
+        # load its proposal is then measured with. The captured trace also carries a
+        # real time to first token, and a long answer is never a connection that stays
+        # silent until it is done.
+        body = {"model": poc.BASELINE, "stream": True, "stream_options": {"include_usage": True}, "temperature": 0, "max_tokens": output}
         if text is None:
             words: list[str] = []
             for hash_id in hash_ids:
@@ -438,13 +457,16 @@ def replay_mooncake(requests_total: int, input_scale: float, max_output: int, wo
             request.add_header(header, value)
         try:
             with urllib.request.urlopen(request, timeout=600) as response:
-                payload = json.loads(response.read())
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as error:
+                usage, complete = stream_usage(response)
+        except (urllib.error.URLError, OSError, ValueError) as error:
             failures.append(str(getattr(error, "code", "")) or type(error).__name__)
             return 0
         finally:
             progress["done"] = progress.get("done", 0) + 1
-        return int((payload.get("usage") or {}).get("completion_tokens", 0))
+        if not complete:
+            failures.append("stream ended early")
+            return 0
+        return int((usage or {}).get("completion_tokens", 0))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         tokens = sum(pool.map(one, enumerate(rows)))
@@ -457,6 +479,28 @@ def replay_mooncake(requests_total: int, input_scale: float, max_output: int, wo
             "input_scale": round(input_scale, 4), "output_scale": round(output_scale, 4), "max_input_tokens": max_input, "max_output_tokens": max_output, "spread_seconds": spread_seconds,
             "text": {"source": "operator_corpus", "corpus": text.identity, "planned_input_tokens": sent["planned_input_tokens"], "answers": "end where the model ends them, capped at the recorded length"}
             if text else {"source": "generated_words", "answers": "forced to the recorded length (ignore_eos)"}}
+
+
+def stream_usage(lines) -> tuple[dict | None, bool]:
+    """Reads a streamed chat completion to its end. Returns the token usage the server
+    reported, and whether the stream finished with its [DONE] line; a stream cut before
+    that is a failed request, whatever arrived first."""
+    usage, complete = None, False
+    for raw in lines:
+        line = raw.decode(errors="replace").strip() if isinstance(raw, bytes) else raw.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            complete = True
+            break
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(chunk, dict) and chunk.get("usage"):
+            usage = chunk["usage"]
+    return usage, complete
 
 
 def pod_get(pod: str, path: str) -> str:
@@ -784,6 +828,7 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
         fail("--reuse-capture needs the same traffic, corpus, engine, GPU type and current setup as the run that recorded the traffic")
     poc.port_forward()
     poc.reset_previous()  # clears the plan and diagnosis; a reused capture keeps its own
+    remove_leftover_baseline()
     kept = {key: previous.get(key) for key in ("capture_digest", "plan", "diagnosis", "traffic", "planner")} if reuse_capture else {"traffic": None, "capture_digest": None, "planner": None}
     save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings, "laptop_at_start": laptop_load()} | kept)
     log("laptop", f"load average {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs at the start; a campaign wants a quiet laptop")
@@ -792,7 +837,8 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
     # measured again, the copy included if its first window errs: eleven. One more for a
     # server Modal preempts. The dollar cap, not this count, bounds the spend.
     broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=12 if text else 6)
-    log("broker", f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
+    log("broker", f"stand-in servers on the laptop, at most {CANDIDATE_SLOTS + 2} at once; no Modal, nothing is spent" if RUN["stand_in"] == "local" else
+        f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
     try:
         check_broker_reachable()
         if reuse_capture:
@@ -809,6 +855,9 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
             traffic["shape"] = RUN["shape"]
             save({"traffic": traffic})
             plan(planner.finish())
+            # When the planner was asked is part of its answer: a diagnosis read after the
+            # traffic ended can describe an idle server.
+            save({"planner": (state().get("planner") or {}) | {"asked": planner.asked}})
             diagnosis = state().get("planner")
             digest = poc.capture_replay()
             save({"capture_digest": digest})
@@ -844,7 +893,8 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
         ledger = broker.stop()
         (OUTPUT / "broker-ledger.json").parent.mkdir(parents=True, exist_ok=True)
         (OUTPUT / "broker-ledger.json").write_text(json.dumps(ledger, indent=2))
-        log("broker", f"stopped; estimated remote spend ${ledger.get('estimated_usd', 0):.2f} (Modal billing is the authority: modal billing report --for today --show-resources)")
+        log("broker", "stopped; the stand-in servers ran on the laptop, nothing was spent" if RUN["stand_in"] == "local" else
+            f"stopped; estimated remote spend ${ledger.get('estimated_usd', 0):.2f} (Modal billing is the authority: modal billing report --for today --show-resources)")
 
 
 def watch(campaign: str, labels: dict) -> dict:
@@ -929,6 +979,9 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                 warnings.append(f"“{row['label']}” speculates but its runs carry no acceptance counters: a working drafter cannot be told from one that loaded and was ignored")
             elif not any(arm["accepted_tokens"] for arm in own):
                 warnings.append(f"“{row['label']}” drafted tokens and none was accepted")
+    asked = (current.get("planner") or {}).get("asked") or ""
+    if asked.startswith("after the traffic ended"):
+        warnings.append(f"the planner was asked {asked}, so its diagnosis may describe a server that was no longer loaded; its first proposal is not evidence of what it proposes under load")
     ledger = broker.ledger()
     for lease in ledger.get("leases", []):
         if lease.get("reason") == "preempted":
@@ -943,17 +996,19 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "current_setup": {"args": CONTROL[2], "env": MODEL.env, "publisher_args": list(MODEL.publisher_args), "publisher_env": MODEL.publisher_env,
                                  "added_args": list(MODEL.added_args), "added_because": MODEL.added_because, "source": MODEL.source}, "planner": current.get("planner"),
                "runtime_image": VLLM_IMAGE, "engine": models.ENGINE.key,
-               "gpu": "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in") else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
+               "gpu": "stand-in servers on the laptop (no GPU, no model, no Modal)" if settings.get("stand_in") == "local" else "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in")
+                      else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
                "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
                         "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"), "reasoning": REASONING_NOTE},
-               "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
+               "measured_from": "the control plane in a kind cluster on the laptop; the stand-in servers run on the same laptop, so no request leaves it" if settings.get("stand_in") == "local"
+                                else "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "laptop": {"at_start": current.get("laptop_at_start"), "at_end": laptop_load()},
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": ledger}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
     text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
-    lines = [f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup on Modal", ""]
+    lines = [f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup{'' if settings.get('stand_in') == 'local' else ' on Modal'}", ""]
     if settings.get("stand_in"):
         lines += ["STAND-IN SERVERS: no model and no GPU ran. Every speed below is scripted; this run proves the path only.", ""]
     if copy:
@@ -972,8 +1027,10 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
             lines.append(f"   {poc.words(row['state'] or '', row['failure_code'])}")
     lines += [f"Warning: {warning}" for warning in warnings]
     lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal).",
+              "No cost and no latency from this run means anything: the stand-in servers ran on the laptop." if settings.get("stand_in") == "local" else
               f"Costs use Modal's {poc.ACCELERATOR} list price (${GPU_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
-              "Tokens per second count reasoning tokens; requests leave the model's reasoning on. Answers: word overlap on 24 short prompts.",
+              "Tokens per second count reasoning tokens; requests leave the model's reasoning on. Answers: word overlap on 24 short prompts;",
+              "a guard against broken answers, not a check that long answers keep their exact text.",
               f"Full record: {path}"]
     width = max(len(line) for line in lines) + 2
     print("\n╭" + "─" * width + "╮")
@@ -1146,7 +1203,9 @@ def main() -> int:
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
     parser.add_argument("--planner-setups", type=int, choices=(0, 1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text); 0, with real text only, records its plan and measures the speculation setup alone")
     parser.add_argument("--smoke", action="store_true", help="shrink the traffic so the whole path costs a few dollars; the judge keeps its rounds")
-    parser.add_argument("--stand-in", action="store_true", help="CPU stand-in servers instead of GPUs: the same path for cents, and no measurement")
+    parser.add_argument("--stand-in", nargs="?", const="modal", choices=("modal", "local"),
+                        help="stand-in servers instead of GPUs, and no measurement. `--stand-in` runs them as CPU containers on Modal, the same path for cents; "
+                             "`--stand-in local` runs them on this machine, with no Modal at all (everything but the path through Modal)")
     args = parser.parse_args()
     os.chdir(ROOT)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1158,7 +1217,7 @@ def main() -> int:
         up(corpus)
         return 0
     held = (state().get("corpus") or {}).get("digest")
-    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in,
+    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False,
                planner_setups=args.planner_setups if args.planner_setups is not None else (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
     if args.command == "run" and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:

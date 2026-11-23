@@ -90,7 +90,7 @@ def download(model_id: str) -> dict[str, object]:
 # writes two words a step and counts drafted and accepted tokens, so the path that
 # carries speculation evidence is exercised. Nothing it reports is a measurement.
 FAKE_SERVER = r'''
-import json, sys, threading, time
+import json, os, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port, key, model = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 speculating = "--speculative-config" in sys.argv[4:]
@@ -148,6 +148,9 @@ class H(BaseHTTPRequestHandler):
         try:
             usage = {"prompt_tokens": prompt, "completion_tokens": words, "total_tokens": prompt + words}
             time.sleep(STEP)  # the prompt
+            # A rehearsal can ask for a silent wait before the answer, to see what the path
+            # to the server does with a request that sends nothing back for a while.
+            time.sleep(min(float(body.get("stand_in_hold_seconds") or 0), 120.0))
             first = time.monotonic() - started
             if body.get("stream"):
                 self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
@@ -173,7 +176,7 @@ class H(BaseHTTPRequestHandler):
                     count["drafts"] += steps; count["draft_tokens"] += 3 * steps; count["accepted_tokens"] += words - steps
                 observe("request_queue_time_seconds", 0.0); observe("request_prefill_time_seconds", first); observe("time_to_first_token_seconds", first)
                 observe("request_decode_time_seconds", max(0.0, elapsed - first)); observe("e2e_request_latency_seconds", elapsed)
-ThreadingHTTPServer(("0.0.0.0", port), H).serve_forever()
+ThreadingHTTPServer((os.environ.get("STAND_IN_BIND", "0.0.0.0"), port), H).serve_forever()
 '''
 
 

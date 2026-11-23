@@ -6,11 +6,13 @@ allowlist. Modal is stubbed, so nothing runs remotely.
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import time
 import types
 import unittest
+import urllib.request
 from pathlib import Path
 
 
@@ -65,6 +67,51 @@ class AccountingTest(unittest.TestCase):
             self.broker.leases[str(index)] = {"lease_id": str(index), "state": "ready", "requested_at": 1e12}
         code, _ = self.broker.create("pod", modal_gpu.QWEN3_8B.id, ["--served-model-name", modal_gpu.QWEN3_8B.id])
         self.assertEqual(code, 429)
+
+
+class LocalStandInTest(unittest.TestCase):
+    """`--stand-in local`: the broker serves a lease from a stand-in server on this machine,
+    with no Modal call and no spend."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory()
+        self.store, modal_gpu.leases = modal_gpu.leases, broker.LocalStore()
+        self.broker = broker.Broker("token", 1.0, 4, 12, Path(self.dir.name) / "ledger.json", dry=True, local_host="127.0.0.1")
+
+    def tearDown(self) -> None:
+        for call in self.broker.calls.values():
+            call.cancel()
+        modal_gpu.leases = self.store
+        self.dir.cleanup()
+
+    def wait(self, lease_id: str, state: str) -> dict:
+        lease = self.broker.leases[lease_id]
+        for _ in range(150):
+            lease["refreshed_at"] = 0
+            self.broker.tick()
+            if lease["state"] == state:
+                return lease
+            time.sleep(0.1)
+        self.fail(f"the lease never became {state}: {lease}")
+
+    def test_a_lease_is_served_from_this_machine_and_costs_nothing(self) -> None:
+        model = modal_gpu.QWEN3_8B
+        code, created = self.broker.create("pod", model.id, ["--served-model-name", model.id])
+        self.assertEqual(code, 201, created)
+        lease = self.wait(created["lease_id"], "ready")
+        self.assertTrue(lease["url"].startswith("http://127.0.0.1:"), lease["url"])
+        body = {"model": model.id, "stream": True, "stream_options": {"include_usage": True}, "max_tokens": 5, "messages": [{"role": "user", "content": "one two three"}]}
+        request = urllib.request.Request(lease["url"] + "/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
+        request.add_header("Authorization", f"Bearer {created['api_key']}")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            streamed = response.read().decode()
+        self.assertIn('"completion_tokens": 5', streamed)
+        self.assertTrue(streamed.rstrip().endswith("data: [DONE]"), streamed[-80:])
+        self.broker.stop(created["lease_id"], "test")
+        self.assertEqual(self.wait(created["lease_id"], "stopped")["reason"], "released")
+        ledger = self.broker.ledger()
+        self.assertEqual((ledger["estimated_usd"], ledger["rate_usd_per_second"]), (0.0, 0.0))
+        self.assertIn("no Modal", ledger["rate_basis"])
 
 
 class AllowlistTest(unittest.TestCase):

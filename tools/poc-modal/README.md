@@ -147,8 +147,21 @@ measurement, and the result says so in its decision. The record of the first reh
 passed, and the four defects earlier attempts found, is in
 `docs/testing/evidence/poc-modal-stand-in-campaign-2026-11-23.json`.
 
+`--stand-in local` runs the same stand-in servers on the laptop, one process per lease behind
+the same broker and proxy, with no Modal app, no container and no spend. It rehearses
+everything a run does on the laptop and in the cluster (gateway, traffic replay, capture,
+planner call, campaign, AIPerf, judge, fresh servers), at full size if asked, and nothing of
+the path through Modal: no tunnel, no cold start, no preemption. Use it to rehearse the exact
+command of a paid campaign before it is launched, and when Modal is not available.
+
+A stand-in holds its answer back for `stand_in_hold_seconds` (a field of the request body, at
+most 120), to show what the path does with a request that sends nothing for a while. On
+2026-11-23 neither Modal's tunnel (up to 90 s) nor the gateway and router (up to 120 s) cut one;
+the record is in the evidence file above, under `later_checks`.
+
 ```bash
 python3 tools/poc-modal/poc_modal.py run --stand-in --smoke --traffic real-text --engine vllm-0.34.0 --budget-usd 1
+python3 tools/poc-modal/poc_modal.py run --stand-in local --traffic real-text --shape interactive --requests 100 --planner-setups 1 --corpus "$CORPUS" --engine vllm-0.34.0 --budget-usd 1
 python3 tools/poc-modal/poc_modal.py run --smoke --traffic real-text --corpus "$CORPUS" --engine vllm-0.34.0 --budget-usd 5
 ```
 
@@ -285,4 +298,5 @@ between machines, and the 90% upper bound. The 2026-11-20 result is in
   measured then. With `--traffic real-text` the text is the prompt corpus's, the result names
   the corpus by digest, licence and source, and input lengths follow the trace to the nearest
   whole passage.
-- A stand-in run (`--stand-in`) has no numbers that mean anything, and prints no cost per token.
+- A stand-in run (`--stand-in`, `--stand-in local`) has no numbers that mean anything, and prints
+  no cost per token.

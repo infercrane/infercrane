@@ -270,6 +270,13 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(scales["max_output_tokens"], 4096)
         self.assertEqual(poc_modal.shape_scales("interactive", rows)["max_output_tokens"], 1180)
 
+    def test_a_streamed_answer_counts_only_when_it_reaches_its_end(self) -> None:
+        stream = [b'data: {"choices":[{"delta":{"reasoning":"think"}}]}\n', b"\n", b'data: {"choices":[{"delta":{"content":"hi"}}]}\n',
+                  b'data: {"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":7}}\n', b"data: [DONE]\n"]
+        self.assertEqual(poc_modal.stream_usage(stream), ({"prompt_tokens": 40, "completion_tokens": 7}, True))
+        self.assertEqual(poc_modal.stream_usage(stream[:3]), (None, False))  # the server went away mid-answer
+        self.assertEqual(poc_modal.stream_usage([b"data: not json\n", b"data: [DONE]\n"]), (None, True))
+
     def test_the_fresh_servers_decide_the_copy(self) -> None:
         first_only = {"comparison": {"output_token_throughput": {"decision": "improved"}}}
         self.assertEqual(poc_modal.objective_decision(first_only), "improved")
