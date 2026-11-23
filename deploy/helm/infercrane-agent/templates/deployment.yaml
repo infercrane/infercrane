@@ -4,6 +4,11 @@
 {{- if and .Values.executor.enabled (not .Values.executor.allowedImages) }}
 {{- fail "executor.allowedImages must list the image repositories candidates may use" }}
 {{- end }}
+{{- range .Values.executor.tolerations }}
+{{- if or (not (kindIs "map" .)) (not (and .key .operator .effect)) (omit . "key" "operator" "value" "effect") }}
+{{- fail "executor.tolerations entries need key, operator (Exists or Equal) and effect, and take no field other than value" }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,6 +76,9 @@ spec:
             - --worker-key-env=INFERCRANE_WORKER_KEY
             - --gpu-resource={{ .Values.executor.gpuResource }}
             - --gpu-product-label={{ .Values.executor.gpuProductLabel }}
+            {{- with .Values.executor.tolerations }}
+            - {{ printf "--tolerations=%s" (toJson .) | quote }}
+            {{- end }}
             {{- range .Values.executor.allowedImages }}
             - --allow-image={{ . }}
             {{- end }}

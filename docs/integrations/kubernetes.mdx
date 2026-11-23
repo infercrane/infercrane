@@ -67,6 +67,40 @@ export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='prefer'
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
 
+### Tainted GPU nodes
+
+Many clusters taint their GPU nodes, for example `nvidia.com/gpu=present:NoSchedule`, so that only
+GPU workloads land on them. A pod needs a matching toleration to schedule there. Model server pods
+get none by default: on a tainted node pool they stay `Pending` and the deployment never becomes
+ready. Check with `kubectl describe node NODE | grep Taints`, then name the taints to tolerate:
+
+```bash
+export INFERCRANE_KUBERNETES_TOLERATIONS_JSON='[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]'
+```
+
+The value is a JSON array of at most 16 tolerations in the Kubernetes field names:
+
+| Field | Accepted |
+|---|---|
+| `key` | The taint key. Required; a toleration for every taint is refused |
+| `operator` | `Exists` (any value of the key) or `Equal` (exactly `value`). Required |
+| `value` | Only with `Equal` |
+| `effect` | `NoSchedule`, `PreferNoSchedule`, or `NoExecute`. Required |
+
+Anything else, including `tolerationSeconds` and unknown fields, stops the control plane at start
+instead of being dropped. The tolerations are rendered into the pod spec of the `Deployment` or the
+KServe predictor, beside the GPU node selector, so they decide only whether the pod may use a
+tainted node; the node selector still decides which GPU it gets. InferCrane never changes a node's
+taints.
+
+Unset, the manifest has no tolerations and its `infercrane.dev/intent-hash` annotation does not
+include them. Set, the tolerations are part of the pod template and of the intent hash, in one
+order however the setting lists them. The control plane reads the setting at start. Dynamo graphs
+do not receive these tolerations.
+
+The rendering and the refusals are covered by hermetic manifest tests. Scheduling onto a tainted
+node has not been run on a real cluster.
+
 ### AMD Instinct GPUs
 
 For a cluster with AMD's GPU device plugin and node labeller, set

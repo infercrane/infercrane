@@ -3,6 +3,9 @@ package provision_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -310,6 +313,154 @@ func TestKubernetesRequiredArtifactCacheRejectsUnqualifiedCustomRuntime(t *testi
 	spec.Workload = runtimecontract.Workload{Image: "registry.example/runtime@sha256:" + strings.Repeat("b", 64), Command: []string{"serve", "${MODEL}"}, Port: 8000, ReadinessPath: "/health", ShutdownGraceSeconds: 30}
 	if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "qualified only for vLLM and SGLang") {
 		t.Fatalf("required cache accepted an unqualified custom runtime: %v", err)
+	}
+}
+
+// appliedKubernetesObjects starts one replica and returns what the cluster
+// holds afterwards, as decoded JSON.
+func appliedKubernetesObjects(t *testing.T, api string, tolerations []provision.KubernetesToleration) map[string]map[string]any {
+	t.Helper()
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, api)
+	provider.Tolerations = tolerations
+	if _, err := provider.EnsureReplica(context.Background(), testKubernetesSpec()); err != nil {
+		t.Fatal(err)
+	}
+	return fixture.Objects
+}
+
+// kubernetesPodSpec is the pod spec of the applied workload: the Deployment's
+// pod template, or the KServe predictor.
+func kubernetesPodSpec(t *testing.T, objects map[string]map[string]any, api string) map[string]any {
+	t.Helper()
+	for key, object := range objects {
+		spec, _ := object["spec"].(map[string]any)
+		switch {
+		case api == "deployment" && strings.HasPrefix(key, "deployment/"):
+			template, _ := spec["template"].(map[string]any)
+			pod, _ := template["spec"].(map[string]any)
+			return pod
+		case api == "kserve" && strings.HasPrefix(key, "inferenceservice/"):
+			pod, _ := spec["predictor"].(map[string]any)
+			return pod
+		}
+	}
+	t.Fatalf("no %s workload in %#v", api, objects)
+	return nil
+}
+
+// takeIntentHash removes the intent hash annotation from every object and
+// returns it; every object of one replica carries the same one.
+func takeIntentHash(t *testing.T, objects map[string]map[string]any) string {
+	t.Helper()
+	hash := ""
+	for key, object := range objects {
+		metadata, _ := object["metadata"].(map[string]any)
+		annotations, _ := metadata["annotations"].(map[string]any)
+		value, _ := annotations["infercrane.dev/intent-hash"].(string)
+		if !strings.HasPrefix(value, "sha256:") || (hash != "" && value != hash) {
+			t.Fatalf("%s intent hash %q, other objects %q", key, value, hash)
+		}
+		hash = value
+		delete(annotations, "infercrane.dev/intent-hash")
+	}
+	return hash
+}
+
+func TestKubernetesManifestHasNoTolerationsUnlessTheOperatorSetsThem(t *testing.T) {
+	for _, api := range []string{"deployment", "kserve"} {
+		t.Run(api, func(t *testing.T) {
+			unset := appliedKubernetesObjects(t, api, nil)
+			if pod := kubernetesPodSpec(t, unset, api); pod["nodeSelector"] == nil || pod["tolerations"] != nil {
+				t.Fatalf("pod spec without tolerations configured: %#v", pod)
+			}
+			if encoded, _ := jsonMarshalFixtureObjects(unset); strings.Contains(encoded, "toleration") {
+				t.Fatalf("manifest mentions tolerations although none are configured: %s", encoded)
+			}
+			// An empty list is the same intent as no setting: same objects
+			// and the same intent hash.
+			empty := appliedKubernetesObjects(t, api, []provision.KubernetesToleration{})
+			if !reflect.DeepEqual(unset, empty) {
+				t.Fatalf("an empty toleration list changed the manifest:\n%#v\n%#v", unset, empty)
+			}
+		})
+	}
+}
+
+func TestKubernetesTolerationsLetPodsScheduleOntoTaintedGPUNodes(t *testing.T) {
+	gpuTaint := []provision.KubernetesToleration{{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "NoSchedule"}}
+	for _, api := range []string{"deployment", "kserve"} {
+		t.Run(api, func(t *testing.T) {
+			unset := appliedKubernetesObjects(t, api, nil)
+			tolerated := appliedKubernetesObjects(t, api, gpuTaint)
+			pod := kubernetesPodSpec(t, tolerated, api)
+			want := []any{map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}}
+			if !reflect.DeepEqual(pod["tolerations"], want) {
+				t.Fatalf("pod tolerations = %#v, want %#v", pod["tolerations"], want)
+			}
+			// The tolerations are part of the intent, and they are the only
+			// thing that changes in the manifest.
+			if before, after := takeIntentHash(t, unset), takeIntentHash(t, tolerated); before == after {
+				t.Fatalf("intent hash %s did not change with the tolerations", after)
+			}
+			delete(pod, "tolerations")
+			if !reflect.DeepEqual(unset, tolerated) {
+				t.Fatalf("tolerations changed more than the pod's tolerations:\n%#v\n%#v", unset, tolerated)
+			}
+		})
+	}
+}
+
+func TestKubernetesTolerationsRenderInOneOrderWithTheirValue(t *testing.T) {
+	dedicated := provision.KubernetesToleration{Key: "dedicated", Operator: "Equal", Value: "inference", Effect: "NoExecute"}
+	gpu := provision.KubernetesToleration{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "NoSchedule"}
+	first := appliedKubernetesObjects(t, "deployment", []provision.KubernetesToleration{gpu, dedicated})
+	second := appliedKubernetesObjects(t, "deployment", []provision.KubernetesToleration{dedicated, gpu})
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("reordering the setting changed the manifest or its intent hash:\n%#v\n%#v", first, second)
+	}
+	want := []any{
+		map[string]any{"key": "dedicated", "operator": "Equal", "value": "inference", "effect": "NoExecute"},
+		map[string]any{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"},
+	}
+	if got := kubernetesPodSpec(t, first, "deployment")["tolerations"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("pod tolerations = %#v, want %#v", got, want)
+	}
+}
+
+func TestKubernetesRefusesInvalidTolerationsBeforeAnythingIsApplied(t *testing.T) {
+	valid := provision.KubernetesToleration{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "NoSchedule"}
+	tooMany := make([]provision.KubernetesToleration, provision.MaxKubernetesTolerations+1)
+	for index := range tooMany {
+		tooMany[index] = provision.KubernetesToleration{Key: fmt.Sprintf("pool-%d", index), Operator: "Exists", Effect: "NoSchedule"}
+	}
+	for name, tolerations := range map[string][]provision.KubernetesToleration{
+		"every taint":           {{Operator: "Exists", Effect: "NoSchedule"}},
+		"no operator":           {{Key: "nvidia.com/gpu", Effect: "NoSchedule"}},
+		"every effect":          {{Key: "nvidia.com/gpu", Operator: "Exists"}},
+		"unknown operator":      {{Key: "nvidia.com/gpu", Operator: "Gt", Value: "1", Effect: "NoSchedule"}},
+		"unknown effect":        {{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "noschedule"}},
+		"Exists with a value":   {{Key: "nvidia.com/gpu", Operator: "Exists", Value: "true", Effect: "NoSchedule"}},
+		"invalid value":         {{Key: "dedicated", Operator: "Equal", Value: "has space", Effect: "NoSchedule"}},
+		"uppercase key prefix":  {{Key: "NVIDIA.com/gpu", Operator: "Exists", Effect: "NoSchedule"}},
+		"key without a name":    {{Key: "nvidia.com/", Operator: "Exists", Effect: "NoSchedule"}},
+		"key with JSON in it":   {{Key: `gpu","effect":"NoExecute`, Operator: "Exists", Effect: "NoSchedule"}},
+		"key over 63":           {{Key: strings.Repeat("a", 64), Operator: "Exists", Effect: "NoSchedule"}},
+		"repeated":              {valid, valid},
+		"more than the maximum": tooMany,
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture := providerfixture.NewKubernetesCLI()
+			provider := testKubernetesProvider(fixture, "deployment")
+			provider.Tolerations = tolerations
+			_, err := provider.EnsureReplica(context.Background(), testKubernetesSpec())
+			if !errors.Is(err, provision.ErrInvalidReplicaSpec) || fixture.DryRuns != 0 || fixture.ApplyCalls != 0 || len(fixture.Objects) != 0 {
+				t.Fatalf("err=%v dry=%d apply=%d objects=%#v", err, fixture.DryRuns, fixture.ApplyCalls, fixture.Objects)
+			}
+			if err = provider.Check(context.Background()); err == nil {
+				t.Fatal("the provider check accepted the tolerations")
+			}
+		})
 	}
 }
 

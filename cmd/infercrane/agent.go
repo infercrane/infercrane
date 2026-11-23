@@ -98,6 +98,7 @@ type agentFlags struct {
 	workerSecret          string
 	workerKeyEnv          string
 	gpuResource, gpuLabel string
+	tolerations           []provision.KubernetesToleration
 	allowImages           stringList
 	allowAccelerators     stringList
 	evalSets              stringList
@@ -105,6 +106,7 @@ type agentFlags struct {
 
 func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 	var flags agentFlags
+	var tolerations string
 	fs := newFlagSet(name)
 	fs.Var(&flags.servers, "server", "a model server URL on this machine or network (repeatable); default: look on the usual local ports")
 	fs.StringVar(&flags.tokenEnv, "token-env", "", "environment variable holding the API key of the --server servers, sent to them as a bearer token")
@@ -128,6 +130,7 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 		fs.StringVar(&flags.workerKeyEnv, "worker-key-env", "INFERCRANE_WORKER_KEY", "environment variable holding that Secret's value")
 		fs.StringVar(&flags.gpuResource, "gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
 		fs.StringVar(&flags.gpuLabel, "gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
+		fs.StringVar(&tolerations, "tolerations", "", `taints test setup pods tolerate, as JSON: [{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]`)
 		fs.Var(&flags.allowImages, "allow-image", "image repository test setups may use (repeatable); nothing else runs")
 		fs.Var(&flags.allowAccelerators, "allow-accelerator", "accelerator test setups may request (repeatable); default any")
 		fs.Var(&flags.evalSets, "eval-set", "a local eval set NAME=PATH for the answer check (repeatable)")
@@ -153,7 +156,28 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 	if flags.serve != "" && flags.once {
 		return agentFlags{}, errors.New("--serve runs until stopped; it cannot be combined with --once")
 	}
+	// Tolerations are checked here, before the agent contacts anything, so a
+	// setting the provider would refuse never reaches a manifest.
+	parsed, err := provision.ParseKubernetesTolerations(tolerations)
+	if err != nil {
+		return agentFlags{}, fmt.Errorf("--tolerations: %w", err)
+	}
+	if len(parsed) > 0 && flags.executor == "" {
+		return agentFlags{}, errors.New("--tolerations applies to test setup pods; it needs --executor kubernetes")
+	}
+	flags.tolerations = parsed
 	return flags, nil
+}
+
+// kubernetesProvider is the namespaced provider test setups start with: one
+// Deployment and one Service per setup, no model cache, and the operator's
+// tolerations for tainted GPU nodes.
+func (f agentFlags) kubernetesProvider(contextName, secretName, secretKey string) provision.Kubernetes {
+	return provision.Kubernetes{
+		Context: contextName, Namespace: f.kubeNS, WorkloadAPI: "deployment", ServiceAccount: f.runtimeSA,
+		WorkerSecretName: secretName, WorkerSecretKey: secretKey, GPUResource: f.gpuResource, GPUProductLabel: f.gpuLabel,
+		ArtifactCachePolicy: "disabled", Tolerations: f.tolerations,
+	}
 }
 
 // candidateExecutor builds the in-cluster executor from flags. It refuses to
@@ -206,11 +230,7 @@ func (f agentFlags) candidateExecutor(ctx context.Context) (agent.CandidateExecu
 		evalSets[name] = set
 	}
 	executor := agent.KubernetesExecutor{
-		Provider: provision.Kubernetes{
-			Context: contextName, Namespace: f.kubeNS, WorkloadAPI: "deployment", ServiceAccount: f.runtimeSA,
-			WorkerSecretName: secretName, WorkerSecretKey: secretKey, GPUResource: f.gpuResource, GPUProductLabel: f.gpuLabel,
-			ArtifactCachePolicy: "disabled",
-		},
+		Provider:  f.kubernetesProvider(contextName, secretName, secretKey),
 		WorkerKey: workerKey, AllowedImages: f.allowImages, AllowedAccelerators: f.allowAccelerators, EvalSets: evalSets,
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
