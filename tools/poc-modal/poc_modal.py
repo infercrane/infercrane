@@ -589,7 +589,9 @@ def plan(proposal: dict) -> list[dict]:
     # A smoke run measures one setup next to the current setup and its copy: with real
     # text the speculation setup, which is the path a paid campaign most needs proven.
     room = 1 if RUN["smoke"] else CANDIDATE_SLOTS
-    slots = max(1, min(RUN["planner_setups"], room))
+    # --planner-setups 0 records the planner's plan and measures none of it beyond the
+    # speculation setup: a campaign of the current setup, that setup and the copy.
+    slots = max(0 if real_text else 1, min(RUN["planner_setups"], room))
     measured = runnable[:slots]
     documented = None
     if real_text and MODEL.publisher_speculation and not models.speculates(CONTROL[2]):
@@ -602,7 +604,7 @@ def plan(proposal: dict) -> list[dict]:
                 measured.append(own)
     for row in runnable:
         if row not in measured:
-            row["skipped"] = ("a smoke run measures one setup next to the current setup and its copy, and with real text that is the speculation setup" if RUN["smoke"] and documented else
+            row["skipped"] = ("this run measures one setup next to the current setup and its copy, and with real text that is the speculation setup" if documented and (RUN["smoke"] or slots == 0) else
                               f"only the planner's first {len(measured)} setup{'s fit' if len(measured) != 1 else ' fits'} next to the current setup and its copy")
             log("plan", f"skip “{row['label']}”: {row['skipped']}")
     chosen = [CONTROL]
@@ -1135,7 +1137,7 @@ def main() -> int:
     parser.add_argument("--requests-at-once", type=int, choices=sorted(LOAD_PROFILES), default=32, help="the load every measured run of the campaign holds (its benchmark profile's concurrency)")
     parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
-    parser.add_argument("--planner-setups", type=int, choices=(1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text)")
+    parser.add_argument("--planner-setups", type=int, choices=(0, 1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text); 0, with real text only, records its plan and measures the speculation setup alone")
     parser.add_argument("--smoke", action="store_true", help="shrink the traffic so the whole path costs a few dollars; the judge keeps its rounds")
     parser.add_argument("--stand-in", action="store_true", help="CPU stand-in servers instead of GPUs: the same path for cents, and no measurement")
     args = parser.parse_args()
@@ -1149,7 +1151,8 @@ def main() -> int:
         up(corpus)
         return 0
     held = (state().get("corpus") or {}).get("digest")
-    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in, planner_setups=args.planner_setups or (2 if args.traffic == "real-text" else 1),
+    RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in,
+               planner_setups=args.planner_setups if args.planner_setups is not None else (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
     if args.command == "run" and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:
         fail("the control plane holds another prompt corpus than the rehearsal one; name it with --corpus")

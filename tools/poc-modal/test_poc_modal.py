@@ -109,6 +109,15 @@ class PlanTest(unittest.TestCase):
         poc_modal.plan(proposal(setup("kv", ["--kv-cache-dtype", "fp8"], "FP8 KV cache")))
         self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], poc_modal.DOCUMENTED_LABEL, poc_modal.COPY[0]])
 
+    def test_planner_setups_zero_records_the_plan_and_measures_the_speculation_setup_alone(self) -> None:
+        poc_modal.RUN.update(traffic="real-text", planner_setups=0)
+        record = poc_modal.plan(proposal(setup("chunks", ["--max-num-batched-tokens", "16384"], "Bigger prompt chunks"), setup("spec", SPECULATION, "Speculation")))
+        self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], "Speculation", poc_modal.COPY[0]])
+        self.assertIn("speculation setup", {row["label"]: row["skipped"] for row in record}["Bigger prompt chunks"])
+        self.assertEqual(self.saved["planner"]["documented_speculation"]["planner_rank"], 2)
+        poc_modal.plan(proposal(setup("chunks", ["--max-num-batched-tokens", "16384"], "Bigger prompt chunks")))
+        self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], poc_modal.DOCUMENTED_LABEL, poc_modal.COPY[0]])
+
     def test_a_current_setup_that_speculates_needs_no_documented_arm(self) -> None:
         poc_modal.configure("vllm-0.34.0", "H100", "publisher-speculation")
         poc_modal.RUN.update(traffic="real-text", planner_setups=2)
