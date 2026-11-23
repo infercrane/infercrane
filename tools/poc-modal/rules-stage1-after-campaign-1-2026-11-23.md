@@ -176,6 +176,22 @@ setup on each cell next to the server.
   - "This GPU can run it" means the argument check passed. A setup no server has started (for
     example speculation with an FP8 KV cache) is reported as not yet started anywhere.
 
+## Added after two cell checks had answered and one had twice not started
+
+Added 2026-11-23; the commit's timestamp is the record. Known when this was added: the answers
+of the first two cell checks (both 128 cells with the documented speculation option as the
+current setup). The third check, `short/128` with the publisher's command, had been started
+twice and never reached the planner: the first time every host offered had another NVIDIA driver
+than the one the run named, the second time the engine ran into its own 600-second startup limit
+while the weights loaded slowly. No answer of that check or of the fourth exists.
+
+- **A check that never reached the planner may be started again, more than once.** The limit of
+  one rerun stays for a check that asked, or that sent traffic and then failed to ask: there an
+  answer or a partial reading could tempt a second try. A server that never served shows
+  nothing. Every attempt is listed with why it ended.
+- **The cell checks name no NVIDIA driver from here on.** They measure nothing; the row says
+  which driver the host had.
+
 ## Two product findings behind these changes (not fixed here)
 
 - The planner decides between its low-load and its loaded plans from one latest reading of
