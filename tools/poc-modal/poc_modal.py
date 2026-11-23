@@ -375,7 +375,10 @@ def deploy_baseline() -> None:
     path.write_text(json.dumps(spec, indent=2))
     digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
     log("deploy", f"current setup: {MODEL_ID} on {ENGINE_VERSION} ({' '.join(CONTROL[2])}), one {server_kind()} ({poc.BASELINE}); first start loads the image and weights")
-    poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}", "--wait", capture=False)
+    # The key names this run. A key of the spec alone made a second run in the same cluster
+    # a replay of the first run's deploy, after that run had removed the deployment: nothing
+    # was deployed and every replayed request got a 404.
+    poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}-{state()['run_id']}", "--wait", capture=False)
 
 
 def replay_mooncake(requests_total: int, input_scale: float, max_output: int, workers: int, progress: dict, max_input: int = MAX_INPUT_TOKENS,
