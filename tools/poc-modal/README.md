@@ -173,7 +173,7 @@ setup source, the planner's diagnosis and every setup it chose or skipped, the c
 and the broker's ledger.
 
 Before a paid run, check that the GPU side can serve the pinned model with its publisher's
-command. One H100 for at most 25 minutes; about 6 minutes and $0.45 when it serves:
+command. One H100 for at most 18 minutes ($1.30); about 6 minutes and $0.45 when it serves:
 
 ```bash
 uv run --no-project --with modal==1.6.4 modal run tools/poc-modal/modal_gpu.py::main --action check --model Qwen/Qwen3.8-27B-FP8

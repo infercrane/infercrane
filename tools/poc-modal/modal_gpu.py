@@ -315,7 +315,8 @@ def serve_dry(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
     return _serve(lease_id, args, api_key, model, dry=True)
 
 
-CHECK_SECONDS = 25 * 60
+# The server has STARTUP_SECONDS to come up and the requests take about a minute.
+CHECK_SECONDS = 18 * 60
 # Families of vLLM's /metrics the control plane's engine scrape reads (docs/features/telemetry.md).
 ENGINE_FAMILIES = ("vllm:num_requests_running", "vllm:num_requests_waiting", "vllm:kv_cache_usage_perc", "vllm:request_queue_time_seconds",
                    "vllm:request_prefill_time_seconds", "vllm:request_decode_time_seconds", "vllm:time_to_first_token_seconds",
@@ -418,7 +419,7 @@ def check_gpu(model_id: str, setup: str = "current") -> dict:
             process.kill()
     server_log = log_path.read_text(errors="replace")
     lines = [line for line in server_log.splitlines() if "it/s]" not in line and "s/it]" not in line]  # no progress bars
-    words = ("kv cache", "maximum concurrency", "deepgemm", "deep_gemm", "loading weights took", "model loading took", "torch.compile", "error", "rust", "frontend", "panic", "init engine")
+    words = ("kv cache", "maximum concurrency", "deepgemm", "deep_gemm", "loading weights took", "model loading took", "torch.compile", "error", "rust", "frontend", "panic", "init engine", "specul", "mtp", "draft", "max_num_seqs", "recurrent")
     result["log_lines"] = [line[-300:] for line in lines if any(word in line.lower() for word in words)][-60:]
     if result.get("error"):
         result["log_tail"] = "\n".join(line[-300:] for line in lines[-60:])
