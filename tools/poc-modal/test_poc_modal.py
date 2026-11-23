@@ -124,13 +124,13 @@ class EngineTest(unittest.TestCase):
     def tearDown(self) -> None:
         poc_modal.configure("vllm-0.22.1", "H100")
 
-    def test_the_newest_engine_serves_the_publishers_command_as_published(self) -> None:
+    def test_the_newest_engine_uses_the_publishers_environment_and_the_limit_its_check_found(self) -> None:
         model = models.QWEN38_27B_FP8
         poc_modal.configure("vllm-0.22.1", "H100")
         self.assertEqual((model.current_args[-2:], model.env, model.max_num_seqs), (["--max-num-seqs", "512"], {}, 818))
         self.assertEqual(poc_modal.ENGINE_VERSION, "vllm-openai-0.22.1-953d3a06")
         poc_modal.configure("vllm-0.34.0", "H200")
-        self.assertEqual((model.current_args, model.env, model.max_num_seqs), (list(model.publisher_args), model.publisher_env, None))
+        self.assertEqual((model.current_args, model.env, model.max_num_seqs), ([*model.publisher_args, "--max-num-seqs", "512"], model.publisher_env, 904))
         self.assertEqual((poc_modal.ENGINE_VERSION, poc_modal.poc.ACCELERATOR, poc_modal.poc.ACCELERATOR_RESOURCE), ("vllm-openai-0.34.0-20fdb089", "H200", "infercrane.dev/modal-h200-lease"))
         self.assertEqual((os.environ[models.ENGINE_VARIABLE], os.environ[models.ACCELERATOR_VARIABLE]), ("vllm-0.34.0", "H200"))
         self.assertAlmostEqual(poc_modal.GPU_HOURLY_USD, 4.54, places=2)

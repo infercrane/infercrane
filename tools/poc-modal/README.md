@@ -108,8 +108,11 @@ campaign holds, through the product's built-in benchmark profiles; there is none
 
 `--engine vllm-0.34.0` serves every setup with vLLM 0.34.0, the newest release on 2026-11-23,
 pinned by digest in `models.py`; the default stays 0.22.1, the version the product pins. On
-0.34.0 the current setup is the publisher's command and environment as published, with nothing
-added. `--gpu H200` runs every setup on an H200 instead of an H100. The judge's allowance for
+0.34.0 the publisher's Rust frontend starts, so the environment is the publisher's
+(`VLLM_USE_RUST_FRONTEND=1`). Its command as published still does not start on one H100
+(2026-11-23 check): vLLM refuses its default of 1,024 requests at once against 904
+recurrent-state cache blocks, so the current setup adds `--max-num-seqs 512` there too.
+`--gpu H200` runs every setup on an H200 instead of an H100. The judge's allowance for
 the difference between two machines was measured on H100s only. Check a new combination on
 one GPU before paying for a campaign:
 

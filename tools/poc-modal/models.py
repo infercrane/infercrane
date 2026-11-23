@@ -167,9 +167,16 @@ QWEN38_27B_FP8 = Model("Qwen/Qwen3.8-27B-FP8", "c3a462cc3d38cf351f3b26cbd763469e
                                added_because=("vLLM 0.22.1 does not start the publisher's command on one H100: max_num_seqs 1024 exceeds the 818 recurrent-state cache blocks, "
                                               "and vLLM asks for at most 818. Its Rust frontend (VLLM_USE_RUST_FRONTEND=1) exited at startup, so the Python frontend serves."),
                                max_num_seqs=818, checked="2026-11-21"),
-                           # The publisher's command and environment as published. Not yet
-                           # checked on a GPU: run `modal_gpu.py::main --action check` first.
-                           "vllm-0.34.0": EngineSetup(env={"VLLM_USE_RUST_FRONTEND": "1"}),
+                           # vLLM 0.34.0 starts the publisher's Rust frontend, so the environment
+                           # is the publisher's. Its command as published still does not start on
+                           # one H100 (2026-11-23 check): "max_num_seqs (1024) exceeds available
+                           # Mamba cache blocks (904) ... lower max_num_seqs to at most 904 or
+                           # increase gpu_memory_utilization". The same 512 as on 0.22.1 is added.
+                           "vllm-0.34.0": EngineSetup(
+                               env={"VLLM_USE_RUST_FRONTEND": "1"}, added_args=("--max-num-seqs", "512"),
+                               added_because=("vLLM 0.34.0 does not start the publisher's command on one H100: max_num_seqs 1024 exceeds the 904 recurrent-state (Mamba) cache blocks, "
+                                              "and vLLM asks for at most 904. A campaign holds at most 32 requests at once, so 512 changes nothing it measures."),
+                               max_num_seqs=904),
                        },
                        # The recipe page's own line: "Add --speculative-config
                        # '{"method":"mtp","num_speculative_tokens":3}' for MTP." It also documents

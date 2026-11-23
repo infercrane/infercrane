@@ -29,11 +29,13 @@ A campaign that keeps the current setup is a result and is reported like any oth
 - **Current setup:** the publisher's command as published on
   `recipes.vllm.ai/Qwen/Qwen3.8-27B` for one H100 in FP8, with its environment
   (`VLLM_USE_RUST_FRONTEND=1`):
-  `vllm serve <weights> --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3 --mm-encoder-tp-mode data`.
-  If the serving check shows this does not start on one H100 with vLLM 0.34.0, the smallest
-  change vLLM's own error asks for is added, recorded in `models.py` with the reason, and
-  this file is replaced before any campaign.
-- **Documented baseline:** that command plus
+  `vllm serve <weights> --tensor-parallel-size 1 --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3 --mm-encoder-tp-mode data --max-num-seqs 512`.
+  The last argument is not the publisher's. The serving check of 2026-11-23 showed the
+  command as published does not start on one H100 with vLLM 0.34.0: "max_num_seqs (1024)
+  exceeds available Mamba cache blocks (904) ... lower max_num_seqs to at most 904". A
+  campaign holds at most 32 requests at once, so 512 changes nothing it measures; it is the
+  same value the 0.22.1 run used.
+- **Documented baseline:** that command, with the same `--max-num-seqs 512`, plus
   `--speculative-config '{"method":"mtp","num_speculative_tokens":3}'`, the line on the same
   page. It is a measured setup in every campaign.
 - **Setups to try:** whatever `infercrane optimize propose --diagnosis-endpoint

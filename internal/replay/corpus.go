@@ -222,23 +222,25 @@ func (t AIPerfTrace) WithPromptCorpus(corpus *PromptCorpus) (AIPerfTrace, error)
 			tokens := 0
 			for {
 				room := limit - planned - tokens
+				// Whole passages only: take one when that lands nearer the
+				// limit than stopping here.
 				next, found := nextPassage(corpus.passages, cursor, func(passage corpusPassage) bool {
-					question := passage.Questions[0].Tokens
 					free := room
 					if last {
-						free -= question
+						free -= passage.Questions[0].Tokens
 					}
-					// Whole passages only: take one when that lands nearer
-					// the limit than stopping here.
-					if free >= (passage.Tokens+1)/2 {
-						return true
-					}
-					// A request's first passage goes in its first block
-					// whenever the request has room for it, so a leading block
-					// other requests share is not left empty by a passage
-					// longer than a block.
-					return planned+tokens == 0 && !last && passage.Tokens+question <= target
+					return free >= (passage.Tokens+1)/2
 				})
+				if !found && planned+tokens == 0 && !last {
+					// No passage near the cursor is that short. A request's
+					// first passage then goes in its first block whenever the
+					// request has room for it, so a leading block other
+					// requests share is not left empty by passages longer
+					// than a block.
+					next, found = nextPassage(corpus.passages, cursor, func(passage corpusPassage) bool {
+						return passage.Tokens+passage.Questions[0].Tokens <= target
+					})
+				}
 				if !found {
 					break
 				}
