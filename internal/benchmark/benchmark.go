@@ -225,7 +225,7 @@ func run(ctx context.Context, cfg Config, commands commandRunner) (Result, error
 	result.ProfileRuns = len(records)
 	result.Confidence = profileConfidence(records, cfg)
 	if cfg.ServerMetrics {
-		result.ServerMetrics = readServerMetrics(dir)
+		result.ServerMetrics = readServerMetrics(dir, prefix)
 	}
 	result.Tool, result.ToolVersion, result.Command = "aiperf", version, command
 	return result, nil

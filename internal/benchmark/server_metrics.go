@@ -12,9 +12,13 @@ import (
 )
 
 const (
-	serverMetricsExportName  = "server_metrics_export.json"
-	maxServerMetricsBytes    = 16 << 20
-	maxServerMetricSummaries = 32
+	// AIPerf names its server-metrics export after --profile-export-prefix
+	// (<prefix>_server_metrics.json) and uses serverMetricsExportName only
+	// when no prefix is set.
+	serverMetricsExportName   = "server_metrics_export.json"
+	serverMetricsExportSuffix = "_server_metrics.json"
+	maxServerMetricsBytes     = 16 << 20
+	maxServerMetricSummaries  = 32
 )
 
 // serverMetricKeywords select the runtime signals that explain a serving
@@ -41,10 +45,10 @@ type serverMetricsExport struct {
 // readServerMetrics summarizes the export AIPerf writes when server-metrics
 // collection is on. It never fails the benchmark: the request records are the
 // measurement, and server metrics are supporting evidence.
-func readServerMetrics(directory string) *ServerMetrics {
+func readServerMetrics(directory, prefix string) *ServerMetrics {
 	var paths []string
 	_ = filepath.WalkDir(directory, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && entry.Name() == serverMetricsExportName {
+		if err == nil && !entry.IsDir() && (entry.Name() == prefix+serverMetricsExportSuffix || entry.Name() == serverMetricsExportName) {
 			paths = append(paths, path)
 		}
 		return nil
