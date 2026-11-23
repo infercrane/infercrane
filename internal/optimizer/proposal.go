@@ -515,8 +515,14 @@ func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 		if qualificationRank(a.CompatibilityState) != qualificationRank(b.CompatibilityState) {
 			return qualificationRank(a.CompatibilityState) < qualificationRank(b.CompatibilityState)
 		}
+		if adapterRank(a, request) != adapterRank(b, request) {
+			return adapterRank(a, request) < adapterRank(b, request)
+		}
 		if artifactRank(a) != artifactRank(b) {
 			return artifactRank(a) < artifactRank(b)
+		}
+		if a.Deployment.Provider.Adapter != b.Deployment.Provider.Adapter {
+			return a.Deployment.Provider.Adapter < b.Deployment.Provider.Adapter
 		}
 		return a.ID < b.ID
 	})
@@ -818,8 +824,14 @@ func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
 		if qualificationRank(proposal.Candidates[i].CompatibilityState) != qualificationRank(proposal.Candidates[j].CompatibilityState) {
 			return qualificationRank(proposal.Candidates[i].CompatibilityState) < qualificationRank(proposal.Candidates[j].CompatibilityState)
 		}
+		if adapterRank(proposal.Candidates[i], request) != adapterRank(proposal.Candidates[j], request) {
+			return adapterRank(proposal.Candidates[i], request) < adapterRank(proposal.Candidates[j], request)
+		}
 		if artifactRank(proposal.Candidates[i]) != artifactRank(proposal.Candidates[j]) {
 			return artifactRank(proposal.Candidates[i]) < artifactRank(proposal.Candidates[j])
+		}
+		if proposal.Candidates[i].Deployment.Provider.Adapter != proposal.Candidates[j].Deployment.Provider.Adapter {
+			return proposal.Candidates[i].Deployment.Provider.Adapter < proposal.Candidates[j].Deployment.Provider.Adapter
 		}
 		return proposal.Candidates[i].ID < proposal.Candidates[j].ID
 	})
@@ -1342,6 +1354,27 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// adapterRank puts a candidate on the adapter the request names ahead of
+// candidates on another adapter of the same cloud. A provider such as
+// "kubernetes" names both a cloud and its plain adapter, and the catalog also
+// offers that cloud through the Dynamo serving graph. With equal evidence the
+// order between the two used to fall to their content hashes, which change
+// with the workload profile. The first candidate is the starting setup a
+// diagnosis plans from, so the profile decided whether engine-flag techniques
+// became setups or were all refused for a serving graph nobody asked for.
+//
+// A provider that names only a cloud, such as "runpod", names no adapter. Its
+// adapters are then taken in name order after the artifact rank, so the
+// starting setup is still the same for every profile. Neither rule reads what
+// a diagnosed endpoint actually runs: the request says which kind of server
+// the plan starts from.
+func adapterRank(candidate Candidate, request Request) int {
+	if candidate.Deployment.Provider.Adapter == request.Provider {
+		return 0
+	}
+	return 1
 }
 
 func qualificationRank(state string) int {
