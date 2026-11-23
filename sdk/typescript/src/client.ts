@@ -79,7 +79,7 @@ class Transport implements ApiTransport {
       const headers: Record<string, string> = {
         Accept: "application/json",
         Authorization: `Bearer ${this.apiKey}`,
-        "User-Agent": "infercrane-typescript/1.0.0",
+        "User-Agent": "infercrane-typescript/2.0.0",
       };
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
       if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
@@ -350,7 +350,7 @@ export class InferCrane {
         Accept: "text/event-stream",
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "User-Agent": "infercrane-typescript/1.0.0",
+        "User-Agent": "infercrane-typescript/2.0.0",
       },
       body: JSON.stringify({ model: deployment, messages, stream: true, ...options.parameters }),
     };

@@ -1,0 +1,35 @@
+# Vulnerabilities the release image scan accepts. Each entry is scoped to one package and one
+# advisory that has no fixed build we can install, with the reason it does not apply. Remove an
+# entry when a fixed build ships. Any new critical finding, or one with a fix available, still fails the
+# release.
+ignore:
+  # openssh-client: SkyPilot reaches the clusters it launches over SSH, so the client must stay.
+  - vulnerability: CVE-2026-60002
+    package:
+      name: openssh-client
+      type: deb
+  # libcurl3t64-gnutls: required by git, which SkyPilot imports through GitPython. Only git's
+  # HTTPS remote helpers load it; the control plane never fetches git remotes.
+  - vulnerability: CVE-2026-9079
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-19931
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-11856
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-92388
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-86414
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-10536
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-18924
+    package: {name: libcurl3t64-gnutls, type: deb}
+  - vulnerability: CVE-2026-8926
+    package: {name: libcurl3t64-gnutls, type: deb}
+  # golang.org/x/net in the upstream kubectl binary: an HTTP/2 server flow-control bug. The image
+  # runs kubectl only as a client, never as a server, and kubectl v1.37.2 is the newest release.
+  - vulnerability: GO-2026-6612
+    package:
+      name: golang.org/x/net
+      type: go-module
+      location: /usr/local/bin/kubectl

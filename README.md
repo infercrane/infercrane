@@ -86,17 +86,17 @@ or browse the compact [benchmark index](BENCHMARKS.md).
 
 ## Install
 
-Install the `v1.0.0-rc.1` public beta CLI with Homebrew or use a matching release artifact:
+Install the `v2.0.0` CLI with Homebrew or use a matching release artifact:
 
 ```bash
 brew install infercrane/tap/infercrane
 python -m pip install \
-  'https://github.com/infercrane/infercrane/releases/download/v1.0.0-rc.1/infercrane-1.0.0rc1-py3-none-any.whl'
-npm install '@infercrane/sdk@1.0.0-rc.1'
+  'https://github.com/infercrane/infercrane/releases/download/v2.0.0/infercrane-2.0.0-py3-none-any.whl'
+npm install '@infercrane/sdk@2.0.0'
 ```
 
 Release archives and Terraform provider binaries are available from the
-[`v1.0.0-rc.1` prerelease](https://github.com/infercrane/infercrane/releases/tag/v1.0.0-rc.1).
+[`v2.0.0` release](https://github.com/infercrane/infercrane/releases/tag/v2.0.0).
 To run the complete GPU-free product proof without creating cloud resources:
 
 ```bash
@@ -109,7 +109,7 @@ The proof connects an OpenAI-compatible worker, sends and inspects a request, cr
 candidate, records a deterministic Release Guard rejection, verifies that production traffic did
 not move, and removes its disposable stack.
 
-`main` contains work scheduled for the next prerelease. The hosted documentation follows `main`;
+`main` contains work scheduled for the next release. The hosted documentation follows `main`;
 use the release notes and assets together when you need a versioned installation.
 
 ## Why InferCrane
@@ -321,7 +321,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
 | OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
-| Python and TypeScript SDKs | Public beta release artifacts: the Python wheel attached to `v1.0.0-rc.1` and `@infercrane/sdk@1.0.0-rc.1`. Generated from the checked OpenAPI contract. |
+| Python and TypeScript SDKs | Release artifacts: the Python wheel attached to `v2.0.0` and `@infercrane/sdk@2.0.0`. Generated from the checked OpenAPI contract. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
 | Browser console | Company-operated service for Model APIs, BYOC planning, optimization campaigns, usage, access, and workspace-scoped sandboxes. Its source is not part of the Apache-2.0 core. |
@@ -329,9 +329,8 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 
 ## Qualification status
 
-InferCrane `v1.0.0-rc.1` is the first public beta. The stable `v1.0.0` release will promote the exact
-qualified product contract after the prerelease cycle; no earlier development tag should be treated
-as a supported public release.
+InferCrane `v2.0.0` is the first stable release and the supported line. The `v1.0.0-rc.*` tags were
+public betas; no earlier development tag should be treated as a supported public release.
 
 - Local race, PostgreSQL, fault-injection, Docker, Kind, KWOK, package, migration, security, and
   documentation gates are automated.
