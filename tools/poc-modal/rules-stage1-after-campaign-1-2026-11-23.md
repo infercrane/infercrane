@@ -83,6 +83,20 @@ launch its exact command is rehearsed at full size on stand-in servers. Whether 
 and when, is decided after campaign 1's result and from what the Modal workspace's spend limit
 leaves.
 
+## Added after campaign 1 and the first planner-only check, before campaign 2
+
+Added 2026-11-23; the commit's timestamp is the record. Campaign 1's result and the first
+planner-only check's answer were known when this was added. Nothing above changes.
+
+- **Campaign 2 sets no limit on time to first token.** In campaign 1 the confirmed setup was
+  slower to its first token at p95, and the product's judge has no guard on that for a throughput
+  objective. A limit can be set on a campaign. None is set for campaign 2: no limit that a
+  customer stated exists for this traffic, and one chosen now would be fitted to campaign 1's
+  numbers. Time to first token is reported for both windows next to the result, with the judge's
+  word for each, as for campaign 1.
+- **What "answers matched" means is stated with every result**: the mean of 24 word-overlap
+  scores on short prompts, not a comparison of exact text.
+
 ## Two product findings behind these changes (not fixed here)
 
 - The planner decides between its low-load and its loaded plans from one latest reading of
