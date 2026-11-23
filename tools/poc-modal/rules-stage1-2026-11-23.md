@@ -19,6 +19,36 @@ reasoning (fixed after it, commit `f3b8e006`). The changes, and why:
 - **What output tokens are, and what the answer check is**, are now stated (below), after the
   smoke showed both needed saying.
 
+**Changed again on 2026-11-23, after the first start of campaign 1 failed and before any
+campaign result existed** (the commit's timestamp is the record of when). Campaign 1 was started
+at 07:12 CET and ended at 07:19:57 in its traffic step, the step before the planner is asked.
+Modal stopped the server because the workspace had reached its spend limit
+(`ResourceExhaustedError: Workspace ... has exceeded its spend limit`); the 53 replayed requests
+in flight failed at once, and the stop rule below ended the run. No diagnosis, no plan, no
+campaign and no measurement existed, so this is an edit of this file and not a new one. The
+failed start was not caused by anything in these rules, and none of the changes below would have
+prevented it. They were found while reading it and while rehearsing the relaunch:
+
+- **The replayed traffic is streamed.** It was sent as buffered requests; the campaign measures
+  with streamed ones (the product's load profiles stream, as chat traffic does). The planner
+  should diagnose the server under the kind of load its proposal is then measured with. A stream
+  that ends before its end marker counts as a failed request. What was known when this changed:
+  in the H100 smoke, on buffered traffic with answers capped at 128 tokens, the planner's
+  diagnosis was "prefill and first token" and its first proposal was "bigger prompt chunks"
+  (`--max-num-batched-tokens 16384`). Whether streaming changes its first proposal is not known
+  and is not why this changed.
+- **Each campaign's exact command is rehearsed at full size on stand-in servers before it is
+  launched** (`--stand-in local`: the stand-in servers run on the laptop, so the rehearsal needs
+  no Modal and covers the laptop's and the cluster's part of the run; `--stand-in`: CPU
+  containers on Modal, which adds the path through Modal). Step 5b in the order below.
+- **When the planner was asked is part of the record.** The planner reads the number of requests
+  running from the engine's latest sample, so asked after the traffic has ended it can describe
+  an idle server. The replayed traffic is a burst: 100 requests arrive within 15 seconds. If the
+  record says the planner was asked after the traffic ended, its first proposal is still
+  measured, and question 1 is reported as not answered for a loaded server.
+- A run removes the current setup that a run which did not finish left deployed. Without it the
+  relaunch would have stopped at "deployment gpu-baseline already exists".
+
 ## What the campaigns answer
 
 One model, one GPU type, traffic with real text. Three questions, each answered whatever the
@@ -132,8 +162,9 @@ throughput as unjudged, with both intervals, and is not called a win.
 
 1. Offline tests. 2. `poc_modal.py dry`. 3. Serving checks: the current setup and the
 documented baseline, one H100 each. 4. Stand-in campaign (`--stand-in --smoke`, no GPU).
-5. Smoke campaign on H100s (`--smoke`). 6. The campaigns, one at a time. No step is skipped.
-Steps 1 to 5 are done. The smoke ran the path on H100s and was stopped once it was clear the
+5. Smoke campaign on H100s (`--smoke`). 5b. Before each campaign, its exact command at full
+size on stand-in servers. 6. The campaigns, one at a time. No step is skipped. Steps 1 to 5 are
+done. The smoke ran the path on H100s and was stopped once it was clear the
 judge could compare nothing; the first campaign is therefore also the first run of the
 judge's comparison and of the re-measurement on fresh servers on real GPUs, and it is stopped
 if that path breaks.

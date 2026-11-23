@@ -375,5 +375,67 @@
     "the approval did not cover the fresh servers, so a setup that gained failed with optimization_confirmation_not_covered; fixed in the harness",
     "a second run in one cluster replayed the first run's deploy and deployed nothing; fixed in the harness",
     "Modal preempted a stand-in container and restarted it at another address; a restarted container now ends its lease"
+  ],
+  "later_checks": [
+    {
+      "what": "Full-size rehearsal of the first paid campaign's exact command on stand-in servers on the laptop (poc_modal.py run --stand-in local --traffic real-text --shape interactive --requests 100 --planner-setups 1 --engine vllm-0.34.0), with the corpus of the paid runs (sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7).",
+      "when": "2026-11-23, 07:34 to 08:03 CET",
+      "modal": "none: no app, no container, no spend",
+      "passed": true,
+      "traffic": {
+        "requests": 100,
+        "failed": 0,
+        "streamed": true,
+        "seconds": 19.0
+      },
+      "campaign": {
+        "setups": 3,
+        "turns_per_window": 9,
+        "warmups_per_window": 2,
+        "requests_per_turn": 100,
+        "failed_requests": 0,
+        "speculation_setup": "measured in the first window and again on fresh servers (18 turns), drafted and accepted tokens recorded in both, answer check passed",
+        "copy_of_current_setup": "rejected, no measurable difference",
+        "servers_started": 6,
+        "minutes": 27
+      },
+      "planner_asked": "after the traffic ended: a stand-in finishes 100 requests in 19 s, before the control plane's 30 s engine scrape. The running-requests reading was 0, so its proposal here says nothing about a loaded server; the result now records when the planner was asked and warns in this case.",
+      "found": [
+        "a run after a run that stopped early could not deploy the current setup (\"deployment gpu-baseline already exists\"); fixed, the run removes the leftover first"
+      ],
+      "not_covered": "the path through Modal (tunnel, cold starts, preemption) and everything a real engine does"
+    },
+    {
+      "what": "Does the path cut a request that sends nothing for a while? A stand-in server holds the answer back for a set time (stand_in_hold_seconds).",
+      "when": "2026-11-23, 07:39 to 08:07 CET",
+      "through_modal_tunnel": {
+        "path": "proxy binary on the laptop, Modal tunnel, one CPU stand-in container",
+        "buffered_silent_seconds_returned_200": [
+          20,
+          45,
+          90
+        ],
+        "streamed_first_byte_after_seconds_completed": [
+          45,
+          90
+        ],
+        "short_requests_beside_them": "20 of 20 returned 200 in about 0.5 s",
+        "estimated_usd": 0.006
+      },
+      "through_gateway": {
+        "path": "gateway, router and the pod's proxy in the kind cluster, stand-in server on the laptop",
+        "buffered_silent_seconds_returned_200": [
+          45,
+          90,
+          120
+        ],
+        "streamed_first_byte_after_seconds_completed": [
+          45,
+          120
+        ],
+        "short_requests_beside_them": "14 of 14 returned 200 in about 0.5 s"
+      },
+      "reading": "Neither part of the path cut a silent request of up to 90 s (tunnel) or 120 s (gateway). The 53 requests that failed in the first start of the first paid campaign failed because Modal stopped the server at the workspace's spend limit."
+    }
   ]
 }
