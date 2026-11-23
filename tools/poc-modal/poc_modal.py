@@ -599,7 +599,8 @@ def plan(proposal: dict) -> list[dict]:
                 measured.append(own)
     for row in runnable:
         if row not in measured:
-            row["skipped"] = f"only the planner's first {len(measured)} setup{'s fit' if len(measured) != 1 else ' fits'} next to the current setup and its copy"
+            row["skipped"] = ("a smoke run measures one setup next to the current setup and its copy, and with real text that is the speculation setup" if RUN["smoke"] and documented else
+                              f"only the planner's first {len(measured)} setup{'s fit' if len(measured) != 1 else ' fits'} next to the current setup and its copy")
             log("plan", f"skip “{row['label']}”: {row['skipped']}")
     chosen = [CONTROL]
     for row in measured:
@@ -911,6 +912,10 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                 warnings.append(f"“{row['label']}” speculates but its runs carry no acceptance counters: a working drafter cannot be told from one that loaded and was ignored")
             elif not any(arm["accepted_tokens"] for arm in own):
                 warnings.append(f"“{row['label']}” drafted tokens and none was accepted")
+    ledger = broker.ledger()
+    for lease in ledger.get("leases", []):
+        if lease.get("reason") == "preempted":
+            warnings.append(f"Modal preempted the server behind pod {lease.get('pod')} during the run; its lease ended and the pod started a new server on another machine")
     if settings.get("stand_in"):
         decision = f"stand-in servers, no model and no GPU: “{decision}” is the pipeline's answer to scripted speeds, not a measurement"
     summary = {"schema_version": "infercrane.poc-modal-result/v3", "campaign_id": campaign, "campaign_state": record.get("state"), "decision": decision,
@@ -928,7 +933,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                         "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "laptop": {"at_start": current.get("laptop_at_start"), "at_end": laptop_load()},
-               "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": broker.ledger()}
+               "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": ledger}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
     text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
     lines = [f"Traffic: Mooncake (Kimi) production trace replay, shape “{settings.get('shape') or 'mooncake'}”, {text_words} · model {MODEL_ID} · vLLM {models.ENGINE.version} · one {server_kind()} per setup on Modal", ""]

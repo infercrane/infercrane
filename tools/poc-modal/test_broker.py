@@ -180,6 +180,16 @@ class DriverPinTest(unittest.TestCase):
         self.report(lease, state="failed", reason="driver_mismatch", error="mismatch")
         self.assertEqual(lease["state"], "failed")
 
+    def test_a_preempted_container_ends_its_lease_instead_of_serving_from_another_machine(self) -> None:
+        # Modal runs a preempted Function again on the same input. The lease already
+        # reported a container start, so the second container must not serve.
+        modal_gpu.leases["st:lease-1"] = {"state": "ready", "container_started_at": 1000.0, "url": "https://old.example"}
+        final = modal_gpu._serve("lease-1", ["--served-model-name", modal_gpu.QWEN3_8B.id], "key", modal_gpu.QWEN3_8B.id, dry=True)
+        self.assertEqual((final["state"], final["reason"]), ("failed", "preempted"))
+        self.assertEqual(modal_gpu.leases["st:lease-1"]["state"], "failed")
+        # A lease the broker starts again after a refused host has no container start yet.
+        self.assertFalse(modal_gpu.leases.get("st:lease-2", {}).get("container_started_at"))
+
     def test_container_check(self) -> None:
         self.assertEqual(modal_gpu.driver_mismatch({"driver": "620.70.06"}, {}), "")
         self.assertEqual(modal_gpu.driver_mismatch({"driver": "620.70.06"}, {"required_driver": "620.70.06"}), "")

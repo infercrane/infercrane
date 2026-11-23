@@ -54,7 +54,8 @@ MAX_DRIVER_RETRIES = 3
 
 def rate_per_second(dry: bool) -> float:
     if dry:
-        return 0.5 * CORE_PER_SECOND + 1 * GIB_PER_SECOND
+        # Non-preemptible CPU Functions bill three times the list price.
+        return 3 * (modal_gpu.DRY_CPU * CORE_PER_SECOND + modal_gpu.DRY_MEMORY_MIB / 1024 * GIB_PER_SECOND)
     return GPU_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
 
 

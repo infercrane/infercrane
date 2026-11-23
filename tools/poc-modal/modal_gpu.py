@@ -94,7 +94,7 @@ import json, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 port, key, model = int(sys.argv[1]), sys.argv[2], sys.argv[3]
 speculating = "--speculative-config" in sys.argv[4:]
-STEP, PER_STEP, MAX_WORDS = 0.02, (2 if speculating else 1), 64
+STEP, PER_STEP, MAX_WORDS = 0.05, (2 if speculating else 1), 64
 BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 lock = threading.Lock()
 count = {"running": 0, "requests": 0, "prompt": 0, "generation": 0, "drafts": 0, "draft_tokens": 0, "accepted_tokens": 0}
@@ -221,6 +221,14 @@ def driver_mismatch(facts: dict, control: dict) -> str:
 
 def _serve(lease_id: str, args: list[str], api_key: str, model: str, dry: bool) -> dict:
     started = time.time()
+    if (leases.get(f"st:{lease_id}", {}) or {}).get("container_started_at"):
+        # Modal restarts a preempted Function on the same input: another machine, behind
+        # another tunnel address. A setup of a campaign must not move to another machine
+        # unnoticed, so the lease ends here. The pod's proxy sees the ended lease, exits,
+        # and asks for a new server; the control plane sees the replica go away and come
+        # back, and judges the measurement by its own rules for a replaced server.
+        return _publish(lease_id, {"state": "failed", "reason": "preempted", "stopped_at": started,
+                                   "error": "Modal preempted the container and started the lease again on another machine; the lease ends so the pod asks for a new server"})
     _publish(lease_id, {"state": "starting", "container_started_at": started, "dry": dry, "args": args, "runtime_image": VLLM_IMAGE})
     try:
         check_args(args, model)
@@ -310,7 +318,14 @@ def serve_gpu(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
 
 # The stand-in. One lease for `poc_modal.py dry`, or a whole stand-in campaign: as many
 # servers at once as a real run, each for as long as a campaign keeps a setup serving.
-@app.function(image=image, cpu=0.5, memory=1024, timeout=GPU_TIMEOUT_SECONDS, retries=0, max_containers=MAX_GPUS, scaledown_window=2)
+# Non-preemptible (Modal allows that for CPU Functions only, at three times the CPU price)
+# and with a whole core, so a rehearsal's scripted pace is not disturbed by Modal moving the
+# container or throttling it. A GPU Function cannot be made non-preemptible; _serve ends
+# the lease when that happens.
+DRY_CPU, DRY_MEMORY_MIB = 1.0, 1024
+
+
+@app.function(image=image, cpu=DRY_CPU, memory=DRY_MEMORY_MIB, timeout=GPU_TIMEOUT_SECONDS, retries=0, max_containers=MAX_GPUS, scaledown_window=2, nonpreemptible=True)
 def serve_dry(lease_id: str, args: list[str], api_key: str, model: str) -> dict:
     return _serve(lease_id, args, api_key, model, dry=True)
 
