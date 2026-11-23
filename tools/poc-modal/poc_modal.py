@@ -736,6 +736,13 @@ def wait_for_lease_end(broker: BrokerProcess, pod_prefix: str, timeout_s: int = 
     fail(f"remote GPUs still running after the {pod_prefix} pods stopped; stop them with: poc_modal.py stop-gpus")
 
 
+def laptop_load() -> dict:
+    """The laptop's load averages now. The control plane, the judge and the load generator
+    run on it, so a busy laptop is part of a campaign's evidence."""
+    one, five, fifteen = os.getloadavg()
+    return {"at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "load_average": [round(one, 2), round(five, 2), round(fifteen, 2)], "cpus": os.cpu_count()}
+
+
 def run_settings(text: prompt_corpus.Corpus | None) -> dict:
     """What this run measures with, kept in its record and compared on --reuse-capture."""
     return {"traffic": RUN["traffic"], "shape": RUN["shape"], "requests_at_once": next(level for level, name in LOAD_PROFILES.items() if name == PROFILE), "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
@@ -768,7 +775,8 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
     poc.port_forward()
     poc.reset_previous()  # clears the plan and diagnosis; a reused capture keeps its own
     kept = {key: previous.get(key) for key in ("capture_digest", "plan", "diagnosis", "traffic", "planner")} if reuse_capture else {"traffic": None, "capture_digest": None, "planner": None}
-    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings} | kept)
+    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings, "laptop_at_start": laptop_load()} | kept)
+    log("laptop", f"load average {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs at the start; a campaign wants a quiet laptop")
     # A gain is measured again on fresh servers, which a setup that speculates is more
     # likely to need, so a real-text run may start more servers in total.
     broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=10 if text else 6)
@@ -919,6 +927,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
                         "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
+               "laptop": {"at_start": current.get("laptop_at_start"), "at_end": laptop_load()},
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": broker.ledger()}
     (OUTPUT / f"{campaign}-result.json").write_text(json.dumps(summary, indent=2))
     text_words = f"real text from “{settings['corpus']['name']}”" if settings.get("corpus") else "generated words"
