@@ -115,6 +115,10 @@ LEDGER = STATE_DIR / "broker-ledger.json"
 
 CURRENT_SETUPS = ("publisher", "publisher-speculation")
 TRAFFIC = ("mooncake-words", "real-text")
+# Stated in every result, so its tokens per second are not read as another run's.
+REASONING_NOTE = ("Requests do not switch the model's reasoning off, so it reasons before it answers, as a request without that switch does in production. "
+                  "Output tokens per second count every generated token, reasoning included. The built-in answer check does switch reasoning off for its "
+                  "24 short prompts and scores word overlap with the current setup's answers (token F1, at most 64 tokens each), not exact text.")
 DOCUMENTED_LABEL = "The publisher's documented speculation option"
 # The broker runs four servers at once: the current setup, two setups to try, and the copy.
 CANDIDATE_SLOTS = 2
@@ -783,9 +787,11 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
     kept = {key: previous.get(key) for key in ("capture_digest", "plan", "diagnosis", "traffic", "planner")} if reuse_capture else {"traffic": None, "capture_digest": None, "planner": None}
     save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings, "laptop_at_start": laptop_load()} | kept)
     log("laptop", f"load average {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs at the start; a campaign wants a quiet laptop")
-    # A gain is measured again on fresh servers, which a setup that speculates is more
-    # likely to need, so a real-text run may start more servers in total.
-    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=10 if text else 6)
+    # Worst case with real text: the traffic server, four campaign servers (current setup,
+    # two setups to try, the copy), and two fresh servers for every setup whose gain is
+    # measured again, the copy included if its first window errs: eleven. One more for a
+    # server Modal preempts. The dollar cap, not this count, bounds the spend.
+    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=12 if text else 6)
     log("broker", f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
     try:
         check_broker_reachable()
@@ -941,7 +947,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
                "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
-                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
+                        "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic"), "reasoning": REASONING_NOTE},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
                "laptop": {"at_start": current.get("laptop_at_start"), "at_end": laptop_load()},
                "diagnosis": current.get("diagnosis"), "setups": rows, "network": current.get("network"), "broker": ledger}
@@ -967,6 +973,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
     lines += [f"Warning: {warning}" for warning in warnings]
     lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal).",
               f"Costs use Modal's {poc.ACCELERATOR} list price (${GPU_HOURLY_USD}/h, GPU only). Latency includes the laptop-to-Modal network path.",
+              "Tokens per second count reasoning tokens; requests leave the model's reasoning on. Answers: word overlap on 24 short prompts.",
               f"Full record: {path}"]
     width = max(len(line) for line in lines) + 2
     print("\n╭" + "─" * width + "╮")

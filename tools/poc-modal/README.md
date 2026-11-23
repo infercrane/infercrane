@@ -219,7 +219,7 @@ The broker is the spend guard. Every remote container stops when the first of th
 - the function timeout of 150 minutes, the hard cap per container.
 
 At most 4 GPUs run at once (the node also advertises only 4 lease slots), and at most 6
-start in one run, 10 with real text. The estimate uses Modal's list prices: H100 SXM5 $0.001097/s or H200
+start in one run, 12 with real text. The estimate uses Modal's list prices: H100 SXM5 $0.001097/s or H200
 $0.001261/s, plus the container's 4 cores and 24 GiB. It counts from the moment a container is requested until the
 container reports its start, and from 2 minutes before that start once it is known. Modal does
 not bill the wait for a GPU.
