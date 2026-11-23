@@ -115,7 +115,10 @@ and also reports the drafted and accepted tokens of one longer answer.
 and 128 output tokens, spread over 150 seconds so the planner still sees a loaded server. The
 judge is unchanged. It keeps its four paired rounds and measures a gain again on fresh
 servers, because the product has no shorter mode and with one pair it cannot decide; each
-round is short because the traffic is. Most of the cost is the servers' cold start.
+round is short because the traffic is. A smoke run measures one setup next to the current
+setup and its copy: with real text the speculation setup. Most of the cost is the servers'
+cold start, about six minutes each, for the current setup, the three campaign servers, and
+two fresh ones when a gain is measured again.
 
 `--stand-in` runs the same path with CPU stand-in servers behind the same broker, tunnel and
 proxy: no GPU, no model, cents. The stand-in answers with filler words at a scripted pace

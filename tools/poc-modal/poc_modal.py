@@ -559,7 +559,10 @@ def plan(proposal: dict) -> list[dict]:
             log("plan", f"skip “{row['label']}”: {skipped}")
         else:
             runnable.append(row)
-    slots = max(1, min(RUN["planner_setups"], CANDIDATE_SLOTS))
+    # A smoke run measures one setup next to the current setup and its copy: with real
+    # text the speculation setup, which is the path a paid campaign most needs proven.
+    room = 1 if RUN["smoke"] else CANDIDATE_SLOTS
+    slots = max(1, min(RUN["planner_setups"], room))
     measured = runnable[:slots]
     documented = None
     if real_text and MODEL.publisher_speculation and not models.speculates(CONTROL[2]):
@@ -567,7 +570,7 @@ def plan(proposal: dict) -> list[dict]:
         documented = {"args": MODEL.speculation_args, "source": MODEL.speculation_source, "proposed_by_planner": own is not None,
                       "planner_rank": runnable.index(own) + 1 if own else None}
         if own is None or own not in measured:
-            measured = measured[:CANDIDATE_SLOTS - 1]
+            measured = measured[:room - 1]
             if own is not None:
                 measured.append(own)
     for row in runnable:

@@ -41,7 +41,7 @@ class PlanTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         poc_modal.save, poc_modal.log = self.originals
-        poc_modal.RUN.update(traffic="mooncake-words", planner_setups=1)
+        poc_modal.RUN.update(traffic="mooncake-words", planner_setups=1, smoke=False)
         poc_modal.configure("vllm-0.22.1", "H100")
 
     def test_planner_change_goes_onto_the_publishers_command_and_the_copy_comes_last(self) -> None:
@@ -100,6 +100,13 @@ class PlanTest(unittest.TestCase):
         self.assertFalse(self.saved["planner"]["documented_speculation"]["proposed_by_planner"])
         # With nothing from the planner at all, the documented option still makes a campaign.
         poc_modal.plan(proposal())
+        self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], poc_modal.DOCUMENTED_LABEL, poc_modal.COPY[0]])
+
+    def test_a_smoke_run_measures_the_speculation_setup_alone(self) -> None:
+        poc_modal.RUN.update(traffic="real-text", planner_setups=2, smoke=True)
+        poc_modal.plan(proposal(setup("kv", ["--kv-cache-dtype", "fp8"], "FP8 KV cache"), setup("spec", SPECULATION, "Speculation")))
+        self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], "Speculation", poc_modal.COPY[0]])
+        poc_modal.plan(proposal(setup("kv", ["--kv-cache-dtype", "fp8"], "FP8 KV cache")))
         self.assertEqual([label for label, _, _ in poc_modal.CANDIDATES], [poc_modal.CONTROL[0], poc_modal.DOCUMENTED_LABEL, poc_modal.COPY[0]])
 
     def test_a_current_setup_that_speculates_needs_no_documented_arm(self) -> None:
