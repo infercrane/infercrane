@@ -61,7 +61,7 @@ class _Transport:
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
-            "User-Agent": "infercrane-python/2.0.0",
+            "User-Agent": "infercrane-python/2.0.1",
         }
         if payload is not None:
             headers["Content-Type"] = "application/json"
@@ -324,7 +324,7 @@ class InferCrane:
                 "Accept": "text/event-stream",
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "infercrane-python/2.0.0",
+                "User-Agent": "infercrane-python/2.0.1",
             },
             method="POST",
         )

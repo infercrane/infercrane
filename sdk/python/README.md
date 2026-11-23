@@ -6,7 +6,7 @@ package has no runtime dependencies and supports Python 3.10 or newer.
 ## Install
 
 ```bash
-python -m pip install 'infercrane==2.0.0'
+python -m pip install 'infercrane==2.0.1'
 ```
 
 Use the SDK version from the same InferCrane release as the control plane.

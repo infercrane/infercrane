@@ -12,7 +12,7 @@ permissions:
 
 steps:
   - uses: actions/checkout@v7
-  - uses: infercrane/infercrane/actions/infercrane@v2.0.0
+  - uses: infercrane/infercrane/actions/infercrane@v2.0.1
     with:
       mode: plan
       spec: deploy/infercrane.yaml
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: infercrane/infercrane/actions/infercrane@v2.0.0
+      - uses: infercrane/infercrane/actions/infercrane@v2.0.1
         with:
           mode: apply
           spec: deploy/infercrane.yaml
@@ -51,7 +51,7 @@ stable application-facing endpoint through the `endpoint` action output.
 ## Verify a release
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@v2.0.0
+- uses: infercrane/infercrane/actions/infercrane@v2.0.1
   with:
     mode: release-check
     deployment: support-production

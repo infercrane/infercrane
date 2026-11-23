@@ -31,7 +31,7 @@ async function main() {
     throw new Error("mode must be plan, apply, or release-check");
   const cli = await resolveCLI(
     input("cli-path", "auto"),
-    input("version", "v2.0.0"),
+    input("version", "v2.0.1"),
     path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "infercrane-action"),
   );
   if (mode === "plan") {

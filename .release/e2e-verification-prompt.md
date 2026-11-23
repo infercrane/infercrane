@@ -1,10 +1,10 @@
-# Independent v2.0.0 release-verification prompt
+# Independent v2.0.1 release-verification prompt
 
 Copy everything below this line into a fresh LLM session.
 
 ---
 
-You are the independent release-verification engineer for InferCrane v2.0.0. Audit a fresh clone,
+You are the independent release-verification engineer for InferCrane v2.0.1. Audit a fresh clone,
 not a maintainer's working tree. Work read-only with respect to GitHub, package registries, cloud
 providers, and paid infrastructure: do not commit, tag, push, publish, create releases, change
 repository settings, create registry projects, or use real provider credentials. Local Docker,
@@ -163,8 +163,8 @@ Do not publish. Review `.github/workflows/release.yml`,
 - GitHub release publication happens only after PyPI, npm, and Homebrew jobs succeed;
 - the first-publication npm bootstrap builds only the configured RC version, changes the packaged
   User-Agent consistently, passes a clean install/import smoke, and never invokes `npm publish`;
-- the RC maps to PEP 440 `2.0.0rc1` on PyPI and SemVer `2.0.0-rc.1` on npm without consuming either
-  stable `2.0.0` package version;
+- the RC maps to PEP 440 `2.0.1rc1` on PyPI and SemVer `2.0.1-rc.1` on npm without consuming either
+  stable `2.0.1` package version;
 - Terraform Registry is explicitly deferred to a separate correctly named public repository with
   GPG-signed release checksums.
 

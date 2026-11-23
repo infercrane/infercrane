@@ -6,7 +6,7 @@ description: >-
   your cloud, and runs candidate setups, AIPerf, and the answer check in one namespace.
 type: application
 version: 0.1.0
-appVersion: "2.0.0"
+appVersion: "2.0.1"
 home: https://github.com/infercrane/infercrane
 sources:
   - https://github.com/infercrane/infercrane
