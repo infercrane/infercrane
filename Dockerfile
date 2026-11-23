@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS builder
-ARG INFERCRANE_VERSION=2.0.1
+ARG INFERCRANE_VERSION=2.0.2
 WORKDIR /build
 COPY go.mod go.sum ./
 # Keep the module cache in the builder layer. The same builder image is used as
@@ -45,9 +45,13 @@ ARG SKYPILOT_VERSION=0.13.0
 ARG SKYPILOT_EXTRAS=runpod,vast
 ARG HUGGINGFACE_HUB_VERSION=1.24.0
 ARG AIPERF_VERSION=0.12.0
+# AWS CLI v2 is installed from its source release into its own virtualenv on the image's Python,
+# not from AWS's prebuilt bundle, which ships its own Python interpreter that lags security fixes.
 ARG AWS_CLI_VERSION=2.42.1
-ARG AWS_CLI_AMD64_SHA256=ff2631c32c5db291b099600f404bc493454ec66c125ff4604625da90480c1f47
-ARG AWS_CLI_ARM64_SHA256=98f5f03bb6508a06ce9d9d6d2db97932dce735f3b7ad85616324a95edf4b815f
+ARG AWS_CLI_SOURCE_SHA256=c2f83292f622e5ef8e2bafb8ecbd41c2ce0b57a7c1ea2a0c55ba25081837b3a5
+# The x86_64 Google Cloud CLI archive bundles its own Python, which lags security fixes. Remove it and
+# run gcloud on the image's Python.
+ENV CLOUDSDK_PYTHON=/usr/local/bin/python3
 ARG GCLOUD_CLI_VERSION=577.0.0
 ARG GCLOUD_CLI_AMD64_SHA256=0b32d330446ce7b0f57f253e7efab4636c18fb1f87a3ac31c6c3f2a2a697525e
 ARG GCLOUD_CLI_ARM64_SHA256=dbac26bdf80d72b5d13538e3a215dcbfe2781edfd2d69723effbeef3839cffb8
@@ -72,17 +76,19 @@ RUN apt-get update \
 	&& python -m venv /opt/infercrane-huggingface \
 	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}"
 RUN case "$TARGETARCH" in \
-	     amd64) aws_arch=x86_64; aws_sha="$AWS_CLI_AMD64_SHA256"; gcloud_arch=x86_64; gcloud_sha="$GCLOUD_CLI_AMD64_SHA256"; kubectl_sha="$KUBECTL_AMD64_SHA256" ;; \
-	     arm64) aws_arch=aarch64; aws_sha="$AWS_CLI_ARM64_SHA256"; gcloud_arch=arm; gcloud_sha="$GCLOUD_CLI_ARM64_SHA256"; kubectl_sha="$KUBECTL_ARM64_SHA256" ;; \
+	     amd64) gcloud_arch=x86_64; gcloud_sha="$GCLOUD_CLI_AMD64_SHA256"; kubectl_sha="$KUBECTL_AMD64_SHA256" ;; \
+	     arm64) gcloud_arch=arm; gcloud_sha="$GCLOUD_CLI_ARM64_SHA256"; kubectl_sha="$KUBECTL_ARM64_SHA256" ;; \
 	     *) echo "unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
 	   esac \
-	&& curl -fsSLo /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip" \
-	&& printf '%s  %s\n' "$aws_sha" /tmp/awscliv2.zip | sha256sum -c - \
-	&& unzip -q /tmp/awscliv2.zip -d /tmp \
-	&& /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
+	&& curl -fsSLo /tmp/aws-cli.tar.gz "https://github.com/aws/aws-cli/archive/refs/tags/${AWS_CLI_VERSION}.tar.gz" \
+	&& printf '%s  %s\n' "$AWS_CLI_SOURCE_SHA256" /tmp/aws-cli.tar.gz | sha256sum -c - \
+	&& python -m venv /opt/aws-cli \
+	&& /opt/aws-cli/bin/pip install --no-cache-dir /tmp/aws-cli.tar.gz \
+	&& ln -s /opt/aws-cli/bin/aws /usr/local/bin/aws \
 	&& curl -fsSLo /tmp/google-cloud-cli.tar.gz "https://storage.googleapis.com/cloud-sdk-release/google-cloud-cli-${GCLOUD_CLI_VERSION}-linux-${gcloud_arch}.tar.gz" \
 	&& printf '%s  %s\n' "$gcloud_sha" /tmp/google-cloud-cli.tar.gz | sha256sum -c - \
 	&& tar -xzf /tmp/google-cloud-cli.tar.gz -C /usr/local \
+	&& rm -rf /usr/local/google-cloud-sdk/platform/bundledpythonunix \
 	&& ln -s /usr/local/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud \
 	&& curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
 	&& printf '%s  %s\n' "$kubectl_sha" /usr/local/bin/kubectl | sha256sum -c - \
@@ -90,7 +96,7 @@ RUN case "$TARGETARCH" in \
 	&& aws --version \
 	&& gcloud --version \
 	&& kubectl version --client=true \
-	&& rm -rf /tmp/aws /tmp/awscliv2.zip /tmp/google-cloud-cli.tar.gz \
+	&& rm -rf /tmp/aws-cli.tar.gz /tmp/google-cloud-cli.tar.gz \
 	&& apt-get purge -y build-essential curl unzip \
 	&& apt-get autoremove -y \
 	&& rm -rf /var/lib/apt/lists/* \

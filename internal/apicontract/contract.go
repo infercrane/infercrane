@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const Version = "2.0.1"
+const Version = "2.0.2"
 
 type Route struct {
 	Method      string

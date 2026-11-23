@@ -194,7 +194,7 @@ func computeProviderInventory(cfg config.Config, configuredSkyPilotProviders []c
 	return providers
 }
 
-var version = "2.0.1"
+var version = "2.0.2"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 
