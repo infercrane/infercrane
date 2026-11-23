@@ -143,7 +143,9 @@ proxy: no GPU, no model, cents. The stand-in answers with filler words at a scri
 and exports vLLM's metric families; started with a speculation option it writes two words a
 step and counts drafted and accepted tokens. It proves that traffic, corpus, planner call,
 campaign, measurement, counters and result fit together. Nothing it reports is a
-measurement, and the result says so in its decision.
+measurement, and the result says so in its decision. The record of the first rehearsal that
+passed, and the four defects earlier attempts found, is in
+`docs/testing/evidence/poc-modal-stand-in-campaign-2026-11-23.json`.
 
 ```bash
 python3 tools/poc-modal/poc_modal.py run --stand-in --smoke --traffic real-text --engine vllm-0.34.0 --budget-usd 1

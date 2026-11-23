@@ -1,0 +1,379 @@
+{
+  "schema_version": "infercrane.poc-modal-stand-in-rehearsal/v1",
+  "recorded": "2026-11-23",
+  "what": "One whole optimization campaign through the real control plane in a kind cluster, with CPU stand-in servers in place of GPUs (tools/poc-modal/poc_modal.py run --stand-in --smoke --traffic real-text --engine vllm-0.34.0). It proves that the pieces fit: real-text traffic through the gateway, the planner asked on the live endpoint, Replay capture, a campaign whose requests the control plane composes from the prompt corpus, engine counters in the campaign record, the re-measurement on fresh servers, the answer check, and the result record.",
+  "not_a_measurement": "No model and no GPU ran. The stand-in answers with filler words at a scripted pace and writes two words a step when started with a speculation option. Every speed, gain and acceptance rate below is scripted.",
+  "result_schema": "infercrane.poc-modal-result/v3",
+  "campaign_state": "qualified",
+  "decision": "stand-in servers, no model and no GPU: “propose The publisher's documented speculation option” is the pipeline's answer to scripted speeds, not a measurement",
+  "run": {
+    "traffic": "real-text",
+    "shape": "mooncake",
+    "requests_at_once": 32,
+    "corpus": {
+      "digest": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+      "name": "InferCrane rehearsal corpus",
+      "license": "Apache-2.0",
+      "source": "Written for the InferCrane repository (tools/poc-modal/testdata/stand-in-corpus.json); not a measurement corpus",
+      "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+      "passages": 12,
+      "prompts": 9
+    },
+    "smoke": true,
+    "stand_in": true,
+    "current_setup": "publisher",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100"
+  },
+  "prompt_text_check": {
+    "expected": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+    "measured_on": [
+      "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9"
+    ],
+    "ok": true
+  },
+  "warnings": [],
+  "copy_of_current_setup": {
+    "must_not_win": true,
+    "won": false,
+    "state": "rejected",
+    "failure_code": "measured_no_measurable_difference",
+    "objective_decision": "no_measurable_difference"
+  },
+  "laptop": {
+    "at_start": {
+      "at": "2026-11-23T04:52:05Z",
+      "load_average": [
+        4.56,
+        5.04,
+        5.87
+      ],
+      "cpus": 8
+    },
+    "at_end": {
+      "at": "2026-11-23T05:22:30Z",
+      "load_average": [
+        8.61,
+        5.79,
+        6.01
+      ],
+      "cpus": 8
+    }
+  },
+  "planner": {
+    "rules_version": "diagnosis-technique-rules-v5",
+    "state": "applied",
+    "primary_bottleneck": "prefill-and-first-token",
+    "summary": "The diagnosis points at time to first token. Trying, in order: bigger prompt chunks.",
+    "model_features": [
+      "native_mtp"
+    ],
+    "setups": [
+      {
+        "label": "Bigger prompt chunks",
+        "technique": "prefill-chunk-large",
+        "priority": 88,
+        "rules": [
+          "prefill.long_input",
+          "bottleneck.prefill"
+        ],
+        "planner_args": [
+          "--max-num-batched-tokens",
+          "16384"
+        ],
+        "skipped": "a smoke run measures one setup next to the current setup and its copy, and with real text that is the speculation setup"
+      }
+    ],
+    "documented_speculation": {
+      "args": [
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ],
+      "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.md?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-23)",
+      "proposed_by_planner": false,
+      "planner_rank": null
+    }
+  },
+  "traffic": {
+    "requests": 40,
+    "failed": 0,
+    "seconds": 152.1,
+    "output_tokens": 1797,
+    "input_words_sent": 129295,
+    "input_scale": 2.0,
+    "output_scale": 1.0,
+    "max_input_tokens": 6000,
+    "max_output_tokens": 128,
+    "spread_seconds": 150.0,
+    "text": {
+      "source": "operator_corpus",
+      "corpus": {
+        "digest": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+        "name": "InferCrane rehearsal corpus",
+        "license": "Apache-2.0",
+        "source": "Written for the InferCrane repository (tools/poc-modal/testdata/stand-in-corpus.json); not a measurement corpus",
+        "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+        "passages": 12,
+        "prompts": 9
+      },
+      "planned_input_tokens": 150442,
+      "answers": "end where the model ends them, capped at the recorded length"
+    },
+    "shape": "mooncake"
+  },
+  "setups": [
+    {
+      "label": "Your current setup (the publisher's vLLM command)",
+      "state": "cleaned",
+      "failure_code": "measured_candidate_superseded",
+      "output_tokens_per_second": 412.0807312996591,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "speculation": null,
+      "prompt_text_corpus": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+      "runs": 4,
+      "requests_per_run": 40,
+      "concurrency": 32,
+      "succeeded": 160,
+      "failed": 0,
+      "first_window": null,
+      "fresh_servers_window": null
+    },
+    {
+      "label": "The publisher's documented speculation option",
+      "state": "qualified",
+      "failure_code": "",
+      "output_tokens_per_second": 687.3255624838789,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "speculation": {
+        "candidate/first": {
+          "draft_tokens": 10848.0,
+          "accepted_tokens": 3572.0,
+          "runs": 4,
+          "acceptance": 0.3293
+        },
+        "candidate/fresh_servers": {
+          "draft_tokens": 10848.0,
+          "accepted_tokens": 3572.0,
+          "runs": 4,
+          "acceptance": 0.3293
+        }
+      },
+      "prompt_text_corpus": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+      "runs": 4,
+      "requests_per_run": 40,
+      "concurrency": 32,
+      "succeeded": 160,
+      "failed": 0,
+      "first_window": {
+        "delta": 0.6727059573821346,
+        "pairs": 4,
+        "method": "paired_bracketing_log_ratio",
+        "decision": "improved",
+        "confidence": 0.975,
+        "comparisons": 2,
+        "noise_floor": 0.17434993074426752,
+        "control_mean": 410.4886845288635,
+        "candidate_mean": 687.3255624838789,
+        "control_spread": 0.011983637098093131,
+        "higher_is_better": true,
+        "machine_difference": 0.0075,
+        "candidate_uncertainty": 0.10231709527433405
+      },
+      "fresh_servers_window": {
+        "delta": 0.7482857533563338,
+        "pairs": 4,
+        "method": "paired_bracketing_log_ratio",
+        "decision": "improved",
+        "confidence": 0.95,
+        "comparisons": 1,
+        "noise_floor": 0.0803502360053725,
+        "control_mean": 385.051556722687,
+        "candidate_mean": 672.0062587215285,
+        "control_spread": 0.032594259302593735,
+        "higher_is_better": true,
+        "machine_difference": 0.0075,
+        "candidate_uncertainty": 0.05909714381284201
+      }
+    },
+    {
+      "label": "A copy of your current setup (must not win)",
+      "state": "rejected",
+      "failure_code": "measured_no_measurable_difference",
+      "output_tokens_per_second": 390.3948818555216,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "speculation": null,
+      "prompt_text_corpus": "sha256:5a575b67eb32662215d68eec142fa911e081a2eb9d28736f988139bfe46304b9",
+      "runs": 4,
+      "requests_per_run": 40,
+      "concurrency": 32,
+      "succeeded": 160,
+      "failed": 0,
+      "first_window": {
+        "delta": 0.020822591038105243,
+        "pairs": 4,
+        "method": "paired_bracketing_log_ratio",
+        "decision": "no_measurable_difference",
+        "confidence": 0.975,
+        "comparisons": 2,
+        "noise_floor": 0.08762606934491868,
+        "control_mean": 382.13813127133426,
+        "candidate_mean": 390.3948818555216,
+        "control_spread": 0.02425643884869123,
+        "higher_is_better": true,
+        "machine_difference": 0.0075,
+        "candidate_uncertainty": 0.04442360365350771
+      },
+      "fresh_servers_window": null
+    }
+  ],
+  "servers": [
+    {
+      "state": "stopped",
+      "reason": "released",
+      "seconds": 232.8,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ]
+    },
+    {
+      "state": "stopped",
+      "reason": "released",
+      "seconds": 689.6,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ]
+    },
+    {
+      "state": "stopped",
+      "reason": "released",
+      "seconds": 305.1,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ]
+    },
+    {
+      "state": "ready",
+      "reason": null,
+      "seconds": 1023.9,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ]
+    },
+    {
+      "state": "stopped",
+      "reason": "released",
+      "seconds": 787.5,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ]
+    },
+    {
+      "state": "ready",
+      "reason": null,
+      "seconds": 453.6,
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--seed",
+        "1"
+      ]
+    }
+  ],
+  "estimated_usd": 0.1605,
+  "found_on_the_way": [
+    "retiring a machine for the fresh-server window failed against PostgreSQL (replica details were not JSON); fixed in internal/workflows",
+    "the approval did not cover the fresh servers, so a setup that gained failed with optimization_confirmation_not_covered; fixed in the harness",
+    "a second run in one cluster replayed the first run's deploy and deployed nothing; fixed in the harness",
+    "Modal preempted a stand-in container and restarted it at another address; a restarted container now ends its lease"
+  ]
+}
