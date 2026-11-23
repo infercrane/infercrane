@@ -10,11 +10,16 @@
     poc_modal.py dry           one lease through the broker, tunnel and proxy on a Modal CPU
                                container with a stand-in server (no GPU)
     poc_modal.py run           the publisher's command on a GPU as the current setup, Mooncake
-                               replay through the gateway; while it runs, the product's planner
-                               chooses what to try from the endpoint's own diagnosis; Replay
-                               capture; a campaign of the current setup, the planner's choice,
-                               and a copy of the current setup that must not win; the built-in
-                               answer check and ranking. Stops at the proposal.
+                               replay through the gateway; Replay capture; the server is then
+                               held at the campaign's load while the product's planner chooses
+                               what to try from the endpoint's own diagnosis; a campaign of the
+                               current setup, the planner's choice, and a copy of the current
+                               setup that must not win; the built-in answer check and ranking.
+                               Stops at the proposal.
+    poc_modal.py ask-planner   the same up to the planner's answer, on one GPU, and no campaign:
+                               what the planner proposes for this traffic shape at this load
+                               (--shape, --requests-at-once), with its reasons. Nothing is
+                               measured.
                                --traffic real-text composes every request from a prompt corpus
                                of real text, so speculative setups are measured, not skipped.
                                --smoke shrinks the traffic so the whole path costs a few dollars.
@@ -45,6 +50,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -374,6 +380,14 @@ def server_kind() -> str:
     return {"local": "stand-in (on this machine)", "modal": "CPU stand-in"}.get(RUN["stand_in"], poc.ACCELERATOR)
 
 
+def harness_version() -> dict:
+    """The commit a run's harness and control plane sources were at, and whether they had
+    uncommitted changes: a result names the code that produced it."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True).stdout.strip()
+    return {"commit": git("rev-parse", "HEAD"), "uncommitted_changes": bool(git("status", "--porcelain", "--", "tools", "internal", "cmd"))}
+
+
 def remove_leftover_baseline() -> None:
     """A run that stops before its traffic shape is recorded leaves the current setup
     deployed. The next run could not deploy it ("deployment gpu-baseline already exists"),
@@ -399,74 +413,87 @@ def deploy_baseline() -> None:
     poc.cli("deploy", str(path), "--idempotency-key", f"{poc.BASELINE}-{digest}-{state()['run_id']}", "--wait", capture=False)
 
 
-def replay_mooncake(requests_total: int, input_scale: float, max_output: int, workers: int, progress: dict, max_input: int = MAX_INPUT_TOKENS,
+def chat_request(row: dict, index: int, input_scale: float, output_scale: float, max_input: int, max_output: int,
+                 text: prompt_corpus.Corpus | None, shift: int = 0) -> tuple[dict, dict]:
+    """One trace row as a chat request through the gateway, and what it sends.
+
+    The trace has no content. Without a corpus the prompt is words generated from the
+    row's prefix block hashes and the answer is forced to its recorded length. With one,
+    the request is real text composed from the corpus (corpus.compose), the same prefix
+    blocks share the same passages, and the answer ends where the model ends it, capped at
+    the recorded length. shift moves every prefix block to other text of the same shape:
+    the hold after the replay sends the trace's rows again without sending its prompts
+    again, which the engine would answer from its prefix cache."""
+    block = max(1, round(poc.MOONCAKE_BLOCK_TOKENS / input_scale))
+    target = min(max_input, max(8, round(row["input_length"] / input_scale)))
+    output = max(1, min(max_output, round(row["output_length"] / output_scale)))
+    hash_ids = [hash_id + shift for hash_id in (row.get("hash_ids") or [row["timestamp"]])]
+    # Streamed, as chat traffic is and as the campaign's measured requests are (its
+    # load profiles stream), so the planner diagnoses the server under the kind of
+    # load its proposal is then measured with. The captured trace also carries a
+    # real time to first token, and a long answer is never a connection that stays
+    # silent until it is done.
+    body = {"model": poc.BASELINE, "stream": True, "stream_options": {"include_usage": True}, "temperature": 0, "max_tokens": output}
+    sent = {"max_tokens": output, "planned_input_tokens": 0, "session": hash_ids[0] if row.get("hash_ids") else shift}
+    if text is None:
+        words: list[str] = []
+        for hash_id in hash_ids:
+            words += poc.block_text(hash_id, block)
+        words = (words + poc.block_text(row["timestamp"] + shift, target))[:target]
+        shared, unique = words[:-block] or words[:1], words[-block:]
+        sent["input_words"] = len(words)
+        body |= {"ignore_eos": True, "messages": [{"role": "system", "content": " ".join(shared)}, {"role": "user", "content": " ".join(unique)}]}
+    else:
+        # Only the blocks the capped request still covers, so a capped row keeps its
+        # leading prefix and drops its tail, as the word replay does.
+        body["messages"], sent["planned_input_tokens"] = prompt_corpus.compose(text, hash_ids[:max(1, -(-target // block))], target, block, index)
+        sent["input_words"] = sum(len(message["content"].split()) for message in body["messages"])
+    return body, sent
+
+
+def send_chat(body: dict, session: int, key: str) -> tuple[int, str]:
+    """Sends one streamed chat request through the gateway and reads it to its end. Returns
+    the output tokens the server reported, and why the request failed ("" when it did not)."""
+    request = urllib.request.Request(f"http://127.0.0.1:{poc.API_PORT}/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
+    for header, value in {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-InferCrane-Session-ID": f"mooncake-{session}", "X-InferCrane-Parent-Session-ID": "mooncake-replay"}.items():
+        request.add_header(header, value)
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            usage, complete = stream_usage(response)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        return 0, str(getattr(error, "code", "")) or type(error).__name__
+    if not complete:
+        return 0, "stream ended early"
+    return int((usage or {}).get("completion_tokens", 0)), ""
+
+
+def replay_mooncake(requests_total: int, input_scale: float, max_output: int, workers: int, max_input: int = MAX_INPUT_TOKENS,
                     spread_seconds: float | None = None, text: prompt_corpus.Corpus | None = None, output_scale: float = 1.0) -> dict:
     """Replays the first rows of the Mooncake trace through the gateway at their recorded
     arrival times (stretched over spread_seconds when given). Input lengths are divided
     by input_scale and capped to fit the model, output lengths by output_scale and capped
-    at max_output. progress counts the requests that finished, for the planner waiting
-    on a loaded server.
-
-    The trace has no content. Without a corpus the prompts are words generated from its
-    prefix block hashes and answers are forced to their recorded length. With one, every
-    request is real text composed from the corpus (corpus.compose), the same prefix
-    blocks share the same passages, and answers end where the model ends them, capped at
-    the recorded length."""
+    at max_output. What a request holds is chat_request's to say."""
     rows = poc.mooncake_rows()[:requests_total]
     start = rows[0]["timestamp"]
     stretch = spread_seconds / max(1.0, (rows[-1]["timestamp"] - start) / 1000) if spread_seconds else 1.0
-    block = max(1, round(poc.MOONCAKE_BLOCK_TOKENS / input_scale))
     what = f"real text from the prompt corpus “{text.identity['name']}” ({text.identity['license']})" if text else "prompts are generated words"
     log("traffic", f"replaying {len(rows)} requests from the Mooncake (Kimi) production trace at their recorded arrival times"
         f"{f' stretched over {spread_seconds:.0f} s' if spread_seconds else ''}: shared prefixes kept, inputs divided by {input_scale:.2f} and capped at {max_input} tokens, outputs divided by {output_scale:.2f} and capped at {max_output}; {what}")
     key, began, failures = state()["api_key"], time.monotonic(), []
-    sent = {"input_words": 0, "max_tokens": 0, "planned_input_tokens": 0}
+    totals = {"input_words": 0, "max_tokens": 0, "planned_input_tokens": 0}
 
     def one(indexed: tuple[int, dict]) -> int:
         index, row = indexed
         delay = (row["timestamp"] - start) / 1000 * stretch - (time.monotonic() - began)
         if delay > 0:
             time.sleep(delay)
-        target = min(max_input, max(8, round(row["input_length"] / input_scale)))
-        output = max(1, min(max_output, round(row["output_length"] / output_scale)))
-        hash_ids = row.get("hash_ids") or [row["timestamp"]]
-        # Streamed, as chat traffic is and as the campaign's measured requests are (its
-        # load profiles stream), so the planner diagnoses the server under the kind of
-        # load its proposal is then measured with. The captured trace also carries a
-        # real time to first token, and a long answer is never a connection that stays
-        # silent until it is done.
-        body = {"model": poc.BASELINE, "stream": True, "stream_options": {"include_usage": True}, "temperature": 0, "max_tokens": output}
-        if text is None:
-            words: list[str] = []
-            for hash_id in hash_ids:
-                words += poc.block_text(hash_id, block)
-            words = (words + poc.block_text(row["timestamp"], target))[:target]
-            shared, unique = words[:-block] or words[:1], words[-block:]
-            sent["input_words"] += len(words)
-            body |= {"ignore_eos": True, "messages": [{"role": "system", "content": " ".join(shared)}, {"role": "user", "content": " ".join(unique)}]}
-        else:
-            # Only the blocks the capped request still covers, so a capped row keeps its
-            # leading prefix and drops its tail, as the word replay does.
-            body["messages"], planned = prompt_corpus.compose(text, hash_ids[:max(1, -(-target // block))], target, block, index)
-            sent["planned_input_tokens"] += planned
-            sent["input_words"] += sum(len(message["content"].split()) for message in body["messages"])
-        sent["max_tokens"] += output
-        request = urllib.request.Request(f"http://127.0.0.1:{poc.API_PORT}/v1/chat/completions", data=json.dumps(body).encode(), method="POST")
-        session = hash_ids[0] if row.get("hash_ids") else 0
-        for header, value in {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-InferCrane-Session-ID": f"mooncake-{session}", "X-InferCrane-Parent-Session-ID": "mooncake-replay"}.items():
-            request.add_header(header, value)
-        try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                usage, complete = stream_usage(response)
-        except (urllib.error.URLError, OSError, ValueError) as error:
-            failures.append(str(getattr(error, "code", "")) or type(error).__name__)
-            return 0
-        finally:
-            progress["done"] = progress.get("done", 0) + 1
-        if not complete:
-            failures.append("stream ended early")
-            return 0
-        return int((usage or {}).get("completion_tokens", 0))
+        body, sent = chat_request(row, index, input_scale, output_scale, max_input, max_output, text)
+        for name in totals:
+            totals[name] += sent[name]
+        tokens, failure = send_chat(body, sent["session"], key)
+        if failure:
+            failures.append(failure)
+        return tokens
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         tokens = sum(pool.map(one, enumerate(rows)))
@@ -475,10 +502,56 @@ def replay_mooncake(requests_total: int, input_scale: float, max_output: int, wo
     log("traffic", f"done in {seconds:.0f} s: {tokens} output tokens reported by the server{note} · trace: kvcache-ai/Mooncake FAST'25 (Apache-2.0)")
     if len(failures) > len(rows) // 2:
         fail("most replayed requests failed; check the gateway and the model server before measuring")
-    return {"requests": len(rows), "failed": len(failures), "seconds": round(seconds, 1), "output_tokens": tokens, "input_words_sent": sent["input_words"],
+    return {"requests": len(rows), "failed": len(failures), "seconds": round(seconds, 1), "output_tokens": tokens, "input_words_sent": totals["input_words"],
             "input_scale": round(input_scale, 4), "output_scale": round(output_scale, 4), "max_input_tokens": max_input, "max_output_tokens": max_output, "spread_seconds": spread_seconds,
-            "text": {"source": "operator_corpus", "corpus": text.identity, "planned_input_tokens": sent["planned_input_tokens"], "answers": "end where the model ends them, capped at the recorded length"}
+            "text": {"source": "operator_corpus", "corpus": text.identity, "planned_input_tokens": totals["planned_input_tokens"], "answers": "end where the model ends them, capped at the recorded length"}
             if text else {"source": "generated_words", "answers": "forced to the recorded length (ignore_eos)"}}
+
+
+# The planner is asked this long into the hold at the earliest: the control plane reads the
+# engine every 30 seconds, so by then its latest reading was taken under the hold's load.
+HOLD_BEFORE_ASK_SECONDS = 45
+HOLD_LIMIT_SECONDS = 300
+PLANNER_POLL_SECONDS = 5
+
+
+def hold_load(requests_total: int, at_once: int, input_scale: float, max_output: int, until: Callable[[], bool], max_input: int = MAX_INPUT_TOKENS,
+              text: prompt_corpus.Corpus | None = None, output_scale: float = 1.0) -> dict:
+    """Keeps the current setup loaded after the replay, until the planner has been asked.
+
+    The replay is a burst: its requests arrive within seconds and a GPU finishes them in
+    about a minute, before the control plane has windowed measurements. A planner asked
+    then reads an idle server (it takes the running requests from the engine's latest
+    reading). So the trace's rows are sent again in a closed loop, at_once at a time, the
+    load the campaign measures every setup at, with other text of the same shapes, and
+    the planner is asked during it. These requests are sent after the traffic shape is
+    recorded, so they are not part of what the campaign replays."""
+    rows = poc.mooncake_rows()[:requests_total]
+    key, began, lock = state()["api_key"], time.monotonic(), threading.Lock()
+    count = {"next": 0, "sent": 0, "failed": 0}
+    log("traffic", f"holding the current setup at {at_once} requests at once until the planner has been asked: the same {len(rows)} rows again with other text, not recorded")
+
+    def worker() -> None:
+        while not until() and time.monotonic() - began < HOLD_LIMIT_SECONDS:
+            with lock:
+                number = count["next"]
+                count["next"] += 1
+            index, cycle = number % len(rows), number // len(rows) + 1
+            body, sent = chat_request(rows[index], index, input_scale, output_scale, max_input, max_output, text, shift=cycle * 1_000_003)
+            _, failure = send_chat(body, sent["session"], key)
+            with lock:
+                count["sent"] += 1
+                count["failed"] += bool(failure)
+
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(at_once)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    seconds = time.monotonic() - began
+    log("traffic", f"hold ended after {seconds:.0f} s: {count['sent']} requests, {count['failed']} failed")
+    return {"requests_at_once": at_once, "seconds": round(seconds, 1), "requests": count["sent"], "failed": count["failed"], "recorded_in_the_traffic_shape": False,
+            "ask_after_seconds": HOLD_BEFORE_ASK_SECONDS, "limit_seconds": HOLD_LIMIT_SECONDS}
 
 
 def stream_usage(lines) -> tuple[dict | None, bool]:
@@ -532,38 +605,42 @@ def engine_measured(document: object) -> bool:
 
 class Planner:
     """Asks the product's planner what to try, from the current setup's own diagnosis, the
-    way a customer does with `optimize propose --diagnosis-endpoint`. It asks while the
-    replayed traffic still runs, once the control plane's engine scrape (every 30 s) has
-    windowed measurements and half the requests have finished, so the diagnosis sees the
-    loaded server's queue, KV cache and timings rather than an idle one. When the traffic
-    ends first, it waits up to 90 seconds for that evidence and then asks anyway."""
+    way a customer does with `optimize propose --diagnosis-endpoint`. It asks during the
+    hold after the replay (hold_load), once the control plane has windowed engine
+    measurements and the hold has run for HOLD_BEFORE_ASK_SECONDS, so the diagnosis reads
+    a server under the load the campaign measures at. The hold goes on until the planner
+    has answered. If the hold reaches its limit first, the planner is asked anyway and
+    the record says so."""
 
-    def __init__(self, total: int) -> None:
-        self.total, self.progress, self.replay_done = total, {"done": 0}, threading.Event()
+    def __init__(self) -> None:
+        self.hold_started: float | None = None
+        self.hold_at_once = 0
+        self.hold_over, self.done = threading.Event(), threading.Event()
         self.proposal: dict | None = None
         self.asked: str = ""
         self.error: str = ""
         self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def hold(self, at_once: int) -> None:
+        """Called as the hold begins."""
+        self.hold_at_once, self.hold_started = at_once, time.monotonic()
         self.thread.start()
 
     def run(self) -> None:
-        ended_at = None
         try:
             while True:
                 try:
                     measured = engine_measured(poc.api("GET", f"/api/v1/endpoints/{poc.BASELINE}/monitoring"))
                 except SystemExit:
                     measured = False
-                loaded = self.progress["done"] >= max(20, self.total // 2)
-                if self.replay_done.is_set():
-                    ended_at = ended_at or time.monotonic()
-                if measured and loaded and not self.replay_done.is_set():
-                    self.asked = f"while the traffic ran, after {self.progress['done']} of {self.total} requests finished"
+                held = time.monotonic() - (self.hold_started or time.monotonic())
+                if self.hold_over.is_set():
+                    self.asked = "after the hold ended" + ("" if measured else ", without windowed engine measurements")
                     break
-                if ended_at and (measured or time.monotonic() - ended_at > 90):
-                    self.asked = "after the traffic ended" + ("" if measured else ", without windowed engine measurements")
+                if measured and held >= HOLD_BEFORE_ASK_SECONDS:
+                    self.asked = f"while the server was held at {self.hold_at_once} requests at once, {held:.0f} s into the hold"
                     break
-                time.sleep(10)
+                time.sleep(PLANNER_POLL_SECONDS)
             self.proposal = json.loads(poc.cli("optimize", "propose", MODEL_ID, "--model-revision", MODEL_REVISION, "--provider", "kubernetes", "--gpu", poc.ACCELERATOR,
                                                "--runtimes", "vllm", "--objective", OBJECTIVE, "--profile", PROFILE, "--max-candidates", "6",
                                                # The pinned config.json says whether the model has its own
@@ -571,14 +648,40 @@ class Planner:
                                                "--diagnosis-endpoint", poc.BASELINE, "--allow-model-metadata-network", "--include-simulated", "--output", "json"))
         except (SystemExit, Exception) as failure:  # noqa: BLE001 - reported by finish()
             self.error = f"{type(failure).__name__}: {failure}"
+        finally:
+            self.done.set()
 
     def finish(self) -> dict:
-        self.replay_done.set()
+        self.hold_over.set()
         self.thread.join(timeout=300)
         if self.proposal is None:
             fail(f"the planner returned no proposal: {self.error or 'it did not answer within 5 minutes'}")
         log("plan", f"asked the planner {self.asked}")
         return self.proposal
+
+
+def capture_shape(expected: int) -> str:
+    """Records the replayed traffic's shape before the hold adds requests to the endpoint's
+    history. The gateway reports finished requests to the control plane in batches, so the
+    capture is repeated, for up to a minute, until it holds every replayed request."""
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            output = json.loads(poc.cli("replay", poc.BASELINE, "--window", "1h", "--max-requests", "200", "--output", "json"))
+        except SystemExit:
+            output = {}
+        summary = output.get("summary") or (output.get("trace") or {}).get("summary") or {}
+        recorded = int(summary.get("requests") or 0)
+        if recorded >= expected or time.monotonic() > deadline:
+            break
+        time.sleep(5)
+    digest = (output.get("shape_digest") or (output.get("trace") or {}).get("shape_digest") or "").removeprefix("sha256:")
+    if len(digest) != 64:
+        return poc.capture_replay()  # fails with the control plane's own words
+    if recorded < expected:
+        log("capture", f"only {recorded} of {expected} replayed requests are in the recorded shape after a minute; the campaign replays those")
+    log("capture", f"traffic shape recorded without content: sha256:{digest[:12]}… {json.dumps(summary)[:160]}")
+    return digest
 
 
 def plan(proposal: dict) -> list[dict]:
@@ -628,6 +731,9 @@ def plan(proposal: dict) -> list[dict]:
             except ValueError as error:
                 skipped = f"the remote GPU refuses it: {error}"
         row["skipped"] = skipped
+        # Whether the remote GPU can run it as it would be measured; what a campaign has
+        # room for is decided below and does not change this.
+        row["runnable"] = not skipped
         row["profile"] = candidate.get("configuration_profile") or "planner-setup"
         record.append(row)
         if skipped:
@@ -803,7 +909,7 @@ def run_settings(text: prompt_corpus.Corpus | None) -> dict:
             "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR}
 
 
-def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool) -> None:
+def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool, planner_only: bool = False) -> None:
     if not state().get("model_image"):
         fail("run `poc_modal.py up` first")
     previous = state()
@@ -830,13 +936,13 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
     poc.reset_previous()  # clears the plan and diagnosis; a reused capture keeps its own
     remove_leftover_baseline()
     kept = {key: previous.get(key) for key in ("capture_digest", "plan", "diagnosis", "traffic", "planner")} if reuse_capture else {"traffic": None, "capture_digest": None, "planner": None}
-    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings, "laptop_at_start": laptop_load()} | kept)
+    save({"network": {}, "run_started_at": time.time(), "run_id": __import__("secrets").token_hex(8), "run": settings, "laptop_at_start": laptop_load(), "harness": harness_version()} | kept)
     log("laptop", f"load average {os.getloadavg()[0]:.1f} on {os.cpu_count()} CPUs at the start; a campaign wants a quiet laptop")
     # Worst case with real text: the traffic server, four campaign servers (current setup,
     # two setups to try, the copy), and two fresh servers for every setup whose gain is
     # measured again, the copy included if its first window errs: eleven. One more for a
     # server Modal preempts. The dollar cap, not this count, bounds the spend.
-    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=12 if text else 6)
+    broker = BrokerProcess(budget, dry=RUN["stand_in"], max_starts=2 if planner_only else 12 if text else 6)
     log("broker", f"stand-in servers on the laptop, at most {CANDIDATE_SLOTS + 2} at once; no Modal, nothing is spent" if RUN["stand_in"] == "local" else
         f"remote {server_kind()} servers capped at ${budget:.2f} for this run (estimate from Modal list prices), at most {CANDIDATE_SLOTS + 2} at once")
     try:
@@ -847,23 +953,30 @@ def run_campaign(budget: float, requests_total: int | None, reuse_capture: bool)
             log("capture", f"reusing the recorded traffic shape sha256:{digest[:12]}… and its diagnosis: {', '.join(row['label'] for row in previous['plan'][1:])}")
         else:
             deploy_baseline()
-            planner = Planner(requests_total)
             scales = shape_scales(RUN["shape"], poc.mooncake_rows()[:requests_total])
-            traffic = replay_mooncake(requests_total, input_scale=scales["input_scale"], max_output=smoke.get("max_output_tokens", scales["max_output_tokens"]), workers=96,
-                                      progress=planner.progress, max_input=smoke.get("max_input_tokens", MAX_INPUT_TOKENS), spread_seconds=smoke.get("spread_seconds"), text=text,
-                                      output_scale=scales["output_scale"])
+            sizes = {"input_scale": scales["input_scale"], "max_output": smoke.get("max_output_tokens", scales["max_output_tokens"]), "max_input": smoke.get("max_input_tokens", MAX_INPUT_TOKENS),
+                     "text": text, "output_scale": scales["output_scale"]}
+            traffic = replay_mooncake(requests_total, workers=96, spread_seconds=smoke.get("spread_seconds"), **sizes)
             traffic["shape"] = RUN["shape"]
+            digest = capture_shape(traffic["requests"] - traffic["failed"])
+            save({"traffic": traffic, "capture_digest": digest})
+            # Only now the planner: the replay alone ends before the control plane has
+            # measured it, so the server is held at the campaign's load while it is asked.
+            planner, at_once = Planner(), settings["requests_at_once"]
+            planner.hold(at_once)
+            traffic["hold"] = hold_load(requests_total, at_once, until=planner.done.is_set, **sizes)
             save({"traffic": traffic})
             plan(planner.finish())
             # When the planner was asked is part of its answer: a diagnosis read after the
-            # traffic ended can describe an idle server.
+            # load ended can describe an idle server.
             save({"planner": (state().get("planner") or {}) | {"asked": planner.asked}})
             diagnosis = state().get("planner")
-            digest = poc.capture_replay()
-            save({"capture_digest": digest})
             log("deploy", f"removing {poc.BASELINE}: its traffic shape is recorded, and its server is not needed for the campaign")
             poc.cli("delete", poc.BASELINE, "--yes", "--wait", check=False)
             wait_for_lease_end(broker, poc.BASELINE)
+        if planner_only:
+            finish({"id": f"planner-only-{state()['run_id']}", "state": "planner_only", "candidates": []}, {}, broker)
+            return
         if len(CANDIDATES) < 2:
             log("plan", "the planner chose nothing the remote GPU can measure for this traffic; no campaign runs")
             finish({"id": f"no-campaign-{state()['run_id']}", "state": "not_started", "candidates": []}, {}, broker)
@@ -960,6 +1073,11 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
     decision = f"propose {winner['label']}" if winner else "keep the current setup"
     if record.get("state") == "not_started":
         decision = "no campaign: the planner chose nothing the remote GPU can measure for this traffic"
+    proposals = (current.get("planner") or {}).get("setups") or []
+    if record.get("state") == "planner_only":
+        first = next((row for row in proposals if row.get("runnable")), None)
+        decision = (f"planner asked, nothing measured: its first proposal this GPU can run is “{first['label']}”" if first else
+                    "planner asked, nothing measured: it proposed nothing this GPU can run")
     if copy_won:
         decision = "no decision: the copy of the current setup measured better than the current setup, so the judge crowned a machine difference"
     settings, warnings, text_check = current.get("run") or run_settings(None), [], None
@@ -980,7 +1098,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
             elif not any(arm["accepted_tokens"] for arm in own):
                 warnings.append(f"“{row['label']}” drafted tokens and none was accepted")
     asked = (current.get("planner") or {}).get("asked") or ""
-    if asked.startswith("after the traffic ended"):
+    if asked.startswith("after the"):  # "after the hold ended", and "after the traffic ended" in records from before the hold existed
         warnings.append(f"the planner was asked {asked}, so its diagnosis may describe a server that was no longer loaded; its first proposal is not evidence of what it proposes under load")
     ledger = broker.ledger()
     for lease in ledger.get("leases", []):
@@ -989,7 +1107,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
     if settings.get("stand_in"):
         decision = f"stand-in servers, no model and no GPU: “{decision}” is the pipeline's answer to scripted speeds, not a measurement"
     summary = {"schema_version": "infercrane.poc-modal-result/v3", "campaign_id": campaign, "campaign_state": record.get("state"), "decision": decision,
-               "run": settings, "prompt_text_check": text_check, "warnings": warnings,
+               "planner_only": record.get("state") == "planner_only", "harness": current.get("harness"), "run": settings, "prompt_text_check": text_check, "warnings": warnings,
                "copy_of_current_setup": {"must_not_win": True, "won": copy_won, "state": copy and copy["state"], "failure_code": copy and copy["failure_code"],
                                          "objective_decision": copy and objective_decision(copy)} if copy else None,
                "model": {"id": MODEL_ID, "revision": MODEL_REVISION, "chosen_by": "poc_modal.py choose-model: most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits one H100"},
@@ -1025,6 +1143,13 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                 lines.append(f"   speculation ({name.split('/', 1)[1].replace('_', ' ')} window): {arm['acceptance']:.0%} of {arm['draft_tokens']:.0f} drafted tokens accepted")
         if row is not rows[0]:
             lines.append(f"   {poc.words(row['state'] or '', row['failure_code'])}")
+    if record.get("state") == "planner_only":
+        lines += [f"The planner was asked {asked or 'at a time that was not recorded'}. Its proposals, in its order:"]
+        for row in proposals:
+            lines.append(f"   {row.get('priority') or '-'} · {row['label']}" + ("" if row.get("runnable") else f" · not measurable here: {row['skipped']}"))
+            lines.append(f"      {(row.get('summary') or ', '.join(row.get('rules') or []))[:200]}")
+        if not proposals:
+            lines.append("   none")
     lines += [f"Warning: {warning}" for warning in warnings]
     lines += ["", f"Decision: {summary['decision']}. Nothing is activated (the run stops at the proposal).",
               "No cost and no latency from this run means anything: the stand-in servers ran on the laptop." if settings.get("stand_in") == "local" else
@@ -1190,7 +1315,7 @@ def down() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("choose-model", "up", "download", "dry", "run", "stop-gpus", "down"))
+    parser.add_argument("command", choices=("choose-model", "up", "download", "dry", "run", "ask-planner", "stop-gpus", "down"))
     parser.add_argument("--budget-usd", type=float, default=9.0, help="hard cap on the run's remote GPU spend (estimate from Modal list prices)")
     parser.add_argument("--requests", type=int, help="Mooncake rows to replay through the gateway (default 200, or 40 with --smoke)")
     parser.add_argument("--reuse-capture", action="store_true", help="skip the baseline and replay; campaign on the traffic shape the last run recorded")
@@ -1220,8 +1345,11 @@ def main() -> int:
     RUN.update(traffic=args.traffic, shape=args.shape, smoke=args.smoke, stand_in=args.stand_in or False,
                planner_setups=args.planner_setups if args.planner_setups is not None else (2 if args.traffic == "real-text" else 1),
                corpus=corpus or (prompt_corpus.STAND_IN if args.traffic == "real-text" else None))
-    if args.command == "run" and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:
+    if args.command in ("run", "ask-planner") and args.traffic == "real-text" and corpus is None and held and held != prompt_corpus.load(prompt_corpus.STAND_IN).digest:
         fail("the control plane holds another prompt corpus than the rehearsal one; name it with --corpus")
+    if args.command == "ask-planner":
+        run_campaign(args.budget_usd, args.requests, reuse_capture=False, planner_only=True)
+        return 0
     {"choose-model": choose_model, "download": download, "dry": dry, "stop-gpus": stop_gpus, "down": down}.get(args.command, lambda: run_campaign(args.budget_usd, args.requests, args.reuse_capture))()
     return 0
 

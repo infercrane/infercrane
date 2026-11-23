@@ -35,6 +35,7 @@ python3 tools/poc-modal/poc_modal.py download      # stage the pinned weights on
 python3 tools/poc-modal/poc_modal.py dry           # one lease end to end on a CPU stand-in (no GPU)
 python3 tools/poc-modal/poc_modal.py run --budget-usd 15
 python3 tools/poc-modal/poc_modal.py run --budget-usd 15 --reuse-capture  # campaign only, on the last recorded traffic
+python3 tools/poc-modal/poc_modal.py ask-planner --budget-usd 2           # one GPU: traffic, hold, the planner's plan; no campaign
 python3 tools/poc-modal/poc_modal.py stop-gpus                            # stop the broker and every remote GPU
 python3 tools/poc-modal/poc_modal.py down
 ```
@@ -165,6 +166,19 @@ python3 tools/poc-modal/poc_modal.py run --stand-in local --traffic real-text --
 python3 tools/poc-modal/poc_modal.py run --smoke --traffic real-text --corpus "$CORPUS" --engine vllm-0.34.0 --budget-usd 5
 ```
 
+### Asking the planner only
+
+`ask-planner` does what `run` does up to the planner's answer, on one GPU, and stops: the
+current setup, the replay, the recorded shape, the hold, the planner's plan with every
+proposal's rule, priority and reason and whether this GPU could run it. No campaign runs and
+nothing is measured. `--shape` and `--requests-at-once` (4, 8 or 32) say which traffic and which
+load the planner is asked about; `--traffic`, `--corpus`, `--engine`, `--gpu` and `--stand-in`
+work as for `run`. About ten minutes of one GPU.
+
+```bash
+python3 tools/poc-modal/poc_modal.py ask-planner --traffic real-text --shape interactive --requests 100 --corpus "$CORPUS" --engine vllm-0.34.0 --budget-usd 2
+```
+
 ### What a run measures
 
 - **The model** is the most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits
@@ -186,9 +200,16 @@ python3 tools/poc-modal/poc_modal.py run --smoke --traffic real-text --corpus "$
 - **What to try** comes from the product's planner, as a customer gets it:
   `optimize propose --diagnosis-endpoint --allow-model-metadata-network` on the current
   setup's endpoint; the second flag lets the planner read the model's pinned `config.json`,
-  which is how it knows the model has its own prediction head. `run` asks while
-  the replayed traffic still runs, once the control plane's engine scrape has measured the
-  loaded server and half the requests have finished. Each of the planner's setups is its
+  which is how it knows the model has its own prediction head. `run` asks it under load:
+  the replay is a burst that a GPU finishes in about a minute, before the control plane (which
+  reads the engine every 30 seconds) has measured it, and the planner takes the number of
+  running requests from the engine's latest reading, so asked after the burst it plans for an
+  idle server. After the replay, and after its shape is recorded, the harness therefore holds
+  the server at the campaign's load: the same rows again in a closed loop at
+  `--requests-at-once`, with other text of the same shapes, not recorded. The planner is asked
+  once the control plane has windowed measurements and the hold has run 45 seconds, and the
+  hold goes on until it has answered (limit 300 seconds). The result records when it was asked
+  and how long the hold ran, and warns if the hold ended first. Each of the planner's setups is its
   starting setup with one change, and that change is applied to the publisher's command. The
   harness only skips what the remote GPU cannot measure honestly, and records why: more than
   one GPU, another engine environment, speculative decoding when the replayed traffic has no

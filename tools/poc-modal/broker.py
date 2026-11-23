@@ -60,6 +60,11 @@ LIVE = ("requested", "starting", "ready", "stopping")
 # A container on a host whose NVIDIA driver differs from the run's pinned driver stops
 # before loading the model; the lease is started again on another host this many times.
 MAX_DRIVER_RETRIES = 3
+# A refused container stays warm for a moment (the Function's scaledown_window), and Modal
+# hands the next call to a warm container, which is the same host. Seen on 2026-11-23: two
+# leases used all their retries within a minute on the one refused host. So the next start
+# waits until that container is gone.
+RESPAWN_DELAY_SECONDS = 15
 
 
 class LocalStore:
@@ -246,10 +251,27 @@ class Broker:
         with self.modal_lock:
             modal_gpu.leases.put(f"st:{lease['lease_id']}", {"state": "requested"})
             modal_gpu.leases.put(f"ctl:{lease['lease_id']}", self.control(now, float(lease.get("deadline", now + modal_gpu.GPU_TIMEOUT_SECONDS))))
-            self.calls[lease["lease_id"]] = self.spawn(lease)
         with self.lock:
-            lease["state"], lease["call_id"] = "starting", self.calls[lease["lease_id"]].object_id
-        log(f"lease {lease['lease_id']}: {why}; starting again on another host ({retries + 1} of {MAX_DRIVER_RETRIES})")
+            # The refused call is over; until the next one exists the watchdog must not
+            # read its end as the end of this lease.
+            self.calls.pop(lease["lease_id"], None)
+            lease.pop("call_id", None)
+            lease["state"] = "starting"
+
+        def start() -> None:
+            with self.lock:
+                if lease["state"] != "starting":
+                    return  # stopped while it waited
+            with self.modal_lock:
+                call = self.spawn(lease)
+            with self.lock:
+                self.calls[lease["lease_id"]], lease["call_id"] = call, call.object_id
+
+        log(f"lease {lease['lease_id']}: {why}; starting again on another host in {RESPAWN_DELAY_SECONDS} s ({retries + 1} of {MAX_DRIVER_RETRIES})")
+        if RESPAWN_DELAY_SECONDS > 0:
+            threading.Timer(RESPAWN_DELAY_SECONDS, start).start()
+        else:
+            start()
         return True
 
     def refresh(self, lease: dict) -> dict:

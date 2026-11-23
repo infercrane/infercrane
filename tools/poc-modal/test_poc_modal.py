@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import urllib.error
@@ -282,6 +283,80 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(poc_modal.objective_decision(first_only), "improved")
         rechecked = dict(first_only, confirmation={"output_token_throughput": {"decision": "no_measurable_difference"}})
         self.assertEqual(poc_modal.objective_decision(rechecked), "no_measurable_difference")
+
+
+ROWS = [{"timestamp": 0, "input_length": 1400, "output_length": 200, "hash_ids": [11, 12, 13]},
+        {"timestamp": 400, "input_length": 1400, "output_length": 90, "hash_ids": [11, 12, 27]},
+        {"timestamp": 900, "input_length": 30, "output_length": 40}]
+
+
+class HoldTest(unittest.TestCase):
+    """After the replay the server is held at the campaign's load, and the planner is asked
+    during that hold: a replay alone ends before the control plane has measured it."""
+
+    def setUp(self) -> None:
+        self.saved = {name: getattr(poc_modal, name) for name in ("send_chat", "state", "HOLD_BEFORE_ASK_SECONDS", "PLANNER_POLL_SECONDS", "engine_measured")}
+        self.poc = {name: getattr(poc_modal.poc, name) for name in ("mooncake_rows", "api", "cli")}
+        poc_modal.state = lambda: {"api_key": "key"}
+        poc_modal.poc.mooncake_rows = lambda: ROWS
+        poc_modal.poc.api = lambda *args, **kwargs: {}
+        poc_modal.poc.cli = lambda *args, **kwargs: '{"candidates": []}'
+        poc_modal.HOLD_BEFORE_ASK_SECONDS, poc_modal.PLANNER_POLL_SECONDS = 0.15, 0.02
+
+    def tearDown(self) -> None:
+        for name, value in self.saved.items():
+            setattr(poc_modal, name, value)
+        for name, value in self.poc.items():
+            setattr(poc_modal.poc, name, value)
+
+    def test_the_hold_sends_the_same_shapes_with_other_text(self) -> None:
+        text = corpus.load(corpus.STAND_IN)
+        first, _ = poc_modal.chat_request(ROWS[0], 0, 1.0, 1.0, 30000, 128, text)
+        again, _ = poc_modal.chat_request(ROWS[0], 0, 1.0, 1.0, 30000, 128, text, shift=1_000_003)
+        self.assertNotEqual(first["messages"], again["messages"])
+        self.assertEqual((first["max_tokens"], first["stream"]), (again["max_tokens"], True))
+        # Two rows that share leading blocks still share their leading text after the shift.
+        other, _ = poc_modal.chat_request(ROWS[1], 1, 1.0, 1.0, 30000, 128, text, shift=1_000_003)
+        self.assertEqual(again["messages"][0]["content"].split("\n\n")[:2], other["messages"][0]["content"].split("\n\n")[:2])
+        words, _ = poc_modal.chat_request(ROWS[2], 2, 1.0, 1.0, 30000, 128, None)
+        moved, _ = poc_modal.chat_request(ROWS[2], 2, 1.0, 1.0, 30000, 128, None, shift=1_000_003)
+        self.assertNotEqual(words["messages"], moved["messages"])
+        self.assertTrue(moved["ignore_eos"])
+
+    def test_the_hold_keeps_the_campaigns_load_until_the_planner_has_been_asked(self) -> None:
+        running, peak, asked = [0], [0], threading.Event()
+        lock = threading.Lock()
+
+        def send(body: dict, session: int, key: str) -> tuple[int, str]:
+            with lock:
+                running[0] += 1
+                peak[0] = max(peak[0], running[0])
+            time.sleep(0.02)
+            with lock:
+                running[0] -= 1
+            return 5, ""
+
+        poc_modal.send_chat = send
+        threading.Timer(0.3, asked.set).start()
+        hold = poc_modal.hold_load(3, 4, 1.0, 128, asked.is_set)
+        self.assertEqual((peak[0], hold["requests_at_once"], hold["failed"], hold["recorded_in_the_traffic_shape"]), (4, 4, 0, False))
+        self.assertGreater(hold["requests"], 3)  # the rows came round again
+
+    def test_the_planner_is_asked_during_the_hold(self) -> None:
+        poc_modal.engine_measured = lambda document: True
+        planner = poc_modal.Planner()
+        self.assertFalse(planner.thread.is_alive())  # nothing is asked before the hold
+        planner.hold(32)
+        self.assertTrue(planner.done.wait(5))
+        self.assertRegex(planner.asked, r"^while the server was held at 32 requests at once, \d+ s into the hold$")
+        self.assertEqual(planner.finish(), {"candidates": []})
+
+    def test_a_hold_that_ends_first_is_said_so(self) -> None:
+        poc_modal.engine_measured = lambda document: False
+        planner = poc_modal.Planner()
+        planner.hold(32)
+        self.assertEqual(planner.finish(), {"candidates": []})
+        self.assertEqual(planner.asked, "after the hold ended, without windowed engine measurements")
 
 
 if __name__ == "__main__":

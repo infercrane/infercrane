@@ -174,12 +174,12 @@ class DriverPinTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
-        self.saved = (modal_gpu.leases, modal_gpu.serve_gpu)
-        modal_gpu.leases, modal_gpu.serve_gpu = _Store(), types.SimpleNamespace(spawn=lambda *a: _Call())
+        self.saved = (modal_gpu.leases, modal_gpu.serve_gpu, broker.RESPAWN_DELAY_SECONDS)
+        modal_gpu.leases, modal_gpu.serve_gpu, broker.RESPAWN_DELAY_SECONDS = _Store(), types.SimpleNamespace(spawn=lambda *a: _Call()), 0
         self.broker = broker.Broker("token", 30.0, 3, 6, Path(self.dir.name) / "ledger.json", dry=False)
 
     def tearDown(self) -> None:
-        modal_gpu.leases, modal_gpu.serve_gpu = self.saved
+        modal_gpu.leases, modal_gpu.serve_gpu, broker.RESPAWN_DELAY_SECONDS = self.saved
         self.dir.cleanup()
 
     def lease(self) -> dict:
@@ -217,6 +217,27 @@ class DriverPinTest(unittest.TestCase):
         self.assertGreaterEqual(lease["prior_seconds"], 300)
         self.assertGreaterEqual(self.broker.lease_seconds(lease, time.time()), 300)
         self.assertEqual(modal_gpu.leases[f"st:{lease['lease_id']}"], {"state": "requested"})
+
+    def test_the_next_start_waits_until_the_refused_container_is_gone(self) -> None:
+        broker.RESPAWN_DELAY_SECONDS = 0.2
+        self.broker.required_driver = "620.70.06"
+        lease = self.lease()
+        first_call = lease["call_id"]
+        self.report(lease, state="failed", reason="driver_mismatch", error="NVIDIA driver 610.57.04 differs")
+        self.assertEqual((lease["state"], lease.get("call_id")), ("starting", None))  # nothing started yet
+        self.broker.tick()  # the watchdog does not take the refused call's end for the lease's
+        self.assertEqual(lease["state"], "starting")
+        time.sleep(0.4)
+        self.assertNotIn(lease.get("call_id"), (None, first_call))
+
+    def test_a_lease_stopped_while_it_waits_is_not_started_again(self) -> None:
+        broker.RESPAWN_DELAY_SECONDS = 0.2
+        self.broker.required_driver = "620.70.06"
+        lease = self.lease()
+        self.report(lease, state="failed", reason="driver_mismatch", error="mismatch")
+        self.broker.stop(lease["lease_id"], "test")
+        time.sleep(0.4)
+        self.assertEqual((lease["state"], lease.get("call_id")), ("stopping", None))
 
     def test_retries_are_bounded(self) -> None:
         self.broker.required_driver = "620.70.06"
