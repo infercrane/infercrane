@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One optimization campaign through the real InferCrane control plane on Modal H100s.
+"""One optimization campaign through the real InferCrane control plane on Modal GPUs.
 
     poc_modal.py choose-model  rank the most downloaded FP8 checkpoints from Qwen, Z.ai and
                                DeepSeek that fit one H100 and have a published one-H100 vLLM
@@ -62,6 +62,11 @@ APPROVAL_HOURS = 3
 BROKER_PORT = 18095
 BROKER_HOST = "host.docker.internal"  # the Mac host as seen from kind pods (Docker Desktop)
 PROFILE, OBJECTIVE = "throughput", "throughput"  # 32 concurrent streams per measured run
+# The requests at once a campaign measures with are its benchmark profile's. A campaign
+# bound to recorded traffic takes nothing else from the profile, so these three built-in
+# profiles are three load levels; the objective stays output throughput. The product has
+# no profile with 12 at once.
+LOAD_PROFILES = {32: "throughput", 8: "balanced", 4: "long-context"}
 MAX_INPUT_TOKENS = 30000  # the traffic shape of the 2026-11-20 run; Qwen3.8 serves 262,144 positions
 # A smoke run proves a paid campaign's path for a few dollars. The judge keeps its four
 # paired rounds and its fresh-server confirmation (the product has no shorter mode: with
@@ -733,7 +738,7 @@ def wait_for_lease_end(broker: BrokerProcess, pod_prefix: str, timeout_s: int = 
 
 def run_settings(text: prompt_corpus.Corpus | None) -> dict:
     """What this run measures with, kept in its record and compared on --reuse-capture."""
-    return {"traffic": RUN["traffic"], "shape": RUN["shape"], "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
+    return {"traffic": RUN["traffic"], "shape": RUN["shape"], "requests_at_once": next(level for level, name in LOAD_PROFILES.items() if name == PROFILE), "corpus": text.identity if text else None, "smoke": RUN["smoke"], "stand_in": RUN["stand_in"],
             "current_setup": RUN["current_setup"], "engine": models.ENGINE.key, "runtime_image": VLLM_IMAGE, "gpu_type": poc.ACCELERATOR}
 
 
@@ -910,7 +915,7 @@ def finish(record: dict, labels: dict, broker: BrokerProcess) -> None:
                "runtime_image": VLLM_IMAGE, "engine": models.ENGINE.key,
                "gpu": "CPU stand-in servers on Modal (no GPU, no model)" if settings.get("stand_in") else f"1 x {models.ACCELERATOR.description} on Modal (gpu=\"{models.ACCELERATOR.modal_gpu}\")",
                "rate": {"usd_per_hour": GPU_HOURLY_USD, "basis": f"Modal list price, {models.ACCELERATOR.description}, GPU only, read {models.ACCELERATOR.price_read}"},
-               "load": {"profile": PROFILE, "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
+               "load": {"profile": PROFILE, "requests_at_once": settings.get("requests_at_once"), "objective": OBJECTIVE, "trace": "Mooncake FAST'25 arxiv trace, first rows, lengths scaled to the run's shape and capped",
                         "shape": settings.get("shape"), "shape_medians": SHAPES.get(settings.get("shape") or "mooncake"),
                         "trace_license": "Apache-2.0 (kvcache-ai/Mooncake)", "traffic": current.get("traffic")},
                "measured_from": "the control plane in a kind cluster on the laptop; every request crosses the internet to Modal through a tunnel",
@@ -1104,6 +1109,7 @@ def main() -> int:
     parser.add_argument("--gpu", choices=sorted(models.ACCELERATORS), default=models.ACCELERATOR.key, help="the GPU type every setup of the run serves on")
     parser.add_argument("--traffic", choices=TRAFFIC, default="mooncake-words", help="real-text composes every request from --corpus, so speculative setups are measured")
     parser.add_argument("--shape", choices=sorted(SHAPES), default="mooncake", help="scale the trace's lengths to a traffic shape: the trace as it is, or the medians of the product's public interactive, long-prefill and decode-heavy shapes")
+    parser.add_argument("--requests-at-once", type=int, choices=sorted(LOAD_PROFILES), default=32, help="the load every measured run of the campaign holds (its benchmark profile's concurrency)")
     parser.add_argument("--corpus", type=Path, help=f"prompt corpus for `up` and for `run --traffic real-text` (default for both: the control plane's, else {prompt_corpus.STAND_IN.name}, a rehearsal corpus too small for a measurement)")
     parser.add_argument("--current-setup", choices=CURRENT_SETUPS, default="publisher", help="the setup every other setup must beat: the publisher's command, or that command with its documented speculation option")
     parser.add_argument("--planner-setups", type=int, choices=(1, 2), help="how many of the planner's setups to measure (default 1, or 2 with real text)")
@@ -1113,6 +1119,8 @@ def main() -> int:
     os.chdir(ROOT)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     configure(args.engine, args.gpu, args.current_setup)
+    global PROFILE
+    PROFILE = LOAD_PROFILES[args.requests_at_once]
     corpus = args.corpus.resolve() if args.corpus else None
     if args.command == "up":
         up(corpus)

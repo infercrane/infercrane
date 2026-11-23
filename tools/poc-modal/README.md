@@ -101,6 +101,9 @@ spread, arrival times and shared prefixes stay. The default, `mooncake`, is the 
 the answers are 35 tokens or shorter, so that shape says little about a setup that only
 speeds up writing.
 
+`--requests-at-once 4`, `8` or `32` (the default) sets the load every measured run of the
+campaign holds, through the product's built-in benchmark profiles; there is none with 12.
+
 ### Engine version and GPU type
 
 `--engine vllm-0.34.0` serves every setup with vLLM 0.34.0, the newest release on 2026-11-23,

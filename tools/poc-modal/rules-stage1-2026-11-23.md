@@ -55,6 +55,9 @@ A campaign that keeps the current setup is a result and is reported like any oth
   articles and 1,000 OpenAssistant oasst1 prompts, the same text the fast-track map measures
   with, both sources Apache-2.0 on their dataset cards. Answers end where the model ends
   them. The campaign replays the recorded shape at 32 requests at once (profile `throughput`).
+  A campaign repeated at 8 or 4 requests at once (`--requests-at-once`, profiles `balanced` and
+  `long-context`) is a separate campaign with its own record; the product has no profile
+  with 12.
 - **Judge:** the product's, unchanged: four paired rounds, a 0.75% allowance for the
   difference between two machines, a second window on fresh servers before a gain counts, the
   built-in answer check, a signed report.
