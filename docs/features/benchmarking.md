@@ -179,3 +179,62 @@ server dies mid-run the main process can exit while those workers keep running. 
 waits at most 30 seconds for them and stops the whole group, so a measurement cannot hang on them.
 A cancelled measurement stops the group at once. A run whose main process exited successfully keeps
 its result; a failed run keeps its error.
+
+## How fast a disconnect frees the engine
+
+When a client stops reading a stream, the serving engine should cancel the request. Until it does,
+the request keeps generating and holds a batch slot that a waiting request could use. Under an
+admission cap, an abandoned stream that the engine has not cancelled holds one of the capped slots.
+Engine upgrades can change how quickly a disconnect is noticed, so optimization campaigns measure it.
+
+When a campaign scrapes a server's engine metrics (its runtime contract declares `/metrics`), every
+AIPerf run is followed by three cancel-release probes. Each probe:
+
+1. Reads the engine's running-request gauge from `/metrics` and waits up to 5 seconds for it to read
+   0. The gauge is `vllm:num_requests_running`, `sglang:num_running_reqs`, or
+   `llamacpp:requests_processing`, read by the same parser as every other engine scrape. If the
+   engine does not go idle, the probe is `unknown` and sends nothing.
+2. Streams one chat completion to the address AIPerf measured, with `max_tokens` 1024 and
+   `ignore_eos`, so the request is still generating when the probe leaves.
+3. Reads the stream until the gauge shows the request running, for at most 30 seconds. A gauge that
+   never rises makes the probe `unknown`. It is never recorded as 0 ms.
+4. Closes the HTTP/1.1 connection and reads `/metrics` every 25 ms until the gauge is back to 0. The
+   time from closing the connection to the scrape that reads 0 is the release time. It can be late by
+   one poll plus one scrape round trip.
+5. If the gauge is not back to 0 within 10 seconds, the probe is `timed_out`, with a reason and no
+   number.
+
+Each campaign run keeps the result in `measured.runs[].cancel_release`:
+
+| Field | Meaning |
+| --- | --- |
+| `engine` | `vllm`, `sglang`, or `llamacpp`, from the metrics the probe read |
+| `probes`, `released`, `timed_out` | Probes run, probes with a release time, and probes that timed out |
+| `max_release_ms` | The slowest release. `null` when no probe released or any probe timed out, because a timed-out probe was slower than `timeout_ms` by an unknown amount |
+| `timeout_ms` | The release bound |
+| `samples` | Each probe's `outcome` (`released`, `timed_out`, or `unknown`), its `release_ms` when released, and a `reason` otherwise |
+
+What the number covers, and what it does not:
+
+- The probe sends its request to the address AIPerf loads, and reads `/metrics` from that address,
+  the same URL AIPerf scrapes. A runtime contract can declare only `/metrics`, and no API input
+  names a metrics URL. In a campaign the address is the candidate's own server, so the release time
+  covers the engine and any provider proxy in front of it. It does not include the InferCrane
+  gateway, which passes a disconnect on by cancelling its upstream request.
+- The gauge is the engine's own report. An engine that does not refresh the gauge once it is idle
+  makes its probes time out or stay `unknown`; it never produces a fast release. In the vLLM 0.22.1
+  source, an aborted request triggers one more scheduler step that publishes the gauge. SGLang
+  0.5.20 republishes the gauge as soon as its scheduler is idle and the gauge is stale. SGLang
+  0.5.12 republishes idle metrics only every 30 seconds, so its probes time out or stay `unknown`.
+  That is missing evidence, not a measured 10-second hold.
+- The probe assumes it is the only traffic on the server, which is true after AIPerf finishes in a
+  campaign. A gauge above 1 during a probe makes it `unknown`.
+- Probes follow every run of both arms, so the pairing of candidate and control runs is unchanged. A
+  probe that times out can leave one request generating up to 1024 tokens before the next run.
+- A model whose context window is shorter than the prompt plus 1024 tokens refuses the probe, which
+  is then `unknown` with the HTTP status.
+- Ordinary `infercrane benchmark` runs do not scrape engine metrics and run no probe.
+
+The result is stored with each run inside the benchmark row's `workload_json`, not as a column of its
+own. It describes a single run, and the pooled candidate row has no single value that would stand for
+all of them.

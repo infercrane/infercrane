@@ -44,6 +44,9 @@ type scriptedAIPerf struct {
 	answerTokens map[string][]float64
 	failAt       map[string]int
 	calls        map[string]int
+	// cancelRelease is returned for every run that requested server
+	// metrics, as benchmark.Run probes only then.
+	cancelRelease *benchmark.CancelRelease
 }
 
 func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchmark.Result, error) {
@@ -94,6 +97,9 @@ func (r *scriptedAIPerf) Run(_ context.Context, config benchmark.Config) (benchm
 		if values := r.answerTokens[config.Endpoint]; len(values) >= call {
 			result.OutputTokensPerRequest = &values[call-1]
 		}
+	}
+	if config.ServerMetrics {
+		result.CancelRelease = r.cancelRelease
 	}
 	return result, nil
 }
@@ -234,6 +240,40 @@ func TestBenchmarkExecutorInterleavesControlWithWarmupRepeatsAndUniqueSeeds(t *t
 	}
 	if len(evidence.Runs) != 9 || strings.Join(evidence.Order[:2], ",") != "warmup:control,warmup:candidate" {
 		t.Fatalf("run audit=%+v order=%v", evidence.Runs, evidence.Order)
+	}
+}
+
+// TestBenchmarkExecutorKeepsEachRunsCancelRelease carries the probe into
+// every audited run whose arm exposes engine metrics. The control here
+// declares no metrics path, so its runs have no probe rather than a zero.
+func TestBenchmarkExecutorKeepsEachRunsCancelRelease(t *testing.T) {
+	fixture := newExecutorFixture(t, optimizer.Request{})
+	fixture.runner.throughput[controlEndpoint] = []float64{100, 101, 100, 101, 100}
+	fixture.runner.throughput[candidateEndpoint] = []float64{130, 131, 129, 130}
+	release := 84.0
+	fixture.runner.cancelRelease = &benchmark.CancelRelease{Engine: "sglang", Probes: 3, Released: 2, TimeoutMS: 10000, Samples: []benchmark.CancelReleaseProbe{
+		{Outcome: benchmark.CancelReleaseReleased, ReleaseMS: &release}, {Outcome: benchmark.CancelReleaseReleased, ReleaseMS: &release},
+		{Outcome: benchmark.CancelReleaseUnknown, Reason: "the engine was not idle"},
+	}, MaxReleaseMS: &release}
+	_, workload := fixture.run(t)
+
+	runs := workload["measured"].(map[string]any)["runs"].([]any)
+	for index, raw := range runs {
+		run := raw.(map[string]any)
+		probe, present := run["cancel_release"].(map[string]any)
+		if run["arm"] == "control" {
+			if present {
+				t.Fatalf("control run %d has a probe without a metrics path: %v", index, run)
+			}
+			continue
+		}
+		if !present || probe["max_release_ms"] != release || probe["probes"] != float64(3) || probe["released"] != float64(2) || probe["timed_out"] != float64(0) || len(probe["samples"].([]any)) != 3 {
+			t.Fatalf("candidate run %d lost its probe: %v", index, run)
+		}
+	}
+	evidence := measuredEvidence(t, workload)
+	if evidence.Runs[1].CancelRelease == nil || *evidence.Runs[1].CancelRelease.MaxReleaseMS != release || evidence.Runs[0].CancelRelease != nil {
+		t.Fatalf("runs=%+v", evidence.Runs)
 	}
 }
 
