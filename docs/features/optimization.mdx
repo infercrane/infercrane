@@ -216,6 +216,16 @@ one change, or an existing setup that already makes that change, such as a setup
 measured. When no rule applies, the proposal holds the starting setup alone, and its diagnosis says
 what to collect, such as serving-engine metrics, before planning again.
 
+The starting setup is on the provider adapter the request names, not on what the diagnosed
+endpoint runs: the plan does not read the endpoint's own setup. `--provider kubernetes` names the
+plain Kubernetes adapter, so the plan starts from a plain server, and the Dynamo serving graph the
+same cloud also offers comes after it. To plan for an endpoint served by a Dynamo serving graph,
+name it: `--provider kubernetes-dynamo`. A request that names the wrong adapter plans from the
+wrong kind of server. A provider that names only a cloud with several adapters, such as
+`--provider runpod`, names none of them; between adapters with equal qualification evidence and
+equal reusable artifacts the plan then starts from the first in name order (`runpod-pods`). Either
+way one request plans from the same kind of server for every `--profile`.
+
 | Diagnosis | Tried, in order | vLLM flags (SGLang) |
 |---|---|---|
 | KV cache full and evicting requests (`kv_cache.preemption`) | FP8 KV cache, then fewer requests at once | `--kv-cache-dtype fp8` (`fp8_e4m3`); `--max-num-seqs` at about 75% of the observed running requests, rounded down to a multiple of 8 (`--max-running-requests`) |
