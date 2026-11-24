@@ -179,21 +179,23 @@ func (s *Store) AutoscalingSLOEvidence(ctx context.Context, deploymentID string,
 	return evidence, nil
 }
 
-func (s *Store) AutoscalingTargetURLs(ctx context.Context, deploymentID string) ([]string, error) {
-	rows, err := s.QueryContext(ctx, `SELECT t.url FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id WHERE dt.deployment_id=? AND t.health='healthy' AND NOT EXISTS(SELECT 1 FROM external_target_policies p WHERE p.target_id=t.id) ORDER BY t.name`, deploymentID)
+// AutoscalingTargets lists a deployment's healthy routed workers with what
+// decides which credential each was started with.
+func (s *Store) AutoscalingTargets(ctx context.Context, deploymentID string) ([]autoscale.Target, error) {
+	rows, err := s.QueryContext(ctx, `SELECT t.url,d.tenant_id,COALESCE(dc.compute_connection_id,''),COALESCE(t.provider_details_json::text,'') FROM targets t JOIN deployment_targets dt ON dt.target_id=t.id JOIN deployments d ON d.id=dt.deployment_id LEFT JOIN deployment_compute_connections dc ON dc.tenant_id=d.tenant_id AND dc.deployment_id=d.id WHERE dt.deployment_id=? AND t.health='healthy' AND NOT EXISTS(SELECT 1 FROM external_target_policies p WHERE p.target_id=t.id) ORDER BY t.name`, deploymentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var urls []string
+	var targets []autoscale.Target
 	for rows.Next() {
-		var targetURL string
-		if err = rows.Scan(&targetURL); err != nil {
+		var target autoscale.Target
+		if err = rows.Scan(&target.URL, &target.TenantID, &target.ComputeConnectionID, &target.ProviderDetails); err != nil {
 			return nil, err
 		}
-		urls = append(urls, targetURL)
+		targets = append(targets, target)
 	}
-	return urls, rows.Err()
+	return targets, rows.Err()
 }
 
 func (s *Store) RecordDecision(ctx context.Context, deploymentID string, decision autoscale.Decision, signals string) error {

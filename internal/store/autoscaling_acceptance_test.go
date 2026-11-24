@@ -14,6 +14,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
+	"github.com/infercrane/infercrane/internal/workercredential"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -154,6 +155,69 @@ func TestDurableAutoscalingAcceptanceOneToTwoToOne(t *testing.T) {
 	decisions, err := s.ScalingDecisionsForTenant(ctx, "global", name, 10)
 	if err != nil || len(decisions) < 2 || decisions[0].Action != "scale_down" {
 		t.Fatalf("decisions=%#v err=%v", decisions, err)
+	}
+}
+
+// scopedAcceptanceProvider records, as the RunPod adapter does, that its
+// workers were started with a tenant-and-deployment-scoped credential.
+type scopedAcceptanceProvider struct{ *acceptanceProvider }
+
+func (p scopedAcceptanceProvider) ObserveReplica(ctx context.Context, handle provision.ProviderHandle, port int) (provision.Observation, error) {
+	observation, err := p.acceptanceProvider.ObserveReplica(ctx, handle, port)
+	if observation.Exists {
+		observation.Details = `{"worker_credential_version":"` + workercredential.Version + `"}`
+	}
+	return observation, err
+}
+
+// The engine scrape asks which credential each routed worker was started
+// with, so the store must hand it the worker's workspace, compute connection
+// and recorded credential version together with its address.
+func TestAutoscalingTargetsCarryWhatDecidesEachWorkersCredential(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	name := "autoscale-credential"
+	requestJSON := fmt.Sprintf(`{"name":%q,"model":"Qwen/Qwen3-8B","cloud":"runpod","gpu":"L40S","tenant_id":"global","min_replicas":1,"max_replicas":1}`, name)
+	deployment, _, _, err := s.SubmitCloudDeployment(ctx,
+		domain.Deployment{Name: name, Model: "Qwen/Qwen3-8B", MinReplicas: 1, MaxReplicas: 1},
+		domain.Operation{Kind: workflows.ConvergeKind, IdempotencyKey: "initial", RequestJSON: requestJSON},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := scopedAcceptanceProvider{&acceptanceProvider{existing: map[string]bool{}}}
+	handlers := workflows.QualifiedCloudHandlers(s, provider, acceptanceRuntime{}, acceptanceArtifactResolver{})
+	worker := operations.Worker{Repository: s, Handlers: handlers, Owner: "acceptance-worker", Lease: time.Second, BaseBackoff: time.Millisecond, MaxBackoff: time.Millisecond, Jitter: func(d time.Duration) time.Duration { return d }}
+	if worked, workerErr := worker.Once(ctx); workerErr != nil || !worked {
+		t.Fatalf("initial converge worked=%t err=%v", worked, workerErr)
+	}
+	assertReplicaCount(t, s, deployment.ID, 1)
+	// Only workers the reconciler found healthy are scraped.
+	if starting, startingErr := s.AutoscalingTargets(ctx, deployment.ID); startingErr != nil || len(starting) != 0 {
+		t.Fatalf("a worker that is not yet healthy was listed: %#v err=%v", starting, startingErr)
+	}
+	resolved, err := s.Resolve(ctx, name)
+	if err != nil || len(resolved.Targets) != 1 {
+		t.Fatalf("routed targets=%#v err=%v", resolved.Targets, err)
+	}
+	if err = s.SetTargetHealth(ctx, resolved.Targets[0].ID, "healthy"); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, err := s.AutoscalingTargets(ctx, deployment.ID)
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets=%#v err=%v", targets, err)
+	}
+	target := targets[0]
+	if !strings.HasPrefix(target.URL, "http://runtime.invalid/") || target.TenantID != "global" || target.ComputeConnectionID != "" || workercredential.VersionOf(target.ProviderDetails) != workercredential.Version {
+		t.Fatalf("target=%#v", target)
+	}
+	source := workercredential.Source{Master: "worker-credential-master-0123456789ab", Shared: "control-plane-api-key"}
+	if got, want := source.Credential(target.TenantID, deployment.ID, target.ComputeConnectionID, target.ProviderDetails), workercredential.Derive(source.Master, "global", deployment.ID); got != want || got == source.Shared {
+		t.Fatalf("scrape credential=%q, want the worker's own %q", got, want)
+	}
+	if other, otherErr := s.AutoscalingTargets(ctx, "no-such-deployment"); otherErr != nil || len(other) != 0 {
+		t.Fatalf("targets of another deployment=%#v err=%v", other, otherErr)
 	}
 }
 

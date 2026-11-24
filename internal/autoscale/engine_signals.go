@@ -11,8 +11,17 @@ import (
 	"github.com/infercrane/infercrane/internal/metrics"
 )
 
+// Target is one routed worker of a deployment and what is needed to decide
+// which credential it was started with.
+type Target struct {
+	URL                 string
+	TenantID            string
+	ComputeConnectionID string
+	ProviderDetails     string
+}
+
 type TargetSource interface {
-	AutoscalingTargetURLs(context.Context, string) ([]string, error)
+	AutoscalingTargets(context.Context, string) ([]Target, error)
 }
 
 // VLLMSignals reads serving-engine running/waiting gauges without recording
@@ -22,15 +31,18 @@ type TargetSource interface {
 type VLLMSignals struct {
 	Targets TargetSource
 	Client  *http.Client
-	APIKey  string
+	// Credential returns the bearer credential one worker of the deployment
+	// was started with. A worker it returns "" for is not scraped: its address
+	// is never sent a credential that belongs to another worker.
+	Credential func(deploymentID string, target Target) string
 }
 
 func (s VLLMSignals) Signals(ctx context.Context, deploymentID string) (Signals, error) {
-	urls, err := s.Targets.AutoscalingTargetURLs(ctx, deploymentID)
+	targets, err := s.Targets.AutoscalingTargets(ctx, deploymentID)
 	if err != nil {
 		return Signals{}, err
 	}
-	if len(urls) == 0 {
+	if len(targets) == 0 {
 		return Signals{}, fmt.Errorf("deployment has no routed targets")
 	}
 	client := s.Client
@@ -38,13 +50,18 @@ func (s VLLMSignals) Signals(ctx context.Context, deploymentID string) (Signals,
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
 	var out Signals
-	for _, baseURL := range urls {
+	for _, target := range targets {
+		baseURL := target.URL
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/metrics", nil)
 		if err != nil {
 			return Signals{}, err
 		}
-		if s.APIKey != "" {
-			request.Header.Set("Authorization", "Bearer "+s.APIKey)
+		if s.Credential != nil {
+			credential := s.Credential(deploymentID, target)
+			if credential == "" {
+				return Signals{}, fmt.Errorf("scrape %s: worker credential is unavailable", baseURL)
+			}
+			request.Header.Set("Authorization", "Bearer "+credential)
 		}
 		response, err := client.Do(request)
 		if err != nil {

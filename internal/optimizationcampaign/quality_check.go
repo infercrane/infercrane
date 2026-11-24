@@ -105,7 +105,7 @@ func (c BuiltinQualityCheck) Check(ctx context.Context, campaign domain.Optimiza
 	if err != nil {
 		return domain.QualityEvidence{}, fmt.Errorf("resolve candidate deployment: %w", err)
 	}
-	target, _, err := directReplica(ctx, c.Store, c.Backends, candidate, resolved.Deployment.ID, draft)
+	target, _, err := directReplica(ctx, c.Store, c.Backends, candidate, resolved.Deployment, draft)
 	if err != nil {
 		return domain.QualityEvidence{}, fmt.Errorf("candidate: %w", err)
 	}
@@ -194,7 +194,7 @@ func (c BuiltinQualityCheck) reference(ctx context.Context, campaign domain.Opti
 		}
 		if err == nil && resolved.Deployment.ActiveRevisionID != "" && resolved.Deployment.ActiveRevisionID != candidate.RevisionID {
 			active := domain.OptimizationCandidateRun{ID: candidate.ID, TenantID: campaign.TenantID, RevisionID: resolved.Deployment.ActiveRevisionID}
-			target, _, targetErr := directReplica(ctx, c.Store, c.Backends, active, resolved.Deployment.ID, activeDraft(candidate, resolved.Deployment.Model))
+			target, _, targetErr := directReplica(ctx, c.Store, c.Backends, active, resolved.Deployment, activeDraft(candidate, resolved.Deployment.Model))
 			if targetErr == nil {
 				return qualityArm{target: target, deployment: campaign.TargetDeployment}, nil
 			}
@@ -223,7 +223,7 @@ func (c BuiltinQualityCheck) reference(ctx context.Context, campaign domain.Opti
 	if err != nil {
 		return qualityArm{}, fmt.Errorf("resolve control deployment: %w", err)
 	}
-	target, _, err := directReplica(ctx, c.Store, c.Backends, control, resolved.Deployment.ID, draft)
+	target, _, err := directReplica(ctx, c.Store, c.Backends, control, resolved.Deployment, draft)
 	if err != nil {
 		return qualityArm{}, fmt.Errorf("control: %w", err)
 	}

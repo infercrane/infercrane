@@ -328,10 +328,18 @@ type ReplicaBackend struct {
 	Provider             ReplicaProvider
 	Capacity             CapacityAdvisor
 	ResolveProvider      func(context.Context, string, string, string) (ReplicaProvider, CapacityAdvisor, string, error)
+	// ResolveOperatorProvider returns the provider for one deployment on the
+	// operator's own account, with the worker credential that deployment's
+	// workers are started with. An adapter that starts every worker from one
+	// operator-provisioned secret leaves it nil and Provider is used.
+	ResolveOperatorProvider func(ctx context.Context, tenant, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error)
 }
 
 func (b ReplicaBackend) resolveProvider(ctx context.Context, tenant, connectionID, deploymentID string) (ReplicaProvider, CapacityAdvisor, string, error) {
 	if connectionID == "" {
+		if b.ResolveOperatorProvider != nil {
+			return b.ResolveOperatorProvider(ctx, tenant, deploymentID)
+		}
 		return b.Provider, b.Capacity, "", nil
 	}
 	if b.ResolveProvider == nil {
@@ -1171,6 +1179,13 @@ func mustJSON(value any) string {
 func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBackend, runtime RuntimeInspector, operation domain.Operation, request CloudRequest, ordinal int) (targetName, endpoint, resourceID string, resultErr error) {
 	if err := refuseUnpassedRuntimeEnv(backend.Name, backend.Profile, request.RuntimeEnv); err != nil {
 		return "", "", "", err
+	}
+	// InferCrane-managed capacity runs a workspace's own workload on the
+	// operator's account. Only an adapter that starts each deployment's workers
+	// with their own credential may serve it; one whose workers share the
+	// operator's credential would hand that credential to the workload.
+	if request.BillingMode == "customer_wallet" && request.ComputeConnectionID == "" && backend.ResolveOperatorProvider == nil {
+		return "", "", "", operations.Permanent("managed_worker_credential_unavailable", errors.New("managed capacity needs a provider adapter that scopes worker credentials to the deployment"))
 	}
 	started := time.Now().UTC()
 	stageDurationsJSON := "{}"

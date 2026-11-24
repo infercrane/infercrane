@@ -695,6 +695,13 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.ManagedDeploymentsEnabled && config.RunPodAPIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
 	}
+	// Managed capacity runs other workspaces' workloads, and their own images,
+	// on the operator's RunPod account. Each must be started with a credential
+	// scoped to it; without the derivation key the only credential left to give
+	// a worker would be the control-plane API key.
+	if config.ManagedDeploymentsEnabled && config.WorkerCredentialKey == "" {
+		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires INFERCRANE_WORKER_CREDENTIAL_KEY")
+	}
 	if err := validateOperatorComputeTenants(config); err != nil {
 		return Config{}, err
 	}

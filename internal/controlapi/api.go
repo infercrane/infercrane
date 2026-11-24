@@ -68,6 +68,7 @@ import (
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/upstreamcredential"
+	"github.com/infercrane/infercrane/internal/workercredential"
 	"github.com/infercrane/infercrane/internal/workflows"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
@@ -483,7 +484,18 @@ type BackendMetadata struct {
 	APIKey     string
 	APIKeyEnv  string
 	Serverless bool
+	// WorkerMaster derives the credential of a worker that was started with
+	// its own tenant-and-deployment-scoped one. APIKey is then sent only to
+	// workers on operator compute that share the operator's credential.
+	WorkerMaster string
 }
+
+// workerCredential returns what a direct request to one of this backend's
+// workers presents, or "" when nothing may be sent to it.
+func (b BackendMetadata) workerCredential(deployment domain.Deployment, replica domain.Replica) string {
+	return workercredential.Source{Master: b.WorkerMaster, Shared: b.APIKey}.Credential(deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, replica.ProviderDetails)
+}
+
 type identityKey struct{}
 
 func (a API) decisions() (decisionStore, bool) {
@@ -4737,18 +4749,23 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "internal", "selected revision replica lookup failed")
 			return
 		}
+		var selected domain.Replica
 		selectedOrdinal := int(^uint(0) >> 1)
 		for _, replica := range replicas {
 			if replica.RevisionID == selectedRevisionID && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Endpoint != "" && replica.Ordinal < selectedOrdinal {
-				endpoint, provider, selectedOrdinal = replica.Endpoint, replica.Provider, replica.Ordinal
+				selected, selectedOrdinal = replica, replica.Ordinal
 			}
 		}
+		endpoint, provider = selected.Endpoint, selected.Provider
 		if provider == "" {
 			writeError(w, 409, "candidate_not_ready", "selected revision has no healthy ready endpoint")
 			return
 		}
 		backend := a.Backends[provider]
-		credential = backend.APIKey
+		// The replica is sent the credential it was started with and no other:
+		// its address belongs to the workload, which may be the tenant's own
+		// image in the tenant's own account.
+		credential = backend.workerCredential(deployment, selected)
 		if credential == "" {
 			writeError(w, 503, "benchmark_unavailable", "candidate benchmark credential is not configured for provider "+provider)
 			return

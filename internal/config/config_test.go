@@ -104,6 +104,9 @@ func TestRunPodContainerDiskIsBounded(t *testing.T) {
 	}
 }
 
+// testWorkerCredentialKey meets the 32-byte floor of the derivation key.
+const testWorkerCredentialKey = "test-worker-credential-key-0123456789"
+
 func TestManagedDeploymentsRequireExplicitEnablementAndRunPodCredential(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	config, err := Load()
@@ -117,6 +120,11 @@ func TestManagedDeploymentsRequireExplicitEnablementAndRunPodCredential(t *testi
 	}
 
 	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_WORKER_CREDENTIAL_KEY") {
+		t.Fatalf("managed deployments without scoped worker credentials were accepted: %v", err)
+	}
+
+	t.Setenv("INFERCRANE_WORKER_CREDENTIAL_KEY", testWorkerCredentialKey)
 	config, err = Load()
 	if err != nil || !config.ManagedDeploymentsEnabled {
 		t.Fatalf("explicit managed deployment configuration was not loaded: cfg=%#v err=%v", config, err)
@@ -157,6 +165,7 @@ func TestOperatorComputeTenantsAreExplicitAndWildcardIsSingleCustomerOnly(t *tes
 
 	t.Setenv("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", "true")
 	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	t.Setenv("INFERCRANE_WORKER_CREDENTIAL_KEY", testWorkerCredentialKey)
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "single-customer") {
 		t.Fatalf("wildcard accepted on a control plane that sells managed capacity: %v", err)
 	}
@@ -175,6 +184,7 @@ func TestEnvSecretTenantsDefaultToSingleCustomerAndStayExplicitWhenShared(t *tes
 
 	t.Setenv("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED", "true")
 	t.Setenv("RUNPOD_API_KEY", "platform-runpod-key")
+	t.Setenv("INFERCRANE_WORKER_CREDENTIAL_KEY", testWorkerCredentialKey)
 	config, err = Load()
 	if err != nil || len(config.EnvSecretTenants) != 0 {
 		t.Fatalf("a shared control plane must not grant environment references by default: cfg=%#v err=%v", config.EnvSecretTenants, err)

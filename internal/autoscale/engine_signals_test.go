@@ -9,8 +9,59 @@ import (
 
 type staticTargets []string
 
-func (s staticTargets) AutoscalingTargetURLs(context.Context, string) ([]string, error) {
-	return s, nil
+func (s staticTargets) AutoscalingTargets(context.Context, string) ([]Target, error) {
+	targets := make([]Target, 0, len(s))
+	for _, url := range s {
+		targets = append(targets, Target{URL: url})
+	}
+	return targets, nil
+}
+
+type fixedTargets []Target
+
+func (s fixedTargets) AutoscalingTargets(context.Context, string) ([]Target, error) { return s, nil }
+
+func TestEngineSignalsSendEachWorkerOnlyItsOwnCredential(t *testing.T) {
+	seen := map[string]string{}
+	handler := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			seen[name] = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte("vllm:num_requests_running 1\nvllm:num_requests_waiting 0\n"))
+		}
+	}
+	scoped, shared := httptest.NewServer(handler("scoped")), httptest.NewServer(handler("shared"))
+	defer scoped.Close()
+	defer shared.Close()
+	credential := func(deploymentID string, target Target) string {
+		if target.ProviderDetails == "scoped" {
+			return "key-of-" + target.TenantID + "-" + deploymentID
+		}
+		return "shared-key"
+	}
+	targets := fixedTargets{{URL: scoped.URL, TenantID: "tenant-a", ProviderDetails: "scoped"}, {URL: shared.URL, TenantID: "tenant-a"}}
+	signals, err := (VLLMSignals{Targets: targets, Credential: credential}).Signals(context.Background(), "deployment-a")
+	if err != nil || signals.Running != 2 {
+		t.Fatalf("signals=%#v err=%v", signals, err)
+	}
+	if seen["scoped"] != "Bearer key-of-tenant-a-deployment-a" || seen["shared"] != "Bearer shared-key" {
+		t.Fatalf("workers were sent %#v", seen)
+	}
+}
+
+func TestEngineSignalsDoNotCallAWorkerWithoutACredential(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte("vllm:num_requests_running 1\nvllm:num_requests_waiting 0\n"))
+	}))
+	defer server.Close()
+	none := func(string, Target) string { return "" }
+	if _, err := (VLLMSignals{Targets: fixedTargets{{URL: server.URL, ComputeConnectionID: "connection-a"}}, Credential: none}).Signals(context.Background(), "deployment-a"); err == nil {
+		t.Fatal("a worker without a credential was scraped")
+	}
+	if called {
+		t.Fatal("a request reached a worker that has no credential to be sent")
+	}
 }
 
 func TestVLLMSignalsAggregatesRuntimeQueueGauges(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/workercredential"
 )
 
 type BenchmarkStore interface {
@@ -30,6 +31,16 @@ type BenchmarkStore interface {
 
 type BenchmarkBackend struct {
 	APIKey, APIKeyEnv string
+	// WorkerMaster derives the credential of a worker that was started with
+	// its own tenant-and-deployment-scoped one. APIKey is then sent only to
+	// workers on operator compute that share the operator's credential.
+	WorkerMaster string
+}
+
+// workerCredential returns what a direct request to one of this backend's
+// workers presents, or "" when nothing may be sent to it.
+func (b BenchmarkBackend) workerCredential(deployment domain.Deployment, replica domain.Replica) string {
+	return workercredential.Source{Master: b.WorkerMaster, Shared: b.APIKey}.Credential(deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, replica.ProviderDetails)
 }
 
 type AIPerfRunner interface {
@@ -93,7 +104,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, fmt.Errorf("resolve immutable candidate artifact: %w", err)
 	}
-	target, provider, err := e.directTarget(ctx, candidate, resolved.Deployment.ID, draft)
+	target, provider, err := e.directTarget(ctx, candidate, resolved.Deployment, draft)
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
@@ -264,8 +275,8 @@ func campaignComparisons(campaign domain.OptimizationCampaign) int {
 
 // directTarget selects the lowest-ordinal healthy ready replica of one exact
 // revision and the server-side credential for its provider.
-func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
-	return directReplica(ctx, e.Store, e.Backends, candidate, deploymentID, draft)
+func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deployment domain.Deployment, draft optimizer.DeploymentDraft) (armTarget, string, error) {
+	return directReplica(ctx, e.Store, e.Backends, candidate, deployment, draft)
 }
 
 type replicaLister interface {
@@ -274,22 +285,28 @@ type replicaLister interface {
 
 // directReplica is shared by measurement and the built-in answer check, so
 // both address the same exact revision with the same credential.
-func directReplica(ctx context.Context, store replicaLister, backends map[string]BenchmarkBackend, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
-	replicas, err := store.ReplicasForDeployment(ctx, candidate.TenantID, deploymentID)
+func directReplica(ctx context.Context, store replicaLister, backends map[string]BenchmarkBackend, candidate domain.OptimizationCandidateRun, deployment domain.Deployment, draft optimizer.DeploymentDraft) (armTarget, string, error) {
+	replicas, err := store.ReplicasForDeployment(ctx, candidate.TenantID, deployment.ID)
 	if err != nil {
 		return armTarget{}, "", err
 	}
-	endpoint, provider, replicaID, ordinal := "", "", "", int(^uint(0)>>1)
+	var selected domain.Replica
+	ordinal := int(^uint(0) >> 1)
 	for _, replica := range replicas {
 		if replica.RevisionID == candidate.RevisionID && replica.Endpoint != "" && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Ordinal < ordinal {
-			endpoint, provider, replicaID, ordinal = replica.Endpoint, replica.Provider, replica.ID, replica.Ordinal
+			selected, ordinal = replica, replica.Ordinal
 		}
 	}
+	endpoint, provider, replicaID := selected.Endpoint, selected.Provider, selected.ID
 	if endpoint == "" || provider == "" {
 		return armTarget{}, "", fmt.Errorf("candidate %w", errNoDirectEndpoint)
 	}
 	backend, ok := backends[provider]
-	if !ok || backend.APIKey == "" {
+	// The replica is sent the credential it was started with and no other: its
+	// address belongs to the workload, which may be the tenant's own image in
+	// the tenant's own account.
+	apiKey := backend.workerCredential(deployment, selected)
+	if !ok || apiKey == "" {
 		return armTarget{}, "", fmt.Errorf("%w: benchmark credential is unavailable for provider %s", errNoDirectEndpoint, provider)
 	}
 	// The runtime contract declares a Prometheus path only when the server
@@ -297,7 +314,7 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	// runtime's draft carries no workload, so read the contract the replica
 	// was provisioned with, not the empty draft.
 	served := support.ServedWorkload(draft.Runtime.Engine, draft.Resources.GPU, draft.Runtime.Workload)
-	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.ServedModel(), replicaID: replicaID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
+	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.ServedModel(), replicaID: replicaID, endpoint: endpoint, apiKey: apiKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 
 // controlTarget resolves the campaign control's live endpoint. The control is
@@ -332,7 +349,7 @@ func (e BenchmarkExecutor) controlTarget(ctx context.Context, campaign domain.Op
 	if err != nil {
 		return nil, evidence, fmt.Errorf("resolve campaign control deployment: %w", err)
 	}
-	target, _, err := e.directTarget(ctx, control, resolved.Deployment.ID, draft)
+	target, _, err := e.directTarget(ctx, control, resolved.Deployment, draft)
 	if errors.Is(err, errNoDirectEndpoint) {
 		evidence.Reason = boundedReason(err)
 		return nil, evidence, nil

@@ -46,7 +46,9 @@ Providers override the image entrypoint with `command[0]` and preserve every rem
 `${MODEL}`, `${MODEL_REVISION}`, and `${PORT}` are replaced without losing argument boundaries. The workload receives the worker credential as
 `INFERCRANE_WORKER_API_KEY`; it must read that environment variable directly. InferCrane rejects
 credentials in command arguments because runtimes commonly print parsed argv during startup. The
-value is not persisted in revision or provider metadata.
+value is not persisted in revision or provider metadata. On RunPod it is scoped to the workspace
+and deployment, and it is the only credential InferCrane ever sends to the workload's address. See
+[Security](/security) for the adapters whose workers share the operator's credential.
 InferCrane resolves `model.id` through the Hugging Face `ModelArtifact` adapter before launch; a
 custom image does not imply arbitrary artifact protocols.
 

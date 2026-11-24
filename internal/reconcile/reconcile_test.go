@@ -226,6 +226,74 @@ func TestRouteWorkerAPIKeyFailsClosedForTenantCompute(t *testing.T) {
 	if got := routeWorkerAPIKey(deployment, []domain.Target{legacy}, "global-key", derive); got != "global-key" {
 		t.Fatalf("legacy managed route key=%q", got)
 	}
+	// Workers on operator compute that were started with a scoped credential
+	// are reached with it, and a set that mixes them with workers on the shared
+	// credential gets neither, whatever order the store lists them in.
+	if got := routeWorkerAPIKey(deployment, []domain.Target{versioned, versioned}, "global-key", derive); got != "tenant-worker-key" {
+		t.Fatalf("scoped operator-compute route key=%q", got)
+	}
+	for name, targets := range map[string][]domain.Target{
+		"shared first": {legacy, versioned},
+		"scoped first": {versioned, legacy},
+		"unknown":      {{ProviderDetails: `{"worker_credential_version":"tenant-hmac-v9"}`}, versioned},
+	} {
+		if got := routeWorkerAPIKey(deployment, targets, "global-key", derive); got != "" {
+			t.Fatalf("%s: a mixed worker set was given %q", name, got)
+		}
+	}
+	if got := routeWorkerAPIKey(deployment, []domain.Target{versioned}, "global-key", nil); got != "" {
+		t.Fatalf("a scoped worker without a derivation fell back to %q", got)
+	}
+}
+
+func TestRouterServesOnlyWorkersThatShareOneCredential(t *testing.T) {
+	scoped := func(id string) domain.Target {
+		return domain.Target{ID: id, ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	}
+	shared := func(id string) domain.Target {
+		return domain.Target{ID: id, ProviderDetails: `{"worker_credential_version":""}`}
+	}
+	ids := func(targets []domain.Target) string {
+		var out []string
+		for _, target := range targets {
+			out = append(out, target.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	for name, test := range map[string]struct {
+		targets []domain.Target
+		want    string
+	}{
+		"all shared":         {[]domain.Target{shared("a"), shared("b")}, "a,b"},
+		"all scoped":         {[]domain.Target{scoped("a"), scoped("b")}, "a,b"},
+		"older worker first": {[]domain.Target{shared("old"), scoped("new")}, "new"},
+		"newer worker first": {[]domain.Target{scoped("new"), shared("old"), scoped("newer")}, "new,newer"},
+		"none":               {nil, ""},
+	} {
+		if got := ids(routableTogether(test.targets)); got != test.want {
+			t.Errorf("%s: routed %q, want %q", name, got, test.want)
+		}
+	}
+}
+
+// A worker that records a scoped credential is never probed with the
+// inspector's own credential, which is the operator's shared one.
+func TestScopedWorkerHealthProbeNeverFallsBackToTheSharedCredential(t *testing.T) {
+	deployment := domain.Deployment{ID: "deployment", TenantID: "tenant-1"}
+	target := domain.Target{URL: "https://worker.example", ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	inspector := &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, target, "global-key", nil); ok || inspector.credential != "" || inspector.unauthenticatedCall {
+		t.Fatalf("ok=%t credential=%q fell back=%t", ok, inspector.credential, inspector.unauthenticatedCall)
+	}
+	inspector = &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, target, "global-key", func(string, string, string) string { return "scoped-key" }); !ok || inspector.credential != "scoped-key" || inspector.unauthenticatedCall {
+		t.Fatalf("ok=%t credential=%q fell back=%t", ok, inspector.credential, inspector.unauthenticatedCall)
+	}
+	// A worker on the shared credential keeps its probe.
+	inspector = &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, domain.Target{URL: "https://worker.example", ProviderDetails: `{}`}, "global-key", nil); !ok || inspector.credential != "global-key" {
+		t.Fatalf("shared worker: ok=%t credential=%q", ok, inspector.credential)
+	}
 }
 
 func TestTenantComputeHealthProbeUsesDerivedWorkerCredential(t *testing.T) {

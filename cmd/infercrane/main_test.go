@@ -20,7 +20,10 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provision"
+	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/workercredential"
 )
 
 type inertRuntimeInspector struct{}
@@ -69,12 +72,12 @@ func TestBindRuntimeBackendsIncludesDiscoveredRuntimeProfiles(t *testing.T) {
 }
 
 func TestBaseBenchmarkBackendsCanMeasureNativeRunPodPods(t *testing.T) {
-	backends := baseBenchmarkBackends(config.Config{APIKey: "worker-key", RunPodAPIKey: "provider-key"})
+	backends := baseBenchmarkBackends(config.Config{APIKey: "worker-key", RunPodAPIKey: "provider-key", WorkerCredentialKey: "derivation-key"})
 	native, ok := backends["runpod-pods"]
 	if !ok {
 		t.Fatal("native RunPod Pods backend is absent from direct benchmark composition")
 	}
-	if native.APIKey != "worker-key" || native.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || native.Serverless {
+	if native.APIKey != "worker-key" || native.APIKeyEnv != "INFERCRANE_WORKER_API_KEY" || native.Serverless || native.WorkerMaster != "derivation-key" {
 		t.Fatalf("native RunPod benchmark metadata=%+v", native)
 	}
 	serverless := backends["runpod-serverless"]
@@ -1722,5 +1725,51 @@ func TestRolloutValidateUsesBoundedExplicitActiveAndCandidateBenchmarks(t *testi
 		return rolloutCommand(context.Background(), config.Config{ControlURL: server.URL, APIKey: "secret"}, []string{"validate", "prod", "--requests", "21", "--acknowledge-validation-cost"})
 	}); err == nil || !strings.Contains(err.Error(), "persisted bounds") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// A Pod on the operator's RunPod account can run another workspace's own
+// image. It must never be started with the control-plane API key.
+func TestOperatorRunPodPodsNeverStartWithTheControlPlaneAPIKey(t *testing.T) {
+	const apiKey, master = "control-plane-api-key", "worker-credential-master-0123456789ab"
+	pods := provision.RunPodPods{APIKey: "runpod-key", WorkerAPIKey: apiKey}
+	resolve := operatorRunPodResolver(master, pods, nil)
+
+	started := map[string]string{}
+	for _, identity := range [][2]string{{"tenant-a", "deployment-a"}, {"tenant-a", "deployment-b"}, {"tenant-b", "deployment-a"}, {secrets.BootstrapTenant, "deployment-a"}} {
+		provider, _, workerKey, err := resolve(context.Background(), identity[0], identity[1])
+		if err != nil {
+			t.Fatalf("%v: %v", identity, err)
+		}
+		pod, ok := provider.(provision.RunPodPods)
+		if !ok {
+			t.Fatalf("%v: provider is %T", identity, provider)
+		}
+		if pod.WorkerAPIKey == apiKey || pod.WorkerAPIKey == "" || pod.WorkerAPIKey != workerKey || pod.WorkerAPIKey != workercredential.Derive(master, identity[0], identity[1]) || pod.WorkerCredentialVersion != workercredential.Version {
+			t.Fatalf("%v: Pod would start with %q (version %q), control plane would call it with %q", identity, pod.WorkerAPIKey, pod.WorkerCredentialVersion, workerKey)
+		}
+		if pod.APIKey != "runpod-key" {
+			t.Fatalf("%v: provider credential changed to %q", identity, pod.APIKey)
+		}
+		for other, key := range started {
+			if key == pod.WorkerAPIKey {
+				t.Fatalf("%v shares a worker credential with %s", identity, other)
+			}
+		}
+		started[identity[0]+"/"+identity[1]] = pod.WorkerAPIKey
+	}
+	if _, _, _, err := resolve(context.Background(), "tenant-a", ""); err == nil {
+		t.Fatal("a deployment without an identity was given a provider")
+	}
+
+	// Without a derivation key the only credential left is the shared one. The
+	// bootstrap operator already holds it; no other workspace's workload may.
+	legacy := operatorRunPodResolver("", pods, nil)
+	provider, _, workerKey, err := legacy(context.Background(), secrets.BootstrapTenant, "deployment-a")
+	if pod, ok := provider.(provision.RunPodPods); err != nil || !ok || pod.WorkerAPIKey != apiKey || pod.WorkerCredentialVersion != "" || workerKey != "" {
+		t.Fatalf("bootstrap operator without a derivation key: provider=%#v key=%q err=%v", provider, workerKey, err)
+	}
+	if provider, _, _, err = legacy(context.Background(), "tenant-a", "deployment-a"); err == nil || provider != nil || !strings.Contains(err.Error(), "INFERCRANE_WORKER_CREDENTIAL_KEY") {
+		t.Fatalf("another workspace was given the shared credential: provider=%#v err=%v", provider, err)
 	}
 }
