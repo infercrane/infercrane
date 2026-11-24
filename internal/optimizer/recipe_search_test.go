@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/spec"
 	"gopkg.in/yaml.v3"
 )
@@ -222,6 +223,79 @@ func TestRecipeSearchExtendsCatalogModelsWithoutRelaxingTheirBoundary(t *testing
 	if err != nil || len(plain.Candidates) != 0 || !reflect.DeepEqual(plain.Missing, []string{"reviewed_runtime_profile"}) {
 		t.Fatalf("default catalog boundary changed: %+v err=%v", plain, err)
 	}
+}
+
+func TestRecipeSearchKeepsTheReviewedToolCallingOfTheExactModel(t *testing.T) {
+	request := Request{ModelIdentity: "qwen3.8-27b-fp8", Provider: "runpod-pods", GPU: "H200", Objective: "throughput", MaxCandidates: 20, Search: SearchRecipes, ModelFeatures: []string{FeatureNativeMTP}, ModelConfigDigest: recipeTestDigest}
+	proposal, err := catalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatalf("proposal failed validation: %v", err)
+	}
+	searched := 0
+	for _, candidate := range proposal.Candidates {
+		if candidate.Source.Name != recipeSearchSource {
+			continue
+		}
+		searched++
+		command := candidate.Deployment.Runtime.Workload.Command
+		if !strings.Contains(strings.Join(command, " "), "--enable-metrics --reasoning-parser qwen3 --tool-call-parser qwen3_coder") {
+			t.Fatalf("setup dropped the model's reviewed parsers: %v", command)
+		}
+		if !reflect.DeepEqual(featureNamed(candidate, "tool_calling"), Feature{Name: "tool_calling", State: "reviewed-parser", Source: "sglang-h200-nextn-k4-provisional"}) {
+			t.Fatalf("tool calling source is not disclosed: %+v", candidate.Features)
+		}
+		limitations := strings.Join(candidate.Limitations, " ")
+		if !strings.Contains(limitations, "Tool calls use the parsers of the reviewed sglang-h200-nextn-k4-provisional setup for this model.") || strings.Contains(limitations, "another sglang version") || strings.Contains(limitations, "parsers are not configured") {
+			t.Fatalf("limitations misstate tool calling: %v", candidate.Limitations)
+		}
+	}
+	if searched == 0 {
+		t.Fatal("no setups were added to check")
+	}
+
+	// A pinned model InferCrane has not reviewed, or another revision of a
+	// reviewed one, gets no parser: its chat template is unknown.
+	for _, unreviewed := range []Request{recipeRequest(), func() Request {
+		other := request
+		other.ModelIdentity, other.ModelRevision = "Qwen/Qwen3.8-27B-FP8", strings.Repeat("b", 40)
+		return other
+	}()} {
+		proposal, err := catalogSource(t).Propose(context.Background(), unreviewed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, candidate := range proposal.Candidates {
+			if candidate.Source.Name != recipeSearchSource {
+				continue
+			}
+			if strings.Contains(strings.Join(candidate.Deployment.Runtime.Workload.Command, " "), "parser") || featureNamed(candidate, "tool_calling").Name != "" {
+				t.Fatalf("%s@%s got a parser it was not reviewed for: %v", unreviewed.ModelIdentity, unreviewed.ModelRevision, candidate.Deployment.Runtime.Workload.Command)
+			}
+			if !strings.Contains(strings.Join(candidate.Limitations, " "), "Reasoning and tool-call parsers are not configured") {
+				t.Fatalf("missing parser was not disclosed: %v", candidate.Limitations)
+			}
+		}
+	}
+}
+
+func TestRecipeToolCallingLimitationNamesAnotherEngineVersion(t *testing.T) {
+	template := recipeTemplates()[0]
+	limitation := recipeToolCallingLimitation(template, &curatedrecipe.ToolCallingSetup{Args: []string{"--tool-call-parser", "qwen"}, Profile: "sglang-elastic"})
+	if limitation != "Tool calls use the parsers of the reviewed sglang-elastic setup for this model. That setup runs another sglang version, and an engine stops at start on a parser name it does not know." {
+		t.Fatalf("limitation=%q", limitation)
+	}
+}
+
+func featureNamed(candidate Candidate, name string) Feature {
+	for _, feature := range candidate.Features {
+		if feature.Name == name {
+			return feature
+		}
+	}
+	return Feature{}
 }
 
 func TestDefaultProposalIsUnchangedWhenSearchIsOff(t *testing.T) {
