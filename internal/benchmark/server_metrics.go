@@ -20,8 +20,14 @@ const (
 // serverMetricKeywords select the runtime signals that explain a serving
 // result: cache occupancy and reuse, preemption, queueing, and speculative
 // acceptance. They are generic name fragments, so no runtime is special-cased
-// and an unknown runtime simply contributes fewer metrics.
-var serverMetricKeywords = []string{"cache", "preempt", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap"}
+// and an unknown runtime simply contributes fewer metrics. Engines name
+// preemption differently: vLLM says preempt, SGLang says retract.
+var serverMetricKeywords = []string{"cache", "preempt", "retract", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap"}
+
+// preemptionKeywords mark the metrics kept first when an engine exposes more
+// matching metrics than the summary holds, so a stall's likeliest cause is
+// never the one dropped.
+var preemptionKeywords = []string{"preempt", "retract"}
 
 var serverMetricStats = map[string]struct{}{
 	"avg": {}, "min": {}, "max": {}, "p50": {}, "p95": {}, "p99": {},
@@ -83,7 +89,13 @@ func summarizeServerMetrics(body []byte) *ServerMetrics {
 			}
 		}
 	}
-	sort.Strings(names)
+	sort.SliceStable(names, func(i, j int) bool {
+		left, right := isPreemptionMetric(names[i]), isPreemptionMetric(names[j])
+		if left != right {
+			return left
+		}
+		return names[i] < names[j]
+	})
 	summary := &ServerMetrics{Collected: true, Metrics: map[string]ServerMetricSummary{}}
 	for _, name := range names {
 		if len(summary.Metrics) == maxServerMetricSummaries {
@@ -113,6 +125,16 @@ func summarizeServerMetrics(body []byte) *ServerMetrics {
 		return &ServerMetrics{Reason: "server-metrics export contained no cache, queue, preemption, or speculation metrics"}
 	}
 	return summary
+}
+
+func isPreemptionMetric(name string) bool {
+	lower := strings.ToLower(name)
+	for _, keyword := range preemptionKeywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 func boundedLabel(value string) string {

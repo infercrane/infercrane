@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +61,15 @@ type Result struct {
 	TTFTP50MS, TTFTP95MS        *float64
 	TPOTP50MS, TPOTP95MS        *float64
 	LatencyP50MS, LatencyP95MS  *float64
+	// The p99 values use the same nearest-rank definition. Below
+	// MinP99Samples observations a nearest-rank p99 is simply the slowest
+	// sample, so they stay nil instead of presenting a maximum as a p99.
+	TTFTP99MS, TPOTP99MS, LatencyP99MS *float64
+	// Stream gaps are the pauses between consecutive streamed content chunks
+	// of successful requests (AIPerf inter_chunk_latency). StreamGapMaxMS is
+	// the longest pause any client saw; StreamGapP99MS follows the p99 sample
+	// rule above. Both are nil for buffered runs, which stream no chunks.
+	StreamGapP99MS, StreamGapMaxMS *float64
 	// OutputTokensPerRequest is the mean server-reported output token count
 	// of a successful request. It is nil unless every successful request
 	// reported a count, so a partial count never stands in for the mean.
@@ -337,7 +347,7 @@ func parseRecordsWithSLO(path string, cfg Config) (Result, error) {
 }
 
 func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
-	var ttft, tpot, latency, outputTokens []float64
+	var ttft, tpot, latency, outputTokens, streamGaps []float64
 	var result Result
 	goodRequests := 0
 	hasSLO := cfg.TTFTSLOMS > 0 || cfg.TPOTSLOMS > 0 || cfg.LatencySLOMS > 0
@@ -430,6 +440,22 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 			if err := appendMetric("output_token_count", &outputTokens); err != nil {
 				return Result{}, err
 			}
+			if metric, ok := row.Metrics["inter_chunk_latency"]; ok {
+				var gaps []float64
+				if len(metric.Value) == 0 || json.Unmarshal(metric.Value, &gaps) != nil {
+					return Result{}, errors.New(`AIPerf metric "inter_chunk_latency" is not a numeric list`)
+				}
+				for _, gap := range gaps {
+					value, err := milliseconds(gap, metric.Unit)
+					if err != nil {
+						return Result{}, fmt.Errorf(`AIPerf metric "inter_chunk_latency": %w`, err)
+					}
+					if value < 0 {
+						return Result{}, errors.New(`AIPerf metric "inter_chunk_latency" contains a negative gap`)
+					}
+					streamGaps = append(streamGaps, value)
+				}
+			}
 			if cfg.TTFTSLOMS > 0 && !observedSLOMetrics["time_to_first_token"] {
 				requestGood = false
 			}
@@ -461,6 +487,12 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 	result.TTFTP50MS, result.TTFTP95MS = percentiles(ttft)
 	result.TPOTP50MS, result.TPOTP95MS = percentiles(tpot)
 	result.LatencyP50MS, result.LatencyP95MS = percentiles(latency)
+	result.TTFTP99MS, result.TPOTP99MS, result.LatencyP99MS = p99(ttft), p99(tpot), p99(latency)
+	result.StreamGapP99MS = p99(streamGaps)
+	if len(streamGaps) > 0 {
+		longest := slices.Max(streamGaps)
+		result.StreamGapMaxMS = &longest
+	}
 	var tokens float64
 	for _, value := range outputTokens {
 		tokens += value
@@ -570,6 +602,21 @@ func percentiles(values []float64) (*float64, *float64) {
 	sort.Float64s(values)
 	p50, p95 := percentile(values, .50), percentile(values, .95)
 	return &p50, &p95
+}
+
+// MinP99Samples is the smallest sample for which a nearest-rank p99 differs
+// from the maximum.
+const MinP99Samples = 100
+
+// p99 sorts values in place. Stream gaps hold one value per streamed chunk,
+// so copying them would double the parser's largest allocation.
+func p99(values []float64) *float64 {
+	if len(values) < MinP99Samples {
+		return nil
+	}
+	slices.Sort(values)
+	value := percentile(values, .99)
+	return &value
 }
 func percentile(values []float64, p float64) float64 {
 	// Use the nearest-rank definition. A floor-index calculation understates
