@@ -29,6 +29,7 @@ _stub_modal()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import broker  # noqa: E402
 import modal_gpu  # noqa: E402
+import models  # noqa: E402
 
 
 class AccountingTest(unittest.TestCase):
@@ -56,34 +57,50 @@ class AccountingTest(unittest.TestCase):
 
     def test_new_lease_refused_near_the_cap(self) -> None:
         self.broker.leases["old"] = {"lease_id": "old", "state": "stopped", "requested_at": 0.0, "ended_at": (10.0 - 0.5) / self.broker.rate}
-        code, body = self.broker.create("pod", modal_gpu.MODEL_ID, ["--served-model-name", modal_gpu.MODEL_ID])
+        code, body = self.broker.create("pod", modal_gpu.QWEN3_8B.id, ["--served-model-name", modal_gpu.QWEN3_8B.id])
         self.assertEqual(code, 402, body)
 
     def test_gpu_limit(self) -> None:
         for index in range(3):
             self.broker.leases[str(index)] = {"lease_id": str(index), "state": "ready", "requested_at": 1e12}
-        code, _ = self.broker.create("pod", modal_gpu.MODEL_ID, ["--served-model-name", modal_gpu.MODEL_ID])
+        code, _ = self.broker.create("pod", modal_gpu.QWEN3_8B.id, ["--served-model-name", modal_gpu.QWEN3_8B.id])
         self.assertEqual(code, 429)
 
 
 class AllowlistTest(unittest.TestCase):
     def test_candidate_arguments_pass(self) -> None:
-        modal_gpu.check_args(["--served-model-name", modal_gpu.MODEL_ID, "--quantization", "fp8", "--kv-cache-dtype=fp8", "--enable-prefix-caching"], modal_gpu.MODEL_ID)
+        modal_gpu.check_args(["--served-model-name", modal_gpu.QWEN3_8B.id, "--quantization", "fp8", "--kv-cache-dtype=fp8", "--enable-prefix-caching"], modal_gpu.QWEN3_8B.id)
 
     def test_refused(self) -> None:
         for args in (
-            ["--served-model-name", modal_gpu.MODEL_ID, "--tensor-parallel-size", "8"],  # more GPUs
-            ["--served-model-name", modal_gpu.MODEL_ID, "--port", "9000"],
+            ["--served-model-name", modal_gpu.QWEN3_8B.id, "--tensor-parallel-size", "8"],  # more GPUs
+            ["--served-model-name", modal_gpu.QWEN3_8B.id, "--port", "9000"],
             ["--served-model-name", "other/model"],
             ["--quantization", "fp8"],  # no served model name
-            ["--served-model-name", modal_gpu.MODEL_ID, "--quantization"],  # missing value
+            ["--served-model-name", modal_gpu.QWEN3_8B.id, "--quantization"],  # missing value
         ):
             with self.subTest(args=args), self.assertRaises(ValueError):
-                modal_gpu.check_args(args, modal_gpu.MODEL_ID)
+                modal_gpu.check_args(args, modal_gpu.QWEN3_8B.id)
 
     def test_other_models_are_refused(self) -> None:
         with self.assertRaises(ValueError):
             modal_gpu.check_args(["--served-model-name", "other/model"], "other/model")
+
+    def test_publishers_commands_pass(self) -> None:
+        for model in models.MODELS.values():
+            with self.subTest(model=model.id):
+                modal_gpu.check_args(["--served-model-name", model.id, *model.publisher_args], model.id)
+
+    def test_planner_changes_pass_within_one_gpu(self) -> None:
+        model = models.QWEN38_27B_FP8
+        base = ["--served-model-name", model.id, *model.publisher_args]
+        for change in (["--api-server-count", "2"], ["--stream-interval", "2"], ["--max-cudagraph-capture-size", "640"], ["--max-num-seqs", "512", "--max-num-batched-tokens", "16384"],
+                       ["--no-async-scheduling"], ["--seed", "1"]):
+            with self.subTest(change=change):
+                modal_gpu.check_args(base + change, model.id)
+        for change in (["--tensor-parallel-size", "2"], ["--api-server-count", "8"], ["--speculative-config", '{"method":"mtp","num_speculative_tokens":1}'], ["--mm-encoder-tp-mode", "x"]):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                modal_gpu.check_args(base + change, model.id)
 
 
 class _Store(dict):
@@ -114,7 +131,7 @@ class DriverPinTest(unittest.TestCase):
         self.dir.cleanup()
 
     def lease(self) -> dict:
-        code, body = self.broker.create("pod", modal_gpu.MODEL_ID, ["--served-model-name", modal_gpu.MODEL_ID])
+        code, body = self.broker.create("pod", modal_gpu.QWEN3_8B.id, ["--served-model-name", modal_gpu.QWEN3_8B.id])
         self.assertEqual(code, 201, body)
         return self.broker.leases[body["lease_id"]]
 
