@@ -339,6 +339,20 @@ func scoreToolCase(prompt Prompt, reference, candidate Answer) toolCaseResult {
 	return result
 }
 
+// refusedToolCase scores a case the candidate refused although the reference
+// accepted the request with tools. The candidate breaks it whatever the
+// reference answered: a server that cannot take tools cannot serve this
+// traffic. The reference's own calls are still counted as its own.
+func refusedToolCase(prompt Prompt, reference Answer) toolCaseResult {
+	referenceCalls := prompt.parseCalls(reference.ToolCalls)
+	return toolCaseResult{
+		broken:           true,
+		referenceInvalid: len(referenceCalls) > 0 && !allValid(referenceCalls),
+		candidate:        qualityevidence.ToolCallFailures{ToolsRefused: 1},
+		reference:        ownFailures(referenceCalls),
+	}
+}
+
 // callsEqual reports whether both sides made the same calls with arguments
 // that are JSON and equal as canonical JSON.
 func callsEqual(reference, candidate []call) bool {

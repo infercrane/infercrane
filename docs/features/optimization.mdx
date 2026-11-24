@@ -817,11 +817,12 @@ decision without you signing anything:
    one at a time, with greedy decoding (`temperature 0`, fixed seed). The reference is the campaign
    control. For an evolve-endpoint campaign it is the target's active revision when that revision is
    directly reachable, because Release Guard compares the candidate with the active revision. The
-   prompts are InferCrane's small built-in suite, pinned by digest in the product, or an eval set you
-   uploaded and named with `--eval-set`.
+   prompts are InferCrane's small built-in suite, pinned by digest in the product, with five tool
+   cases so tool calls are checked on every run, or an eval set you uploaded and named with
+   `--eval-set`.
 3. **Answers are scored, then discarded.** Each answer is scored by how closely it matches the
    reference's answer to the same prompt (token overlap, ignoring case, punctuation, and reasoning
-   blocks). A case of your eval set that declares function tools is scored on its tool calls instead.
+   blocks). A case that declares function tools is scored on its tool calls instead.
    A drop of up to 5% is `PASS`, 5% to 10% is `WATCH` and still ranks, and more than 10% is `BLOCK`,
    which rejects the candidate with `quality_gate_rejected`. These are the same PASS/WATCH/BLOCK
    rules Release Guard applies. A candidate that breaks a tool call the reference made correctly is
@@ -839,6 +840,9 @@ the control failed to start, the candidate ends `inconclusive` with `quality_ref
 When the reference gives no answer text and makes no tool call to a prompt within the token limit,
 for example a reasoning model cut off mid-reasoning, the candidate ends `inconclusive` with
 `quality_reference_unanswered`: two answers with no text are not a match.
+A tool case the reference refuses, because its server runs without tool calling, is not checked, and
+the other cases decide; when every case declares tools, the candidate ends `inconclusive` with
+`quality_nothing_checked`. A candidate that refuses tools the reference accepted is blocked.
 When the campaign names an eval set that is not uploaded yet, the candidate waits for it. To have
 every candidate wait for your own signed evaluation instead, create the campaign with
 `--quality-check customer_evidence`. Each candidate's `quality` object in the campaign API, the run

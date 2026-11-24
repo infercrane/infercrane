@@ -11801,13 +11801,13 @@
             "description": "Built-in check over eval-set cases that declare function tools. Present only when the eval set has such cases.",
             "properties": {
               "broken": {
-                "description": "Cases where the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate.",
+                "description": "Cases where the candidate refused tools the reference accepted, or the reference's calls validated against the declared schemas and the candidate's did not. One blocks the candidate.",
                 "minimum": 0,
                 "type": "integer"
               },
               "candidate": {
                 "additionalProperties": false,
-                "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                "description": "Tool cases by how their calls failed; a case can count under several kinds. tools_refused counts cases where the server refused a request with tools that the reference accepted.",
                 "properties": {
                   "extra_calls": {
                     "minimum": 0,
@@ -11822,6 +11822,10 @@
                     "type": "integer"
                   },
                   "schema_invalid": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "tools_refused": {
                     "minimum": 0,
                     "type": "integer"
                   },
@@ -11840,19 +11844,26 @@
                   "wrong_function",
                   "schema_invalid",
                   "extra_calls",
-                  "unexpected_call"
+                  "unexpected_call",
+                  "tools_refused"
                 ],
                 "type": "object"
               },
               "cases": {
-                "minimum": 1,
+                "description": "Tool cases the check scored.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "not_checked": {
+                "description": "Tool cases not checked because the reference refused requests with tools. They have no score and are unknown, not passed.",
+                "minimum": 0,
                 "type": "integer"
               },
               "reference": {
                 "allOf": [
                   {
                     "additionalProperties": false,
-                    "description": "Tool cases by how their calls failed; a case can count under several kinds.",
+                    "description": "Tool cases by how their calls failed; a case can count under several kinds. tools_refused counts cases where the server refused a request with tools that the reference accepted.",
                     "properties": {
                       "extra_calls": {
                         "minimum": 0,
@@ -11867,6 +11878,10 @@
                         "type": "integer"
                       },
                       "schema_invalid": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tools_refused": {
                         "minimum": 0,
                         "type": "integer"
                       },
@@ -11885,12 +11900,13 @@
                       "wrong_function",
                       "schema_invalid",
                       "extra_calls",
-                      "unexpected_call"
+                      "unexpected_call",
+                      "tools_refused"
                     ],
                     "type": "object"
                   }
                 ],
-                "description": "The reference's own failures; missing, extra, and unexpected calls stay 0."
+                "description": "The reference's own failures; missing, extra, unexpected, and refused calls stay 0."
               },
               "reference_invalid": {
                 "description": "Cases where the reference's own calls did not validate; they measure agreement only.",
@@ -11898,7 +11914,7 @@
                 "type": "integer"
               },
               "score": {
-                "description": "Mean over tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference.",
+                "description": "Mean over scored tool cases: 1 for a case when the candidate called the same functions with the same arguments as the reference. 0 and meaningless when cases is 0.",
                 "maximum": 1,
                 "minimum": 0,
                 "type": "number"
@@ -11906,6 +11922,7 @@
             },
             "required": [
               "cases",
+              "not_checked",
               "score",
               "broken",
               "reference_invalid",

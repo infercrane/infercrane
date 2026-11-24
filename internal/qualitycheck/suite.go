@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	// EvalSetSchemaV1 is the schema of the default suite: single-turn prompts.
+	// EvalSetSchemaV1 is the schema of single-turn prompts.
 	EvalSetSchemaV1 = "infercrane.dev/quality-eval-set/v1"
-	// EvalSetSchemaV2 adds conversations and function tools to a case.
+	// EvalSetSchemaV2 adds conversations and function tools to a case. The
+	// default suite uses it for its tool cases.
 	EvalSetSchemaV2 = "infercrane.dev/quality-eval-set/v2"
 	// MaxEvalSetBytes bounds an uploaded eval set.
 	MaxEvalSetBytes = 512 << 10
@@ -48,9 +49,11 @@ const (
 // DefaultSuiteDigest pins the embedded default suite. Changing the suite file
 // without changing this digest and the suite version fails the package tests,
 // so evidence from different prompts is never compared as the same suite.
-const DefaultSuiteDigest = "sha256:f65db09bb9ba827c58c317236a8faf795f73b09b9380d84307b69334782611af"
+// Version 2 keeps version 1's 24 answer prompts and adds five tool cases, so
+// every check without a customer eval set also checks tool calls.
+const DefaultSuiteDigest = "sha256:2f605522e4ef8fdc77188ba4674dae1c87f55214396e862b5b9d200db18bc11d"
 
-//go:embed suites/infercrane-default-v1.json
+//go:embed suites/infercrane-default-v2.json
 var defaultSuite []byte
 
 var (
@@ -217,7 +220,11 @@ func (s EvalSet) PairingDigest() string {
 	for _, prompt := range s.Prompts {
 		ids = append(ids, prompt.ID)
 	}
-	encoded, _ := json.Marshal(map[string]any{"eval_set": s.Digest, "prompts": ids})
+	return pairingDigest(s.Digest, ids)
+}
+
+func pairingDigest(evalSet string, ids []string) string {
+	encoded, _ := json.Marshal(map[string]any{"eval_set": evalSet, "prompts": ids})
 	return Digest(encoded)
 }
 

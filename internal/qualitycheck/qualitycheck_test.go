@@ -18,7 +18,7 @@ import (
 )
 
 func TestDefaultSuiteIsPinnedByDigest(t *testing.T) {
-	body, err := os.ReadFile("suites/infercrane-default-v1.json")
+	body, err := os.ReadFile("suites/infercrane-default-v2.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,10 +26,10 @@ func TestDefaultSuiteIsPinnedByDigest(t *testing.T) {
 		t.Fatalf("default suite digest = %s, pinned %s; bump the suite version and the pinned digest together", got, DefaultSuiteDigest)
 	}
 	set := Default()
-	if set.Digest != DefaultSuiteDigest || set.Name != "infercrane-default" || set.Version != "1" || len(set.Prompts) < 20 || set.MaxTokens != 64 {
+	if set.Digest != DefaultSuiteDigest || set.Schema != EvalSetSchemaV2 || set.Name != "infercrane-default" || set.Version != "2" || len(set.Prompts) != 29 || set.MaxTokens != 256 {
 		t.Fatalf("default suite = %+v", set)
 	}
-	if set.SuiteVersion() != "1@"+DefaultSuiteDigest {
+	if set.SuiteVersion() != "2@"+DefaultSuiteDigest {
 		t.Fatalf("suite version = %s", set.SuiteVersion())
 	}
 	if string(DefaultSuiteBytes()) != string(body) {

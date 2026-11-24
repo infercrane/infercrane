@@ -156,16 +156,35 @@ func TestToolCallScoresAreBoundedAndReservedForTheBuiltinCheck(t *testing.T) {
 	if err := payload.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	// Tool cases the reference refused are counted apart and have no score;
+	// a check may have scored none of them.
 	for name, calls := range map[string]ToolCallScores{
-		"no cases":          {Cases: 0},
-		"more than samples": {Cases: 4},
-		"score above one":   {Cases: 1, Score: 1.5},
-		"more broken":       {Cases: 1, Broken: 2},
-		"negative broken":   {Cases: 1, Broken: -1},
-		"more invalid":      {Cases: 1, ReferenceInvalid: 2},
-		"kind above cases":  {Cases: 1, Candidate: ToolCallFailures{WrongFunction: 2}},
-		"negative kind":     {Cases: 1, Candidate: ToolCallFailures{SchemaInvalid: -1}},
-		"reference missing": {Cases: 1, Reference: ToolCallFailures{MissingCall: 1}},
+		"some not checked":  {Cases: 1, NotChecked: 4, Broken: 1, Candidate: ToolCallFailures{ToolsRefused: 1}},
+		"none checked":      {NotChecked: 5},
+		"refused and other": {Cases: 1, Broken: 1, Candidate: ToolCallFailures{ToolsRefused: 1, MissingCall: 1}},
+	} {
+		payload.Distribution.ToolCalls = &calls
+		if err := payload.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, calls := range map[string]ToolCallScores{
+		"no cases":             {Cases: 0},
+		"negative not checked": {Cases: 1, NotChecked: -1},
+		"score with no cases":  {NotChecked: 2, Score: 1},
+		"broken with no cases": {NotChecked: 2, Broken: 1},
+		"kind with no cases":   {NotChecked: 2, Candidate: ToolCallFailures{ToolsRefused: 1}},
+		"too many not checked": {Cases: 1, NotChecked: 100_001},
+		"reference refused":    {Cases: 1, Reference: ToolCallFailures{ToolsRefused: 1}},
+		"refused above cases":  {Cases: 1, Candidate: ToolCallFailures{ToolsRefused: 2}},
+		"more than samples":    {Cases: 4},
+		"score above one":      {Cases: 1, Score: 1.5},
+		"more broken":          {Cases: 1, Broken: 2},
+		"negative broken":      {Cases: 1, Broken: -1},
+		"more invalid":         {Cases: 1, ReferenceInvalid: 2},
+		"kind above cases":     {Cases: 1, Candidate: ToolCallFailures{WrongFunction: 2}},
+		"negative kind":        {Cases: 1, Candidate: ToolCallFailures{SchemaInvalid: -1}},
+		"reference missing":    {Cases: 1, Reference: ToolCallFailures{MissingCall: 1}},
 	} {
 		payload.Distribution.ToolCalls = &calls
 		if err := payload.Validate(); err == nil {

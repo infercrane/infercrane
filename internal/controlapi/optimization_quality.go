@@ -151,6 +151,9 @@ func candidateQuality(campaign domain.OptimizationCampaign, candidate domain.Opt
 	case candidate.FailureCode == optimizationcampaign.FailureQualityReferenceUnanswered:
 		view.State = qualityStateInconclusive
 		view.Reason = "The reference gave no answer text to some prompts within the token limit, so this setup's answers could not be checked. Reasoning does not count as an answer. Use an eval set with a larger max_tokens."
+	case candidate.FailureCode == optimizationcampaign.FailureQualityNothingChecked:
+		view.State = qualityStateInconclusive
+		view.Reason = "Every case in the eval set declares tools and the reference refused requests with tools, so nothing could be checked. Add cases without tools, or start the reference with tool calling on."
 	case candidate.State == optimizationcampaign.CandidateValidating && view.Check == "customer_evidence":
 		view.State = qualityStateWaitingEvidence
 		view.Reason = "Waiting for your signed evaluation of this setup."
@@ -208,13 +211,17 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 		view.RegressionPercent = &drop
 	}
 	matched := fmt.Sprintf("Answers matched the reference %.0f%% across %d prompts", row.Score*100, row.SampleCount)
-	if calls := view.ToolCalls; calls != nil {
+	if calls := view.ToolCalls; calls != nil && calls.Cases > 0 {
 		matched += fmt.Sprintf("; tool calls matched %.0f%% across %d", calls.Score*100, calls.Cases)
+	}
+	if calls := view.ToolCalls; calls != nil && calls.NotChecked > 0 {
+		// No score is given for these: unknown is not a match.
+		matched += fmt.Sprintf("; %d tool cases not checked because the reference refused requests with tools", calls.NotChecked)
 	}
 	switch {
 	case view.ToolCalls != nil && view.ToolCalls.Broken > 0:
 		view.State = qualityStateBlocked
-		view.Reason = fmt.Sprintf("%s. This setup broke %d of %d tool calls the reference made correctly (%s). A broken tool call blocks a setup.", matched, view.ToolCalls.Broken, view.ToolCalls.Cases, toolCallFailureWords(view.ToolCalls.Candidate))
+		view.Reason = fmt.Sprintf("%s. This setup broke %d of %d tool calls (%s). A broken tool call blocks a setup.", matched, view.ToolCalls.Broken, view.ToolCalls.Cases, toolCallFailureWords(view.ToolCalls.Candidate))
 	case !row.Passed || eval.Verdict == releaseguard.QualityBlock:
 		view.State, view.Reason = qualityStateBlocked, fmt.Sprintf("%s. More than %.0f%% different blocks a setup.", matched, block)
 	case eval.Verdict == releaseguard.QualityWatch:
@@ -236,6 +243,7 @@ func toolCallFailureWords(failures qualityevidence.ToolCallFailures) string {
 		{failures.MissingCall, "missing call"}, {failures.WrongFunction, "wrong or undeclared function"},
 		{failures.MalformedArguments, "arguments that are not JSON"}, {failures.SchemaInvalid, "arguments that break the schema"},
 		{failures.ExtraCalls, "extra call"}, {failures.UnexpectedCall, "call where the reference made none"},
+		{failures.ToolsRefused, "refused tools the reference accepted"},
 	} {
 		if kind.count > 0 {
 			parts = append(parts, fmt.Sprintf("%s %d", kind.words, kind.count))
