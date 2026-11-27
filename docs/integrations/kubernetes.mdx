@@ -342,15 +342,17 @@ the InferCrane gateway, not directly to revisions or workers - so safe rollout o
 ## Migrate an endpoint you connect
 
 `infercrane connect URL --as NAME --manage-traffic --token-env VAR` stores the server's key
-encrypted. A control plane you run needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` for that, and it
-refuses that key without `INFERCRANE_WORKER_CREDENTIAL_KEY`; give both, each at least 32 random
-bytes. Without them `connect` answers "cannot store server credentials". On Kubernetes the engines
-keep receiving the control plane's API key.
+encrypted, so a control plane you run needs the two keys in
+[Keys for stored credentials](#keys-for-stored-credentials). Without them `connect` answers "cannot
+store server credentials". On Kubernetes the engines keep receiving the control plane's API key.
 
-The planner's catalog marks Kubernetes with vLLM as simulated, so `infercrane optimize propose
---provider kubernetes` proposes no setup unless you add `--include-simulated`. The proof still
-measures every setup it runs. The planner may also propose a `kubernetes-dynamo` setup; leave it out
-unless NVIDIA Dynamo runs in the cluster. See [Migration](/features/migration) for the commands.
+The planner's catalog qualifies Kubernetes with vLLM 0.34.0 on a real cluster for one GPU, the
+NVIDIA A10G (`--gpu NVIDIA-A10G`), and proposes setups for it directly. For every other GPU, a
+time-sliced label such as `NVIDIA-A10G-SHARED`, or another engine version, the pair is marked
+simulated, and `infercrane optimize propose --provider kubernetes` proposes no setup unless you add
+`--include-simulated`; the proof still measures every setup it runs. With that flag the planner may
+also propose a `kubernetes-dynamo` setup; leave it out unless NVIDIA Dynamo runs in the cluster. See
+[Migration](/features/migration) for the commands.
 
 ## Known limits
 

@@ -58,8 +58,9 @@ agent's health probe is skipped without a reason in the log.
 
 1. Apply the bootstrap in [Kubernetes](/integrations/kubernetes#bootstrap-a-namespace): the
    namespace, service accounts, and the namespaced Role.
-2. Create the control plane's Secret: its API key, the PostgreSQL password, and the two credential
-   keys that `infercrane connect --token-env` needs, each at least 32 random bytes:
+2. Create the control plane's Secret: its API key, the PostgreSQL password, and the two
+   [keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials) that
+   `infercrane connect --token-env` needs, each at least 32 random bytes:
 
    ```bash
    key() { openssl rand -hex 32 | tr -d '\n'; }
@@ -104,7 +105,7 @@ infercrane migrate price support-bot primary --authority contract --input-usd 1.
   --valid-until 2026-12-31
 infercrane evaluation set upload eval-set.json        # graded, at least 30 prompts
 infercrane optimize create YOUR/MODEL --model-revision COMMIT --provider kubernetes --gpu NVIDIA-A10G \
-  --include-simulated --max-candidates 1 --runtimes vllm \
+  --runtimes vllm \
   --migrate-from support-bot/primary --dialect openai-compatible \
   --workload-fingerprint sha256:DIGEST --eval-set sha256:EVAL_DIGEST
 infercrane optimize approve RUN_ID --max-cost-usd 10 --expires-in 6h
@@ -113,10 +114,11 @@ infercrane migrate canary support-bot --verdict VERDICT_ID --percent 5
 infercrane migrate rollback support-bot
 ```
 
-`--include-simulated` is needed while the catalog marks Kubernetes with vLLM as simulated; the run
-still measures every setup. `--max-candidates 1` keeps the plain Kubernetes setup and leaves out a
-`kubernetes-dynamo` one, which needs NVIDIA Dynamo. Grade a set the way your model answers: a model
-that explains its answer ("32 + 30 = 62.") scores 0 under `exact_match`; use `answer_line`.
+On the NVIDIA A10G with vLLM 0.34.0 the planner proposes the qualified Kubernetes setup directly.
+On any other GPU add `--include-simulated`, because the catalog marks that pair as simulated (the
+run still measures every setup), and `--max-candidates 1`, which keeps the plain Kubernetes setup
+ahead of a `kubernetes-dynamo` one that needs NVIDIA Dynamo. Grade a set the way your model answers:
+a model that explains its answer ("32 + 30 = 62.") scores 0 under `exact_match`; use `answer_line`.
 
 ## Remove it
 
