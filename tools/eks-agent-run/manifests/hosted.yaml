@@ -156,6 +156,18 @@ spec:
                 secretKeyRef:
                   name: control-plane
                   key: api-key
+            # Stores the keys of servers connected with
+            # `infercrane connect --token-env` (the migration's source).
+            - name: INFERCRANE_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane
+                  key: credential-encryption-key
+            - name: INFERCRANE_WORKER_CREDENTIAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane
+                  key: worker-credential-key
             - name: INFERCRANE_HOST
               value: "0.0.0.0"
             - name: INFERCRANE_PORT

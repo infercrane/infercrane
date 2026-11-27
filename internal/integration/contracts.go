@@ -184,6 +184,107 @@ type RuntimeCompatibility struct {
 	State    QualificationState `json:"state"`
 	Evidence string             `json:"evidence,omitempty"`
 	Reason   string             `json:"reason,omitempty"`
+	// Accelerators, RuntimeVersion, and Image narrow an entry to the exact
+	// tuple one run qualified. Empty fields cover every value. A narrowed
+	// entry sits beside the adapter's general one and is chosen only where
+	// it applies.
+	Accelerators   []string `json:"accelerators,omitempty"`
+	RuntimeVersion string   `json:"runtime_version,omitempty"`
+	Image          string   `json:"image,omitempty"`
+}
+
+// Applies reports whether the entry covers a GPU and engine version. GPU
+// names compare without vendor prefix, case, or separators, so NVIDIA-A10G
+// and a10g are the same GPU; NVIDIA-A10G-SHARED, a time-sliced label, is not.
+func (c RuntimeCompatibility) Applies(gpu, runtimeVersion string) bool {
+	if c.RuntimeVersion != "" && strings.TrimPrefix(strings.TrimSpace(runtimeVersion), "v") != c.RuntimeVersion {
+		return false
+	}
+	if len(c.Accelerators) == 0 {
+		return true
+	}
+	want := provideridentity.NormalizedAccelerator(gpu)
+	if want == "" {
+		return false
+	}
+	for _, accelerator := range c.Accelerators {
+		if provideridentity.NormalizedAccelerator(accelerator) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (c RuntimeCompatibility) narrowed() bool {
+	return len(c.Accelerators) > 0 || c.RuntimeVersion != "" || c.Image != ""
+}
+
+func (c RuntimeCompatibility) scopeKey() string {
+	accelerators := make([]string, 0, len(c.Accelerators))
+	for _, accelerator := range c.Accelerators {
+		accelerators = append(accelerators, provideridentity.NormalizedAccelerator(accelerator))
+	}
+	sort.Strings(accelerators)
+	return strings.Join(accelerators, ",") + "\x00" + c.RuntimeVersion + "\x00" + c.Image
+}
+
+// QualificationRank orders states by the evidence behind them: real, then
+// local, then simulated, then every other state.
+func QualificationRank(state QualificationState) int {
+	switch state {
+	case QualificationReal:
+		return 0
+	case QualificationLocal:
+		return 1
+	case QualificationSimulated:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// Strongest keeps one entry for each runtime, adapter, and mode: the best
+// qualified, and on a tie the narrowed one. The entries must already apply
+// to the request. Order follows the first entry of each group.
+func Strongest(entries []RuntimeCompatibility) []RuntimeCompatibility {
+	best := map[string]int{}
+	var out []RuntimeCompatibility
+	for _, entry := range entries {
+		key := entry.Runtime + "\x00" + entry.Adapter + "\x00" + string(entry.Mode)
+		index, seen := best[key]
+		if !seen {
+			best[key] = len(out)
+			out = append(out, entry)
+			continue
+		}
+		current := out[index]
+		if rank, held := QualificationRank(entry.State), QualificationRank(current.State); rank < held || rank == held && entry.narrowed() && !current.narrowed() {
+			out[index] = entry
+		}
+	}
+	return out
+}
+
+// SelectCompatibility returns the strongest entry for a runtime on a cloud
+// in a mode that applies to the GPU and engine version.
+func SelectCompatibility(entries []RuntimeCompatibility, runtime, cloud string, mode ComputeMode, gpu, runtimeVersion string) (RuntimeCompatibility, bool) {
+	var applicable []RuntimeCompatibility
+	for _, entry := range entries {
+		if entry.Runtime == runtime && entry.Cloud == cloud && entry.Mode == mode && entry.Applies(gpu, runtimeVersion) {
+			applicable = append(applicable, entry)
+		}
+	}
+	if len(applicable) == 0 {
+		return RuntimeCompatibility{}, false
+	}
+	sort.SliceStable(applicable, func(i, j int) bool {
+		left, right := QualificationRank(applicable[i].State), QualificationRank(applicable[j].State)
+		if left != right {
+			return left < right
+		}
+		return applicable[i].narrowed() && !applicable[j].narrowed()
+	})
+	return applicable[0], true
 }
 
 // CompositionProfile describes a replaceable external system that composes
@@ -336,7 +437,15 @@ func (r *Registry) SetCompatibility(entries ...RuntimeCompatibility) error {
 		if (entry.State == QualificationLocal || entry.State == QualificationReal || entry.State == QualificationSimulated) && entry.Evidence == "" {
 			return errors.New("qualified runtime compatibility requires evidence")
 		}
-		key := entry.Runtime + "\x00" + entry.Adapter + "\x00" + string(entry.Mode)
+		for _, accelerator := range entry.Accelerators {
+			if provideridentity.NormalizedAccelerator(accelerator) == "" {
+				return errors.New("runtime compatibility names an empty accelerator")
+			}
+		}
+		if entry.narrowed() && entry.State != QualificationReal && entry.State != QualificationLocal {
+			return fmt.Errorf("a narrowed runtime compatibility records a qualified run, not state %q", entry.State)
+		}
+		key := entry.Runtime + "\x00" + entry.Adapter + "\x00" + string(entry.Mode) + "\x00" + entry.scopeKey()
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("duplicate runtime compatibility for %s/%s/%s", entry.Runtime, entry.Cloud, entry.Mode)
 		}

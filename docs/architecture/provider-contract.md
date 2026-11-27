@@ -35,6 +35,14 @@ same lifecycle. External targets are registered endpoints; InferCrane does not p
 A capability or adapter registration never implies public support. Evidence is tied to contract
 version, adapter version, commit, test suite, environment class, timestamp and sanitized artifacts.
 
+A runtime compatibility entry covers a runtime on one adapter and compute mode. A real-cluster run
+that qualified one exact tuple adds a narrowed entry beside the general one: the GPUs
+(`accelerators`, compared without vendor prefix, case, or separators), the engine version
+(`runtime_version`), and the pinned image (`image`), with its evidence. Only a `local-qualified` or
+`real-qualified` entry may be narrowed. Where several entries apply to a request, the planner and the
+evidence rows take the best-qualified one, and the narrowed one on a tie; every other GPU and
+version keeps the general entry's state.
+
 ## Prohibited coupling
 
 Lifecycle core must not switch on provider name. Secrets must not enter persisted provider metadata.

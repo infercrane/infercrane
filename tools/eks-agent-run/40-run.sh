@@ -54,6 +54,10 @@ run_phase() {
   need_tools aws kubectl curl python3
   need_cluster
   guard_phase run 75
+  # Only this run's check lines decide its exit code; earlier attempts stay in
+  # the file (27 Nov: an earlier discovery failure made a passing rerun exit 6).
+  local checks_start=0
+  [ -f "$CHECKS" ] && checks_start=$(wc -l <"$CHECKS" | tr -d ' ')
   trap stop_port_forwards EXIT
   mkdir -p "$RUN_DIR"
   state_set RUN_STARTED_AT "$(date +%s)"
@@ -83,7 +87,9 @@ run_phase() {
   state_set GPU_PRODUCT "$product"
 
   step "0b. The customer's own model server (namespace $NAMESPACE_MODELS): $MODEL on $product"
-  secret_file "$STATE_DIR/server-token" openssl rand -hex 24
+  # No trailing newline: the token goes into an HTTP header, where a newline
+  # cannot travel, so the agent's probe of the server failed (27 Nov).
+  secret_file "$STATE_DIR/server-token" sh -c 'openssl rand -hex 24 | tr -d "\n"'
   ensure_namespace "$NAMESPACE_MODELS"
   apply_secret "$NAMESPACE_MODELS" model-server-token "token=$STATE_DIR/server-token"
   render "$TOOL_DIR/manifests/models.yaml" | kc apply --dry-run=server -f - >/dev/null
@@ -299,7 +305,8 @@ run = json.load(open(sys.argv[1]))["candidate_run"]
 result = run.get("result") or {}
 rows = []
 def row(name, ok, detail):
-    rows.append("%s\t%s\t%s" % (name, "pass" if ok else "fail", detail))
+    stamp = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows.append("%s\t%s\t%s\t%s" % (stamp, name, "pass" if ok else "fail", detail))
     print("  %s  %s: %s" % ("PASS" if ok else "FAIL", name, detail))
 for field in ("control", "candidate", "control_after"):
     m = result.get(field) or {}
@@ -310,7 +317,7 @@ row("answer_check", bool(quality) and quality.get("verdict") in ("PASS", "WATCH"
 row("candidate_cleaned_up", result.get("cleaned_up") is True, "cleaned_up=%s, ready after %s s" % (result.get("cleaned_up"), result.get("ready_seconds")))
 open(sys.argv[2], "a").write("\n".join(rows) + "\n")
 PY
-  if grep -q "	fail	" "$CHECKS"; then
+  if tail -n "+$((checks_start + 1))" "$CHECKS" | grep -q "	fail	"; then
     FAILED=1
   fi
   local remaining

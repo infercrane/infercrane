@@ -23,7 +23,12 @@ SOURCE_ENDPOINT=support-bot
 SOURCE_URL="http://qwen3.$NAMESPACE_MODELS.svc:8000/v1"
 EVAL_SET="$TOOL_DIR/eval/graded-arithmetic.json"
 SETUPS=${EKS_PROOF_SETUPS:-2}
-CAMPAIGN_MAX_COST_USD=5
+# The rules' cap is $5 of the rate card at the L4's list price. The rate card
+# is the GPU instance's list price (env.sh), so the cap scales with it: on the
+# A10G ($1.006 an hour in us-east-1) $5 was below the planner's sourced worst
+# case of $6.04 (27 Nov). Rate-card dollars are a test value, not money spent;
+# the cluster's own time limit bounds the real cost.
+CAMPAIGN_MAX_COST_USD=$(awk "BEGIN { printf \"%.2f\", 5 * $PRICE_GPU_INSTANCE / 0.8048 }")
 CAMPAIGN_WATCH_MINUTES=120
 
 # icli_stdin FILE ARGS… runs the CLI in the control plane's pod with FILE as
@@ -124,12 +129,18 @@ print(found[0] if found else "")' "$RUN_DIR/capture.json")
     state_set MIG_EVAL "$eval_digest"
   fi
   eval_digest=$(state_get MIG_EVAL)
-  check eval_set_uploaded pass "graded eval set $eval_digest (40 prompts, exact_match)"
+  check eval_set_uploaded pass "graded eval set $eval_digest ($(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("%d prompts, %s" % (len(d["prompts"]), d["grading"]))' "$EVAL_SET"))"
 
   step "3. The migration campaign"
   local campaign
   if ! done_step CAMPAIGN; then
+    # --include-simulated: the catalog marks the Kubernetes adapter's vLLM
+    # compatibility "simulated" (internal/integration/catalog.go), and the
+    # planner proposes nothing on it without this flag ("missing:
+    # qualified_provider_runtime_compatibility", 27 Nov). The laptop proof of
+    # 20 Nov passed it too. A deviation, recorded in the rules.
     icli optimize propose "$MODEL" --model-revision "$MODEL_REVISION" --provider kubernetes --gpu "$product" \
+      --include-simulated \
       --runtimes vllm --migrate-from "$SOURCE_ENDPOINT/primary" --dialect openai-compatible \
       --workload-fingerprint "$digest" --eval-set "$eval_digest" --max-candidates "$SETUPS" \
       --output json >"$RUN_DIR/proposal.json" 2>"$RUN_DIR/proposal.err" ||
@@ -140,6 +151,21 @@ print(found[0] if found else "")' "$RUN_DIR/capture.json")
 import json, sys
 proposal = json.load(open(sys.argv[1]))
 fraction, length, out = sys.argv[2], sys.argv[3], sys.argv[4]
+if not proposal.get("candidates"):
+    sys.exit("the proposal has no setups; missing: %s" % ", ".join(proposal.get("missing") or ["nothing named"]))
+# Only setups for the plain Kubernetes adapter: the planner also proposes
+# kubernetes-dynamo setups, and this cluster runs no NVIDIA Dynamo (27 Nov).
+kept = [c for c in proposal["candidates"] if (c.get("deployment") or {}).get("provider", {}).get("adapter") == "kubernetes"]
+dropped = len(proposal["candidates"]) - len(kept)
+if not kept:
+    sys.exit("the proposal has no setup for the kubernetes adapter")
+for rank, candidate in enumerate(kept, start=1):
+    candidate["rank"] = rank
+proposal["candidates"] = kept
+if isinstance(proposal.get("starting_point"), dict) and proposal["starting_point"].get("candidate_id") not in [c["id"] for c in kept]:
+    proposal["starting_point"]["candidate_id"] = kept[0]["id"]
+if dropped:
+    print("dropped %d setup(s) for another adapter (kubernetes-dynamo)" % dropped)
 def limit(args):
     args = list(args or [])
     for flag, value in (("--gpu-memory-utilization", fraction), ("--max-model-len", length)):
@@ -164,7 +190,7 @@ print("%d setups: %s" % (len(proposal.get("candidates", [])), "; ".join(
 json.dump({"proposal": proposal, "intent": "new_endpoint"}, open(out, "w"))
 PY
     status=$(curl -sS --max-time 60 --cacert "$STATE_DIR/tls.crt" --resolve "$CONTROL_HOST:$CONTROL_LOCAL_PORT:127.0.0.1" \
-      -X POST -H "Content-Type: application/json" -H "@$STATE_DIR/auth-header" -H "Idempotency-Key: eks-qual-migration-$(state_get CREATED_AT)" \
+      -X POST -H "Content-Type: application/json" -H "@$STATE_DIR/auth-header" -H "Idempotency-Key: eks-qual-migration-$(state_get CREATED_AT)-$(printf '%s' "$eval_digest" | cut -c8-19)" \
       -o "$RUN_DIR/campaign-created.json" -w '%{http_code}' --data-binary "@$RUN_DIR/campaign-request.json" \
       "https://$CONTROL_HOST:$CONTROL_LOCAL_PORT/api/v1/optimization/campaigns")
     case "$status" in 200 | 201) ;; *) die "posting the campaign answered HTTP $status: $(head -c 500 "$RUN_DIR/campaign-created.json")" ;; esac
@@ -208,7 +234,7 @@ try:
     d = json.load(open(sys.argv[1]))
 except ValueError:
     d = {}
-items = d.get("verdicts", d if isinstance(d, list) else [])
+items = d if isinstance(d, list) else d.get("verdicts", [])
 for item in items:
     if str(item.get("verdict", "")).upper() == "PASS":
         print(item.get("id", ""), item.get("candidate_id") or item.get("candidate_run_id") or "")

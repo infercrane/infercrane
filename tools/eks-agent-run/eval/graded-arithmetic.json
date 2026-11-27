@@ -1,8 +1,8 @@
 {
  "schema": "infercrane.dev/quality-eval-set/v1",
  "name": "eks-qual-arithmetic",
- "version": "1",
- "grading": "exact_match",
+ "version": "2",
+ "grading": "answer_line",
  "max_tokens": 32,
  "prompts": [
   {

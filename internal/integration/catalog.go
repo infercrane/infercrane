@@ -255,6 +255,13 @@ func KubernetesCatalog() (*Registry, error) {
 	}
 	compatibility := append(registry.Snapshot().Compatibility,
 		RuntimeCompatibility{Runtime: "vllm", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestKubernetesProviderContractConformance"},
+		// The customer install, end to end, on one Amazon EKS 1.36 node with an
+		// NVIDIA A10G in us-east-1 on 27 Nov 2026: vLLM 0.34.0 at its pinned
+		// image, the control plane in the cluster. Only this tuple; every other
+		// GPU and version keeps the entry above.
+		RuntimeCompatibility{Runtime: "vllm", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationReal,
+			Accelerators: []string{"NVIDIA-A10G"}, RuntimeVersion: "0.34.0", Image: "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+			Evidence: "docs:docs/testing/evidence/eks-customer-install-a10g-2026-11-27.json"},
 		RuntimeCompatibility{Runtime: "sglang", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
 		RuntimeCompatibility{Runtime: "custom-oci", Adapter: "kubernetes", Cloud: "kubernetes", Mode: ElasticMode, State: QualificationSimulated, Evidence: "go:test/internal/conformance#TestPortableRuntimeConformance"},
 	)

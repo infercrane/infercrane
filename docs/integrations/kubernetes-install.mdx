@@ -1,0 +1,139 @@
+---
+title: Install on your GPU cluster
+description: Install InferCrane on your own GPU Kubernetes cluster, serve a model, migrate an endpoint with a 5% canary, and remove everything again.
+---
+
+# Install on your GPU cluster
+
+This page follows the path qualified on a real cluster on 27 Nov 2026: Amazon EKS 1.36 with one
+NVIDIA A10G, in the order a platform team does it. Each command is the one that ran there, or its
+CLI form where the test called the API. What differs on your cluster is yours to check; see
+[Known limits](/integrations/kubernetes#known-limits) and the
+[record](/testing/aws-real-evidence#eks-customer-install-on-one-a10g-27-nov-2026).
+
+## Before you start
+
+- Kubernetes with NVIDIA GPU nodes: driver 580 or newer (the vLLM 0.34.0 image is built for CUDA
+  13), NVIDIA's device plugin, and GPU feature discovery, so nodes carry `nvidia.com/gpu` and the
+  `nvidia.com/gpu.product` label. InferCrane installs neither.
+- A network plugin that enforces `NetworkPolicy` (on EKS: the VPC CNI with
+  `enableNetworkPolicy: "true"`). Without one, the engines' policies are stored and do nothing.
+- About 100 GB of disk on each GPU node: the vLLM image is about 30 GB unpacked, plus weights.
+- Egress to Hugging Face and Docker Hub. Nothing inbound.
+- Every key and password below is written without a trailing newline (`printf '%s'`, never `echo`
+  or `openssl … > file`): a newline breaks the database login and every bearer token.
+
+## Two ways to run it
+
+| | Agent only (hosted control plane) | Control plane in your cluster |
+|---|---|---|
+| You install | the agent, with its Helm chart | the agent, `infercrane serve`, and PostgreSQL |
+| You get | discovery, monitoring, the agent's data plane, candidate runs beside your server | the above, plus deploy, the gateway, optimization runs, migration with a 5% canary and rollback |
+
+Deploy, the gateway, and optimization runs need the control plane inside the cluster: it reaches a
+replica by its Service's cluster DNS name.
+
+## Agent only
+
+```bash
+infercrane agent create my-cluster --output json            # prints the key once
+kubectl create namespace models
+kubectl -n models create secret generic infercrane-agent-key --from-literal=key="$AGENT_KEY"
+helm install agent deploy/helm/infercrane-agent -n models \
+  --set controlPlane.url=https://YOUR-CONTROL-PLANE \
+  --set 'agent.servers[0]=http://vllm.models.svc:8000' \
+  --set agent.serverTokenSecret.name=YOUR-SERVER-KEY-SECRET \
+  --set agent.endpointName=support-bot --set agent.model=YOUR/MODEL \
+  --set executor.enabled=true --set 'executor.allowedImages[0]=vllm/vllm-openai' \
+  --set 'executor.allowedAccelerators[0]=NVIDIA-A10G' \
+  --wait
+```
+
+Use the chart from a release that sets its image tag to `v<version>`; with the 2.0.2 chart add
+`--set image.tag=v2.0.2`. Within a minute `infercrane endpoint list` shows `support-bot`. If the agent
+finds your server but never registers it, check the server's key first: a server that fails the
+agent's health probe is skipped without a reason in the log.
+
+## Control plane in your cluster
+
+1. Apply the bootstrap in [Kubernetes](/integrations/kubernetes#bootstrap-a-namespace): the
+   namespace, service accounts, and the namespaced Role.
+2. Create the control plane's Secret: its API key, the PostgreSQL password, and the two
+   [keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials) that
+   `infercrane connect --token-env` needs, each at least 32 random bytes:
+
+   ```bash
+   key() { openssl rand -hex 32 | tr -d '\n'; }
+   kubectl -n infercrane-system create secret generic control-plane \
+     --from-literal=api-key="$INFERCRANE_API_KEY" \
+     --from-literal=postgres-password="$(key)" \
+     --from-literal=credential-encryption-key="$(key)" \
+     --from-literal=worker-credential-key="$(key)"
+   kubectl -n infercrane-system create secret generic infercrane-worker \
+     --from-literal=api-key="$INFERCRANE_API_KEY"
+   ```
+
+3. Run PostgreSQL and `infercrane serve` in `infercrane-system` with the environment of
+   [Configure the control plane](/integrations/kubernetes#configure-the-control-plane) plus
+   `INFERCRANE_API_KEY`, `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, and
+   `INFERCRANE_WORKER_CREDENTIAL_KEY` from that Secret. There is no Helm chart for the control plane
+   yet; `tools/eks-agent-run/manifests/hosted.yaml` is the manifest the qualification ran.
+4. Check it from inside the cluster: `infercrane doctor --kubernetes`.
+
+## Deploy and serve
+
+On a 24 GB GPU, give the engine a context length it can hold; `infercrane deploy MODEL` sets none, and
+Qwen3-8B then does not start. Deploy from a spec file
+([example](/integrations/kubernetes#deploy)):
+
+```bash
+infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+curl https://YOUR-CONTROL-PLANE/v1/chat/completions -H "Authorization: Bearer $APP_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen-kubernetes","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+If a deploy never becomes ready, `infercrane operation cancel OPERATION_ID` before you delete it.
+
+## Migrate an endpoint with a 5% canary
+
+```bash
+SOURCE_TOKEN=... infercrane connect http://vllm.models.svc:8000/v1 --as support-bot \
+  --model YOUR/MODEL --manage-traffic --token-env SOURCE_TOKEN
+infercrane migrate capture support-bot --binding primary --window 1h
+infercrane migrate price support-bot primary --authority contract --input-usd 1.00 --output-usd 8.00 \
+  --valid-until 2026-12-31
+infercrane evaluation set upload eval-set.json        # graded, at least 30 prompts
+infercrane optimize create YOUR/MODEL --model-revision COMMIT --provider kubernetes --gpu NVIDIA-A10G \
+  --runtimes vllm \
+  --migrate-from support-bot/primary --dialect openai-compatible \
+  --workload-fingerprint sha256:DIGEST --eval-set sha256:EVAL_DIGEST
+infercrane optimize approve RUN_ID --max-cost-usd 10 --expires-in 6h
+infercrane migrate verdicts RUN_ID
+infercrane migrate canary support-bot --verdict VERDICT_ID --percent 5
+infercrane migrate rollback support-bot
+```
+
+On the NVIDIA A10G with vLLM 0.34.0 the planner proposes the qualified Kubernetes setup directly.
+On any other GPU add `--include-simulated`, because the catalog marks that pair as simulated (the
+run still measures every setup), and `--max-candidates 1`, which keeps the plain Kubernetes setup
+ahead of a `kubernetes-dynamo` one that needs NVIDIA Dynamo. Grade a set the way your model answers:
+a model that explains its answer ("32 + 30 = 62.") scores 0 under `exact_match`; use `answer_line`.
+
+## Remove it
+
+In this order; the last command removes what the chart keeps on purpose.
+
+```bash
+infercrane optimize cancel RUN_ID
+infercrane delete qwen-kubernetes --yes --wait
+helm uninstall agent -n models --wait
+kubectl delete -f YOUR-CONTROL-PLANE-MANIFEST.yaml
+kubectl -n infercrane-system delete secret control-plane infercrane-worker
+kubectl delete -f deploy/kubernetes/base/provider-rbac.yaml
+kubectl delete -f deploy/kubernetes/base/service-accounts.yaml
+kubectl delete -f deploy/kubernetes/base/namespace.yaml
+kubectl -n models delete secret agent-infercrane-agent-hash-key infercrane-agent-key
+```
+
+On the qualified cluster nothing of InferCrane was left after this, namespaced or cluster-wide.

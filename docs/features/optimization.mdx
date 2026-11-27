@@ -2093,8 +2093,13 @@ only as unmeasured setups chosen by the
 [diagnosis rules](#choose-setups-from-the-endpoint-diagnosis). It never enables LMCache,
 disaggregated serving, FlashInfer, or TensorRT-LLM. Those mechanisms are version- and
 workload-specific and require their own compatibility and qualification evidence.
-Use `--include-simulated` only for development exploration; simulated candidates are excluded by
-default.
+Simulated candidates are excluded by default. A provider and runtime that are not yet qualified on a
+real cluster for your GPU need `--include-simulated`; the proof still measures every setup it runs,
+so a simulated entry only decides what is proposed, never what is claimed. A real-cluster
+qualification can cover one exact tuple: Kubernetes with vLLM 0.34.0 at its pinned image is
+qualified on one NVIDIA A10G (EKS, 27 Nov 2026), so a proposal for `--gpu NVIDIA-A10G` needs no
+flag, while every other GPU, a time-sliced label such as `NVIDIA-A10G-SHARED`, and every other
+engine version still do.
 
 ## Upstream composition boundaries
 

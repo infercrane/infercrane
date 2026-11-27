@@ -5526,14 +5526,11 @@ func (a API) recommendDeployment(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		for _, compatibility := range a.Integrations.Compatibility {
-			if compatibility.Runtime == row.Runtime && compatibility.Cloud == row.Provider && string(compatibility.Mode) == row.ComputeMode {
-				row.QualificationState = string(compatibility.State)
-				row.Qualified = runtimeVersionQualified && (compatibility.State == integration.QualificationReal || compatibility.State == integration.QualificationLocal)
-				if !runtimeVersionQualified {
-					row.QualificationState = "runtime-version-mismatch"
-				}
-				break
+		if compatibility, found := integration.SelectCompatibility(a.Integrations.Compatibility, row.Runtime, row.Provider, integration.ComputeMode(row.ComputeMode), row.GPU, row.RuntimeVersion); found {
+			row.QualificationState = string(compatibility.State)
+			row.Qualified = runtimeVersionQualified && (compatibility.State == integration.QualificationReal || compatibility.State == integration.QualificationLocal)
+			if !runtimeVersionQualified {
+				row.QualificationState = "runtime-version-mismatch"
 			}
 		}
 		if capacity, capacityErr := store.LatestCapacityEvidence(r.Context(), principal.TenantID, row.Provider, row.Runtime, row.ComputeMode, row.Region, row.GPU, row.GPUCount); capacityErr == nil {

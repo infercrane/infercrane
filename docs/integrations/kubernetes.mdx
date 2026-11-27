@@ -10,9 +10,17 @@ one standard KServe `InferenceService`. Kubernetes owns scheduling and Pods. Inf
 lifecycle, rollout policy, routing membership, evidence, and deletion of its exact labeled resources.
 
 <Warning>
-The adapter has hermetic and Kind lifecycle qualification. Real GPU, vLLM, SGLang, and custom OCI
-compatibility remains deferred to consolidated manual qualification. Registration is not a
-real-cluster support claim.
+One real-cluster tuple is qualified, on 27 Nov 2026: Amazon EKS 1.36 in `us-east-1`, one
+`g5.xlarge` (NVIDIA A10G 24 GB, EKS AL2023 NVIDIA AMI, driver 580.178.04), the VPC CNI with
+`enableNetworkPolicy`, NVIDIA's device plugin 0.20.2 with GPU feature discovery, the control plane in
+the cluster, and vLLM 0.34.0
+(`vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1`)
+serving `Qwen/Qwen3-8B` on the whole GPU and `Qwen/Qwen3-0.6B` on the GPU time-sliced four ways.
+Install, deploy, the gateway, the agent with its executor, a migration with a 5% canary and
+rollback, and uninstall passed there, with the deviations and limits the
+[record](/testing/aws-real-evidence#eks-customer-install-on-one-a10g-27-nov-2026) lists. Every other
+GPU (the L4 included), cloud, Kubernetes distribution, runtime, and model has hermetic and Kind
+qualification only. Registration is not a real-cluster support claim.
 </Warning>
 
 ## Choose the workload API
@@ -263,6 +271,46 @@ infercrane deploy Qwen/Qwen3-8B \
   --idempotency-key qwen-kubernetes-initial
 ```
 
+On a 24 GB GPU (L4, A10G) the command above cannot serve `Qwen/Qwen3-8B`: it sets no context length,
+so vLLM 0.34.0 reserves the model's 40960 tokens, needs 5.62 GiB of KV cache with 3.72 GiB free, and
+exits. `infercrane deploy` has no flag for engine arguments; deploy from a spec file instead
+([DeploymentSpec](/deployment-spec)):
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen-kubernetes
+model:
+  id: Qwen/Qwen3-8B
+  revision: b968826d9c46dd6066d109eabc6255188de91218
+runtime:
+  engine: vllm
+  args: ["--max-model-len", "8192"]
+compute:
+  mode: elastic
+provider:
+  cloud: kubernetes
+resources:
+  gpu: NVIDIA-A10G
+  gpu_count: 1
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+```
+
+```bash
+infercrane plan qwen-kubernetes.yaml
+infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+```
+
+A deploy that never becomes ready keeps its operation open, and `infercrane delete` is refused
+("unresolved lifecycle operation") until you cancel it:
+
+```bash
+infercrane operation list
+infercrane operation cancel OPERATION_ID
+```
+
 Provisioning uses strict server-side dry-run followed by server-side apply with the
 `infercrane-provider-v1` field manager. InferCrane does not use `--force-conflicts`; ownership drift
 fails visibly. A lost apply response is safe to retry because resource names and ownership metadata
@@ -290,6 +338,37 @@ implicitly by `workload_api`.
 `deploy/kubernetes/gateway-api/httproute.yaml` is an optional placeholder. Replace the Gateway and
 hostname, then apply it only if your cluster already has Gateway API and a controller. It routes to
 the InferCrane gateway, not directly to revisions or workers - so safe rollout ownership stays singular.
+
+## Migrate an endpoint you connect
+
+`infercrane connect URL --as NAME --manage-traffic --token-env VAR` stores the server's key
+encrypted, so a control plane you run needs the two keys in
+[Keys for stored credentials](#keys-for-stored-credentials). Without them `connect` answers "cannot
+store server credentials". On Kubernetes the engines keep receiving the control plane's API key.
+
+The planner's catalog qualifies Kubernetes with vLLM 0.34.0 on a real cluster for one GPU, the
+NVIDIA A10G (`--gpu NVIDIA-A10G`), and proposes setups for it directly. For every other GPU, a
+time-sliced label such as `NVIDIA-A10G-SHARED`, or another engine version, the pair is marked
+simulated, and `infercrane optimize propose --provider kubernetes` proposes no setup unless you add
+`--include-simulated`; the proof still measures every setup it runs. With that flag the planner may
+also propose a `kubernetes-dynamo` setup; leave it out unless NVIDIA Dynamo runs in the cluster. See
+[Migration](/features/migration) for the commands.
+
+## Known limits
+
+- Deploy, the gateway, and optimization runs need the control plane inside the cluster: a replica's
+  address is its Service's cluster DNS name. A hosted control plane reaches your cluster through the
+  [agent](/architecture/agent) only.
+- The only 5% canary is the migration canary (`infercrane migrate canary`); an optimization winner
+  is activated, not canaried.
+- InferCrane never sets vLLM's `--gpu-memory-utilization`, and vLLM 0.34.0 then takes the whole GPU.
+  To share one GPU between servers (time-slicing), give each server its own limit.
+- A time-sliced GPU's label (for example `NVIDIA-A10G-SHARED`) matches none of the planner's reviewed
+  profiles, so it gets generic setups only.
+- There is no Helm chart for the control plane yet.
+- The engines' `NetworkPolicy` does nothing without a network plugin that enforces it.
+- The agent does not say why it leaves a server it found unregistered; a server that fails its
+  health probe (for example a wrong token) shows only "server is not registered with this agent".
 
 ## Local conformance
 

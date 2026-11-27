@@ -223,6 +223,7 @@
               "integrations/aws-ec2",
               "integrations/gcp-compute",
               "integrations/kubernetes",
+              "integrations/kubernetes-install",
               "integrations/amd-instinct",
               "integrations/bare-metal",
               "integrations/dynamo",

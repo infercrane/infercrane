@@ -197,6 +197,7 @@ EOF
     state_unset "$key"
   done
   rm -f "$KUBECONFIG" "$STATE_DIR/api-key" "$STATE_DIR/auth-header" "$STATE_DIR/app-auth-header" "$STATE_DIR/postgres-password" \
+    "$STATE_DIR/credential-encryption-key" "$STATE_DIR/worker-credential-key" \
     "$STATE_DIR/server-token" "$STATE_DIR/tls.key" "$STATE_DIR/tls.crt" "$STATE_DIR"/port-forward-*
   say "Total counted for this test so far: \$$(spent_closed) of \$$BUDGET_USD."
   say "Deleted, and checked: nothing billable of this test is left."

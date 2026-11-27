@@ -69,11 +69,21 @@ for key in sorted(labels):
   # the whole value, so a newline made them differ (27 Nov, "password
   # authentication failed" on the first start).
   secret_file "$STATE_DIR/postgres-password" sh -c 'openssl rand -hex 24 | tr -d "\n"'
+  # `infercrane connect --token-env` stores the connected server's key
+  # encrypted, which needs INFERCRANE_CREDENTIAL_ENCRYPTION_KEY; the control
+  # plane refuses that key without INFERCRANE_WORKER_CREDENTIAL_KEY (both at
+  # least 32 bytes, internal/config/config.go). Without them the migration's
+  # connect was refused on 27 Nov ("cannot store server credentials"). On
+  # Kubernetes the engines still get the API key (workercredential: shared
+  # credential for operator compute without a version stamp).
+  secret_file "$STATE_DIR/credential-encryption-key" sh -c 'openssl rand -hex 32 | tr -d "\n"'
+  secret_file "$STATE_DIR/worker-credential-key" sh -c 'openssl rand -hex 32 | tr -d "\n"'
   if [ ! -s "$STATE_DIR/tls.crt" ]; then
     (umask 077 && openssl req -x509 -newkey rsa:2048 -nodes -days 3 -keyout "$STATE_DIR/tls.key" -out "$STATE_DIR/tls.crt" \
       -subj "/CN=$CONTROL_HOST" -addext "subjectAltName=DNS:$CONTROL_HOST,DNS:$CONTROL_HOST.cluster.local" >/dev/null 2>&1)
   fi
-  apply_secret "$NAMESPACE_HOSTED" control-plane "api-key=$STATE_DIR/api-key" "postgres-password=$STATE_DIR/postgres-password"
+  apply_secret "$NAMESPACE_HOSTED" control-plane "api-key=$STATE_DIR/api-key" "postgres-password=$STATE_DIR/postgres-password" \
+    "credential-encryption-key=$STATE_DIR/credential-encryption-key" "worker-credential-key=$STATE_DIR/worker-credential-key"
   # The key every engine pod requires; the control plane presents its API
   # key to them (docs: "Create the worker credential").
   apply_secret "$NAMESPACE_HOSTED" infercrane-worker "api-key=$STATE_DIR/api-key"
