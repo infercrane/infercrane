@@ -129,7 +129,13 @@ print(found[0] if found else "")' "$RUN_DIR/capture.json")
   step "3. The migration campaign"
   local campaign
   if ! done_step CAMPAIGN; then
+    # --include-simulated: the catalog marks the Kubernetes adapter's vLLM
+    # compatibility "simulated" (internal/integration/catalog.go), and the
+    # planner proposes nothing on it without this flag ("missing:
+    # qualified_provider_runtime_compatibility", 27 Nov). The laptop proof of
+    # 20 Nov passed it too. A deviation, recorded in the rules.
     icli optimize propose "$MODEL" --model-revision "$MODEL_REVISION" --provider kubernetes --gpu "$product" \
+      --include-simulated \
       --runtimes vllm --migrate-from "$SOURCE_ENDPOINT/primary" --dialect openai-compatible \
       --workload-fingerprint "$digest" --eval-set "$eval_digest" --max-candidates "$SETUPS" \
       --output json >"$RUN_DIR/proposal.json" 2>"$RUN_DIR/proposal.err" ||
@@ -140,6 +146,21 @@ print(found[0] if found else "")' "$RUN_DIR/capture.json")
 import json, sys
 proposal = json.load(open(sys.argv[1]))
 fraction, length, out = sys.argv[2], sys.argv[3], sys.argv[4]
+if not proposal.get("candidates"):
+    sys.exit("the proposal has no setups; missing: %s" % ", ".join(proposal.get("missing") or ["nothing named"]))
+# Only setups for the plain Kubernetes adapter: the planner also proposes
+# kubernetes-dynamo setups, and this cluster runs no NVIDIA Dynamo (27 Nov).
+kept = [c for c in proposal["candidates"] if (c.get("deployment") or {}).get("provider", {}).get("adapter") == "kubernetes"]
+dropped = len(proposal["candidates"]) - len(kept)
+if not kept:
+    sys.exit("the proposal has no setup for the kubernetes adapter")
+for rank, candidate in enumerate(kept, start=1):
+    candidate["rank"] = rank
+proposal["candidates"] = kept
+if isinstance(proposal.get("starting_point"), dict) and proposal["starting_point"].get("candidate_id") not in [c["id"] for c in kept]:
+    proposal["starting_point"]["candidate_id"] = kept[0]["id"]
+if dropped:
+    print("dropped %d setup(s) for another adapter (kubernetes-dynamo)" % dropped)
 def limit(args):
     args = list(args or [])
     for flag, value in (("--gpu-memory-utilization", fraction), ("--max-model-len", length)):
