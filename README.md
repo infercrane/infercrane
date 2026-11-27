@@ -51,7 +51,12 @@ change goes through the same four steps:
    up as the fallback, and traffic switches back automatically if the guard sees a regression.
 
 A result the evidence doesn't show is reported as "not shown", never as a win. Prompts and answers
-stay in your account. See [how a run measures and confirms a gain](docs/features/optimization.mdx)
+stay in your account.
+
+InferCrane doesn't replace your engine. It runs [vLLM](https://github.com/vllm-project/vllm) and
+[SGLang](https://github.com/sgl-project/sglang) as they are, drives load with
+[AIPerf](https://github.com/ai-dynamo/aiperf), and trains drafts with
+[speculators](https://github.com/vllm-project/speculators). See [how a run measures and confirms a gain](docs/features/optimization.mdx)
 and [how answers are checked](docs/features/semantic-quality.mdx).
 
 ## Results and receipts
