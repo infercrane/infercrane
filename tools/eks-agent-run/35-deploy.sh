@@ -12,6 +12,13 @@
 #      key, streamed and not; an unknown key is refused;
 #   4. `infercrane delete`, and nothing of it is left.
 #
+# On 27 Nov the docs' command did not serve on a 24 GB GPU (A10G): it passes
+# no context length, so vLLM 0.34.0 takes Qwen3-8B's 40960 tokens, needs 5.62
+# GiB of KV cache with 3.72 GiB free, and refuses to start. Once that is
+# recorded (DEPLOY_DOCS_FAILED), the phase deletes that deployment and deploys
+# the same model from a spec file (`infercrane deploy FILE`, docs/deployment-
+# spec.md) with `--max-model-len FULL_MAX_MODEL_LEN`, as a deviation.
+#
 # It creates nothing in AWS. Checks go to run/checks.tsv.
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -69,14 +76,62 @@ deploy_phase() {
   product=$(state_get GPU_PRODUCT_WHOLE)
   [ -n "$product" ] || die "the install phase has not finished; run 30-install.sh"
 
-  step "1. infercrane deploy $FULL_MODEL --cloud kubernetes --gpu $product (the docs' command)"
-  state_set DEPLOY_STARTED_AT "$(date +%s)"
-  if icli deploy "$FULL_MODEL" --name "$DEPLOYMENT" --cloud kubernetes --gpu "$product" \
-    --idempotency-key "$DEPLOYMENT-initial" --output json >"$RUN_DIR/deploy.json" 2>"$RUN_DIR/deploy.err"; then
-    check deploy_accepted pass "deploy accepted: $(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("endpoint %s, runtime %s, provider %s" % (d.get("endpoint"), d.get("runtime"), d.get("provider")))' "$RUN_DIR/deploy.json")"
+  local attempt=docs ready_check=deploy_ready
+  [ "$(state_get DEPLOY_DOCS_FAILED)" = 1 ] && attempt=spec ready_check=deploy_spec_ready
+  if [ "$attempt" = docs ]; then
+    step "1. infercrane deploy $FULL_MODEL --cloud kubernetes --gpu $product (the docs' command)"
+    state_set DEPLOY_STARTED_AT "$(date +%s)"
+    if icli deploy "$FULL_MODEL" --name "$DEPLOYMENT" --cloud kubernetes --gpu "$product" \
+      --idempotency-key "$DEPLOYMENT-initial" --output json >"$RUN_DIR/deploy.json" 2>"$RUN_DIR/deploy.err"; then
+      check deploy_accepted pass "deploy accepted: $(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("endpoint %s, runtime %s, provider %s" % (d.get("endpoint"), d.get("runtime"), d.get("provider")))' "$RUN_DIR/deploy.json")"
+    else
+      check deploy_accepted fail "$(tail -c 400 "$RUN_DIR/deploy.err")"
+      die "the control plane refused the deploy"
+    fi
   else
-    check deploy_accepted fail "$(tail -c 400 "$RUN_DIR/deploy.err")"
-    die "the control plane refused the deploy"
+    step "1. The docs' command did not serve ($(state_get DEPLOY_DOCS_REASON)); deploying from a spec file with --max-model-len $FULL_MAX_MODEL_LEN"
+    icli delete "$DEPLOYMENT" --yes --wait >>"$RUN_DIR/deploy-docs-delete.txt" 2>&1 || true
+    local left="" until_gone=$((SECONDS + 300))
+    while [ "$SECONDS" -lt "$until_gone" ]; do
+      left=$(kc --namespace "$NAMESPACE_HOSTED" get deployment,service,networkpolicy,pods -l app.kubernetes.io/managed-by=infercrane -o name)
+      [ -z "$left" ] && break
+      sleep 10
+    done
+    [ -z "$left" ] || die "the failed deployment's objects are still there: $(printf '%s' "$left" | tr '\n' ' ')"
+    say "  the docs' deployment is deleted"
+    cat >"$RUN_DIR/$DEPLOYMENT.yaml" <<EOF
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: $DEPLOYMENT
+model:
+  id: $FULL_MODEL
+  revision: $FULL_MODEL_REVISION
+runtime:
+  engine: vllm
+  args:
+    - --max-model-len
+    - "$FULL_MAX_MODEL_LEN"
+compute:
+  mode: elastic
+provider:
+  cloud: kubernetes
+resources:
+  gpu: $product
+  gpu_count: 1
+scaling:
+  min_replicas: 1
+  max_replicas: 1
+routing:
+  strategy: round-robin
+EOF
+    kc --namespace "$NAMESPACE_HOSTED" exec -i deployment/infercrane -- sh -c "cat >/tmp/$DEPLOYMENT.yaml" <"$RUN_DIR/$DEPLOYMENT.yaml"
+    state_set DEPLOY_STARTED_AT "$(date +%s)"
+    if icli deploy "/tmp/$DEPLOYMENT.yaml" --idempotency-key "$DEPLOYMENT-spec" --output json >"$RUN_DIR/deploy.json" 2>"$RUN_DIR/deploy.err"; then
+      check deploy_spec_accepted pass "deploy from a spec file with --max-model-len $FULL_MAX_MODEL_LEN accepted: $(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("endpoint %s, runtime %s, provider %s" % (d.get("endpoint"), d.get("runtime"), d.get("provider")))' "$RUN_DIR/deploy.json")"
+    else
+      check deploy_spec_accepted fail "$(tail -c 400 "$RUN_DIR/deploy.err")"
+      die "the control plane refused the spec-file deploy"
+    fi
   fi
   local endpoint
   endpoint=$(json_field "$RUN_DIR/deploy.json" endpoint)
@@ -84,7 +139,7 @@ deploy_phase() {
   state_set FULL_ENDPOINT "$endpoint"
 
   step "2. Waiting for the replica (the first start pulls the vLLM image and $FULL_MODEL's 16.4 GB)"
-  local until=$((SECONDS + 30 * 60)) state="" reason
+  local until=$((SECONDS + 30 * 60)) state="" reason restarts
   while [ "$SECONDS" -lt "$until" ]; do
     api GET "/api/v1/deployments/$DEPLOYMENT" "$RUN_DIR/deployment.json" >/dev/null || true
     # lifecycle_status.serving_state is "serving" once the gateway routes to
@@ -101,6 +156,13 @@ if str(operation.get("state", "")).lower() in ("failed", "error"):
     state = "failed"
 print(state)' "$RUN_DIR/deployment.json")
     case "$state" in serving | failed) break ;; esac
+    # A server that keeps exiting will not serve: stop at three restarts.
+    restarts=$(kc --namespace "$NAMESPACE_HOSTED" get pods -l app.kubernetes.io/managed-by=infercrane \
+      -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null || true)
+    if [ "${restarts:-0}" -ge 3 ] 2>/dev/null; then
+      state=crash-looping
+      break
+    fi
     reason=$(kc --namespace "$NAMESPACE_HOSTED" get pods -l app.kubernetes.io/managed-by=infercrane \
       -o jsonpath='{range .items[*]}{.status.phase}/{.status.containerStatuses[0].state.waiting.reason}{" "}{end}' 2>/dev/null || true)
     say "  $(date +%H:%M:%S) deployment: ${state:-unknown}; pods: ${reason:-none}"
@@ -109,9 +171,16 @@ print(state)' "$RUN_DIR/deployment.json")
   state_set DEPLOY_READY_AT "$(date +%s)"
   kc --namespace "$NAMESPACE_HOSTED" get deployment,service,networkpolicy,pods -l app.kubernetes.io/managed-by=infercrane -o wide | tee "$RUN_DIR/deploy-objects.txt"
   case "$state" in
-    serving) check deploy_ready pass "$DEPLOYMENT is $state after $((($(state_get DEPLOY_READY_AT) - $(state_get DEPLOY_STARTED_AT)) / 60)) minutes" ;;
+    serving) check "$ready_check" pass "$DEPLOYMENT is $state after $((($(state_get DEPLOY_READY_AT) - $(state_get DEPLOY_STARTED_AT)) / 60)) minutes" ;;
     *)
-      check deploy_ready fail "$DEPLOYMENT is ${state:-unknown} after 30 minutes"
+      local why
+      why=$(kc --namespace "$NAMESPACE_HOSTED" logs -l app.kubernetes.io/managed-by=infercrane --previous --tail=400 2>/dev/null |
+        grep -o -E '(ValueError|RuntimeError|torch\.OutOfMemoryError|CUDA error)[^.]*' | tail -1 | cut -c1-200)
+      check "$ready_check" fail "$DEPLOYMENT is ${state:-unknown} after $((($(state_get DEPLOY_READY_AT) - $(state_get DEPLOY_STARTED_AT)) / 60)) minutes${why:+: $why}"
+      if [ "$attempt" = docs ]; then
+        state_set DEPLOY_DOCS_FAILED 1
+        state_set DEPLOY_DOCS_REASON "${why:-${state:-unknown}}"
+      fi
       kc --namespace "$NAMESPACE_HOSTED" describe pods -l app.kubernetes.io/managed-by=infercrane | tail -40
       kc --namespace "$NAMESPACE_HOSTED" logs -l app.kubernetes.io/managed-by=infercrane --tail=80 || true
       die "the replica did not become ready; 90-delete.sh --yes, or fix and run this phase again"
