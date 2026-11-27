@@ -410,10 +410,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "license \"gemma\" is unresolved",
-          "no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"
-        ]
+        "blockers": ["license \"gemma\" is unresolved"]
       },
       "source_url": "https://huggingface.co/amd/gemma-4-12B-it-w4a16-llmcompressor",
       "limitations": [
@@ -483,10 +480,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "license \"gemma\" is unresolved",
-          "no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"
-        ]
+        "blockers": ["license \"gemma\" is unresolved"]
       },
       "source_url": "https://huggingface.co/amd/gemma-4-26B-A4B-it-w4a16-llmcompressor",
       "limitations": [
@@ -760,8 +754,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/gpt-oss-20b-BF16-w4a16-llmcompressor",
       "limitations": [
@@ -830,8 +823,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-small-w4a16-llmcompressor",
       "limitations": [
@@ -900,8 +892,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-small-w8a8-llmcompressor",
       "limitations": [
@@ -970,8 +961,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-tiny-w4a16-llmcompressor",
       "limitations": [
@@ -1040,8 +1030,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.29.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/granite-4.0-h-tiny-w8a8-llmcompressor",
       "limitations": [
@@ -1110,10 +1099,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "license \"other\" is unresolved",
-          "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"
-        ]
+        "blockers": ["license \"other\" is unresolved"]
       },
       "source_url": "https://huggingface.co/amd/Instella-MoE-16B-A3B-SFT-w4a16-llmcompressor",
       "limitations": [
@@ -1183,10 +1169,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "license \"other\" is unresolved",
-          "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"
-        ]
+        "blockers": ["license \"other\" is unresolved"]
       },
       "source_url": "https://huggingface.co/amd/Instella-MoE-16B-A3B-SFT-w8a8-llmcompressor",
       "limitations": [
@@ -1645,8 +1628,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-w4a16-llmcompressor",
       "limitations": [
@@ -1715,8 +1697,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.31.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-w8a8-llmcompressor",
       "limitations": [
@@ -1785,8 +1766,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Muse-Glimmer-30B-w8a8-llmcompressor",
       "limitations": [
@@ -1982,8 +1962,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Phi-4-mini-instruct-w4a16-llmcompressor",
       "limitations": [
@@ -2053,8 +2032,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Qwen3-VL-8B-Instruct-w4a16-llmcompressor",
       "limitations": [
@@ -2124,8 +2102,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Qwen3-VL-8B-Instruct-w8a8-llmcompressor",
       "limitations": [
@@ -2508,8 +2485,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-w4a16-llmcompressor",
       "limitations": [
@@ -2578,8 +2554,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.26.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Qwen3.6-35B-A3B-w8a8-llmcompressor",
       "limitations": [
@@ -3036,8 +3011,7 @@
         "state": "approved"
       },
       "eligibility": {
-        "state": "catalog_only",
-        "blockers": ["no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1"]
+        "state": "candidate"
       },
       "source_url": "https://huggingface.co/amd/Qwen3.8-27B-w8a8-llmcompressor",
       "limitations": [
@@ -14642,11 +14616,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": [
-          "review pending",
-          "license \"openmdw-1.1\" is unresolved",
-          "no reviewed runtime fits the pinned images: vllm needs 0.25.1 or newer, pinned 0.22.1"
-        ]
+        "blockers": ["review pending", "license \"openmdw-1.1\" is unresolved"]
       },
       "source_url": "https://huggingface.co/RedHatAI/Laguna-S-2.1-NVFP4",
       "limitations": [
@@ -18763,7 +18733,7 @@
       },
       "eligibility": {
         "state": "catalog_only",
-        "blockers": ["review pending", "no reviewed runtime fits the pinned images: vllm needs 0.32.0 or newer, pinned 0.22.1"]
+        "blockers": ["review pending"]
       },
       "source_url": "https://huggingface.co/RedHatAI/Qwen3.8-27B-MXFP4xFP8",
       "limitations": [

@@ -1,0 +1,197 @@
+{
+ "schema": "infercrane.kernel-tune-dry-run/v1",
+ "what": "The kernel-tuning proof's whole path on a laptop with stand-ins: tools/kernel-tune/kernel_tune_modal.py dry. The tuner's timings are a fixed made-up surface (tune_moe.stand_in_time) and the server is stand_in_server.py, 4% faster per token when it reads the tuned file. Nothing here is a measurement.",
+ "stand_in": true,
+ "commit": "fc62d61e",
+ "ran_from": "a clean worktree at fc62d61e (no uncommitted changes)",
+ "date": "2026-11-26",
+ "cost_usd": 0,
+ "laptop_load_average": "about 19 to 21 while it ran (other sessions shared the Mac)",
+ "rules": "tools/kernel-tune/rules-qwen36-moe-h100-2026-11-26.md",
+ "stages": {
+  "gap_check": {
+   "startup_seconds": 1.0,
+   "engine": {
+    "backend": "TRITON",
+    "default_for": [
+     "E=256,N=512,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json"
+    ]
+   }
+  },
+  "tuning": {
+   "plan": {
+    "tune": [
+     1,
+     2,
+     4,
+     8,
+     16,
+     24,
+     32,
+     48,
+     64,
+     96,
+     128,
+     2048,
+     3072,
+     4096,
+     6144,
+     8192
+    ],
+    "default": [
+     5,
+     9,
+     17,
+     65
+    ]
+   },
+   "kept_tuned": [
+    96,
+    128,
+    2048,
+    3072,
+    4096,
+    6144,
+    8192
+   ],
+   "note": "The stand-in's default wastes rows above 64 tokens, where vLLM 0.34.0's default switches to 64-row tiles; the memory-floor check refused the earlier stand-in surface (dry runs 1-2), whose times were below what an H100's memory allows."
+  },
+  "set": {
+   "digest": "sha256:849da3ed1c525999d4b9aebcc8658ef35914241ef1d6d474f4974a87e8a32d8c",
+   "runtime_version": "0.34.0",
+   "device": "NVIDIA_H100_80GB_HBM3",
+   "files": [
+    "E=256,N=512,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json"
+   ],
+   "validated_by": "infercrane optimize evidence kernel-tuning --set (kerneltuning.Validate)"
+  },
+  "first_machine": {
+   "stopped": null,
+   "error": null,
+   "seconds": 218.4,
+   "runs": 9,
+   "quality_answer_sets": [
+    "control-1",
+    "candidate-1",
+    "control-2"
+   ]
+  },
+  "fresh_machine": {
+   "stopped": null,
+   "error": null,
+   "seconds": 213.3,
+   "runs": 9,
+   "note": "The dry action measures the fresh machine whatever the first window shows, to walk that path; a paid run starts it only after a first-window gain the judge calls improved."
+  }
+ },
+ "verdicts": {
+  "first_window_only": {
+   "decision": "no_measurable_gain",
+   "reasons": [
+    "no load served measurably more output with the tuned kernels"
+   ],
+   "cells": [
+    {
+     "cell": "short/128",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0576,
+      "noise_floor": 0.0967,
+      "decision": "no_measurable_difference",
+      "max_adjacent_control_drift": 0.0499
+     },
+     "fresh": null
+    },
+    {
+     "cell": "short/32",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0147,
+      "noise_floor": 0.0489,
+      "decision": "no_measurable_difference",
+      "max_adjacent_control_drift": 0.0324
+     },
+     "fresh": null
+    }
+   ],
+   "launch_fresh_machine": false
+  },
+  "both_windows": {
+   "decision": "no_measurable_gain",
+   "reasons": [
+    "no load served measurably more output with the tuned kernels"
+   ],
+   "warnings": [
+    "short/32: ttft_p95_ms got worse with the tuned kernels (+15.7%)"
+   ],
+   "cells": [
+    {
+     "cell": "short/128",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0576,
+      "noise_floor": 0.0967,
+      "decision": "no_measurable_difference",
+      "max_adjacent_control_drift": 0.0499
+     },
+     "fresh": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0677,
+      "noise_floor": 0.0531,
+      "decision": "improved",
+      "max_adjacent_control_drift": 0.0906
+     }
+    },
+    {
+     "cell": "short/32",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0147,
+      "noise_floor": 0.0489,
+      "decision": "no_measurable_difference",
+      "max_adjacent_control_drift": 0.0324
+     },
+     "fresh": {
+      "valid": true,
+      "reason": null,
+      "delta": 0.0198,
+      "noise_floor": 0.0752,
+      "decision": "no_measurable_difference",
+      "max_adjacent_control_drift": 0.1028
+     }
+    }
+   ],
+   "task_set": {
+    "reference_score": 1,
+    "candidate_score": 1,
+    "difference": 0,
+    "low": 0,
+    "high": 0,
+    "margin": 0.03,
+    "verdict": "no_measurable_difference",
+    "items": 40,
+    "only_reference_right": 0,
+    "only_candidate_right": 0
+   },
+   "identical_answers": {
+    "control-1/candidate-1": 1,
+    "control-1/control-2": 1
+   }
+  }
+ },
+ "earlier_dry_runs": [
+  "dry-1: path ran; laptop noise drifted the controls 17-21%, both cells unknown (stand-in server too CPU-hungry).",
+  "dry-2: stand-in made lighter; the memory-floor check refused every stand-in time as impossible on an H100 (made-up surface), so only prefill keys kept; windows valid.",
+  "dry-3: another session's stand-in held port 8000 on this laptop and answered first; dry runs now pick a free port.",
+  "dry-4 (uncommitted tree): gap check added; first window short/32 +3.2% (noise 2.8%) improved, fresh machine +3.4% not settled: not confirmed, no measurable gain. Every decision branch walked."
+ ]
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/replay"
@@ -110,16 +111,19 @@ type loadPlan struct {
 // OutputTokensPerRequest is absent when a successful request reported no
 // server count, and on runs measured before it was recorded.
 type RunSummary struct {
-	Arm                    string                   `json:"arm"`
-	Requests               int                      `json:"requests"`
-	Failed                 int                      `json:"failed"`
-	DurationSeconds        float64                  `json:"duration_seconds"`
-	OutputTokenThroughput  *float64                 `json:"output_token_throughput,omitempty"`
-	RequestThroughput      *float64                 `json:"request_throughput,omitempty"`
-	TTFTP95MS              *float64                 `json:"ttft_p95_ms,omitempty"`
-	TPOTP95MS              *float64                 `json:"tpot_p95_ms,omitempty"`
-	LatencyP95MS           *float64                 `json:"latency_p95_ms,omitempty"`
-	Goodput                *float64                 `json:"goodput,omitempty"`
+	Arm                   string   `json:"arm"`
+	Requests              int      `json:"requests"`
+	Failed                int      `json:"failed"`
+	DurationSeconds       float64  `json:"duration_seconds"`
+	OutputTokenThroughput *float64 `json:"output_token_throughput,omitempty"`
+	RequestThroughput     *float64 `json:"request_throughput,omitempty"`
+	TTFTP95MS             *float64 `json:"ttft_p95_ms,omitempty"`
+	TPOTP95MS             *float64 `json:"tpot_p95_ms,omitempty"`
+	LatencyP95MS          *float64 `json:"latency_p95_ms,omitempty"`
+	Goodput               *float64 `json:"goodput,omitempty"`
+	// UsefulOutputThroughput is the output tokens per second of requests that
+	// met every limit the campaign set; absent when it set none.
+	UsefulOutputThroughput *float64                 `json:"useful_output_throughput,omitempty"`
 	OutputTokensPerRequest *float64                 `json:"output_tokens_per_request,omitempty"`
 	ServerMetrics          *benchmark.ServerMetrics `json:"server_metrics,omitempty"`
 }
@@ -206,6 +210,7 @@ var comparedMetrics = []comparedMetric{
 	{"tpot_p95_ms", false, func(r benchmark.Result) *float64 { return r.TPOTP95MS }, func(r RunSummary) *float64 { return r.TPOTP95MS }},
 	{"latency_p95_ms", false, func(r benchmark.Result) *float64 { return r.LatencyP95MS }, func(r RunSummary) *float64 { return r.LatencyP95MS }},
 	{"goodput", true, func(r benchmark.Result) *float64 { return r.Goodput }, func(r RunSummary) *float64 { return r.Goodput }},
+	{lab.MetricUsefulOutput, true, func(r benchmark.Result) *float64 { return r.UsefulOutputThroughput }, func(r RunSummary) *float64 { return r.UsefulOutputThroughput }},
 }
 
 // invocations gives every AIPerf run a distinct seed and, for replay, a
@@ -259,6 +264,9 @@ func (i *invocations) run(ctx context.Context, target armTarget, requests int) (
 		if err = errors.Join(writeErr, closeErr); err != nil {
 			return benchmark.Result{}, fmt.Errorf("stage replay trace: %w", err)
 		}
+		// A pass composed from a prompt corpus holds its full text, so each
+		// staged file is removed as soon as its invocation ends.
+		defer os.Remove(path)
 		config.InputFile, config.DatasetType = path, replay.AIPerfDatasetType
 		config.Timeout = replayInvocationTimeout
 	}
@@ -415,6 +423,41 @@ func comparePaired(runs []RunSummary, value func(RunSummary) *float64, higherBet
 	return comparison, true
 }
 
+// JudgeRecordedWindow applies the campaign judge to a window measured outside
+// a campaign, such as the one-GPU windows of tools/trained-draft. runs are in
+// run order, each Arm "control" or "candidate", every candidate run between
+// two control runs; comparisons is how many candidates the window's control
+// is compared with (the Bonferroni count). It returns why the window cannot
+// be judged, or the paired comparison of every metric, by exactly the rules a
+// campaign uses: a failed run or control runs that drift more than 15% apart
+// void the window, and every interval holds the 0.75% machine difference even
+// when the arms shared one machine.
+func JudgeRecordedWindow(runs []RunSummary, comparisons int) (map[string]MetricComparison, string) {
+	var previous float64
+	for _, run := range runs {
+		if run.Failed > 0 || run.Requests == 0 {
+			return nil, fmt.Sprintf("a %s run had %d failed of %d requests", run.Arm, run.Failed, run.Requests)
+		}
+		if run.Arm != "control" {
+			continue
+		}
+		if run.OutputTokenThroughput == nil || *run.OutputTokenThroughput <= 0 {
+			return nil, "control runs were not clean"
+		}
+		if previous > 0 {
+			if change := math.Abs(*run.OutputTokenThroughput-previous) / previous; change > maxControlDrift {
+				return nil, fmt.Sprintf("control output throughput drifted %.1f%% between adjacent runs, above the %.0f%% limit", change*100, maxControlDrift*100)
+			}
+		}
+		previous = *run.OutputTokenThroughput
+	}
+	compared := comparePairedArms(runs, comparisons)
+	if compared == nil {
+		return nil, "the window has fewer than two candidate runs between control runs"
+	}
+	return compared, ""
+}
+
 // pairedStandardErrorScale turns the sample standard deviation of n
 // bracketed log ratios into the standard error of their mean. Neighbouring
 // ratios share the control run between them, so they are correlated and the
@@ -502,6 +545,7 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 	pooled.RequestThroughput = mean(func(r benchmark.Result) *float64 { return r.RequestThroughput })
 	pooled.OutputTokenThroughput = mean(func(r benchmark.Result) *float64 { return r.OutputTokenThroughput })
 	pooled.Goodput = mean(func(r benchmark.Result) *float64 { return r.Goodput })
+	pooled.UsefulOutputThroughput = mean(func(r benchmark.Result) *float64 { return r.UsefulOutputThroughput })
 	pooled.TTFTP50MS, pooled.TTFTP95MS = mean(func(r benchmark.Result) *float64 { return r.TTFTP50MS }), mean(func(r benchmark.Result) *float64 { return r.TTFTP95MS })
 	pooled.TPOTP50MS, pooled.TPOTP95MS = mean(func(r benchmark.Result) *float64 { return r.TPOTP50MS }), mean(func(r benchmark.Result) *float64 { return r.TPOTP95MS })
 	pooled.LatencyP50MS, pooled.LatencyP95MS = mean(func(r benchmark.Result) *float64 { return r.LatencyP50MS }), mean(func(r benchmark.Result) *float64 { return r.LatencyP95MS })
@@ -518,7 +562,7 @@ func aggregate(results []benchmark.Result) (benchmark.Result, map[string]benchma
 }
 
 func summarizeRun(arm string, result benchmark.Result) RunSummary {
-	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
+	return RunSummary{Arm: arm, Requests: result.Requests, Failed: result.Failed, DurationSeconds: result.DurationSeconds, OutputTokenThroughput: result.OutputTokenThroughput, RequestThroughput: result.RequestThroughput, TTFTP95MS: result.TTFTP95MS, TPOTP95MS: result.TPOTP95MS, LatencyP95MS: result.LatencyP95MS, Goodput: result.Goodput, UsefulOutputThroughput: result.UsefulOutputThroughput, OutputTokensPerRequest: result.OutputTokensPerRequest, ServerMetrics: result.ServerMetrics}
 }
 
 func warmupRequests(concurrency int) int {
@@ -569,8 +613,9 @@ func ControlKept(campaign domain.OptimizationCampaign) bool {
 // resolveBoundReplay returns the verified AIPerf rendering of the Replay trace
 // a customer-observed campaign is bound to, or nil when none is bound. Missing,
 // malformed, or tampered traces are permanent failures; a store error stays
-// retryable.
-func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant string, request optimizer.Request) (*replay.AIPerfTrace, error) {
+// retryable. With an operator's prompt corpus the requests are composed from
+// its text; without one AIPerf synthesizes the text.
+func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant string, request optimizer.Request, corpus *replay.PromptCorpus) (*replay.AIPerfTrace, error) {
 	digest, bound, err := boundReplayDigest(request)
 	if err != nil {
 		return nil, operations.Permanent("optimization_replay_unavailable", err)
@@ -591,6 +636,11 @@ func resolveBoundReplay(ctx context.Context, source ReplayTraceSource, tenant st
 	rendered, err := replay.NewAIPerfTrace(trace)
 	if err != nil {
 		return nil, operations.Permanent("optimization_replay_invalid", err)
+	}
+	if corpus != nil {
+		if rendered, err = rendered.WithPromptCorpus(corpus); err != nil {
+			return nil, operations.Permanent("optimization_replay_invalid", err)
+		}
 	}
 	return &rendered, nil
 }

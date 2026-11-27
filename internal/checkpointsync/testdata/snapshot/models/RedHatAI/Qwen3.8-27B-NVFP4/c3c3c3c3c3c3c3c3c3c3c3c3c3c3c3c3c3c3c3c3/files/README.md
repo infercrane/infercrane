@@ -2,7 +2,7 @@
 
 - **Version:** 2.0
 
-Evaluated with vLLM `0.29.0`. Requires vllm>=0.28.1.
+Evaluated with vLLM `0.36.0`. Requires vllm>=0.35.1.
 
 | Benchmark | Qwen/Qwen3.8-27B | RedHatAI NVFP4 | Recovery |
 | --- | --- | --- | --- |

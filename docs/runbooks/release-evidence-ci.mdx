@@ -132,7 +132,7 @@ the provider outcome cannot be proven.
     ```bash
     kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
       --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
-      get deployment,service \
+      get deployment,service,networkpolicy \
       -l app.kubernetes.io/managed-by=infercrane \
       -o json | jq -S '[.items[] | {apiVersion,kind,metadata:{name:.metadata.name,uid:.metadata.uid}}] | sort_by(.kind,.metadata.name)' \
       > "$evidence/provider-inventory.json"

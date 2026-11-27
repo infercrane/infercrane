@@ -146,3 +146,122 @@ func TestCandidateRunsReachTheAgentThroughItsLongPoll(t *testing.T) {
 		t.Fatalf("empty poll=%+v err=%v", response, pollErr)
 	}
 }
+
+// A measured window reaches the agent like a candidate run, carries its
+// result back in the same column, and is queued once per idempotency key:
+// the fake store hands back the stored command for a repeated key.
+func TestMeasuredWindowsReachTheAgentAndCarryTheirNumbersBack(t *testing.T) {
+	store := &keyedCommandStore{fakeCommandStore: fakeCommandStore{fakeStore: fakeStore{servers: []domain.AgentServer{{AgentID: "agent-1", Key: "vllm-8000", EndpointName: "support-bot", UpstreamModel: "Qwen/Qwen3-8B"}}}}}
+	service := &Service{Store: store}
+	run := candidateSpec()
+	spec := agentprotocol.WindowSpec{
+		Endpoint: "support-bot", Label: "run c1 setup 2 window 1",
+		Candidate: &agentprotocol.CandidateSetup{Model: run.Model, Workload: run.Workload, RuntimeArgs: run.RuntimeArgs, Accelerator: run.Accelerator, GPUCount: 1},
+		Rounds:    4, Warmup: 16, Load: run.Load, SeedBase: 12,
+		Quality:     agentprotocol.WindowQuality{EvalSet: "default", ReferenceSubject: "agentserver-current", CandidateSubject: "agentsetup-0123456789abcdef01234567"},
+		TimeoutSecs: 3600,
+	}
+	if _, err := service.QueueWindow(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "", spec); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a window without a key: %v", err)
+	}
+	first, err := service.QueueWindow(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:window:1", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := service.QueueWindow(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:window:1", spec)
+	if err != nil || again.ID != first.ID || len(store.commands) != 1 {
+		t.Fatalf("the same key queued a second window: %+v %v (%d commands)", again, err, len(store.commands))
+	}
+	agent := domain.Agent{ID: "agent-1", TenantID: "tenant-a", Name: "cluster-a"}
+	response, err := service.Commands(context.Background(), agent, 0)
+	if err != nil || len(response.Commands) != 1 || response.Commands[0].Kind != agentprotocol.CommandMeasureWindow || response.Commands[0].MeasureWindow == nil || response.Commands[0].RunCandidate != nil || response.Commands[0].Control.ServerKey != "vllm-8000" {
+		t.Fatalf("polled=%+v err=%v", response, err)
+	}
+	value := 100.0
+	runs := []agentprotocol.WindowRun{{Arm: "control", Seed: 14, Requests: 50, Succeeded: 50, OutputTokenThroughput: &value}}
+	if _, err = service.UpdateCommand(context.Background(), agent, first.ID, agentprotocol.CommandUpdate{State: agentprotocol.CommandSucceeded, Window: &agentprotocol.WindowResult{Tool: "aiperf", Runs: runs, CleanedUp: true}}); err != nil {
+		t.Fatal(err)
+	}
+	store.commands[0].ResultJSON = store.updates[len(store.updates)-1].ResultJSON
+	decoded, result, err := DecodeWindow(store.commands[0])
+	if err != nil || decoded.Rounds != 4 || result == nil || len(result.Runs) != 1 || *result.Runs[0].OutputTokenThroughput != 100 {
+		t.Fatalf("decoded=%+v result=%+v err=%v", decoded, result, err)
+	}
+	other := spec
+	other.Endpoint = "not-this-agents"
+	if _, err = service.QueueWindow(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:window:2", other); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("foreign endpoint: %v", err)
+	}
+}
+
+type keyedCommandStore struct{ fakeCommandStore }
+
+func (k *keyedCommandStore) EnqueueAgentCommand(ctx context.Context, command domain.AgentCommand) (domain.AgentCommand, error) {
+	k.mu.Lock()
+	for _, existing := range k.commands {
+		if existing.IdempotencyKey != "" && existing.IdempotencyKey == command.IdempotencyKey {
+			k.mu.Unlock()
+			return existing, nil
+		}
+	}
+	k.mu.Unlock()
+	return k.fakeCommandStore.EnqueueAgentCommand(ctx, command)
+}
+
+// A rollout's start and stop reach the agent without a current setup to
+// measure against, once per key, and carry only the server's key back.
+func TestRolloutServerCommandsReachTheAgent(t *testing.T) {
+	store := &keyedCommandStore{fakeCommandStore: fakeCommandStore{fakeStore: fakeStore{servers: []domain.AgentServer{{AgentID: "agent-1", Key: "vllm-8000", EndpointName: "support-bot", UpstreamModel: "Qwen/Qwen3-8B"}}}}}
+	service := &Service{Store: store}
+	run := candidateSpec()
+	start := &agentprotocol.StartServerSpec{Endpoint: "support-bot", Setup: agentprotocol.CandidateSetup{Model: run.Model, Workload: run.Workload, RuntimeArgs: run.RuntimeArgs, Accelerator: run.Accelerator, GPUCount: 1}, TimeoutSecs: 1800}
+	if _, err := service.QueueServerCommand(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "k", start, &agentprotocol.StopServerSpec{Endpoint: "support-bot", ServerKey: "vllm-8000"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("start and stop at once: %v", err)
+	}
+	queued, err := service.QueueServerCommand(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:start", start, nil)
+	if err != nil || queued.Kind != agentprotocol.CommandStartServer {
+		t.Fatalf("queue: %+v %v", queued, err)
+	}
+	if again, _ := service.QueueServerCommand(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:start", start, nil); again.ID != queued.ID || len(store.commands) != 1 {
+		t.Fatalf("the same key queued twice: %+v", store.commands)
+	}
+	response, err := service.Commands(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, 0)
+	if err != nil || len(response.Commands) != 1 || response.Commands[0].StartServer == nil || response.Commands[0].Control != nil {
+		t.Fatalf("polled: %+v %v", response, err)
+	}
+	if _, err = service.UpdateCommand(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, queued.ID, agentprotocol.CommandUpdate{State: agentprotocol.CommandSucceeded, Server: &agentprotocol.ServerResult{ServerKey: "infercrane-abc-models-svc-8000", ReadySeconds: 40}}); err != nil {
+		t.Fatal(err)
+	}
+	store.commands[0].ResultJSON = store.updates[len(store.updates)-1].ResultJSON
+	if result, decodeErr := DecodeServerResult(store.commands[0]); decodeErr != nil || result == nil || result.ServerKey != "infercrane-abc-models-svc-8000" {
+		t.Fatalf("result: %+v %v", result, decodeErr)
+	}
+}
+
+type rolloutRegisterStore struct {
+	fakeCommandStore
+	rollout []domain.AgentServerRegistration
+}
+
+func (r *rolloutRegisterStore) RegisterAgentRolloutServer(_ context.Context, _, _ string, registration domain.AgentServerRegistration) (domain.AgentServer, bool, error) {
+	r.rollout = append(r.rollout, registration)
+	return domain.AgentServer{Key: registration.Key, EndpointName: registration.EndpointName, Rollout: true}, true, nil
+}
+
+// A rollout's server registers on the endpoint it was started for, and is
+// never taken as the current setup a run measures against.
+func TestRolloutServerRegistersOnItsEndpointAndIsNeverTheControl(t *testing.T) {
+	store := &rolloutRegisterStore{fakeCommandStore: fakeCommandStore{fakeStore: fakeStore{servers: []domain.AgentServer{
+		{AgentID: "agent-1", Key: "vllm-8000", EndpointName: "support-bot", UpstreamModel: "Qwen/Qwen3-8B"},
+		{AgentID: "agent-1", Key: "rollout-8000", EndpointName: "support-bot", UpstreamModel: "Qwen/Qwen3-8B", Rollout: true},
+	}}}}
+	service := &Service{Store: store}
+	response, err := service.Register(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, agentprotocol.RegisterServerRequest{ServerKey: "rollout-8000", Endpoint: "support-bot", Model: "Qwen/Qwen3-8B", Engine: "vllm", Address: "http://infercrane-abc.models.svc:8000", Rollout: true})
+	if err != nil || len(store.rollout) != 1 || response.Server.Endpoint != "support-bot" {
+		t.Fatalf("register: %+v %v %+v", response, err, store.rollout)
+	}
+	control, err := service.controlFor(context.Background(), "tenant-a", domain.Agent{ID: "agent-1"}, "support-bot")
+	if err != nil || control.ServerKey != "vllm-8000" {
+		t.Fatalf("control: %+v %v", control, err)
+	}
+}

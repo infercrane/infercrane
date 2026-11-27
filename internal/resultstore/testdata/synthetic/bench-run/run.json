@@ -1,0 +1,18 @@
+{
+ "run_id": "synthetic-rung",
+ "stopped": "",
+ "ended_at": "2001-01-06T03:00:00Z",
+ "estimated_usd": 0.0,
+ "jobs": [
+  {
+   "cell": "example-8b/long/16",
+   "state": "done",
+   "reason": ""
+  },
+  {
+   "cell": "example-8b/short/16",
+   "state": "done",
+   "reason": ""
+  }
+ ]
+}

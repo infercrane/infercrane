@@ -6,7 +6,7 @@ model:
   revision: 7ae557604adf67be50417f59c2c2f167def9a775
 runtime:
   engine: vllm
-  version: 0.22.1
+  version: 0.34.0
   args:
     - --enable-auto-tool-choice
     - --tool-call-parser

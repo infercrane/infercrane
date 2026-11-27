@@ -161,6 +161,7 @@ step "installing the agent with the Helm chart"
   --set image.repository="${image%:*}" --set image.tag="${image##*:}" --set image.pullPolicy=Never \
   --set controlPlane.url=https://capture.hosted.svc:8443 --set-file controlPlane.caBundle="$work/tls.crt" \
   --set 'agent.servers[0]=http://qwen3.models.svc:8000' --set agent.endpointName=support-bot --set agent.model=Qwen/Qwen3-0.6B \
+  --set agent.offlineGrace=10m \
   --set executor.enabled=true --set executor.gpuResource=infercrane.dev/simulated-accelerator \
   --set "executor.allowedImages[0]=$registry_alias/infercrane-dataplane/" --set 'executor.allowedAccelerators[0]=SIMULATED-CPU' \
   --wait --timeout 5m
@@ -176,4 +177,4 @@ INFERCRANE_AGENT_KIND_AGENT_ID="$agent_id" \
 INFERCRANE_AGENT_KIND_DATA_PLANE_URL=http://127.0.0.1:18089 \
 INFERCRANE_AGENT_KIND_CAPTURE_URL=http://127.0.0.1:19090 \
 INFERCRANE_AGENT_KIND_ENGINE_IMAGE="$engine_image" \
-  go test -count=1 -timeout 30m -v -run '^TestAgentDataPlaneOnKind$' ./internal/testtools/agentintegration
+  go test -count=1 -timeout 60m -v -run '^TestAgentDataPlaneOnKind$' ./internal/testtools/agentintegration

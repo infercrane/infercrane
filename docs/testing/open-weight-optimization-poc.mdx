@@ -159,6 +159,14 @@ now holds that difference in every interval; see
 [`evidence/h100-machine-variance-modal-2026-11-20.json`](./evidence/h100-machine-variance-modal-2026-11-20.json);
 it was billed $3.81.
 
+The next run removes what made the first one a textbook win. It serves the most downloaded FP8
+checkpoint from Qwen, Z.ai and DeepSeek that fits one H100 (`Qwen/Qwen3.8-27B-FP8` on 2026-11-21,
+chosen live by `poc_modal.py choose-model`), and its current setup is the publisher's own
+one-H100 vLLM command, not vLLM's defaults. What to try comes from the product's planner, which
+reads the live endpoint's diagnosis while the replayed traffic runs, as `optimize propose
+--diagnosis-endpoint` does for a customer. A copy of the current setup is measured beside it and
+must not win. No result exists for this run yet.
+
 ## Mechanism ladder
 
 Use the cheapest, broadest mechanisms first:

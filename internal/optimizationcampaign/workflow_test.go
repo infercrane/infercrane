@@ -464,3 +464,21 @@ func TestActivatingAMigrationWinnerStartsTheCanaryOnTheClosedAPIEndpoint(t *test
 		t.Fatalf("migration activation result=%s err=%v started=%v published=%q", result, err, store.started, store.publishedEndpoint)
 	}
 }
+
+// The winner of a run on an agent's endpoint is not rolled out through a
+// deployment rollout it does not have: activation stops with a clear code
+// and touches nothing.
+func TestActivationHandlerRefusesToRollOutASetupAnAgentMeasured(t *testing.T) {
+	now := time.Now().UTC()
+	repository, _, _ := approvedCoordinatorFixture(now, 1)
+	repository.campaign.TargetDeployment, repository.campaign.TargetEndpoint, repository.campaign.AgentID = "", "support-bot", "agent-1"
+	repository.campaign.State = CampaignGuardPassed
+	repository.campaign.Candidates[0].State = CandidateGuardPassed
+	store := &activationStoreFixture{coordinatorRepository: repository}
+	payload, _ := json.Marshal(ActivateRequest{TenantID: "tenant", CampaignID: "campaign", CandidateID: "candidate-a", Actor: "operator"})
+	_, err := ActivationHandlers(store, func(context.Context) error { return nil }, func() time.Time { return now })[ActivateKind](context.Background(), domain.Operation{RequestJSON: string(payload)})
+	var failure operations.Failure
+	if !errors.As(err, &failure) || failure.Retryable || failure.Code != "optimization_agent_rollout_unavailable" || len(store.operations) != 0 || repository.campaign.Candidates[0].State != CandidateGuardPassed {
+		t.Fatalf("activation: %v operations=%+v state=%s", err, store.operations, repository.campaign.Candidates[0].State)
+	}
+}

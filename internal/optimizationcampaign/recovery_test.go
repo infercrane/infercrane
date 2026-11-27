@@ -12,6 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -86,7 +87,7 @@ func newRecoveryHarness(t *testing.T, intent, arm string, sequence int) recovery
 	draft := func(name string) string {
 		value := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: name}
 		value.Model.ID, value.Model.Revision = "Qwen/Qwen3-8B", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		value.Runtime.Engine, value.Runtime.Version = "vllm", "0.8.5.post1"
+		value.Runtime.Engine, value.Runtime.Version = "vllm", support.DefaultRuntimeVersion
 		value.Compute.Mode, value.Resources.GPU = "elastic", "L40S"
 		value.Provider.Cloud, value.Provider.Adapter, value.Provider.Region = "aws", "aws-ec2", "eu-central-1"
 		value.Scaling.MinReplicas, value.Scaling.MaxReplicas = 1, 1

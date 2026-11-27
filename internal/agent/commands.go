@@ -16,6 +16,21 @@ type CandidateExecutor interface {
 	RunCandidate(context.Context, CandidateRun, func(phase string)) (agentprotocol.CandidateRunResult, error)
 }
 
+// WindowExecutor runs one measured window of an optimization run where the
+// agent runs and returns numbers only. KubernetesExecutor implements it; an
+// executor that does not refuses measure_window commands.
+type WindowExecutor interface {
+	MeasureWindow(context.Context, WindowJob, func(phase string)) (agentprotocol.WindowResult, error)
+}
+
+// WindowJob is one leased window with the current setup resolved to an
+// address this agent found itself.
+type WindowJob struct {
+	ID      string
+	Spec    agentprotocol.WindowSpec
+	Control ControlServer
+}
+
 // CandidateRun is one leased run with the current setup resolved to an
 // address this agent found itself.
 type CandidateRun struct {
@@ -37,6 +52,8 @@ type CandidateError struct {
 	Code, Detail string
 	// Result carries what was measured before the failure, if anything.
 	Result *agentprotocol.CandidateRunResult
+	// Window carries a window's runs measured before the failure.
+	Window *agentprotocol.WindowResult
 }
 
 func (e *CandidateError) Error() string { return e.Code + ": " + e.Detail }
@@ -102,26 +119,104 @@ func (a *Agent) runCommand(ctx context.Context, command agentprotocol.Command) e
 		defer cancel()
 		return a.config.Client.UpdateCommand(reportCtx, command.ID, update)
 	}
-	fail := func(code, detail string, result *agentprotocol.CandidateRunResult) error {
+	fail := func(code, detail string, result *agentprotocol.CandidateRunResult, window *agentprotocol.WindowResult) error {
 		if result != nil && result.Validate() != nil {
 			result = nil
 		}
-		_, err := report(agentprotocol.CommandUpdate{State: agentprotocol.CommandFailed, FailureCode: code, FailureDetail: agentprotocol.CleanText(detail, agentprotocol.MaxText), Result: result})
+		if window != nil && window.Validate() != nil {
+			window = nil
+		}
+		_, err := report(agentprotocol.CommandUpdate{State: agentprotocol.CommandFailed, FailureCode: code, FailureDetail: agentprotocol.CleanText(detail, agentprotocol.MaxText), Result: result, Window: window})
 		a.emit(Event{Kind: "candidate_failed", Message: fmt.Sprintf("%s: %s %s", command.ID, code, detail)})
 		return err
 	}
-	if command.Kind != agentprotocol.CommandRunCandidate || command.RunCandidate == nil || command.Control == nil {
-		return fail("unsupported_command", "this agent runs only run_candidate commands", nil)
+	// Each kind names its timeout, its label, and how it runs; leasing,
+	// heartbeats, cancellation, and reporting are shared.
+	var (
+		label       string
+		timeoutSecs int
+		execute     func(context.Context, ControlServer, func(string)) (agentprotocol.CommandUpdate, error)
+	)
+	switch {
+	case command.Kind == agentprotocol.CommandRunCandidate && command.RunCandidate != nil:
+		if err := command.RunCandidate.Validate(); err != nil {
+			return fail("invalid_command", err.Error(), nil, nil)
+		}
+		label, timeoutSecs = command.RunCandidate.Label, command.RunCandidate.TimeoutSecs
+		execute = func(runCtx context.Context, control ControlServer, progress func(string)) (agentprotocol.CommandUpdate, error) {
+			result, err := a.config.Executor.RunCandidate(runCtx, CandidateRun{ID: command.ID, Spec: *command.RunCandidate, Control: control}, progress)
+			if err == nil {
+				err = result.Validate()
+			}
+			return agentprotocol.CommandUpdate{Result: &result}, err
+		}
+	case command.Kind == agentprotocol.CommandMeasureWindow && command.MeasureWindow != nil && command.Control != nil:
+		windows, ok := a.config.Executor.(WindowExecutor)
+		if !ok {
+			return fail("unsupported_command", "this agent's executor does not run measured windows", nil, nil)
+		}
+		if err := command.MeasureWindow.Validate(); err != nil {
+			return fail("invalid_command", err.Error(), nil, nil)
+		}
+		if command.MeasureWindow.Endpoint != command.Control.Endpoint {
+			return fail("invalid_command", "the window's endpoint is not the current setup's", nil, nil)
+		}
+		label, timeoutSecs = command.MeasureWindow.Label, command.MeasureWindow.TimeoutSecs
+		execute = func(runCtx context.Context, control ControlServer, progress func(string)) (agentprotocol.CommandUpdate, error) {
+			result, err := windows.MeasureWindow(runCtx, WindowJob{ID: command.ID, Spec: *command.MeasureWindow, Control: control}, progress)
+			if err == nil {
+				err = result.Validate()
+			}
+			return agentprotocol.CommandUpdate{Window: &result}, err
+		}
+	case command.Kind == agentprotocol.CommandStartServer && command.StartServer != nil, command.Kind == agentprotocol.CommandStopServer && command.StopServer != nil:
+		servers, ok := a.config.Executor.(ServerExecutor)
+		if !ok {
+			return fail("unsupported_command", "this agent's executor does not start servers for rollouts", nil, nil)
+		}
+		label, timeoutSecs = command.Kind, 600
+		if start := command.StartServer; start != nil {
+			if err := start.Validate(); err != nil {
+				return fail("invalid_command", err.Error(), nil, nil)
+			}
+			timeoutSecs = start.TimeoutSecs
+			execute = func(runCtx context.Context, _ ControlServer, progress func(string)) (agentprotocol.CommandUpdate, error) {
+				launched, result, err := servers.StartServer(runCtx, command.ID, *start, progress)
+				if err == nil {
+					a.addLaunched(launched)
+				}
+				return agentprotocol.CommandUpdate{Server: &result}, err
+			}
+		} else {
+			stop := command.StopServer
+			if err := stop.Validate(); err != nil {
+				return fail("invalid_command", err.Error(), nil, nil)
+			}
+			execute = func(runCtx context.Context, _ ControlServer, _ func(string)) (agentprotocol.CommandUpdate, error) {
+				result, err := servers.StopServer(runCtx, *stop)
+				if err == nil {
+					a.forgetLaunched(stop.ServerKey)
+				}
+				return agentprotocol.CommandUpdate{Server: &result}, err
+			}
+		}
+	default:
+		return fail("unsupported_command", "this agent runs only run_candidate, measure_window, start_server, and stop_server commands", nil, nil)
 	}
-	if err := command.RunCandidate.Validate(); err != nil {
-		return fail("invalid_command", err.Error(), nil)
+	// Measuring needs the current setup's server; starting or stopping a
+	// rollout's server does not.
+	var control ControlServer
+	if command.Control != nil {
+		resolved, ok := a.controlServer(*command.Control)
+		if !ok {
+			return fail("control_unavailable", "the current setup's server is not healthy on this agent", nil, nil)
+		}
+		control = resolved
+	} else if command.Kind == agentprotocol.CommandRunCandidate || command.Kind == agentprotocol.CommandMeasureWindow {
+		return fail("invalid_command", "a measurement names the current setup's server", nil, nil)
 	}
-	control, ok := a.controlServer(*command.Control)
-	if !ok {
-		return fail("control_unavailable", "the current setup's server is not healthy on this agent", nil)
-	}
-	a.emit(Event{Kind: "candidate_started", Message: fmt.Sprintf("%s: %s against %s", command.ID, command.RunCandidate.Label, control.Endpoint)})
-	timeout := time.Duration(command.RunCandidate.TimeoutSecs) * time.Second
+	a.emit(Event{Kind: "candidate_started", Message: fmt.Sprintf("%s: %s against %s", command.ID, label, control.Endpoint)})
+	timeout := time.Duration(timeoutSecs) * time.Second
 	if !command.DeadlineAt.IsZero() && time.Until(command.DeadlineAt) < timeout {
 		timeout = time.Until(command.DeadlineAt)
 	}
@@ -155,7 +250,7 @@ func (a *Agent) runCommand(ctx context.Context, command agentprotocol.Command) e
 			}
 		}
 	}()
-	result, err := a.config.Executor.RunCandidate(runCtx, CandidateRun{ID: command.ID, Spec: *command.RunCandidate, Control: control}, func(next string) {
+	update, err := execute(runCtx, control, func(next string) {
 		a.emit(Event{Kind: "candidate_phase", Message: command.ID + ": " + next})
 		select {
 		case phase <- next:
@@ -170,19 +265,19 @@ func (a *Agent) runCommand(ctx context.Context, command agentprotocol.Command) e
 		var failure *CandidateError
 		switch {
 		case errors.As(err, &failure):
-			return fail(failure.Code, failure.Detail, failure.Result)
+			return fail(failure.Code, failure.Detail, failure.Result, failure.Window)
 		case errors.Is(runCtx.Err(), context.DeadlineExceeded):
-			return fail("deadline_exceeded", "the candidate run did not finish in time", nil)
+			return fail("deadline_exceeded", "the candidate run did not finish in time", nil, nil)
 		case runCtx.Err() != nil:
-			return fail("cancelled", "the candidate run was cancelled", nil)
+			return fail("cancelled", "the candidate run was cancelled", nil, nil)
+		case update.Result != nil && update.Result.Validate() != nil, update.Window != nil && update.Window.Validate() != nil, update.Server != nil && update.Server.Validate() != nil:
+			return fail("invalid_result", err.Error(), nil, nil)
 		default:
-			return fail("candidate_failed", err.Error(), nil)
+			return fail("candidate_failed", err.Error(), nil, nil)
 		}
 	}
-	if err = result.Validate(); err != nil {
-		return fail("invalid_result", err.Error(), nil)
-	}
-	_, err = report(agentprotocol.CommandUpdate{State: agentprotocol.CommandSucceeded, Phase: "done", Result: &result})
+	update.State, update.Phase = agentprotocol.CommandSucceeded, "done"
+	_, err = report(update)
 	if err == nil {
 		a.emit(Event{Kind: "candidate_done", Message: command.ID + ": measured and cleaned up"})
 	}

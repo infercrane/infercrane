@@ -151,6 +151,10 @@ type TrafficShape struct {
 	RetryCount          int      `json:"retry_count,omitempty"`
 	ParentSessionIDHash string   `json:"parent_session_id_hash,omitempty"`
 	ToolPauseMS         *float64 `json:"tool_pause_ms,omitempty"`
+	// FallbackFromBindingID names the binding the request failed over from,
+	// before any byte reached the caller: that binding's failure, counted
+	// against it by Release Guard.
+	FallbackFromBindingID string `json:"fallback_from_binding_id,omitempty"`
 }
 
 // Traffic shape sources.
@@ -234,6 +238,10 @@ type RegisterServerRequest struct {
 	Model     string `json:"model"`
 	Engine    string `json:"engine"`
 	Address   string `json:"address"`
+	// Rollout marks a server the agent started to roll out a proven setup
+	// on Endpoint: the control plane binds it to that existing endpoint
+	// instead of observing it as a new one.
+	Rollout bool `json:"rollout,omitempty"`
 }
 
 // RegisterServerResponse returns the registration and whether it was new.
@@ -435,7 +443,7 @@ func (s TrafficShape) Validate() error {
 	}
 	switch s.Source {
 	case "", ShapeSourceGateway:
-		if s.BindingID != "" || s.QueueMS != nil || s.RetryCount != 0 || s.ParentSessionIDHash != "" || s.ToolPauseMS != nil || s.ResponseModel != "" {
+		if s.BindingID != "" || s.QueueMS != nil || s.RetryCount != 0 || s.ParentSessionIDHash != "" || s.ToolPauseMS != nil || s.ResponseModel != "" || s.FallbackFromBindingID != "" {
 			return errors.New("data-plane fields need source data-plane")
 		}
 	case ShapeSourceDataPlane:
@@ -444,6 +452,9 @@ func (s TrafficShape) Validate() error {
 		}
 		if s.RetryCount < 0 || s.RetryCount > 3 {
 			return errors.New("retry_count must be between 0 and 3")
+		}
+		if s.FallbackFromBindingID != "" && (!identifierPattern.MatchString(s.FallbackFromBindingID) || s.FallbackFromBindingID == s.BindingID) {
+			return errors.New("fallback_from_binding_id names another binding of the endpoint")
 		}
 	default:
 		return errors.New("source must be gateway or data-plane")

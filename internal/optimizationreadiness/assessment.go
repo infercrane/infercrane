@@ -147,6 +147,12 @@ const (
 	SignalSharedPrefixRatio = "shared_prefix_request_ratio"
 	SignalPreemptionRate    = "runtime_preemptions_per_completed_request"
 	SignalRunningPerReplica = "runtime_requests_running_per_replica"
+	// SignalWaitingPerReplica and SignalCacheBlocksPerReplica divide the
+	// endpoint's waiting requests and engine cache blocks by the replicas that
+	// reported them, like SignalRunningPerReplica.
+	SignalWaitingPerReplica     = "runtime_requests_waiting_per_replica"
+	SignalCacheBlocksPerReplica = "runtime_kv_cache_blocks_per_replica"
+	SignalMeanOutputTokens      = "mean_output_tokens"
 )
 
 func DefaultPolicy() Policy {
@@ -199,8 +205,11 @@ func Assess(snapshot domain.EndpointMonitoringSnapshot, policy Policy) Assessmen
 
 	queuePressure := admissionPressure(snapshot.Admission) || meaningfulShare(snapshot.Summary.P95QueueMS, latency, policy.QueueShare, 25)
 	engineQueue := engine.value(metrics.MeasurementQueueTimeP95)
-	engineQueuePressure := meaningfulShare(engineQueue, latency, policy.QueueShare, 25)
 	engineWaiting := engine.value(metrics.MeasurementRequestsWaiting)
+	// The queue-time histogram covers the whole window, so a burst at its start
+	// keeps it long after the queue is gone. When the engine's waiting gauge
+	// is reported and shows nobody waiting, the queue time is not a queue now.
+	engineQueuePressure := meaningfulShare(engineQueue, latency, policy.QueueShare, 25) && (engineWaiting == nil || *engineWaiting > 0)
 	waiting := queuePressure || engineQueuePressure || engineWaiting != nil && *engineWaiting > 0
 	kv := kvPressure(engine, policy, queuePressure || engineQueuePressure)
 	prefix := prefixReuse(snapshot, engine, policy)
@@ -563,11 +572,17 @@ func preemptionRate(engine engineSignals) (float64, bool) {
 // runningPerReplica averages the latest running-request gauge over the
 // replicas that reported it (one sample per replica).
 func runningPerReplica(engine engineSignals) (float64, bool) {
-	running, replicas := engine.withSamples(metrics.MeasurementRequestsRunning)
-	if running == nil || replicas < 1 {
+	return engine.perReplica(metrics.MeasurementRequestsRunning)
+}
+
+// perReplica divides an endpoint-wide sum by the replicas that reported it
+// (one sample per replica).
+func (e engineSignals) perReplica(name string) (float64, bool) {
+	total, replicas := e.withSamples(name)
+	if total == nil || replicas < 1 {
 		return 0, false
 	}
-	return *running / float64(replicas), true
+	return *total / float64(replicas), true
 }
 
 func sharedPrefix(snapshot domain.EndpointMonitoringSnapshot) *float64 {
@@ -588,9 +603,19 @@ func meanInputTokens(snapshot domain.EndpointMonitoringSnapshot) *float64 {
 	return &value
 }
 
+func meanOutputTokens(snapshot domain.EndpointMonitoringSnapshot) *float64 {
+	if snapshot.Summary.OutputTokenSamples <= 0 {
+		return nil
+	}
+	value := float64(snapshot.Summary.OutputTokens) / float64(snapshot.Summary.OutputTokenSamples)
+	return &value
+}
+
 func monitoringSignals(snapshot domain.EndpointMonitoringSnapshot, engine engineSignals) []Signal {
 	preemption, preemptionOK := preemptionRate(engine)
 	running, runningOK := runningPerReplica(engine)
+	waiting, waitingOK := engine.perReplica(metrics.MeasurementRequestsWaiting)
+	blocks, blocksOK := engine.perReplica(metrics.MeasurementKVCacheBlocks)
 	optional := func(value float64, ok bool) *float64 {
 		if !ok {
 			return nil
@@ -607,10 +632,16 @@ func monitoringSignals(snapshot domain.EndpointMonitoringSnapshot, engine engine
 		{"p95_ttft", "ms", "First-token pressure suggests prefill, batching, cache, or attention investigation.", snapshot.Summary.P95TTFTMS},
 		{"p95_generation", "ms", "Generation pressure suggests decode, KV-cache, sampling, or quantization investigation.", snapshot.Summary.P95GenerationMS},
 		{"mean_input_tokens", "tokens", "Long inputs make the batched-token budget and chunked prefill the first prefill levers.", meanInputTokens(snapshot)},
+		{SignalMeanOutputTokens, "tokens", "With the input length, how many tokens a request holds in the cache by the time it finishes.", meanOutputTokens(snapshot)},
 		{SignalSharedPrefixRatio, "ratio", "Requests that repeat a system prefix can reuse cached prefix tokens.", sharedPrefix(snapshot)},
 		{metrics.MeasurementKVCacheUsage, "percent", "A nearly full KV cache with waiting requests limits admission by memory, not compute.", engine.value(metrics.MeasurementKVCacheUsage)},
 		{SignalPreemptionRate, "ratio", "Preemptions mean the engine evicted running sequences for lack of KV-cache space.", optional(preemption, preemptionOK)},
 		{SignalRunningPerReplica, "requests", "Few concurrent sequences per replica leave decode memory-bandwidth bound.", optional(running, runningOK)},
+		{SignalWaitingPerReplica, "requests", "Requests the engine has accepted but cannot run yet; with the running requests, the load each replica is asked to hold.", optional(waiting, waitingOK)},
+		{SignalCacheBlocksPerReplica, "blocks", "Cache blocks the engine allocated per replica; with the cache use and the running requests, the blocks one running request holds.", optional(blocks, blocksOK)},
+		{metrics.MeasurementKVCacheBlockTokens, "tokens", "Tokens one cache block holds.", engine.value(metrics.MeasurementKVCacheBlockTokens)},
+		{metrics.MeasurementStatePageBytes, "bytes", "Reported only for models with recurrent-state layers, whose state page sets the cache block size.", engine.value(metrics.MeasurementStatePageBytes)},
+		{metrics.MeasurementSpecDraftLength, "tokens", "Draft tokens per step the server speculates with; absent when it does not speculate.", engine.value(metrics.MeasurementSpecDraftLength)},
 		{metrics.MeasurementQueueTimeP95, "ms", "Time requests wait inside the engine scheduler before running.", engine.value(metrics.MeasurementQueueTimeP95)},
 		{metrics.MeasurementTTFTP95, "ms", "Engine-measured first-token time, independent of gateway and network overhead.", engine.value(metrics.MeasurementTTFTP95)},
 		{metrics.MeasurementTPOTP95, "ms", "Engine-measured time per output token for completed requests.", engine.value(metrics.MeasurementTPOTP95)},

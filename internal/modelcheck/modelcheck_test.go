@@ -30,6 +30,10 @@ var fixtures = map[string]string{
 	"deepseek-ai/DeepSeek-V2-Lite-Chat":    "deepseek-v2-lite",
 	"stabilityai/stable-diffusion-xl-base": "sdxl",
 	"TheBloke/Llama-2-7B-GGUF":             "llama-2-7b-gguf",
+	// Recorded on 2026-11-26 with blobs=true, at the pinned commits.
+	"Qwen/Qwen3-8B":       "qwen3-8b",
+	"Qwen/Qwen3-8B-FP8":   "qwen3-8b-fp8",
+	"nvidia/Qwen3-8B-FP8": "nvidia-qwen3-8b-fp8",
 }
 
 // gatedConfigWithToken stands in for the gated config.json, which cannot be
@@ -466,4 +470,43 @@ func checkNames(report Report) string {
 		names = append(names, item.Name)
 	}
 	return strings.Join(names, ",")
+}
+
+// The tokenizer digest says whether two repositories' servers read text
+// alike: Qwen's FP8 checkpoint lists the base model's tokenizer files with
+// the same content, NVIDIA's lists another tokenizer_config.json and its own
+// chat template, and a response without hashes gives no digest.
+func TestTokenizerDigestComparesTheFilesThatReadText(t *testing.T) {
+	h := newHub(t)
+	resolver := newResolver(t, h, ResolverOptions{})
+	digest := func(repository, revision string) string {
+		t.Helper()
+		model, err := resolver.Resolve(context.Background(), Request{Repository: repository, Revision: revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.TokenizerDigest
+	}
+	base := digest("Qwen/Qwen3-8B", "b968826d9c46dd6066d109eabc6255188de91218")
+	if !strings.HasPrefix(base, "sha256:") || len(base) != len("sha256:")+64 {
+		t.Fatalf("base digest = %q", base)
+	}
+	if qwen := digest("Qwen/Qwen3-8B-FP8", "220b46e3b2180893580a4454f21f22d3ebb187d3"); qwen != base {
+		t.Fatalf("Qwen's FP8 checkpoint lists the base model's tokenizer files: %q against %q", qwen, base)
+	}
+	if nvidia := digest("nvidia/Qwen3-8B-FP8", "2cebc4c89e25abc17668c81b01dceaf3d8b914d5"); nvidia == "" || nvidia == base {
+		t.Fatalf("NVIDIA's checkpoint lists another tokenizer_config.json and a chat template: %q against %q", nvidia, base)
+	}
+	if recorded := digest("microsoft/phi-4", ""); recorded != "" {
+		t.Fatalf("a response without blob hashes gave a digest %q", recorded)
+	}
+	changed := []sibling{{Name: "tokenizer.json", LFS: &struct {
+		SHA256 string `json:"sha256"`
+	}{SHA256: strings.Repeat("a", 64)}}, {Name: "tokenizer_config.json", BlobID: "417d038a63fa3de29cfde265caedae14d1a58d92"}}
+	same := tokenizerDigest(changed)
+	changed[1].BlobID = "eb89444dcfb54dacaadc35b8735b57b677b8662a"
+	if same == "" || tokenizerDigest(changed) == same || tokenizerDigest([]sibling{{Name: "config.json", BlobID: "x"}}) != "" ||
+		tokenizerDigest([]sibling{{Name: "tokenizer.json"}}) != "" {
+		t.Fatal("the digest does not follow the tokenizer files' content")
+	}
 }

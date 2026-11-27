@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: infercrane
+    type: file
+    allowUiUpdates: false
+    options: {path: /var/lib/grafana/dashboards}

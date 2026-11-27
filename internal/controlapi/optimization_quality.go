@@ -48,10 +48,14 @@ type candidateQualityView struct {
 	// Check is builtin or customer_evidence, as the campaign asked.
 	Check string `json:"check"`
 	// Source names who produced the deciding evidence: infercrane or customer.
-	Source              string   `json:"source,omitempty"`
-	Role                string   `json:"role,omitempty"`
-	Suite               string   `json:"suite,omitempty"`
-	SuiteVersion        string   `json:"suite_version,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Role         string `json:"role,omitempty"`
+	Suite        string `json:"suite,omitempty"`
+	SuiteVersion string `json:"suite_version,omitempty"`
+	// Evaluator names what scored the deciding evidence: infercrane-builtin
+	// (answer agreement with the reference), infercrane-task (a task score
+	// item by item), infercrane-graded, or the customer's evaluator.
+	Evaluator           string   `json:"evaluator,omitempty"`
 	EvalSet             string   `json:"eval_set,omitempty"`
 	PromptCount         int      `json:"prompt_count,omitempty"`
 	Score               *float64 `json:"score,omitempty"`
@@ -62,8 +66,11 @@ type candidateQualityView struct {
 	EvidenceID          string   `json:"evidence_id,omitempty"`
 	// ToolCalls is the built-in check's score over cases that declare tools.
 	ToolCalls *qualityevidence.ToolCallScores `json:"tool_calls,omitempty"`
-	Reason    string                          `json:"reason"`
-	Command   string                          `json:"command,omitempty"`
+	// Divergence is the built-in check's KL divergence of a precision change
+	// from the reference on forced decoding. Evidence only: it decides nothing.
+	Divergence *qualityevidence.Divergence `json:"divergence,omitempty"`
+	Reason     string                      `json:"reason"`
+	Command    string                      `json:"command,omitempty"`
 }
 
 // campaignQualityInputs is what candidateQuality needs beyond the campaign.
@@ -176,7 +183,7 @@ func candidateQuality(campaign domain.OptimizationCampaign, candidate domain.Opt
 func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCandidateRun, row domain.QualityEvidence) candidateQualityView {
 	score := row.Score
 	view.EvidenceID, view.Source, view.Score = row.ID, row.Source, &score
-	view.Suite, view.SuiteVersion, view.PromptCount = row.Suite, row.SuiteVersion, row.SampleCount
+	view.Suite, view.SuiteVersion, view.PromptCount, view.Evaluator = row.Suite, row.SuiteVersion, row.SampleCount, row.Evaluator
 	if view.Source == "" {
 		view.Source = domain.QualityEvidenceSourceCustomer
 	}
@@ -192,7 +199,7 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 	view.ReferenceRevisionID = row.ReferenceRevisionID
 	var distribution qualityevidence.Distribution
 	if json.Unmarshal([]byte(row.DistributionJSON), &distribution) == nil {
-		view.ToolCalls = distribution.ToolCalls
+		view.ToolCalls, view.Divergence = distribution.ToolCalls, distribution.Divergence
 	}
 	watch, block := qualitycheck.WatchRegressionPercent, qualitycheck.BlockRegressionPercent
 	view.WatchLimitPercent, view.BlockLimitPercent = &watch, &block
@@ -202,6 +209,32 @@ func evidenceQuality(view candidateQualityView, candidate domain.OptimizationCan
 		return view
 	}
 	view.Role = "candidate"
+	if row.Evaluator == qualitycheck.TaskEvaluator {
+		// A task set's score is the share of items right, judged against the
+		// reference's own share item by item; the check's verdict is Passed.
+		view.WatchLimitPercent, view.BlockLimitPercent = nil, nil
+		right := fmt.Sprintf("%.1f%% of %d task items right", row.Score*100, row.SampleCount)
+		servers := "one server each"
+		if distribution.TaskServers > 1 {
+			servers = fmt.Sprintf("%d servers each", distribution.TaskServers)
+		}
+		// A setup that changes answers is read by the stricter rule
+		// (qualitycheck.RequireHeld), and its row says which rule it was.
+		held := distribution.TaskRule == qualitycheck.RuleHeld
+		switch {
+		case row.Passed && held:
+			view.State, view.Reason = qualityStatePassed, right+", answers held within 1 point of the reference (the 95% interval of the paired difference starts above −1 point, or the setup did better), as a setup that changes answers must show."
+		case row.Passed:
+			view.State, view.Reason = qualityStatePassed, right+", not measurably worse than the reference (95% interval of the paired difference within 3 points, or better)."
+		case distribution.TaskVerdict == qualitycheck.CodeTaskNotShownHeld:
+			view.State, view.Reason = qualityStateInconclusive, right+": answers not shown to hold within 1 point of the reference on "+servers+". A setup that changes answers is not promoted until they are, whatever its speed."
+		case held:
+			view.State, view.Reason = qualityStateBlocked, right+": worse than the reference (the whole 95% interval of the paired difference is below zero)."
+		default:
+			view.State, view.Reason = qualityStateBlocked, right+": worse than the reference, or the 95% interval of the paired difference reaches past 3 points. Either blocks a setup that can change answers."
+		}
+		return view
+	}
 	eval := qualitycheck.VerdictForScore(row.Score)
 	if eval.RegressionPercent != nil {
 		drop := math.Round(*eval.RegressionPercent*10) / 10

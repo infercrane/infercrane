@@ -63,7 +63,13 @@ func TestPlanningGoldenDetectsAReorderedOrForbiddenPlan(t *testing.T) {
 	}
 	swapped := proposal
 	swapped.Candidates = append([]Candidate{}, proposal.Candidates...)
-	swapped.Candidates[1], swapped.Candidates[2] = swapped.Candidates[2], swapped.Candidates[1]
+	var diagnosed []int
+	for index, candidate := range swapped.Candidates {
+		if candidate.Reason != nil && candidate.Reason.Role == ReasonDiagnosis {
+			diagnosed = append(diagnosed, index)
+		}
+	}
+	swapped.Candidates[diagnosed[0]], swapped.Candidates[diagnosed[1]] = swapped.Candidates[diagnosed[1]], swapped.Candidates[diagnosed[0]]
 	if result := scorePlanningTask(task, swapped); result.Correct {
 		t.Fatal("a reordered plan passed the golden task")
 	}

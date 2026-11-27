@@ -1,0 +1,18 @@
+#!/bin/sh
+# Starts vLLM with the adaptive-speculation-one-engine setup only on an image that carries
+# InferCrane's state-by-draft patch as it was built: the receipt check runs first, with the
+# engine's own Python (recorded at build), and on any failure vLLM does not start (the deployment
+# fails and the starting setup keeps serving). On a stock vLLM image this file does not exist, so
+# the setup cannot start there. The setup needs vLLM's Python front end, whose metrics carry the
+# patch's gauges, so a Rust front end is refused too.
+set -eu
+if [ "${VLLM_USE_RUST_FRONTEND:-0}" != "0" ]; then
+    echo "serve-state-by-draft: VLLM_USE_RUST_FRONTEND=${VLLM_USE_RUST_FRONTEND}; this setup needs vLLM's Python front end, whose metrics carry the patch's gauges; not starting vLLM" >&2
+    exit 78
+fi
+python="$(cat /opt/infercrane/engine-python)"
+if ! "$python" /opt/infercrane/verify_state_by_draft.py /opt/infercrane/state-by-draft-receipt.json >&2; then
+    echo "serve-state-by-draft: the image does not carry the state-by-draft patch as built; not starting vLLM" >&2
+    exit 78
+fi
+exec vllm serve "$@"

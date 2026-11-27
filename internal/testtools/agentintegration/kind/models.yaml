@@ -22,7 +22,9 @@ spec:
       containers:
         - name: engine
           image: @@ENGINE_IMAGE@@
-          args: ["--port", "8000", "--model", "Qwen/Qwen3-0.6B", "--worker", "qwen3"]
+          # 40 ms slower than a setup without the delay, so the optimization
+          # run on this endpoint has a winner to roll out.
+          args: ["--port", "8000", "--model", "Qwen/Qwen3-0.6B", "--worker", "qwen3", "--delay", "40ms"]
           ports: [{containerPort: 8000}]
           readinessProbe:
             httpGet: {path: /health, port: 8000}

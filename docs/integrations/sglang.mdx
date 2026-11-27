@@ -6,13 +6,19 @@ description: The second Runtime Contract V1 engine profile.
 # SGLang
 
 SGLang is InferCrane's second registered inference engine. The runtime profile pins the official
-`lmsysorg/sglang:v0.5.12` multi-platform manifest by digest and launches its OpenAI-compatible
-server through the same provider-neutral workload contract used by custom OCI images.
+`lmsysorg/sglang:v0.5.23` multi-platform manifest (CUDA 13.0.3) and the `v0.5.23-rocm720-mi30x` and
+`-mi35x` ROCm builds by digest, and launches the OpenAI-compatible server
+(`python3 -m sglang.launch_server … --enable-metrics`) through the same provider-neutral workload
+contract used by custom OCI images. SGLang serves `/metrics` only with `--enable-metrics`. The server
+requires the worker key, passed in a `--config` file that a launcher writes from the container's
+secret at start; see the [runtime contract](/architecture/runtime-contract#engine-releases-and-accelerator-platforms).
 
-The image tag and launch form follow the [official SGLang release and Docker
-documentation](https://github.com/sgl-project/sglang/releases/tag/v0.5.12). InferCrane resolved the
-manifest digest during implementation; the immutable value is visible through
-`infercrane integrations --output json` and the persisted revision.
+The image tags and launch form follow the [official SGLang
+release](https://github.com/sgl-project/sglang/releases/tag/v0.5.23). The digests were read from the
+registry on 2026-11-26 and are visible through `infercrane integrations --output json`,
+`GET /api/v1/catalog/accelerators`, and the persisted revision. SGLang 0.5.12, the release pinned
+before, stays pinned as `legacy` only for revisions that record it: a revision stores its image, so
+it keeps its engine, and Stay optimized proposes the move.
 
 ```yaml
 name: qwen-sglang
@@ -20,7 +26,7 @@ model:
   id: Qwen/Qwen3-8B
 runtime:
   engine: sglang
-  version: 0.5.12
+  version: 0.5.23
 compute:
   mode: elastic
 provider:
@@ -40,9 +46,9 @@ The built-in profile declares the immutable image and argv, so normal users do n
 | Evidence | Scope | What it shows |
 |---|---|---|
 | Local conformance | Hermetic runtime contract | Client cancellation, connection draining, the metrics endpoint, and immutable launch intent |
-| Real AWS lifecycle checks, two passing runs on 2026-08-23 | The pinned full 0.5.12 image serving `Qwen/Qwen3-8B` on one L40S in `eu-central-1` | Readiness and model identity, buffered and streaming OpenAI transport, immutable model-revision launch, a five-request AIPerf sample, and durable shutdown ([evidence](/testing/aws-real-evidence)) |
+| Real AWS lifecycle checks, two passing runs on 2026-08-23 | The full 0.5.12 image (now legacy) serving `Qwen/Qwen3-8B` on one L40S in `eu-central-1` | Readiness and model identity, buffered and streaming OpenAI transport, immutable model-revision launch, a five-request AIPerf sample, and durable shutdown ([evidence](/testing/aws-real-evidence)) |
 
-The AWS checks cover one exact tuple. Five requests are a smoke sample, not performance
+The AWS checks cover one exact tuple, on 0.5.12; the 0.5.23 image has not run through InferCrane yet. Five requests are a smoke sample, not performance
 qualification, and the runs are recorded in the evidence page rather than retained as catalog
 evidence, so the integration catalog keeps real-GPU qualification for SGLang deferred. Every other
 model, accelerator, provider, and workload remains unqualified. The negative SGLang result in the
@@ -52,3 +58,22 @@ A smaller official `runtime` image was considered and then rejected by real AWS 
 because its published dependency set could not start the SGLang server. Tool calling, structured
 output, broader model compatibility, and other providers remain separate qualification surfaces.
 Autoscaling is rejected for SGLang because normalized SGLang scaling signals are not yet qualified.
+
+## Optimization options on SGLang 0.5.23
+
+The capability registry records these options with the flags read from the v0.5.23 source
+(`python/sglang/srt/arg_groups/fields/`). Only longest-prefix-match admission compiles today; the
+others name their flags and limits but stay deferred until a run measures them.
+
+| Option | Flags | State | Limits |
+|---|---|---|---|
+| Longest-prefix-match admission | `--schedule-policy lpm` (default `fcfs`) | local-qualified | Helps only traffic whose prompts share prefixes |
+| HiCache (host-memory KV tier) | `--enable-hierarchical-cache`, `--hicache-ratio` (2.0 in cache mode when unset), `--hicache-write-policy` | deferred | Needs host RAM of that size; gains depend on multi-turn reuse the replay keeps |
+| Attention backend | `--attention-backend fa3`, `trtllm_mha`, `flashinfer`, or `triton` | deferred | Each backend runs only on the GPU generations it is built for; the engine checks at start |
+| Adaptive speculation | `--speculative-adaptive` with EAGLE or EAGLE3 (NEXTN resolves to EAGLE) | deferred | Needs top-k 1, no attention data parallelism, no multi-layer EAGLE; otherwise SGLang falls back to static steps with only a log warning. Cache room stays reserved for the largest step count |
+
+The planner's own SGLang setups (larger batches, bigger prefill chunks, `lpm`, FP8 weights and KV
+cache, the model's prediction head) use flags that exist in both 0.5.12 and 0.5.23. In 0.5.23,
+`--cuda-graph-max-bs` became `--cuda-graph-max-bs-decode` and `-prefill`, and `--disable-cuda-graph`
+is a deprecated spelling of `--cuda-graph-backend-decode=disabled` and
+`--cuda-graph-backend-prefill=disabled`.

@@ -42,6 +42,7 @@ customer machine                                    InferCrane control plane
 | Report NVIDIA GPUs (`nvidia-smi`, which reads NVML), Apple Silicon, and AMD GPUs with unknowns named | Implemented; Apple and AMD telemetry is not collected |
 | Serve an agent-managed endpoint inside the customer's cloud with InferCrane API keys, routes, admission, and request quota ([data plane](#the-agent-as-the-data-plane)) | Implemented |
 | Run a candidate setup in the customer's Kubernetes namespace, measure it against the current setup with AIPerf, and run the answer check there ([candidate runs](#candidate-runs)) | Implemented for Kubernetes |
+| Measure every setup of an optimization run on its endpoint, so the hosted control plane ranks, confirms, and guards them by its own rules ([optimization runs on an agent's endpoint](#optimization-runs-on-an-agent%E2%80%99s-endpoint)) | Implemented for Kubernetes, with the winner's guarded rollout on an agent-managed endpoint |
 | Install in Kubernetes with a Helm chart (`deploy/helm/infercrane-agent`) | Implemented |
 | Run candidates by restarting an engine the agent launched on one machine (`--launch`) | Designed below; not implemented |
 
@@ -134,7 +135,7 @@ no long-lived connection that a proxy or load balancer has to keep open.
 | `GET /api/v1/agent/data-plane?generation=` | With `--serve`: at start and every poll interval | The generation the agent holds; the answer is the snapshot, or `unchanged` with a new validity window |
 | `POST /api/v1/agent/quota-leases` | With `--serve`, when the workspace has a request quota and the agent's lease runs low | The current minute and a request count (at most 1,000) |
 | `GET /api/v1/agent/commands?wait=25s` | With `--executor`: a long poll, held at most 25 s | Nothing |
-| `POST /api/v1/agent/commands/{id}` | Progress every phase and every 2 minutes, then the result | State, phase, failure code, and the [candidate-run result](#what-leaves-your-cloud) |
+| `POST /api/v1/agent/commands/{id}` | Progress every phase and every 2 minutes, then the result | State, phase, failure code, and the [candidate-run or window result](#what-leaves-your-cloud) |
 
 - Bodies are gzip-compressed JSON, at most 8 MiB after decompression. Unknown fields are ignored
   so a newer agent can add fields within one protocol version (`infercrane.agent/v1`).
@@ -262,7 +263,7 @@ about other agents or other endpoints:
 | `credentials` | SHA-256 digests of the workspace's live, non-agent API keys that may call at least one of those endpoints, with role, scopes, endpoint restrictions, and expiry. Keys restricted to other endpoints, agent keys, disabled and expired keys are left out. No key itself is ever sent; digests are what the control plane stores |
 | `admission` | The admission policy of each of those endpoints (concurrency, queue depth and timeout, request timeout, request and output limits, priorities, retry budget) |
 | `request_quota` | The workspace's hard request rate, when it has one |
-| `generation`, `valid_until` | A digest of the content, and how long the agent may serve on it (15 minutes) |
+| `generation`, `valid_until` | A digest of the content, and how long the agent may serve on it (15 minutes; a self-hosted control plane sets `INFERCRANE_AGENT_DATA_PLANE_VALIDITY`, 1m to 24h) |
 
 A route names a server by the agent's server key, never by address. The agent resolves the key to
 an address it detected itself, and routes only to servers it registered and currently sees as
@@ -281,9 +282,25 @@ leaves the machine.
   through the same durable minute-window allocator. The agent leases at most 1,000 requests at a
   time (`POST /api/v1/agent/quota-leases`). If it cannot get a lease, requests get HTTP 429; they
   are never let through unmetered.
-- **Staleness.** The agent refreshes the snapshot every poll interval. If it cannot refresh for 15
-  minutes it stops serving (HTTP 503, `data_plane_stale`), because a revoked key could otherwise
-  keep working. Revoking the agent stops it at its next poll.
+- **Staleness.** The agent refreshes the snapshot every poll interval. A snapshot is valid for 15
+  minutes. Past that, the agent serves only inside its offline grace (below, 24 hours by default),
+  and then stops serving (HTTP 503, `data_plane_stale`), because a revoked key could otherwise keep
+  working. Revoking the agent stops it at its next poll.
+- **Offline grace.** During a control-plane outage the agent keeps serving your own server for up
+  to 24 hours past the snapshot's validity (`--offline-grace`, `INFERCRANE_AGENT_OFFLINE_GRACE`,
+  Helm `agent.offlineGrace`; default 24 hours with `--serve`, at most 24 hours). A key revoked
+  during the outage keeps working until the agent reconnects or the grace ends; revocations apply
+  when it reconnects. Each key's own expiry still applies, and an unknown key is refused. Only the
+  endpoints' own servers are routed: a server a rollout started is dropped until the control plane
+  is reached again, a test setup is never served, and no new rollout, candidate, or change arrives
+  meanwhile. To fail closed instead, set it to `0s` (Helm `--set agent.offlineGrace=0s`): the agent
+  then refuses requests (HTTP 503) once the snapshot's 15 minutes run out. A value that is not a
+  duration stops the agent at start rather than being read as the default. A workspace with a hard
+  request quota needs leases from the control plane, so its requests get HTTP 429 during an
+  outage, never a free pass.
+  The last snapshot is kept in the agent's state directory (`--state-dir`, mode 0600, API key
+  digests only, never a key), so an agent restarted during an outage serves inside the grace; the
+  Helm chart keeps it in the pod's own volume, which survives a container restart, not a reschedule.
 - **Records.** Each request becomes a request shape with `source: data-plane` and the binding it
   was routed to; the control plane stores it as a request record with compute mode
   `agent-data-plane`. Monitoring, readiness, replay capture, and optimization read these records as
@@ -312,8 +329,10 @@ The agent then, in its own namespace:
    `executor.allowedImages`) and the accelerator against `--allow-accelerator`, before applying
    anything;
 2. starts the candidate with the same namespaced Kubernetes provider the control plane uses
-   (`provision.Kubernetes`: one Deployment and one Service, server-side apply, no cluster-scoped
-   permission) and waits for it to be ready. Tainted GPU nodes need the operator's tolerations
+   (`provision.Kubernetes`: one Deployment, one Service and one engine NetworkPolicy, server-side
+   apply, no cluster-scoped permission) and waits for it to be ready. The candidate requires the
+   worker key like every engine; a candidate whose command starts SGLang gets it through the same
+   configuration-file launcher as a deployment. Tainted GPU nodes need the operator's tolerations
    (`--tolerations`, Helm `executor.tolerations`; see [Tainted GPU nodes](#tainted-gpu-nodes));
 3. measures the current setup, the candidate, and the current setup again with AIPerf, so the
    result carries a same-setup noise figure;
@@ -322,14 +341,104 @@ The agent then, in its own namespace:
    answer stay in the cluster; only per-prompt agreement scores and digests are sent;
 5. deletes the candidate, also when the run fails or is cancelled.
 
+Only the sources in `--engine-ingress` may reach a candidate pod, on its engine port. The agent
+reads `INFERCRANE_KUBERNETES_ENGINE_INGRESS` when the flag is not set, and refuses to start the
+executor without one of them. Name the agent's own pods, which run the measurements and the answer
+check (the Helm chart does this by default), or `none` to apply no policy. The syntax is the
+control plane's, described in
+[who can reach engine pods](/integrations/kubernetes#who-can-reach-engine-pods), and so are its
+limits: the network plugin must enforce `NetworkPolicy`.
+
 Runs on one agent go one at a time, so two candidates never compete for the same accelerators.
 `GET /api/v1/agents/{id}/candidate-runs/{run}` shows the state, the current phase, and the result;
 `DELETE` cancels it, and the agent removes the candidate on its next report. A run whose agent
 stops reporting is handed out again (at most three times), and a run past its deadline expires.
 
-Candidate runs are separate from optimization runs today: their results are stored with the run,
-not ranked against other candidates or promoted. Feeding them into ranking, Release Guard, and
-promotion is the next step.
+A candidate run on its own is stored with the run, not ranked against other candidates. An
+optimization run on the agent's endpoint ranks them: see the next section.
+
+### Optimization runs on an agent's endpoint
+
+An optimization run that names an endpoint an agent serves (`POST /api/v1/optimization/campaigns`
+with `"intent": "evolve_endpoint", "target_endpoint": "support-bot"`) is measured by that agent in
+the customer's cluster and judged by the control plane, with the same code it uses for a run it
+measures itself:
+
+1. **Measured windows.** For each setup the control plane queues a `measure_window` command. The
+   agent starts the setup (as for a candidate run), warms both servers, and runs the endpoint's own
+   server and the setup in turn, control, setup, control, ... control, four setup runs each between
+   two control runs, every AIPerf invocation with its own seed. It then asks both the answer check
+   and deletes the setup. Every window runs the answer check, the window on a new server too. The
+   endpoint's own server is the run's control and is never restarted.
+2. **The judge.** The control plane writes the window's runs into the run's measurement checkpoint
+   and applies the campaign judge: the control-drift check, the paired comparison with the 0.75%
+   machine allowance in every interval, and the confirmation rule. A setup that gains on the
+   objective is started again on a new server, the endpoint's server kept because it serves
+   production, and a second window must show the gain before it counts. The new server is a fresh
+   machine only when the agent shows it ran on another node: it reads where the pods run (read-only)
+   and names each node by a digest keyed with its local hashing key. On the same node, or on one it
+   could not name (a server outside its namespace, for example), the gain's fresh-machine evidence
+   stays unknown and the claim reads "not shown": a fresh-machine confirmation needs a second GPU
+   node. Which GPU a pod holds is not readable without exec or node access, so it stays unknown.
+3. **Answers.** The agent sends each item's score on both sides (right or wrong on a task set,
+   agreement otherwise), the eval set's identity, and a digest that commits to the answers. The
+   control plane applies the same rules as its own check: a setup that changes answers (other
+   weights or precision, or a technique that declares it) must show them held within 1 point, and
+   unknown never qualifies. The evidence is signed and labelled InferCrane-run. The agent cannot
+   read the endpoint's own engine flags, so its operator declares them (`declared_setup` beside
+   `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`); the plan and the run's copy start
+   from that. Until a setup is declared, whether a setup changes answers is not known, so every setup
+   must show its answers held within 1 point, and no divergence is read. A setup measured again on a
+   new server is judged on that server's answers, pooled with its first server's on a task set when
+   it must show its answers held, exactly as the control plane pools a run it measures itself
+   ([task sets](/features/semantic-quality#task-sets)). The endpoint's own server is kept, so it answers once per
+   pair and `task_servers` counts pairs. The checkpoint keeps the first window's per-item scores in
+   `confirmation.first_answers`; if the agent could not compare them,
+   `confirmation.first_answers_skipped` says why and the new server's answers decide alone. Answers
+   the agent could not compare in the window on the new server leave the setup unknown.
+4. **Ranking and Release Guard.** Rows are stored under each setup's identity (the digest of the
+   exact spec the agent started, or the endpoint's own server), so the ranker reads them unchanged.
+   The ranker compares setups measured under the same load; which agent commands measured a setup,
+   on which nodes, and whether it ran on another node are provenance and do not change that, as
+   which revision ran does not. Release Guard compares the winner's runs with the control runs that
+   bracketed them. A setup an agent started has no deployment revision or serving plan, so its
+   decision is stored in `agent_release_guard_evaluations` (setups, measurement, decision, reasons,
+   metrics, policy), and the candidate names that row as its Release Guard evidence, as a run the
+   control plane measures names its own.
+
+The eval set is the built-in suite or one the operator keeps beside the agent (Helm
+`executor.evalSets`); a run names the latter by the digest of its bytes (`quality_eval_set`), which
+is all the control plane knows of it. A run the agent cannot measure is refused when it is created
+(`invalid_agent_run`): customer-signed evidence, a replayed trace (the agent measures the synthetic
+profile for now), and setups with environment variables, tuned kernel files, LoRA adapters, or a
+private model's credential. An old agent refuses `measure_window` (`unsupported_command`).
+
+### The winner's guarded rollout
+
+Activating the winner (`POST /api/v1/optimization/campaigns/{id}/activate`) rolls it out on the
+endpoint, when the agent serves its traffic (`agent-managed`):
+
+1. The agent starts the setup as a server it owns and keeps (`start_server`), with the same
+   allowlists, NetworkPolicy, and worker key as a measured setup, and registers it on the endpoint
+   as a second agent-managed binding.
+2. On the run's Release Guard PASS the endpoint's serving plan routes to the new server first, the
+   customer's own server as its fallback.
+3. For the rollback window (300 seconds) Release Guard compares the new server's live requests,
+   including any the data plane failed over away from it, with the own server's hour before the
+   switch. A rejection, or too few requests by the end of the window, switches the endpoint back to
+   its previous plan and stops the new server (`stop_server`); a pass at the end promotes the setup.
+
+If the agent stops reporting during the window, the rollout fails closed and is never promoted on
+silence: once the control plane marks the agent's servers unhealthy (three minutes without a
+report), the endpoint switches back at once, and the stop waits in the agent's queue for its
+return. While it is out of contact the agent keeps serving its last plan for the snapshot's validity
+(15 minutes). Past that, inside its offline grace, it routes only the endpoint's own server, so the
+rollout's server gets no traffic, and after the grace it stops serving, as for any stale snapshot.
+
+The customer's own server is never stopped or removed: InferCrane did not start it, and
+`stop_server` refuses any server a rollout did not start. An approval that expires stops a rollout
+before its switch, never during its window. On an `observe-only` endpoint nothing of InferCrane's
+carries the traffic, so the winner waits in `guard_passed` with its exact setup to apply.
 
 ### Taking turns on one machine (designed, not implemented)
 
@@ -360,9 +469,19 @@ helm install agent deploy/helm/infercrane-agent -n models \
 | Deployment `<release>-infercrane-agent` | The agent: no inbound port for InferCrane, a read-only root filesystem, no privilege escalation, all capabilities dropped |
 | Service `<release>-infercrane-agent` | The data plane for applications in the cluster (`http://<release>-infercrane-agent.<namespace>.svc:8080/v1`) |
 | Secret `<release>-infercrane-agent-hash-key` | The request-hashing key, random, kept when the release is removed so hashes stay comparable |
-| Role and RoleBinding (with `executor.enabled`) | Exactly the provider grant of `deploy/kubernetes/base/provider-rbac.yaml`: Deployments and Services, read-only PVCs, in one namespace. No Secrets, no Pods/exec, nothing cluster-scoped |
+| Role and RoleBinding (with `executor.enabled`) | The provider grant of `deploy/kubernetes/base/provider-rbac.yaml` (Deployments, Services and NetworkPolicies, read-only PVCs) plus read-only Pods, to name the node a measured server ran on, in one namespace. No Secrets, no Pods/exec, nothing cluster-scoped |
 | Secret `<release>-infercrane-agent-worker`, ServiceAccount `infercrane-runtime` | The candidate pods' API key and identity (no API token mounted) |
 | ConfigMaps | The control plane's private CA, and local eval sets, when set |
+
+With `executor.enabled`, the chart sets `--engine-ingress` to this release's agent pods in the
+release namespace, so candidates admit only the agent, also when `executor.namespace` names another
+namespace. Set `executor.engineIngress` to name other sources, or `none`.
+
+The chart runs the release image `ghcr.io/infercrane/infercrane:v<appVersion>`, the tag a release
+publishes, unless `image.tag` or `image.digest` names another one.
+
+`scripts/test-agent-data-plane-kind.sh` installs the chart on a kind cluster and proves the data
+path end to end (see [Proof](#proof)).
 
 ### Tainted GPU nodes
 
@@ -387,9 +506,6 @@ fails on a missing or unknown field, and the agent does not start with a list it
 nothing is applied. The top-level `tolerations` value of the chart is for the agent's own pod, not
 for candidates. InferCrane never changes a node's taints.
 
-`scripts/test-agent-data-plane-kind.sh` installs the chart on a kind cluster and proves the data
-path end to end (see [Proof](#proof)).
-
 ## What leaves your cloud
 
 Every field the agent sends to the control plane, by call. Nothing else is sent: no prompt,
@@ -401,12 +517,14 @@ local server key, hashing key, eval prompt, answer, engine log, or Kubernetes ob
 | `POST /agent/sync` (envelope) | protocol, agent version, OS, architecture, sent-at time; hardware state, and per accelerator kind: vendor, name, count, memory, driver, source, and the fields it could not read; limitations; the pass-through gateway's listen address and server key, when used |
 | `POST /agent/sync` (servers) | per server: server key, engine, engine version, address as the agent reaches it, model names, loaded model, health and its detail, whether metrics and authentication are configured |
 | `POST /agent/sync` (metrics) | per server: the current and a baseline engine scrape, filtered on the machine to the families InferCrane parses, with their ages |
-| `POST /agent/sync` (request shapes) | per request: a random shape ID, server key, start time, operation (chat, completion, embeddings, responses, other), requested model name, response model name, status code, latency, time to first byte, queue time, retry count, streaming flag, input and output token counts, error type, and HMAC-SHA256 hashes (keyed with a secret that never leaves) of the system prompt, session ID, and parent session ID, tool pause time; with the data plane also the binding ID |
+| `POST /agent/sync` (request shapes) | per request: a random shape ID, server key, start time, operation (chat, completion, embeddings, responses, other), requested model name, response model name, status code, latency, time to first byte, queue time, retry count, streaming flag, input and output token counts, error type, and HMAC-SHA256 hashes (keyed with a secret that never leaves) of the system prompt, session ID, and parent session ID, tool pause time; with the data plane also the binding ID, and the binding a request failed over from before any byte reached the caller |
 | `POST /agent/servers` | server key, endpoint name, model, engine, address |
 | `GET /agent/data-plane` | the generation the agent holds |
 | `POST /agent/quota-leases` | a minute and a request count |
 | `GET /agent/commands` | nothing |
 | `POST /agent/commands/{id}` | state, phase, failure code and a bounded failure detail written by the agent; for a finished candidate run: per measurement (current setup, candidate, current setup again) the tool and version, request, success, and failure counts, duration, request and output-token throughput, and p50/p95 time to first token, time per output token, and latency; the noise figure; the eval-set name, its digest, the prompt count, one agreement score per prompt, the mean, the verdict, and a digest committing to the answers; seconds until ready, the candidate image reference, and whether it was cleaned up |
+| `POST /agent/commands/{id}` (a rollout's server) | the server's key, seconds until ready, its image reference, the keyed node digest, and whether it was stopped |
+| `POST /agent/commands/{id}` (measured window) | per run, in order: the arm (control or setup), the seed, a keyed digest of the node its server ran on (or `several`, or `unknown`), the GPU as `unknown`, request, success, and failure counts, duration, request and output-token throughput, goodput and useful-output throughput when limits are set, output tokens per request, and p50/p95 time to first token, time per output token, and latency; the load generator and its version; seconds until ready, the setup's image reference, and whether it was cleaned up; the eval set's name, version, digest, and pairing digest, its grading, the item count, each side's score per item, tool-call counts, the forced-decoding divergence summary when asked, a digest committing to the answers, and when they were scored; or, instead of the answers, a failure code |
 
 ## Proof
 

@@ -226,6 +226,74 @@ func TestRouteWorkerAPIKeyFailsClosedForTenantCompute(t *testing.T) {
 	if got := routeWorkerAPIKey(deployment, []domain.Target{legacy}, "global-key", derive); got != "global-key" {
 		t.Fatalf("legacy managed route key=%q", got)
 	}
+	// Workers on operator compute that were started with a scoped credential
+	// are reached with it, and a set that mixes them with workers on the shared
+	// credential gets neither, whatever order the store lists them in.
+	if got := routeWorkerAPIKey(deployment, []domain.Target{versioned, versioned}, "global-key", derive); got != "tenant-worker-key" {
+		t.Fatalf("scoped operator-compute route key=%q", got)
+	}
+	for name, targets := range map[string][]domain.Target{
+		"shared first": {legacy, versioned},
+		"scoped first": {versioned, legacy},
+		"unknown":      {{ProviderDetails: `{"worker_credential_version":"tenant-hmac-v9"}`}, versioned},
+	} {
+		if got := routeWorkerAPIKey(deployment, targets, "global-key", derive); got != "" {
+			t.Fatalf("%s: a mixed worker set was given %q", name, got)
+		}
+	}
+	if got := routeWorkerAPIKey(deployment, []domain.Target{versioned}, "global-key", nil); got != "" {
+		t.Fatalf("a scoped worker without a derivation fell back to %q", got)
+	}
+}
+
+func TestRouterServesOnlyWorkersThatShareOneCredential(t *testing.T) {
+	scoped := func(id string) domain.Target {
+		return domain.Target{ID: id, ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	}
+	shared := func(id string) domain.Target {
+		return domain.Target{ID: id, ProviderDetails: `{"worker_credential_version":""}`}
+	}
+	ids := func(targets []domain.Target) string {
+		var out []string
+		for _, target := range targets {
+			out = append(out, target.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	for name, test := range map[string]struct {
+		targets []domain.Target
+		want    string
+	}{
+		"all shared":         {[]domain.Target{shared("a"), shared("b")}, "a,b"},
+		"all scoped":         {[]domain.Target{scoped("a"), scoped("b")}, "a,b"},
+		"older worker first": {[]domain.Target{shared("old"), scoped("new")}, "new"},
+		"newer worker first": {[]domain.Target{scoped("new"), shared("old"), scoped("newer")}, "new,newer"},
+		"none":               {nil, ""},
+	} {
+		if got := ids(routableTogether(test.targets)); got != test.want {
+			t.Errorf("%s: routed %q, want %q", name, got, test.want)
+		}
+	}
+}
+
+// A worker that records a scoped credential is never probed with the
+// inspector's own credential, which is the operator's shared one.
+func TestScopedWorkerHealthProbeNeverFallsBackToTheSharedCredential(t *testing.T) {
+	deployment := domain.Deployment{ID: "deployment", TenantID: "tenant-1"}
+	target := domain.Target{URL: "https://worker.example", ProviderDetails: `{"worker_credential_version":"tenant-hmac-v1"}`}
+	inspector := &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, target, "global-key", nil); ok || inspector.credential != "" || inspector.unauthenticatedCall {
+		t.Fatalf("ok=%t credential=%q fell back=%t", ok, inspector.credential, inspector.unauthenticatedCall)
+	}
+	inspector = &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, target, "global-key", func(string, string, string) string { return "scoped-key" }); !ok || inspector.credential != "scoped-key" || inspector.unauthenticatedCall {
+		t.Fatalf("ok=%t credential=%q fell back=%t", ok, inspector.credential, inspector.unauthenticatedCall)
+	}
+	// A worker on the shared credential keeps its probe.
+	inspector = &credentialRuntime{}
+	if ok, _ := inspectRuntimeTarget(context.Background(), inspector, deployment, domain.Target{URL: "https://worker.example", ProviderDetails: `{}`}, "global-key", nil); !ok || inspector.credential != "global-key" {
+		t.Fatalf("shared worker: ok=%t credential=%q", ok, inspector.credential)
+	}
 }
 
 func TestTenantComputeHealthProbeUsesDerivedWorkerCredential(t *testing.T) {
@@ -699,5 +767,86 @@ func TestEngineMetricTargetsUseRouteCredentialsAndSkipProviderAPIs(t *testing.T)
 	}
 	if byoc.TargetID != "byoc-versioned" || byoc.Credential != "icw_tenant-1_byoc_tenant-hmac-v1" {
 		t.Fatalf("tenant compute target=%s", byoc.TargetID)
+	}
+}
+
+type probeEventStore struct {
+	*fakeStore
+	events []string
+}
+
+func (s *probeEventStore) SetTargetHealth(_ context.Context, _ string, health string) error {
+	s.target.Health = health
+	return nil
+}
+
+func (s *probeEventStore) Event(_ context.Context, _, _, eventType, _, _ string) error {
+	s.events = append(s.events, eventType)
+	return nil
+}
+
+// scriptedRuntime answers each probe with the next result of its script.
+type scriptedRuntime struct{ results []bool }
+
+func (r *scriptedRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	passed := r.results[0]
+	r.results = r.results[1:]
+	if !passed {
+		return false, nil
+	}
+	return true, map[string]struct{}{"model": {}}
+}
+
+func TestHealthyTargetKeepsItsRouteThroughOneMissedProbe(t *testing.T) {
+	// Step 1 of the optimizer plan, second attempt: one probe failed six seconds into a load of
+	// 128 requests at once while every running request kept streaming, the route was withdrawn
+	// for a pass, and the gateway turned away 4,550 requests in ten seconds.
+	fixture, directory := reconcilerFixture()
+	fixture.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	store := &probeEventStore{fakeStore: fixture}
+	probes := &scriptedRuntime{results: []bool{false, true, false, false, true}}
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, probes), RouterStartPort: 18080, InstanceID: "instance"}
+	pass := func(wantRouted bool, wantHealth string, wantEvents ...string) {
+		t.Helper()
+		store.events = nil
+		if err := reconciler.Once(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if _, routed := directory.Get("prod"); routed != wantRouted || store.target.Health != wantHealth || strings.Join(store.events, ",") != strings.Join(wantEvents, ",") {
+			t.Fatalf("routed=%t health=%q events=%v; want routed=%t health=%q events=%v", routed, store.target.Health, store.events, wantRouted, wantHealth, wantEvents)
+		}
+	}
+	pass(true, "healthy", "replica_probe_missed") // one miss: the route stays
+	pass(true, "healthy")                         // a pass clears the count
+	pass(true, "healthy", "replica_probe_missed") // a new single miss: still routed
+	pass(false, "unhealthy", "replica_unhealthy") // a second in a row: withdrawn
+	pass(true, "healthy", "replica_healthy")      // back after one passing probe
+	if len(backend.stopped) != 0 {
+		t.Fatalf("a missed probe restarted the router: stopped=%v", backend.stopped)
+	}
+}
+
+func TestUnhealthyOrWrongModelTargetGetsNoGrace(t *testing.T) {
+	fixture, directory := reconcilerFixture()
+	fixture.target.Health = "unhealthy"
+	store := &probeEventStore{fakeStore: fixture}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, &scriptedRuntime{results: []bool{false}}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, routed := directory.Get("prod"); routed || len(store.events) != 0 {
+		t.Fatalf("an unhealthy target that failed its probe was routed: events=%v", store.events)
+	}
+	// A healthy target that answers without its model is wrong, not slow.
+	fixture, directory = reconcilerFixture()
+	fixture.target.UpstreamModel = "another-model"
+	store = &probeEventStore{fakeStore: fixture}
+	reconciler = Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, routed := directory.Get("prod"); routed || store.target.Health != "unhealthy" {
+		t.Fatalf("a target serving another model kept its route: health=%q events=%v", store.target.Health, store.events)
 	}
 }

@@ -132,7 +132,7 @@ provider_inventory() {
       ;;
     kubernetes)
       compose exec -T infercrane sh -eu -c '
-        kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" get deployment,service -l app.kubernetes.io/managed-by=infercrane -o name
+        kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" get deployment,service,networkpolicy -l app.kubernetes.io/managed-by=infercrane -o name
         if kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" api-resources --api-group serving.kserve.io -o name | grep -qx inferenceservices; then
           kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" get inferenceservices.serving.kserve.io -l app.kubernetes.io/managed-by=infercrane -o name
         fi

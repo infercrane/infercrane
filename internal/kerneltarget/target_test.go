@@ -715,3 +715,36 @@ func TestProfileGenerateAndQualifyDriveTheEngineToAQualifiedKernel(t *testing.T)
 		t.Fatalf("second=%+v", second)
 	}
 }
+
+// A hotspot names the input shapes and dtypes its kernels were launched
+// with, read from the operator that launched each kernel; a kernel replayed
+// from a CUDA graph has no operator, so its time counts and its shape stays
+// unknown.
+func TestSummarizeReadsHotspotShapesFromTheLaunchingOperator(t *testing.T) {
+	directory := t.TempDir()
+	trace := `{"traceEvents":[
+	 {"ph":"X","cat":"cpu_op","name":"vllm::fused_add_rms_norm","dur":9,"args":{"External id":7,"Input Dims":[[16,4096],[16,4096],[4096],[]],"Input type":["c10::BFloat16","c10::BFloat16","c10::BFloat16","double"]}},
+	 {"ph":"X","cat":"cuda_runtime","name":"cudaLaunchKernel","dur":2,"args":{"External id":7,"correlation":100}},
+	 {"ph":"X","cat":"kernel","name":"fused_add_rms_norm_kernel","dur":30,"args":{"correlation":100,"stream":7}},
+	 {"ph":"X","cat":"cpu_op","name":"vllm::fused_add_rms_norm","dur":9,"args":{"External id":8,"Input Dims":[[128,4096],[128,4096],[4096],[]],"Input type":["c10::BFloat16","c10::BFloat16","c10::BFloat16","double"]}},
+	 {"ph":"X","cat":"cuda_runtime","name":"cudaLaunchKernel","dur":2,"args":{"External id":8,"correlation":101}},
+	 {"ph":"X","cat":"kernel","name":"fused_add_rms_norm_kernel","dur":50,"args":{"correlation":101,"stream":7}},
+	 {"ph":"X","cat":"cuda_runtime","name":"cudaGraphLaunch","dur":3,"args":{"External id":9,"correlation":200}},
+	 {"ph":"X","cat":"kernel","name":"fused_moe_kernel","dur":120,"args":{"correlation":200,"stream":7}}
+	]}`
+	if err := os.WriteFile(filepath.Join(directory, "a.trace.json"), []byte(trace), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hotspots, _, err := summarizeTraces(directory, kernelplanner.PhaseDecode)
+	if err != nil || len(hotspots) != 2 {
+		t.Fatalf("hotspots=%+v err=%v", hotspots, err)
+	}
+	moe, norm := hotspots[0], hotspots[1]
+	if moe.Family != kernelplanner.MoERouting || len(moe.Shapes) != 0 || len(moe.DTypes) != 0 {
+		t.Fatalf("a graph-replayed kernel got a shape: %+v", moe)
+	}
+	if norm.Family != kernelplanner.ResidualRMSNorm || len(norm.Shapes) != 2 || norm.Shapes[0] != "128×4096 bf16; 128×4096 bf16; 4096 bf16" ||
+		norm.Shapes[1] != "16×4096 bf16; 16×4096 bf16; 4096 bf16" || len(norm.DTypes) != 1 || norm.DTypes[0] != "bf16" {
+		t.Fatalf("norm hotspot = %+v", norm)
+	}
+}

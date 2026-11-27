@@ -1,0 +1,402 @@
+---
+title: Speculation that changes with load
+description: Serve one model from one engine per draft length on the same GPU, and keep awake the one whose draft length fits the present load.
+---
+
+# Speculation that changes with load
+
+Speculative decoding that pays at a light load can cost more than it gives at a heavy one. On
+`Qwen/Qwen3.8-27B-FP8` on one H100 (vLLM 0.34.0), short chat
+had a different fastest setup in each band of load ([what the map measured](#what-the-map-measured)):
+three draft tokens up to about 48 requests at once, one draft token from 64 to 128, and, for requests
+that must see their first token within one second, no speculation at 128. A fixed setup gives up one of those bands.
+
+`infercrane-specswitch` runs one engine per setup on the same GPU, keeps one awake, and swaps them
+when the load has moved to another band and stayed there.
+
+<Warning>
+**Lab-proven.** The product cannot yet prove this technique on your traffic, so it makes no claim
+for it. The gain comes from the load moving between bands, and the product's verdict measures one
+load level per run. In InferCrane's lab, on H100s with one model and one mixed-load trace, both forms
+gave more output within one second of first token than the best fixed setup: the two-engine switch
+on one machine, not confirmed on a fresh one, and the
+[one engine with prefix caching off](#one-engine-prefix-caching-off) on two machines. Neither form
+was shown to give more output overall. The lab ran vLLM's Rust front end and patch v2; the product
+runs the Python front end and patch v4.
+</Warning>
+
+## Why not the engines' own switch
+
+Both engines can lower the draft length as the batch grows, and neither frees the cache that the
+longer draft length reserved. This was read in their code:
+
+| Engine | Switch | What it keys on | Memory |
+|---|---|---|---|
+| vLLM 0.34.0 | `num_speculative_tokens_per_batch_size` in `--speculative-config` | requests scheduled in the step | lookahead slots and the recurrent-state copies stay sized for `num_speculative_tokens` |
+| SGLang 0.5.23 | `--speculative-adaptive`, `--speculative-adaptive-config` | running batch size and acceptance | reserved for the largest candidate |
+
+On a model with recurrent-state layers each draft token keeps another copy of the state for every
+running request. Qwen3.8-27B has three state layer groups and one attention group, so a running
+short request holds `1 + 3 × (1 + drafts)` cache blocks: 4, 7 and 13 with none, one and three draft
+tokens, which is what the map read from the engine's gauges (4.0, 7.1, 13.2). With three draft
+tokens reserved, the engine runs at most about 59 requests at once whatever its schedule says, so it
+cannot reach the 111 that one draft token fits. vLLM's `--use-replayssm`, which drops the per-draft
+copies, is refused for this model class in 0.34.0.
+
+On a model without recurrent-state layers a draft token reserves a few token slots, the engine's
+own switch changes what matters, and this page does not apply.
+
+## How the switch works
+
+```text
+caller -> switch :8000 -> awake engine (127.0.0.1:8101, 3 drafts)
+                          sleeping engine (127.0.0.1:8102, 1 draft)   weights in host memory
+                          sleeping engine (127.0.0.1:8103, none)      weights in host memory
+```
+
+1. **Start.** The command starts each engine in turn with `--enable-sleep-mode`, checks that it
+   answers one token, and puts it to sleep (level 1: weights, CUDA graphs and runtime buffers to
+   host memory, cache discarded). The first band's engine starts last and stays awake.
+2. **Memory.** vLLM 0.34.0 sizes its cache from all free memory unless given a share, and a woken
+   engine commits the same cache again, so an engine sized alone could not wake beside the others.
+   Engines with a share of their own (`--gpu-memory-utilization 0.85`) start first; the command reads
+   the GPU's used memory with them asleep (`memory.probe`) and puts in place of `{memory_share}`, in
+   the other engines' commands, the share that fits one awake beside the rest asleep, less
+   `memory.margin_mib`, at most `memory.max_share`.
+3. **Room.** The switch sends the awake engine at most its room (`room`, the requests its cache
+   holds) and queues the rest in order. A queued request has not started, so a swap never waits for
+   it.
+4. **Load.** Every `sample` the switch reads the requests at once: running plus queued. The load is
+   the highest reading in the last `smooth` window, so the short gaps of a closed loop do not count.
+5. **Bands.** A policy maps load bands to engines. A higher band must hold `raise_after` (3 s by
+   default): staying costs every request, since a light setup under a heavy load queues them all. A
+   lower band must hold `lower_after` (2 minutes) and the awake engine must have been awake
+   `min_dwell` (1 minute): staying costs only some speed, and a swap holds new requests for its
+   whole length. After a swap that failed, the switch waits `min_dwell` before deciding again.
+6. **Swap.** New requests queue; the requests in flight finish (`drain_timeout`); the awake engine
+   sleeps; the next wakes and answers one token; the queue flows to it.
+7. **Failure.** A drain that does not end calls the swap off. A failed sleep or wake wakes the engine
+   the switch started from again. Only if that fails too does `/health` answer 503 and every request
+   503; the command exits when an engine process exits.
+
+The switch serves `/v1/*`, `/version`, `/health` and `/metrics`. It never forwards an engine's sleep
+or development routes. The engines need `VLLM_SERVER_DEV_MODE=1` for their sleep routes, so the
+command refuses an engine that does not pass `--host` with a loopback address.
+
+## Configuration
+
+```json
+{
+  "listen": ":8000",
+  "admin_listen": "127.0.0.1:8199",
+  "engines": [
+    {"name": "drafts-3", "drafts": 3, "url": "http://127.0.0.1:8101", "room": 60,
+     "command": ["vllm", "serve", "/weights/qwen3.8-27b-fp8", "--host", "127.0.0.1", "--port", "8101",
+                 "--enable-sleep-mode", "--gpu-memory-utilization", "{memory_share}",
+                 "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"]},
+    {"name": "drafts-1", "drafts": 1, "url": "http://127.0.0.1:8102", "room": 112,
+     "command": ["vllm", "serve", "/weights/qwen3.8-27b-fp8", "--host", "127.0.0.1", "--port", "8102",
+                 "--enable-sleep-mode", "--gpu-memory-utilization", "{memory_share}",
+                 "--speculative-config", "{\"method\":\"mtp\",\"num_speculative_tokens\":1}"]},
+    {"name": "drafts-0", "drafts": 0, "url": "http://127.0.0.1:8103", "room": 0,
+     "command": ["vllm", "serve", "/weights/qwen3.8-27b-fp8", "--host", "127.0.0.1", "--port", "8103",
+                 "--enable-sleep-mode", "--gpu-memory-utilization", "0.85"]}
+  ],
+  "policies": {
+    "throughput": [{"up_to": 58, "engine": "drafts-3"}, {"engine": "drafts-1"}],
+    "useful-output": [{"up_to": 58, "engine": "drafts-3"}, {"up_to": 111, "engine": "drafts-1"}, {"engine": "drafts-0"}]
+  },
+  "policy": "throughput",
+  "timing": {"sample": "250ms", "smooth": "2s", "raise_after": "3s", "lower_after": "2m",
+             "min_dwell": "1m", "drain_timeout": "1m", "wake_timeout": "3m"},
+  "queue_limit": 1024,
+  "memory": {"probe": ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+             "margin_mib": 1024, "max_share": 0.98}
+}
+```
+
+```bash
+infercrane-specswitch --config switch.json --check
+```
+
+```bash
+infercrane-specswitch --config switch.json
+```
+
+`--config-json` takes the same document as one argument. A zero timing takes its default. Bands
+must rise and end in an open band. A configuration holds two to four engines, a queue of at most
+4,096 requests and 512 MiB of queued request bodies; a request body is at most 16 MiB.
+
+The two policies differ above one draft token's room: for all output, one draft token keeps the
+lead it had at 128 on the map; for output within a first-token limit, requests that wait for room
+miss it, and no speculation fits them all. `POST /switch/policy?name=` on the admin address changes
+the policy; `GET /switch/state` returns the awake engine, the queue and the last 64 swaps.
+
+### Metrics
+
+`/metrics` writes the switch's own series, then the awake engine's metrics as the engine wrote them:
+
+| Series | Meaning |
+|---|---|
+| `infercrane_specswitch_engine_awake{engine,drafts}` | 1 for the awake engine |
+| `infercrane_specswitch_requests_in_flight`, `_requests_queued` | requests at the awake engine, and waiting in the switch |
+| `infercrane_specswitch_swaps_total{from,to,result}` | swaps by result: `swapped`, `drain_timeout`, `sleep_failed`, `wake_failed`, `fatal` |
+| `infercrane_specswitch_swap_seconds_sum`, `_count` | time from a swap's start until requests flow again |
+
+Requests queued in the switch are not in the engine's waiting gauge. Engine counters restart when
+another engine wakes, so a rate across a swap mixes two engines.
+
+## What it costs
+
+- **Host memory:** an engine's host backup (its weights, runtime buffers and CUDA graphs' memory,
+  pinned) is made at its first sleep and kept after it wakes, so the server holds about every
+  engine's weights in host memory, the awake one's included (about 31 GiB each for
+  Qwen3.8-27B-FP8).
+- **GPU memory:** a sleeping engine keeps its CUDA context and whatever sleep mode does not move to
+  host memory, and the awake engine gets the rest less a margin. Its cache is that much smaller than
+  the same setup's alone, which runs with all the memory: at about 1 GiB kept per sleeping engine
+  and a 1 GiB margin, about 3 GiB less cache on an H100, room for about 104 short requests with one
+  draft token instead of 111. How much a sleeping engine keeps is unknown for this model until a run
+  reads it.
+- **Start:** every engine starts once, one after another.
+- **Swap:** the drain (the longest answer in flight), one sleep and one wake. In vLLM 0.34.0 a sleep
+  copies the weights, runtime buffers and CUDA graphs' memory to host memory and drops the cache; a
+  wake maps memory again and copies them back (the graphs are not captured again), then maps the
+  cache afresh. The switch wakes the weights and the cache apart and records each part of every
+  swap: `drain_seconds`, `sleep_seconds`, `wake_weights_seconds`, `wake_cache_seconds` and
+  `first_token_seconds` (`GET /switch/state`). Every request that
+  arrives meanwhile waits in the switch, and that wait counts in its time to first token. On the
+  stand-in trace below, with slow sleeps and wakes, requests that arrived just after the load rose
+  waited many seconds for their first token. How long a sleep and a wake take on a GPU is not known
+  yet.
+
+## What one gate measured
+
+On one H100 with `Qwen/Qwen3.8-27B-FP8` (vLLM 0.34.0), a two-engine switch (three draft tokens at
+0.92 of the GPU, one draft token sized by the switch), one run:
+
+- **Sleep and wake work and keep answers exact:** every answer asked one at a time after a wake was
+  word for word that of servers that never slept, one-at-a-time speed was about unchanged, and no
+  request failed.
+- **A swap took a few seconds:** the drain took most of it, then the sleep, the wake and the first
+  token. An engine's first sleep is slower, since it makes its host backup.
+- **A sleeping engine kept a few GiB of GPU memory,** so each awake engine had somewhat less cache
+  than alone. A third engine would leave less still, so for this model on an 80 GB GPU the switch
+  runs two.
+- **Host memory held both engines' weights:** each keeps its backup after waking.
+
+## How the planner proposes it
+
+Rule set `diagnosis-technique-rules-v11` adds the technique `adaptive-speculation` ("Speculation
+that changes with load"), chosen by `kv_cache.speculation_bands`. It fires on a server that runs
+three draft tokens or one, of a model with recurrent-state layers, whose load is past the room three
+draft tokens leave. Its reason states the rooms from the engine's own readings and the bands for the
+run's goal. It ranks after the fixed choice for the present load (priority 40). It is listed and not
+measured: no candidate is built until the switch's serving image is published, and the plan says
+so. Since rule set `diagnosis-technique-rules-v12` the rule chooses the
+[one-engine form](#one-engine-prefix-caching-off) in its place when that form's image is available. Like every speculation setup it needs a task score before it can be chosen.
+
+It is also registered under the [technique contract](/features/technique-contract) as
+`adaptive-speculation` 0.1.0 (`optimizer.AdaptiveSpeculation`), runtime policy `adaptive`: for a
+starting setup on vLLM 0.34.0 on an H100 with the model's own prediction head, it returns two bands,
+three draft tokens up to the room they leave and one draft token above, each band the starting
+setup's flags with only the draft length changed. It relieves `decode-steps` and `kv-cache-room`,
+costs `first-token` (the swap), `gpu-memory` (what the sleeping engine keeps, a few GiB on the gate)
+and `host-memory` (about the weights' size per engine, about 31 GiB for this model, the awake
+engine's included), and falls back to the starting setup. Bands are judged by the per-band verdict, and the switch's configuration takes the
+verdict's `switch_bands` as one of its policies.
+
+## One engine, prefix caching off
+
+The switch exists because vLLM's own schedule keeps every request's state sized for the longest
+draft length. InferCrane's patch to vLLM 0.34.0, `infercrane-state-by-draft-v4`
+(`deploy/vllm-state-by-draft`), changes that in one engine:
+
+1. When the scheduler admits a request, the request reserves the state of the draft length the
+   schedule gives the batch it joins, for its whole life: 13 blocks with three draft tokens, 7 with
+   one, 4 with none on Qwen3.8-27B.
+2. A step drafts no more tokens than the request with the smallest reservation holds. The recurrent
+   kernels read a request's state at the column of its last accepted token and write one column per
+   query token, so every request stays inside the columns it reserved. A request admitted at a heavy
+   load keeps the whole batch at its draft length until it finishes.
+3. A finished request's reservation is dropped. Every 50 admissions the scheduler logs the running
+   requests by reserved draft tokens.
+4. vLLM's Prometheus logger serves the same count on `/metrics`:
+   `vllm:infercrane_running_reserving_{0,1,3}_drafts`, and
+   `vllm:infercrane_running_mixed_reservations`, the smaller of those reserving three and those
+   reserving fewer, above zero only when both run together. This is vLLM's Python front end, the
+   product's default; the Rust front end (`VLLM_USE_RUST_FRONTEND=1`) does not serve them.
+5. When that logger starts, the engine runs the image's verifier itself (the receipt, and the
+   sha256 of all four patched files) and exports the answer as
+   `vllm:infercrane_state_by_draft_receipt_verified`, 1 or 0.
+
+Versions 3 and 4 keep version 2's reservation edits, which the H100 proofs ran, byte for byte, and
+add only the gauges and the engine's own receipt check. A test pins the digest of version 2's edits.
+
+<Warning>
+**Prefix caching off is this form's condition.** The patch covers vLLM's recurrent-state cache mode
+`none`, the mode with prefix caching off. With prefix caching on (mode `align`, vLLM's default) it
+changes nothing, and every request keeps the full reservation. So the setup runs with
+`--no-enable-prefix-caching`, and it must never serve traffic that shares prefixes, such as agent
+sessions, long shared system prompts, or retrieval over a shared context: there it would lose the
+prefix cache.
+</Warning>
+
+### The engine image
+
+`deploy/vllm-state-by-draft/Dockerfile` builds the image from vLLM 0.34.0 for amd64
+(`vllm/vllm-openai@sha256:cf5b2fdd…`, the image inside the product's pinned manifest list). It
+applies the patch, which refuses any vLLM source whose sha256 it does not know, runs a CPU check
+with vLLM's own block manager, and writes a read-only receipt. Its entrypoint,
+`/opt/infercrane/serve-state-by-draft`, checks the receipt and the sha256 of all four patched vLLM
+files with the engine's own Python before it runs `vllm serve`, and exits without starting the
+server when any differ, or when `VLLM_USE_RUST_FRONTEND` is set to anything but `0`. The
+technique's setup uses that file as its server command, so it cannot start on a stock vLLM image,
+where the file does not exist.
+
+The image's identity is its content: the base image's digest and the patch's sha256 (`53e1b1ed…`,
+pinned in `internal/optimizer`; an edit to the patch fails a test until the pin is reviewed). No
+image is published yet. Until one is, the technique proposes nothing. A qualification run may name
+an image built from the folder by digest in `INFERCRANE_QUALIFY_STATE_BY_DRAFT_IMAGE`. The setup then
+says so in its limitations and in its feature `engine_image_source` (`qualification`, against
+`published`), because the same request without the variable plans differently, and the entrypoint
+still checks the receipt. The variable is for qualification runs only; never set it in a production
+control plane's configuration.
+
+### What the technique proposes
+
+The condition is in the technique's manifest, not only on this page. The technique is registered
+under the [technique contract](/features/technique-contract) as
+`adaptive-speculation-one-engine` 0.1.0 (`optimizer.AdaptiveSpeculationOneEngine`). Its
+`requires.signals_at_most` holds `runtime_prefix_cache_hit_rate` at most 0.02. The contract refuses
+a setup before the technique is asked when its traffic took more than 2% of its input from the
+prefix cache, or when no hit rate was read. The technique checks again itself.
+
+It proposes only what the H100 proofs measured. For a goal of useful output within 1,000 ms of first
+token, on a starting setup that speculates with the model's own prediction head on vLLM 0.34.0, it
+returns one setup: the starting setup's flags, prefix caching off, and a
+`num_speculative_tokens_per_batch_size` schedule of three draft tokens up to 83% of the room three
+leave and none above, up to the setup's `--max-num-seqs`. On the proofs' model the engine's readings
+give `[[1,48,3],[49,512,0]]`, the schedule the proofs ran. The edge sits below the room because a
+request reserves the state of the band it joins: on the gate below, an edge of 110 against one draft
+token's room of about 111 was never passed.
+
+It proposes nothing for another goal or first-token limit, a starting setup on vLLM's Rust front end
+(`VLLM_USE_RUST_FRONTEND` set; the patch's gauges are on the Python front end's metrics) or with
+other engine environment, a starting setup that does not speculate, a model
+without recurrent-state layers, or loads that all fit three draft tokens. It relieves
+`decode-steps` and `kv-cache-room`, costs `prefill-compute` (a repeated prefix is computed again),
+and falls back to the starting setup.
+
+Rule `kv_cache.speculation_bands` (rule set `diagnosis-technique-rules-v12`) chooses it in place of
+the two-engine switch when its image is available, at the same place in the order (priority 40). The
+technique's own reason for proposing nothing, such as the goal or the prefix-cache hit rate, is the
+plan's reason for skipping it. Without the image the plan lists the two-engine switch, as before.
+
+### Its evidence and disclosures
+
+A result is "shown" only with two evidence items, which the product reads from the run itself, not
+from a harness or the engine's log:
+
+| Evidence | What the campaign must have recorded |
+|---|---|
+| `state-by-draft-receipt` | In every measured run of both windows, the patched gauges answered and `vllm:infercrane_state_by_draft_receipt_verified` read 1 at every scrape: the engine found the image's receipt and its patched files as built. Stock vLLM has none of these gauges. |
+| `reservation-mix` | In every measured run, requests reserving three draft tokens and fewer ran together at some scrape: `vllm:infercrane_running_mixed_reservations` reached at least 1. |
+
+Both digest one record (`infercrane.state-by-draft-proof/v1`) that the report rebuilds from the
+stored measurement. AIPerf scrapes the gauges with the engine's other metrics. Because both come from
+the engine, they hold on any deploy path, including a proxy in front of a remote engine, where the
+deployment names the proxy's image; the record keeps that image and command for audit.
+
+Every claim carries four disclosures. The setup shows them among its limitations, and the result
+records the ones it showed; a result missing one is "not shown":
+
+- All output, not only output within one second of first token, was not shown to improve against
+  the best fixed setup in the H100 lab runs.
+- At 128 requests at once it served less output within one second of first token than the plain
+  vLLM command on the same H100; the cause is not read.
+- It runs a patched vLLM 0.34.0 image with prefix caching off, and is refused for traffic that takes
+  more than 2% of its input from the prefix cache.
+- The H100 lab runs used patch v2 and vLLM's Rust front end; the product runs patch v4 and vLLM's
+  Python front end.
+
+The disclosures describe the lab runs and quote no figure from them. A claim's numbers come from the
+product's own run. Until a product run shows the gain, the technique stays "lab-proven".
+
+### What the lab measured
+
+These are lab runs on Modal H100s with InferCrane's own harness, rules written before each server,
+not runs of the product. `Qwen/Qwen3.8-27B-FP8`, vLLM 0.34.0, the patch at version 2, schedule
+`[[1,48,3],[49,512,0]]`, a mixed-load trace of short chat, each setup alone on the same machine.
+Every setup ran vLLM's Rust front end (`VLLM_USE_RUST_FRONTEND=1`, the publisher's); the product
+serves the Python front end.
+
+On two machines the engine gave more output within one second of first token than the best fixed
+setup alone. Neither run showed more output overall. The first run's KL floor was too noisy to judge
+its KL bar. The second passed all nine of its bars: decode and forced KL at a mixed batch within the
+fixed setups' floor, every greedy answer at one request identical, no failed request, and requests
+reserving three and fewer logged together. On the second machine the copy of the no-speculation
+setup did not finish (the launching laptop slept); the rules' missing-copy allowance of 0.75%
+applied. At 128 at once, the engine served less output within one second than the plain vLLM
+command; the cause is not read.
+
+Earlier, one gate on one H100 ran three draft tokens up to 48, one up to 110, none above. Its
+answers one at a time were word for word those of the released vLLM's fixed setups, and its task
+score showed no measurable difference. By its rules it did not pass: agreement word for word under
+load fell short of its bar, and a schedule with no draft token at any load did not start (below).
+The none band was never reached, since the batch filled at one draft token's room; that is why the
+edge sits below the room.
+
+## What the map measured
+
+The bands come from InferCrane's H100 map of 23 November 2026 (`tools/fast-track-map`, rules
+`rules-h100-map-2026-11-23.md` and `rules-h100-crossover-2026-11-23.md`): three fresh servers per
+setup and load, medians, output tokens per second on short chat (one message in, at most 295 tokens
+out). They are the reason for the design, not a result of it.
+
+On the map, three draft tokens gave the most output at 32 and 48 requests at once, and one draft
+token at 64, 96 and 128. Past 64, three draft tokens fell back to about no speculation's output at
+96 and below it at 128. For output whose first token came within one second at 128, no speculation
+gave far more than one draft token.
+
+## Stand-in replay
+
+`TestStandInReplayReachesTheBandWinnerInEveryBand` (`internal/specswitch`) runs three stand-in
+engines whose per-request speeds and rooms are the map's, 50 times faster than real time, at 32, 64,
+96 and 128 at once: through the switch and against each engine alone. Through the switch the output
+matched the best engine alone in each band (the recorded run), every swap ended inside the warm-up,
+no request failed and none reached a sleeping engine. The record is
+`docs/testing/evidence/specswitch-stand-in-replay-2026-11-26.json`. A stand-in's speeds are the
+map's by construction, so this shows the switch's logic and overhead, not a gain on a GPU.
+
+### Across bands
+
+`TestStandInTraceAcrossBands` holds 32, then 128, then 32 requests at once, and scores the whole
+trace for the switch and each engine alone, by all output and by output whose first token, every
+queue included, came within one second. The grid
+(`docs/testing/evidence/specswitch-stand-in-trace-2026-11-26.json`) varies the phase length (5 or
+15 minutes) and the time of each sleep and each wake (2, 8 or 20 s).
+
+With short phases and quick swaps, and with long phases and middling swaps, the switch came out
+ahead of the best engine alone on both scores, more on output within one second. With short phases
+and middling swaps it came out slightly behind on both. With long phases and the slowest swaps it
+came out behind on all output and ahead within one second.
+
+The switch pays when load stays in a band long against the time a swap takes. That is the stand-in's
+answer with the map's speeds, not a gain on a GPU; the swap time on a GPU decides it.
+
+## Limits
+
+- One server. The router and gateway are unchanged; on several servers each switches on its own
+  load.
+- The one-engine form needs prefix caching off and the patched vLLM 0.34.0 image. It is refused for
+  traffic that takes more than 2% of its input from the prefix cache, or whose hit rate was not
+  read, and proposed only for useful output within one second. Its image is not published yet.
+- vLLM 0.34.0 does not start a per-batch schedule whose longest draft is zero (`[[1,512,0]]`): its
+  capture of the prediction head's CUDA graphs passes an argument the prefill does not take. A
+  schedule that drafts somewhere starts; the candidate always starts with three draft tokens.
+- vLLM only, with sleep mode. SGLang has no equivalent wired in.
+- A readiness check that sends an inference request waits in the queue during a swap; a swap longer
+  than its timeout fails that check.
+- Bands come from rooms the engines reported at one load, or from a measured map. Traffic with
+  longer prompts takes more blocks per request and moves the edges.

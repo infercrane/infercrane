@@ -33,7 +33,7 @@ grep -Fq 'using: node24' "$root/actions/infercrane/action.yml"
 grep -Fq "input(\"version\", \"v$release_version\")" "$root/actions/infercrane/index.js"
 grep -Fq "infercrane:v$release_version" "$root/compose.production.yaml"
 grep -Fq "version = \"$release_version\"" "$root/examples/terraform/main.tf"
-grep -Fq 'version: 0.22.1' "$root/examples/infercrane.yaml"
+grep -Fq 'version: 0.34.0' "$root/examples/infercrane.yaml"
 grep -Fq "RELEASE_CANDIDATE_TAG ?= \$(shell jq -r '.candidate_tag' .release/version.json)" "$root/Makefile"
 grep -Fq 'GORELEASER_CURRENT_TAG=$(RELEASE_CANDIDATE_TAG)' "$root/Makefile"
 # Require notes for the artifact being published: the candidate while it is
@@ -64,6 +64,7 @@ jq -e '.[0].files | map(.path) | index("LICENSE") != null and index("NOTICE") !=
 "$root/scripts/verify-sdk-artifacts.sh" "$package_dir" "$release_version" prepare
 "$root/scripts/build-npm-bootstrap-package.sh" "$package_dir/npm-bootstrap" >/dev/null
 node --test "$root"/actions/infercrane/test/*.test.js
+"$root/examples/proof-gate/dry-run.sh"
 
 (
   cd "$root/integrations/terraform"

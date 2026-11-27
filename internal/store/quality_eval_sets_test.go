@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -95,5 +96,27 @@ func TestQualityEvalSetsAreContentAddressedPerTenant(t *testing.T) {
 	}
 	if _, err = s.QualityEvalSet(ctx, "global", digest); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("deleted eval set: %v", err)
+	}
+}
+
+// A full task set (1,000 items, more than the general eval set's 512 KiB) is
+// stored like any eval set.
+func TestAFullTaskSetIsStored(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	prompts := make([]map[string]any, 0, qualitycheck.MaxTaskPrompts)
+	for index := range qualitycheck.MaxTaskPrompts {
+		prompts = append(prompts, map[string]any{"id": fmt.Sprintf("gsm8k.test.%d", index), "prompt": strings.Repeat("A worked question with enough text. ", 18), "expected": []string{fmt.Sprint(index)}})
+	}
+	body, err := json.Marshal(map[string]any{"schema": qualitycheck.EvalSetSchemaV1, "name": "task-set", "version": "1", "max_tokens": 1024, "grading": qualitycheck.GradingAnswerLine, "prompts": prompts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) <= 512*1024 || len(body) > qualitycheck.MaxEvalSetBytes {
+		t.Fatalf("the test set is %d bytes, want between 512 KiB and 1 MiB", len(body))
+	}
+	stored, created, err := s.RecordQualityEvalSet(ctx, "global", "operator", body)
+	if err != nil || !created || stored.PromptCount != qualitycheck.MaxTaskPrompts {
+		t.Fatalf("stored=%+v created=%t err=%v", stored.PromptCount, created, err)
 	}
 }

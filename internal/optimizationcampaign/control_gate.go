@@ -84,6 +84,8 @@ func applyControlGate(campaign domain.OptimizationCampaign, objective, workloadP
 			}
 		}
 	}
+	swing, swingFrom := machineSwing(rows, evidenceToCandidate, benchmarks, control.ID, metric)
+	widenForMachines(campaign, control, hasControl, gate.assessments, swing, swingFrom)
 	if labSelected == "" {
 		// Nothing is selected, so Lab's comparability and constraint reasons
 		// stand; the assessments and guard checks are still persisted.
@@ -389,4 +391,91 @@ func RankedMetric(evaluation domain.LabEvaluation) string {
 		}
 	}
 	return ""
+}
+
+// widenForMachines measures the machine allowance from the run itself and
+// uses it in every decision. The allowance is the largest of three: the
+// judge's fixed floor (machineDifference), the difference a copy of the
+// control measured from it (a copy differs only by its machine), and the
+// machine difference a setup measured on two pairs of servers implies
+// (machineSwing). When it is above a candidate's interval's own machine term,
+// the interval is widened by it and the decision taken again. A copy that
+// measures as a gain is itself never a winner: the rest of the gate already
+// treats it as any candidate, and the widened intervals make its own gain the
+// allowance.
+func widenForMachines(campaign domain.OptimizationCampaign, control domain.OptimizationCandidateRun, hasControl bool, assessments map[string]ControlAssessment, swing float64, swingFrom string) {
+	if !hasControl {
+		return
+	}
+	// A copy is found by its draft; without the control's, only the swing
+	// can measure the machines.
+	copyDifference, copyID := 0.0, ""
+	if controlDraft, err := candidateDraft(control); err == nil {
+		for _, run := range campaign.Candidates {
+			if run.ID == control.ID {
+				continue
+			}
+			draft, err := candidateDraft(run)
+			if err != nil || !copyOfControl(controlDraft, draft) {
+				continue
+			}
+			if assessment := assessments[run.ID]; assessment.Basis == basisInterleaved && assessment.Comparison != nil && math.Abs(assessment.Comparison.Delta) > copyDifference {
+				copyDifference, copyID = math.Abs(assessment.Comparison.Delta), run.ID
+			}
+		}
+	}
+	difference, why := copyDifference, fmt.Sprintf("a copy of the current setup measured %.1f%% from it", copyDifference*100)
+	if swing > difference {
+		label := CandidateLabels(campaign)[swingFrom]
+		if label == "" {
+			label = "a setup"
+		}
+		difference, why = swing, fmt.Sprintf("%s changed by a different amount on fresh servers than on its first ones, which puts two machines %.1f%% apart", label, swing*100)
+	}
+	if difference <= machineDifference {
+		return
+	}
+	for id, assessment := range assessments {
+		if id == copyID || assessment.Basis != basisInterleaved || assessment.Comparison == nil || difference <= assessment.Comparison.MachineDifference {
+			continue
+		}
+		widened := WidenForMachines(*assessment.Comparison, difference)
+		if widened.Decision != assessment.Decision && assessment.Decision == DecisionImproved {
+			assessment.Decision = widened.Decision
+		}
+		assessment.Comparison = &widened
+		assessment.Reason += fmt.Sprintf("; %s, so two machines are allowed to differ by that much instead of %.2f%%", why, machineDifference*100)
+		assessments[id] = assessment
+	}
+}
+
+// machineSwing is the machine difference a setup measured twice implies. The
+// same candidate against the same control setup, in its first window and
+// again on fresh servers, can change only by the machines and run noise; two
+// independent draws of a machine difference differ by about the square root
+// of two times one, so the swing is the log difference over that. Run noise
+// is in it too, which errs toward a wider interval. Only valid second windows
+// count. It returns the largest, and the candidate it came from.
+func machineSwing(rows []lab.Candidate, evidenceToCandidate map[string]string, benchmarks map[string]domain.BenchmarkResult, controlID, metric string) (float64, string) {
+	best, from := 0.0, ""
+	for _, row := range rows {
+		id := evidenceToCandidate[row.EvidenceID]
+		if id == controlID {
+			continue
+		}
+		measured := decodeRankingWorkload(benchmarks[row.EvidenceID].WorkloadJSON).Measured
+		if measured == nil || measured.Control.Role != ControlRoleBracketed || measured.Confirmation == nil || measured.Confirmation.Control.Role != ControlRoleBracketed {
+			continue
+		}
+		first, firstOK := measured.Comparison[metric]
+		second, secondOK := measured.Confirmation.Comparison[metric]
+		if !firstOK || !secondOK || first.Delta <= -1 || second.Delta <= -1 {
+			continue
+		}
+		swing := math.Expm1(math.Abs(math.Log1p(first.Delta)-math.Log1p(second.Delta)) / math.Sqrt2)
+		if swing > best {
+			best, from = swing, id
+		}
+	}
+	return best, from
 }

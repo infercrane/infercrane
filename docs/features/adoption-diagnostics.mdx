@@ -48,9 +48,11 @@ database error leaves its health and its published route unchanged until the nex
 The health probe asks `GET /health`, then `GET /v1/models`, which must list the connected model. A
 hosted API such as OpenAI's has no `/health` route: a `404` there is treated as no such probe, and
 the model list alone decides. Any other non-OK answer marks the server unhealthy. The control plane needs
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`; otherwise the request is refused with
-`upstream_credential_unavailable`, and the agent (which keeps the key on the server's machine) is
-the path.
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, which in turn requires `INFERCRANE_WORKER_CREDENTIAL_KEY`
+(each at least 32 bytes; see
+[keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials)). Without the
+encryption key the request is refused with `upstream_credential_unavailable`, and the agent (which
+keeps the key on the server's machine) is the path.
 
 ## Diagnose an adapter qualification gap
 

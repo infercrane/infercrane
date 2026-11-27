@@ -56,3 +56,29 @@ func TestPlanWritesProposalAndRequiresReviewDateToReplaceCatalog(t *testing.T) {
 		t.Fatal("--write did not install the reviewed proposal")
 	}
 }
+
+func TestRegateRewritesOnlyWithWrite(t *testing.T) {
+	committed, err := os.ReadFile(filepath.Join(fixtures, "previous.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := filepath.Join(t.TempDir(), "catalog.json")
+	if err = os.WriteFile(catalog, committed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err = run(context.Background(), []string{"regate", "--catalog", catalog}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, _ := os.ReadFile(catalog); !bytes.Equal(unchanged, committed) || !strings.Contains(stdout.String(), "entries changed eligibility") {
+		t.Fatalf("regate without --write changed the catalog or said nothing: %s", stdout.String())
+	}
+	stdout.Reset()
+	if err = run(context.Background(), []string{"regate", "--catalog", catalog, "--write"}, &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err = run(context.Background(), []string{"regate", "--catalog", catalog}, &stdout, &bytes.Buffer{}); err != nil || !strings.Contains(stdout.String(), "0 of ") {
+		t.Fatalf("a regated catalog regated again: %s err=%v", stdout.String(), err)
+	}
+}

@@ -1394,6 +1394,10 @@
                         "additionalProperties": true,
                         "type": "object"
                       },
+                      "rollout": {
+                        "description": "A server a rollout started beside the endpoint's own. An agent serving out of contact with the control plane, inside its offline grace, routes only to the endpoint's own servers.",
+                        "type": "boolean"
+                      },
                       "runtime": {
                         "type": "string"
                       },
@@ -3414,6 +3418,14 @@
             "minimum": 1,
             "type": "integer"
           },
+          "kernel_configs": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KernelConfigSet"
+              }
+            ],
+            "description": "The engine's own MoE kernel tuned for this GPU and workload, as files the engine reads at start. Only for the engine version and GPU the set was tuned for, on the pinned image; Kubernetes delivers it and other adapters refuse the deployment before provisioning."
+          },
           "managed_runtime_seconds": {
             "maximum": 86400,
             "minimum": 900,
@@ -3482,11 +3494,12 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Reviewed engine environment switches for the runtime's pinned image on the GPU's platform, such as VLLM_ROCM_USE_AITER (0 or 1) for vLLM 0.22.1 on AMD Instinct MI300X, MI325X, MI350X, and MI355X. Any other name or value is rejected, and adapters that cannot pass it refuse the deployment before provisioning. Never put credentials here.",
+            "description": "Reviewed engine environment switches for the runtime's pinned image on the GPU's platform: VLLM_ROCM_USE_AITER (0 or 1) for vLLM 0.34.0 and 0.22.1 on AMD Instinct MI300X, MI325X, MI350X, and MI355X, and VLLM_USE_RUST_FRONTEND (0 or 1) for vLLM 0.34.0 on NVIDIA GPUs. Any other name or value is rejected, and adapters that cannot pass it refuse the deployment before provisioning. Never put credentials here.",
             "maxProperties": 8,
             "type": "object"
           },
           "runtime_version": {
+            "description": "Engine release. Built-in runtimes default to the current pinned release (vLLM 0.34.0, SGLang 0.5.23); vLLM 0.22.1 and SGLang 0.5.12 are kept only for revisions that already record them. A release without a pinned image is rejected for an elastic deployment that uses the built-in image; serverless and Dynamo deployments record the operator image's release.",
             "type": "string"
           },
           "serving": {
@@ -6879,6 +6892,80 @@
         },
         "type": "object"
       },
+      "KernelConfigSet": {
+        "additionalProperties": false,
+        "description": "The engine's own kernels tuned for one GPU and the step sizes of one workload, as data the engine reads at start (vLLM's fused-MoE tile files). It carries no code. The server accepts only reviewed engine versions, file names in the engine's form for the set's device, canonical files of tile settings, and matching sha256 digests.",
+        "properties": {
+          "device": {
+            "description": "The GPU's name as the engine writes it in a file name, such as NVIDIA_H100_80GB_HBM3.",
+            "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+            "type": "string"
+          },
+          "digest": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "The file's exact bytes: a JSON object of step sizes to tile settings, in canonical form.",
+                  "maxLength": 32768,
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 160,
+                  "type": "string"
+                },
+                "sha256": {
+                  "pattern": "^[a-f0-9]{64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "content",
+                "sha256"
+              ],
+              "type": "object"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "type": "array"
+          },
+          "operator": {
+            "enum": [
+              "fused-moe"
+            ],
+            "type": "string"
+          },
+          "runtime": {
+            "enum": [
+              "vllm"
+            ],
+            "type": "string"
+          },
+          "runtime_version": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "tuner": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operator",
+          "runtime",
+          "runtime_version",
+          "device",
+          "tuner",
+          "digest",
+          "files"
+        ],
+        "type": "object"
+      },
       "KernelOpportunityRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9678,9 +9765,255 @@
         ],
         "type": "object"
       },
+      "OptimizationBandStudy": {
+        "additionalProperties": false,
+        "description": "Each finished campaign is its load band's verdict: its judge's winner, confirmed on fresh servers, or the current setup kept. Setups are keyed by what they serve (model, engine, flags, environment, GPUs), so one setup has one key across campaigns.",
+        "properties": {
+          "campaigns": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "band": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "band",
+                "outcome"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "current": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              "infercrane.dev/band-study/v1"
+            ],
+            "type": "string"
+          },
+          "setups": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "engine": {
+                  "type": "string"
+                },
+                "engine_version": {
+                  "type": "string"
+                },
+                "env": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "engine",
+                "engine_version",
+                "args"
+              ],
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "verdict": {
+            "additionalProperties": false,
+            "properties": {
+              "bands": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "copy_gain": {
+                      "type": "number"
+                    },
+                    "copy_inside_noise": {
+                      "type": "boolean"
+                    },
+                    "current": {
+                      "type": "number"
+                    },
+                    "decision": {
+                      "enum": [
+                        "winner",
+                        "keep_current",
+                        "no_decision",
+                        "unknown"
+                      ],
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "load": {
+                      "type": "integer"
+                    },
+                    "noise_floor": {
+                      "type": "number"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "repeats_steady": {
+                      "type": "boolean"
+                    },
+                    "setups": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "ahead": {
+                            "type": "boolean"
+                          },
+                          "gain": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "held_back": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "output_gain": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "gain",
+                          "output_gain",
+                          "ahead"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "spread": {
+                      "type": "number"
+                    },
+                    "winner": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "kind",
+                    "load",
+                    "current",
+                    "spread",
+                    "noise_floor",
+                    "repeats_steady",
+                    "decision",
+                    "setups",
+                    "reason"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "metric": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "summary": {
+                "enum": [
+                  "one_setup",
+                  "setup_per_band",
+                  "incomplete"
+                ],
+                "type": "string"
+              },
+              "switch_bands": {
+                "description": "The band table a per-server switch serves from; present only when every band decided and the bands are one kind of traffic.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "engine": {
+                      "type": "string"
+                    },
+                    "up_to": {
+                      "description": "The band's largest load in requests at once; absent for the last band, above every other.",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "engine"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "winners": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "metric",
+              "bands",
+              "summary",
+              "winners",
+              "reason"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "model",
+          "current",
+          "campaigns",
+          "setups",
+          "verdict"
+        ],
+        "type": "object"
+      },
       "OptimizationCampaign": {
         "additionalProperties": false,
         "properties": {
+          "agent_id": {
+            "description": "The agent that measures the run's setups, when it runs on an agent's endpoint.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "approval_expires_at": {
             "format": "date-time",
             "type": [
@@ -9796,6 +10129,13 @@
           },
           "target_deployment": {
             "type": "string"
+          },
+          "target_endpoint": {
+            "description": "The endpoint an InferCrane agent serves, when the run evolves one; its agent measures every setup in the customer's cluster and target_deployment is empty.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -9991,6 +10331,9 @@
           "target_endpoint": {
             "type": "string"
           },
+          "technique": {
+            "$ref": "#/components/schemas/OptimizationCandidateTechnique"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -10039,7 +10382,11 @@
             "type": "object"
           },
           "target_deployment": {
-            "description": "Required only for evolve_endpoint campaigns; names the stable deployment whose candidate revision will be compared.",
+            "description": "For an evolve_endpoint campaign: the stable deployment whose candidate revision will be compared. Name it or target_endpoint, not both.",
+            "type": "string"
+          },
+          "target_endpoint": {
+            "description": "For an evolve_endpoint campaign on an endpoint one InferCrane agent serves: the agent measures every setup in the customer's cluster against the endpoint's own server, and only numbers come back. Name it or target_deployment, not both.",
             "type": "string"
           }
         },
@@ -10396,6 +10743,126 @@
             "items": {
               "additionalProperties": false,
               "properties": {
+                "answer_check": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "block_threshold_percent": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "evidence_id": {
+                      "type": "string"
+                    },
+                    "prompts": {
+                      "type": "integer"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "reference": {
+                      "description": "True for the setup whose answers the others are compared with.",
+                      "type": "boolean"
+                    },
+                    "regression_percent": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "score": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "source": {
+                      "enum": [
+                        "infercrane",
+                        "customer"
+                      ],
+                      "type": "string"
+                    },
+                    "suite": {
+                      "type": "string"
+                    },
+                    "tool_call_cases": {
+                      "type": "integer"
+                    },
+                    "tool_calls_broken": {
+                      "type": "integer"
+                    },
+                    "verdict": {
+                      "enum": [
+                        "PASS",
+                        "WATCH",
+                        "BLOCK",
+                        "UNKNOWN"
+                      ],
+                      "type": "string"
+                    },
+                    "watch_threshold_percent": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "verdict",
+                    "score",
+                    "regression_percent",
+                    "watch_threshold_percent",
+                    "block_threshold_percent",
+                    "reason"
+                  ],
+                  "type": "object"
+                },
+                "confirmation": {
+                  "allOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "basis": {
+                          "description": "Set on a regression: drifted_control_runs is read from runs whose control drifted and can show a setup is worse, never better.",
+                          "enum": [
+                            "interleaved_control",
+                            "drifted_control_runs"
+                          ],
+                          "type": "string"
+                        },
+                        "change_percent": {
+                          "type": "number"
+                        },
+                        "decision": {
+                          "enum": [
+                            "improved",
+                            "regressed",
+                            "no_measurable_difference",
+                            "unchanged",
+                            "unknown"
+                          ],
+                          "type": "string"
+                        },
+                        "metric": {
+                          "type": "string"
+                        },
+                        "noise_floor_percent": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "metric",
+                        "change_percent",
+                        "noise_floor_percent",
+                        "decision"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "The objective comparison measured again on fresh servers. A gain in versus_baseline counts only when this shows it too. Absent when no second window was measured."
+                },
                 "cost_per_million_output_tokens": {
                   "type": [
                     "number",
@@ -10549,6 +11016,9 @@
                 },
                 "state": {
                   "type": "string"
+                },
+                "technique": {
+                  "$ref": "#/components/schemas/OptimizationCandidateTechnique"
                 },
                 "tpot_p95_ms": {
                   "type": [
@@ -10946,7 +11416,8 @@
                     "ttft_p95_ms",
                     "output_tokens_per_second_per_user",
                     "output_tokens_per_second_per_accelerator",
-                    "requests_per_second"
+                    "requests_per_second",
+                    "useful_output_tokens_per_second"
                   ],
                   "type": "string"
                 },
@@ -11181,11 +11652,12 @@
             "type": "string"
           },
           "objective_metric": {
-            "description": "Measured metric the objective ranked on: p95 time to first token for interactive and latency, p95 request latency for those two on a non-streaming (buffered) profile, and output throughput for throughput and cost-efficiency, which divides it by the sourced hourly cost.",
+            "description": "Measured metric the objective ranked on: p95 time to first token for interactive and latency, p95 request latency for those two on a non-streaming (buffered) profile, output throughput for throughput and cost-efficiency, which divides it by the sourced hourly cost, and output throughput of requests within the first-token limit for useful-output.",
             "enum": [
               "ttft_p95_ms",
               "latency_p95_ms",
-              "output_token_throughput"
+              "output_token_throughput",
+              "useful_output_throughput"
             ],
             "type": "string"
           },
@@ -11734,8 +12206,81 @@
             "description": "The exact command that unblocks a waiting step.",
             "type": "string"
           },
+          "divergence": {
+            "additionalProperties": false,
+            "description": "InferCrane's built-in check, for a setup that changes numeric precision: both servers read the reference's prompt and its own greedy answer as one forced sequence, and each position's KL divergence of this setup from the reference is taken over the reference's top tokens plus one bucket for the rest. Prefill is the prompt's positions, generation the answer's. Evidence only; it passes or blocks nothing. Absent when not measured, including when a server does not return prompt log probabilities.",
+            "properties": {
+              "generation_max_kl": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "generation_mean_kl": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "generation_tokens": {
+                "description": "Answer positions read: the sample size of the generation values.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "max_answer_tokens": {
+                "description": "The cap on each reference answer read.",
+                "maximum": 4096,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "method": {
+                "enum": [
+                  "forced-decoding-kl-top-k-v1"
+                ],
+                "type": "string"
+              },
+              "prefill_mean_kl": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "prefill_tokens": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "prompt_set": {
+                "description": "The prompts read: the task set's own items when the campaign has a task set, else infercrane-divergence, built-in prompts with long open answers.",
+                "maxLength": 128,
+                "type": "string"
+              },
+              "prompt_set_version": {
+                "description": "The prompt set's version@digest.",
+                "maxLength": 256,
+                "type": "string"
+              },
+              "prompts": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "top_k": {
+                "maximum": 64,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "method",
+              "top_k",
+              "prompts",
+              "prefill_tokens",
+              "prefill_mean_kl",
+              "generation_tokens",
+              "generation_mean_kl",
+              "generation_max_kl"
+            ],
+            "type": "object"
+          },
           "eval_set": {
             "description": "Digest of the customer eval set the campaign named.",
+            "type": "string"
+          },
+          "evaluator": {
+            "description": "What scored the deciding evidence: infercrane-builtin (answer agreement with the reference), infercrane-task (a task score, item by item), infercrane-graded, or the customer's own evaluator.",
             "type": "string"
           },
           "evidence_id": {
@@ -11959,11 +12504,13 @@
             "type": "array"
           },
           "expected_benefit": {
+            "description": "A planning prior for a diagnosis setup; baseline for the control; check for a reference or the copy, which test the plan rather than promise a gain.",
             "enum": [
               "high",
               "medium",
               "low",
-              "baseline"
+              "baseline",
+              "check"
             ],
             "type": "string"
           },
@@ -11976,10 +12523,12 @@
             "type": "integer"
           },
           "role": {
-            "description": "control is the starting setup every other setup is measured against; diagnosis was chosen by a diagnosis rule. A diagnosis-ordered proposal holds no other setups.",
+            "description": "control is the starting setup every other setup is measured against; diagnosis was chosen by a diagnosis rule; reference tests the diagnosis's own choice (the starting setup without its speculation, the neighbouring draft length, or a speculation and precision pair); copy is the starting setup with only a sampling seed added, which measures the machine difference and must not win. Only diagnosis names a technique.",
             "enum": [
               "control",
-              "diagnosis"
+              "diagnosis",
+              "reference",
+              "copy"
             ],
             "type": "string"
           },
@@ -12007,10 +12556,262 @@
         ],
         "type": "object"
       },
+      "OptimizationCandidateTechnique": {
+        "additionalProperties": false,
+        "description": "Set only for a setup a technique-contract technique made (docs/features/technique-contract.mdx). The claim is judged against the technique's manifest, so a result can never drop a requirement.",
+        "properties": {
+          "artifact": {
+            "additionalProperties": false,
+            "properties": {
+              "digest": {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "runs_in": {
+                "enum": [
+                  "customer-account",
+                  "disposable-gpu-container"
+                ],
+                "type": "string"
+              },
+              "uses_customer_content": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "runs_in",
+              "uses_customer_content"
+            ],
+            "type": "object"
+          },
+          "changes_answers": {
+            "type": "boolean"
+          },
+          "claim": {
+            "description": "shown only for a gain a fresh machine measured again (evidence.fresh-machine-confirmation), with every field and the technique's evidence present.",
+            "enum": [
+              "shown",
+              "not shown"
+            ],
+            "type": "string"
+          },
+          "costs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fallback": {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "serves": {
+                "enum": [
+                  "starting-setup",
+                  "engine-default"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "serves",
+              "reason"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "description": "The technique's manifest ID, for example tuned-moe-kernels, trained-draft, adaptive-speculation, adaptive-speculation-one-engine.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "relieves": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required_evidence": {
+            "description": "Evidence names every result of the technique must carry besides the five fields.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "result": {
+            "description": "The campaign's measurement as a technique result (schemas/technique-result-v1.schema.json). Absent until the setup is measured.",
+            "type": "object"
+          },
+          "unknown": {
+            "description": "What a shown claim still needs: result fields and evidence names (evidence.NAME), or measured when nothing was measured yet.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "label",
+          "relieves",
+          "costs",
+          "required_evidence",
+          "changes_answers",
+          "claim",
+          "unknown"
+        ],
+        "type": "object"
+      },
       "OptimizationDiagnosisPlan": {
         "additionalProperties": false,
         "description": "The endpoint diagnosis that ordered this campaign's setups. Absent when the proposal was not ordered by a diagnosis or cannot be read. It explains what was chosen and why, not how anything performed.",
         "properties": {
+          "cache_room": {
+            "additionalProperties": false,
+            "description": "How many requests fit at once per server with each draft length of the model's own prediction head, beside the load the server is asked to hold, from the engine's cache readings. A prediction, not a measured result. Absent when the engine did not report cache use and running requests.",
+            "properties": {
+              "bands": {
+                "description": "Predicted setup per load band: the most draft tokens that still fit. Predicted from one window, never measured per band.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "drafts": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "up_to": {
+                      "description": "Largest load of the band; absent for the band above every room.",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "drafts"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "blocks": {
+                "description": "Cache blocks per server the engine reported.",
+                "type": "number"
+              },
+              "cache_use_percent": {
+                "type": "number"
+              },
+              "current_drafts": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "draft_lengths": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "basis": {
+                      "description": "measured for the server's own draft length; predicted for another; upper_bound when predicted from a server without a prediction head loaded; lower_bound for no speculation predicted from a server with one.",
+                      "enum": [
+                        "measured",
+                        "predicted",
+                        "upper_bound",
+                        "lower_bound"
+                      ],
+                      "type": "string"
+                    },
+                    "blocks_per_request": {
+                      "type": "number"
+                    },
+                    "drafts": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "fits": {
+                      "description": "Room above the load.",
+                      "type": "boolean"
+                    },
+                    "room": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "drafts",
+                    "room",
+                    "basis",
+                    "fits"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "load": {
+                "description": "Requests running plus waiting per server.",
+                "type": "number"
+              },
+              "precision": {
+                "description": "Room predicted with each precision change: an FP8 KV cache from the engine's blocks alone, FP8 weights and both also from the model's memory as the model check read it. Absent when the engine did not report its cache layout or the model keeps recurrent state.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "basis": {
+                      "description": "Always an upper bound: embeddings and some layers stay at 16 bits, and the engine sizes its own buffers anew.",
+                      "enum": [
+                        "upper_bound"
+                      ],
+                      "type": "string"
+                    },
+                    "blocks": {
+                      "description": "Cache blocks per server predicted with the change.",
+                      "type": "number"
+                    },
+                    "fits": {
+                      "description": "Room above the load.",
+                      "type": "boolean"
+                    },
+                    "room": {
+                      "type": "number"
+                    },
+                    "technique": {
+                      "enum": [
+                        "fp8-kv-cache",
+                        "fp8-weights",
+                        "fp8-weights-kv-cache"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "technique",
+                    "blocks",
+                    "room",
+                    "basis",
+                    "fits"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "running": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "load",
+              "running",
+              "cache_use_percent",
+              "current_drafts",
+              "draft_lengths"
+            ],
+            "type": "object"
+          },
           "endpoint": {
             "type": "string"
           },
@@ -12157,6 +12958,51 @@
             "maxLength": 255,
             "type": "string"
           },
+          "declared_setup": {
+            "additionalProperties": false,
+            "description": "What the server of the endpoint in diagnosis_endpoint runs, declared by its operator, when one InferCrane agent serves that endpoint and no deployment revision can be read: the plan starts from it, a run's copy is started from it, and the answer rules compare setups with it. Without it a run on an agent's endpoint makes every setup show its answers held.",
+            "properties": {
+              "args": {
+                "items": {
+                  "maxLength": 8192,
+                  "type": "string"
+                },
+                "maxItems": 256,
+                "type": "array"
+              },
+              "engine": {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "maxProperties": 64,
+                "type": "object"
+              },
+              "gpu": {
+                "maxLength": 128,
+                "type": "string"
+              },
+              "gpu_count": {
+                "maximum": 1024,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "version": {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "engine",
+              "version"
+            ],
+            "type": "object"
+          },
           "diagnosis_endpoint": {
             "description": "Endpoint whose recorded diagnosis (readiness assessment over the last hour, engine metrics, and a GPU profile summary when one was captured in the last 7 days: kernel shares, plus the fired trace analysis findings with measured values and thresholds for a capture recorded with infercrane profile) chooses and orders the candidates. The proposal then holds the starting setup plus only setups a diagnosis rule chose; when no rule applies it holds the starting setup alone and diagnosis.needed_evidence says what to collect. The server reads the diagnosis; a client cannot supply one. The proposal records it in input.diagnosis and explains the order in diagnosis and each candidate's reason.",
             "maxLength": 255,
@@ -12177,6 +13023,14 @@
           "include_simulated": {
             "default": false,
             "type": "boolean"
+          },
+          "kernel_configs": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KernelConfigSet"
+              }
+            ],
+            "description": "A tuned kernel set for this GPU and engine. The proposal adds the starting setup with it as one candidate, which the campaign measures against the same engine untuned and checks for answer quality; a set that does not fit the starting setup's engine version adds nothing and a warning says why."
           },
           "max_candidates": {
             "default": 10,
@@ -12266,9 +13120,10 @@
             "type": "string"
           },
           "model_features": {
-            "description": "Capabilities declared by the pinned model configuration. They gate experiments and are never performance evidence.",
+            "description": "Capabilities declared by the pinned model configuration: native_mtp (the model's own prediction head) and fused_moe_fp8_block (MoE layers on the engine's block-FP8 fused-MoE kernel). They gate techniques and experiments and are never performance evidence.",
             "items": {
               "enum": [
+                "fused_moe_fp8_block",
                 "native_mtp"
               ],
               "type": "string"
@@ -12292,13 +13147,24 @@
             "maxLength": 255,
             "type": "string"
           },
+          "model_tokenizers": {
+            "additionalProperties": {
+              "pattern": "^sha256:[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "description": "Recorded by the server, never taken from a client: the tokenizer digest of each model the setups serve, keyed MODEL@REVISION, when they serve more than one model. A divergence between two models is read only when both digests are recorded and equal; otherwise it is unknown.",
+            "maxProperties": 16,
+            "type": "object"
+          },
           "objective": {
             "default": "interactive",
+            "description": "useful-output ranks on output tokens per second of requests that met max_ttft_p95_ms as a per-request first-token limit (1000 ms when unset).",
             "enum": [
               "interactive",
               "latency",
               "throughput",
-              "cost-efficiency"
+              "cost-efficiency",
+              "useful-output"
             ],
             "type": "string"
           },
@@ -12336,13 +13202,22 @@
             "uniqueItems": true
           },
           "search": {
-            "description": "Adds bounded, unmeasured runtime-recipe experiments ahead of the reviewed candidates.",
+            "description": "Adds bounded, unmeasured setups to try ahead of the reviewed candidates.",
             "enum": [
-              "recipes"
+              "setups"
             ],
             "type": "string"
           },
+          "speculative_drafts": {
+            "description": "Drafts for exactly this model and commit: at most one trained on your traffic and one published. Needs diagnosis_endpoint. Each becomes a setup measured against the starting setup, beside the model's own prediction head and, when the starting setup speculates, no speculation. vLLM only.",
+            "items": {
+              "$ref": "#/components/schemas/SpeculativeDraft"
+            },
+            "maxItems": 2,
+            "type": "array"
+          },
           "target_concurrency": {
+            "description": "Observed or expected concurrent requests. A campaign measures at this load, rounded up to whole requests (1 to 512); without it, at the workload profile's concurrency.",
             "exclusiveMinimum": 0,
             "type": "number"
           },
@@ -12680,6 +13555,989 @@
         ],
         "type": "object"
       },
+      "ProofReport": {
+        "additionalProperties": false,
+        "properties": {
+          "algorithm_version": {
+            "type": "string"
+          },
+          "claim_rule": {
+            "type": "string"
+          },
+          "finished": {
+            "type": "boolean"
+          },
+          "limits": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "period": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": "object"
+          },
+          "prepared_for": {
+            "type": "string"
+          },
+          "report_digest": {
+            "description": "SHA-256 of the compact report JSON with report_digest emptied; it is the last member.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "schema_version": {
+            "enum": [
+              "infercrane.dev/proof-report/v1"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": false,
+            "properties": {
+              "annual_saving_usd": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "headline": {
+                "type": "string"
+              },
+              "monthly_saving_usd": {
+                "description": "The sum of every workload's verified monthly saving; saving_covers says how many workloads that is.",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "output_per_gpu_change_percent": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "saving_assumption": {
+                "type": "string"
+              },
+              "saving_covers": {
+                "type": "string"
+              },
+              "verified_workloads": {
+                "type": "integer"
+              },
+              "workloads": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "headline",
+              "workloads",
+              "verified_workloads",
+              "monthly_saving_usd",
+              "annual_saving_usd",
+              "output_per_gpu_change_percent"
+            ],
+            "type": "object"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unknown": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workloads": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cost_per_million_change_percent": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "gpu_hours_change_percent": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "loads": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "bands": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "decision": {
+                            "enum": [
+                              "winner",
+                              "keep_current",
+                              "no_decision",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          },
+                          "load": {
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "winner": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "load",
+                          "decision",
+                          "reason"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "metric": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "enum": [
+                        "one_setup",
+                        "setup_per_band",
+                        "incomplete"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "metric",
+                    "summary",
+                    "reason",
+                    "bands"
+                  ],
+                  "type": "object"
+                },
+                "loads_reason": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "monthly_saving_usd": {
+                  "description": "The smallest verified monthly saving across the workload's loads; null unless every load verified one.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "output_per_gpu_change_percent": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "runs": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "after": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "accelerator": {
+                                "type": "string"
+                              },
+                              "accelerator_count": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "args": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "engine": {
+                                "type": "string"
+                              },
+                              "engine_version": {
+                                "type": "string"
+                              },
+                              "env": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "hourly_usd_per_replica": {
+                                "description": "The hourly price of one replica recorded with the measurement: the customer's own compute price, never an InferCrane price. Null when none was recorded.",
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "image_digest": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "price_source": {
+                                "type": "string"
+                              },
+                              "provider": {
+                                "type": "string"
+                              },
+                              "region": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "model",
+                              "engine",
+                              "engine_version",
+                              "args",
+                              "accelerator",
+                              "accelerator_count",
+                              "hourly_usd_per_replica"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "baseline": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "basis": {
+                            "type": "string"
+                          },
+                          "candidate_runs": {
+                            "type": "integer"
+                          },
+                          "control_runs": {
+                            "type": "integer"
+                          },
+                          "fresh_servers": {
+                            "type": "boolean"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "noise_floor_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "label",
+                          "basis",
+                          "control_runs",
+                          "candidate_runs",
+                          "noise_floor_percent",
+                          "fresh_servers"
+                        ],
+                        "type": "object"
+                      },
+                      "before": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "accelerator": {
+                                "type": "string"
+                              },
+                              "accelerator_count": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "args": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "type": "array"
+                              },
+                              "engine": {
+                                "type": "string"
+                              },
+                              "engine_version": {
+                                "type": "string"
+                              },
+                              "env": {
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "type": "object"
+                              },
+                              "hourly_usd_per_replica": {
+                                "description": "The hourly price of one replica recorded with the measurement: the customer's own compute price, never an InferCrane price. Null when none was recorded.",
+                                "type": [
+                                  "number",
+                                  "null"
+                                ]
+                              },
+                              "image_digest": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "price_source": {
+                                "type": "string"
+                              },
+                              "provider": {
+                                "type": "string"
+                              },
+                              "region": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "model",
+                              "engine",
+                              "engine_version",
+                              "args",
+                              "accelerator",
+                              "accelerator_count",
+                              "hourly_usd_per_replica"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "campaign_id": {
+                        "type": "string"
+                      },
+                      "claim": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "change_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "claim": {
+                            "enum": [
+                              "shown",
+                              "not shown"
+                            ],
+                            "type": "string"
+                          },
+                          "metric": {
+                            "type": "string"
+                          },
+                          "missing": {
+                            "description": "What a \"shown\" claim still needs, in words.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "noise_floor_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "technique": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "claim",
+                          "change_percent",
+                          "noise_floor_percent",
+                          "missing"
+                        ],
+                        "type": "object"
+                      },
+                      "evidence": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "records": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "digest": {
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "subject": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "digest"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "report_digest": {
+                            "type": "string"
+                          },
+                          "report_path": {
+                            "type": "string"
+                          },
+                          "verify": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "report_digest",
+                          "report_path",
+                          "verify",
+                          "records"
+                        ],
+                        "type": "object"
+                      },
+                      "finished": {
+                        "type": "boolean"
+                      },
+                      "headline": {
+                        "type": "string"
+                      },
+                      "load": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "numbers": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "after": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "basis": {
+                              "type": "string"
+                            },
+                            "before": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "change_percent": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "decision": {
+                              "enum": [
+                                "improved",
+                                "regressed",
+                                "no_measurable_difference",
+                                "unchanged",
+                                "unknown"
+                              ],
+                              "type": "string"
+                            },
+                            "higher_is_better": {
+                              "type": "boolean"
+                            },
+                            "key": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "noise_floor_percent": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "unit": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "label",
+                            "unit",
+                            "higher_is_better",
+                            "before",
+                            "after",
+                            "change_percent",
+                            "noise_floor_percent",
+                            "decision",
+                            "basis"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "objective": {
+                        "type": "string"
+                      },
+                      "objective_metric": {
+                        "type": "string"
+                      },
+                      "outcome": {
+                        "enum": [
+                          "winner_selected",
+                          "baseline_kept",
+                          "no_winner",
+                          "in_progress",
+                          "cancelled"
+                        ],
+                        "type": "string"
+                      },
+                      "quality": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "after_score": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "answer_rule": {
+                            "description": "How the task set was read: held_within_1_point for a setup that changes answers, within_margin otherwise.",
+                            "type": "string"
+                          },
+                          "answer_verdict": {
+                            "type": "string"
+                          },
+                          "basis": {
+                            "type": "string"
+                          },
+                          "before_score": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "delta": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "eval": {
+                            "type": "string"
+                          },
+                          "method": {
+                            "type": "string"
+                          },
+                          "prompts": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "servers_each": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "verdict": {
+                            "enum": [
+                              "PASS",
+                              "WATCH",
+                              "BLOCK",
+                              "UNKNOWN"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "verdict",
+                          "basis",
+                          "prompts",
+                          "before_score",
+                          "after_score",
+                          "delta",
+                          "servers_each"
+                        ],
+                        "type": "object"
+                      },
+                      "rerun": {
+                        "description": "Commands that measure the run again from the same request; NEW_RUN is the ID the first prints.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "saving": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "annual_saving_usd": {
+                            "description": "Twelve months at the captured rate: a projection.",
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "assumption": {
+                            "type": "string"
+                          },
+                          "cost_per_million_change_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "gpu_hours_change_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_cost_after_usd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_cost_before_usd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_gpu_hours_after": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_gpu_hours_before": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_output_tokens": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_saving_usd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "monthly_unavailable_reason": {
+                            "type": "string"
+                          },
+                          "output_per_gpu_change_percent": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "reasons": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "state": {
+                            "description": "verified only when the claim is shown, answers passed, no guard held the setup back, and output per GPU or cost per output token improved beyond the noise; the amounts are null otherwise.",
+                            "enum": [
+                              "verified",
+                              "not_shown",
+                              "none",
+                              "in_progress"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reasons",
+                          "output_per_gpu_change_percent",
+                          "cost_per_million_change_percent",
+                          "gpu_hours_change_percent",
+                          "monthly_output_tokens",
+                          "monthly_gpu_hours_before",
+                          "monthly_gpu_hours_after",
+                          "monthly_cost_before_usd",
+                          "monthly_cost_after_usd",
+                          "monthly_saving_usd",
+                          "annual_saving_usd"
+                        ],
+                        "type": "object"
+                      },
+                      "simulated_accelerator": {
+                        "type": "boolean"
+                      },
+                      "targets": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "after": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "after_met": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "at_most": {
+                              "type": "boolean"
+                            },
+                            "before": {
+                              "type": [
+                                "number",
+                                "null"
+                              ]
+                            },
+                            "before_met": {
+                              "type": [
+                                "boolean",
+                                "null"
+                              ]
+                            },
+                            "explanation": {
+                              "type": "string"
+                            },
+                            "key": {
+                              "enum": [
+                                "ttft_p95_ms",
+                                "tpot_p95_ms",
+                                "error_rate",
+                                "output_tokens_per_second"
+                              ],
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "limit": {
+                              "type": "number"
+                            },
+                            "unit": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "label",
+                            "unit",
+                            "limit",
+                            "at_most",
+                            "before",
+                            "after",
+                            "before_met",
+                            "after_met"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "warnings": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "workload": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "method": {
+                            "type": "string"
+                          },
+                          "profile": {
+                            "type": "string"
+                          },
+                          "requests_per_run": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "shape_digest": {
+                            "pattern": "^sha256:[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "requests_per_run"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "campaign_id",
+                      "load",
+                      "finished",
+                      "outcome",
+                      "headline",
+                      "objective",
+                      "simulated_accelerator",
+                      "before",
+                      "after",
+                      "workload",
+                      "baseline",
+                      "numbers",
+                      "targets",
+                      "quality",
+                      "claim",
+                      "saving",
+                      "evidence",
+                      "rerun",
+                      "warnings"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "traffic": {
+                  "type": "string"
+                },
+                "verdict": {
+                  "enum": [
+                    "verified_at_every_load",
+                    "verified_at_some_loads",
+                    "not_shown",
+                    "no_saving",
+                    "in_progress"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "model",
+                "traffic",
+                "verdict",
+                "summary",
+                "runs",
+                "monthly_saving_usd",
+                "output_per_gpu_change_percent",
+                "cost_per_million_change_percent",
+                "gpu_hours_change_percent"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "algorithm_version",
+          "title",
+          "period",
+          "finished",
+          "summary",
+          "claim_rule",
+          "workloads",
+          "limits",
+          "unknown",
+          "report_digest"
+        ],
+        "type": "object"
+      },
+      "ProofReportEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "report": {
+            "$ref": "#/components/schemas/ProofReport"
+          },
+          "signature": {
+            "description": "Ed25519 signature over report_digest by the control plane's passport signing key; null until every run has finished or without a key, never made up. Verify a saved response with `infercrane report proof verify FILE`.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OptimizationCampaignReportSignature"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unsigned_reason": {
+            "description": "Why signature is null; absent when the report is signed.",
+            "enum": [
+              "proof_not_finished",
+              "signing_key_not_configured"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "report",
+          "signature"
+        ],
+        "type": "object"
+      },
       "ProviderConnectionCreate": {
         "additionalProperties": false,
         "properties": {
@@ -12762,19 +14620,21 @@
       },
       "QualityEvalSetUpload": {
         "additionalProperties": false,
-        "description": "At most 512 KiB. Unknown fields are rejected. Expected answers are accepted only in a graded set, which names its grading. Schema v2 adds conversations and function tools to a case; a case that declares tools is scored on its tool calls, and a graded set may not declare tools.",
+        "description": "At most 512 KiB, or 1 MiB for a task set (grading answer_line). Unknown fields are rejected. Expected answers are accepted only in a graded set, which names its grading. Schema v2 adds conversations and function tools to a case; a case that declares tools is scored on its tool calls, and a graded set may not declare tools.",
         "properties": {
           "grading": {
-            "description": "Makes the set graded: every prompt is scored against its expected answers.",
+            "description": "Makes the set graded: every prompt is scored against its expected answers. answer_line makes a task set: each prompt has one expected answer, a number or a letter A to D, read from the answer's last \"Answer:\" line, and two setups are compared item by item.",
             "enum": [
               "exact_match",
-              "token_f1"
+              "token_f1",
+              "answer_line"
             ],
             "type": "string"
           },
           "max_tokens": {
             "default": 64,
-            "maximum": 512,
+            "description": "At most 512, or 2048 for a task set.",
+            "maximum": 2048,
             "minimum": 1,
             "type": "integer"
           },
@@ -12784,6 +14644,7 @@
             "type": "string"
           },
           "prompts": {
+            "description": "At most 200, or 1000 for a task set.",
             "items": {
               "additionalProperties": false,
               "description": "Either prompt (with an optional system) or, in v2, messages.",
@@ -12974,7 +14835,7 @@
               ],
               "type": "object"
             },
-            "maxItems": 200,
+            "maxItems": 1000,
             "minItems": 1,
             "type": "array"
           },
@@ -13440,6 +15301,776 @@
         },
         "type": "object"
       },
+      "ResultRankQuery": {
+        "additionalProperties": false,
+        "description": "The traffic kind, load, GPU and model to rank for, and the setups that could be measured there. Every gain is against current.",
+        "properties": {
+          "accelerator": {
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "knobs": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "drafts": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "engine": {
+                      "type": "string"
+                    },
+                    "flags": {
+                      "type": "string"
+                    },
+                    "kv_cache": {
+                      "type": "string"
+                    },
+                    "quantization": {
+                      "type": "string"
+                    },
+                    "speculation": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "engine"
+                  ],
+                  "type": "object"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "knobs"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "current": {
+            "additionalProperties": false,
+            "properties": {
+              "drafts": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "engine": {
+                "type": "string"
+              },
+              "flags": {
+                "type": "string"
+              },
+              "kv_cache": {
+                "type": "string"
+              },
+              "quantization": {
+                "type": "string"
+              },
+              "speculation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "engine"
+            ],
+            "type": "object"
+          },
+          "engine_version": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "load": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "active_params_b": {
+                "type": "number"
+              },
+              "architecture": {
+                "enum": [
+                  "dense",
+                  "moe",
+                  "hybrid",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "checkpoint": {
+                "type": "string"
+              },
+              "features": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "params_b": {
+                "type": "number"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "architecture"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "model",
+          "accelerator",
+          "kind",
+          "load",
+          "metric",
+          "current",
+          "candidates"
+        ],
+        "type": "object"
+      },
+      "ResultRanking": {
+        "additionalProperties": false,
+        "description": "Setups ordered by the lower bound of their estimated gain over the current setup in similar measured results. It orders what to measure; it is not a result. A setup nothing similar measured is last and unknown.",
+        "properties": {
+          "algorithm": {
+            "type": "string"
+          },
+          "cells": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "ranked": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cells": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "estimate": {
+                  "type": "number"
+                },
+                "evidence": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cell": {
+                        "type": "string"
+                      },
+                      "distance": {
+                        "type": "number"
+                      },
+                      "gain": {
+                        "type": "number"
+                      },
+                      "shared": {
+                        "type": "boolean"
+                      },
+                      "spread": {
+                        "type": "number"
+                      },
+                      "weight": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "cell",
+                      "gain",
+                      "spread",
+                      "distance",
+                      "weight"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "known": {
+                  "type": "boolean"
+                },
+                "lower": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "setup": {
+                  "type": "string"
+                },
+                "weight": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "setup",
+                "estimate",
+                "lower",
+                "cells",
+                "weight",
+                "known",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "records": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "algorithm",
+          "metric",
+          "records",
+          "cells",
+          "ranked"
+        ],
+        "type": "object"
+      },
+      "ResultRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "cell": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "set": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "set",
+              "key"
+            ],
+            "type": "object"
+          },
+          "id": {
+            "description": "Derived from the record's content: the same record imported twice is stored once.",
+            "type": "string"
+          },
+          "judgement": {
+            "additionalProperties": false,
+            "description": "How the claim was judged beyond the result's own fields. The claim is the technique contract's own (the result's claim with its manifest's evidence); a measured result shows it only when it is not a baseline, was judged against its technique's manifest, and no check of its run failed.",
+            "properties": {
+              "baseline": {
+                "description": "A setup measured to compare with; it needs no manifest and makes no claim.",
+                "type": "boolean"
+              },
+              "dry": {
+                "type": "boolean"
+              },
+              "failed": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "manifest": {
+                "type": "string"
+              },
+              "unsettled": {
+                "description": "Checks the run could not decide (its unknown); never a failed one.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "model": {
+            "additionalProperties": false,
+            "properties": {
+              "active_params_b": {
+                "type": "number"
+              },
+              "architecture": {
+                "enum": [
+                  "dense",
+                  "moe",
+                  "hybrid",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "checkpoint": {
+                "type": "string"
+              },
+              "features": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "params_b": {
+                "type": "number"
+              },
+              "revision": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "architecture"
+            ],
+            "type": "object"
+          },
+          "observed": {
+            "additionalProperties": false,
+            "properties": {
+              "max": {
+                "type": "number"
+              },
+              "median": {
+                "type": "number"
+              },
+              "min": {
+                "type": "number"
+              },
+              "runs": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "median",
+              "min",
+              "max",
+              "runs"
+            ],
+            "type": "object"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": false,
+            "properties": {
+              "baseline": {
+                "additionalProperties": false,
+                "properties": {
+                  "basis": {
+                    "type": "string"
+                  },
+                  "setup": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "setup",
+                  "basis"
+                ],
+                "type": "object"
+              },
+              "candidate": {
+                "type": "string"
+              },
+              "correctness": {
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "method",
+                  "verdict"
+                ],
+                "type": "object"
+              },
+              "evidence": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "digest": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "digest"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "hardware": {
+                "additionalProperties": false,
+                "properties": {
+                  "accelerator": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "driver": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "accelerator",
+                  "count"
+                ],
+                "type": "object"
+              },
+              "measured": {
+                "additionalProperties": false,
+                "properties": {
+                  "change": {
+                    "type": "number"
+                  },
+                  "decision": {
+                    "enum": [
+                      "improved",
+                      "no_measurable_difference",
+                      "regressed",
+                      "unknown"
+                    ],
+                    "type": "string"
+                  },
+                  "metric": {
+                    "type": "string"
+                  },
+                  "noise_floor": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "metric",
+                  "change",
+                  "noise_floor",
+                  "decision"
+                ],
+                "type": "object"
+              },
+              "precision": {
+                "additionalProperties": false,
+                "properties": {
+                  "kv_cache": {
+                    "type": "string"
+                  },
+                  "weights": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "weights",
+                  "kv_cache"
+                ],
+                "type": "object"
+              },
+              "reproduction": {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "commit": {
+                    "type": "string"
+                  },
+                  "image_digest": {
+                    "type": "string"
+                  },
+                  "traffic_shape": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command",
+                  "commit",
+                  "image_digest",
+                  "traffic_shape"
+                ],
+                "type": "object"
+              },
+              "required_evidence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "schema_version": {
+                "enum": [
+                  "infercrane.dev/technique-result/v1"
+                ],
+                "type": "string"
+              },
+              "software": {
+                "additionalProperties": false,
+                "properties": {
+                  "engine": {
+                    "type": "string"
+                  },
+                  "engine_version": {
+                    "type": "string"
+                  },
+                  "image_digest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "engine",
+                  "engine_version",
+                  "image_digest"
+                ],
+                "type": "object"
+              },
+              "technique": {
+                "type": "string"
+              },
+              "technique_version": {
+                "type": "string"
+              },
+              "workload": {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "load": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "requests": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "shape_digest": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "shape_digest",
+                  "kind",
+                  "load",
+                  "requests"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "schema_version",
+              "technique",
+              "technique_version",
+              "candidate",
+              "hardware",
+              "software",
+              "workload",
+              "precision",
+              "baseline",
+              "correctness",
+              "measured",
+              "reproduction"
+            ],
+            "type": "object"
+          },
+          "schema_version": {
+            "enum": [
+              "infercrane.dev/result-record/v1"
+            ],
+            "type": "string"
+          },
+          "setup": {
+            "additionalProperties": false,
+            "properties": {
+              "drafts": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "flags": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kv_cache": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "quantization": {
+                "type": "string"
+              },
+              "speculation": {
+                "enum": [
+                  "none",
+                  "mtp",
+                  "ngram",
+                  "draft-model",
+                  "eagle",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "speculation"
+            ],
+            "type": "object"
+          },
+          "sharing": {
+            "description": "private: read and used by its own organization only. numbers: rankings for other organizations may use its numbers, without names; it is never returned to them.",
+            "enum": [
+              "private",
+              "numbers"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "additionalProperties": false,
+            "properties": {
+              "digest": {
+                "type": "string"
+              },
+              "file": {
+                "type": "string"
+              },
+              "importer": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "importer"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema_version",
+          "id",
+          "sharing",
+          "model",
+          "setup",
+          "cell",
+          "observed",
+          "result",
+          "source",
+          "recorded_at"
+        ],
+        "type": "object"
+      },
+      "ResultRecordImport": {
+        "additionalProperties": false,
+        "description": "Measured results, as `infercrane results export` writes them. Their sharing is this request's, never their own field's; importing again states the current choice.",
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/ResultRecord"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_version": {
+            "enum": [
+              "infercrane.dev/result-records/v1"
+            ],
+            "type": "string"
+          },
+          "sharing": {
+            "enum": [
+              "private",
+              "numbers"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "records"
+        ],
+        "type": "object"
+      },
+      "ResultRecordImportReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "added": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "received": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sharing": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "added",
+          "received",
+          "sharing"
+        ],
+        "type": "object"
+      },
+      "ResultRecordList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ResultRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
       "RuntimeWorkload": {
         "additionalProperties": false,
         "properties": {
@@ -13836,6 +16467,171 @@
         ],
         "type": "object"
       },
+      "SpeculativeDraft": {
+        "additionalProperties": false,
+        "description": "A speculative-decoding draft for exactly the plan's model and commit. A trained draft was trained on prompts from your own traffic in your own account; a published draft was trained by its publisher. InferCrane stores this record only, never the draft's files or the data it learned from.",
+        "properties": {
+          "artifact_digest": {
+            "description": "sha256 of the draft's file manifest from its training report; required for a trained draft. A bucket draft's revision is this digest.",
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "base_model": {
+            "description": "Hugging Face OWNER/NAME of the model the draft was trained against; it must be the plan's model.",
+            "maxLength": 193,
+            "type": "string"
+          },
+          "base_revision": {
+            "description": "Commit of that model; it must be the plan's model_revision.",
+            "pattern": "^[a-f0-9]{40}$",
+            "type": "string"
+          },
+          "draft_tokens": {
+            "description": "Tokens the server drafts per step.",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "method": {
+            "enum": [
+              "eagle3"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+            "type": "string"
+          },
+          "pinned": {
+            "additionalProperties": false,
+            "description": "The engine version and GPU the draft was built and qualified for. A setup elsewhere serves without the draft.",
+            "properties": {
+              "accelerator": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "engine": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "engine_version": {
+                "maxLength": 64,
+                "type": "string"
+              }
+            },
+            "required": [
+              "engine",
+              "engine_version",
+              "accelerator"
+            ],
+            "type": "object"
+          },
+          "repository": {
+            "description": "Hugging Face OWNER/NAME (a private repository uses the plan's model_secret_reference_id), or an s3:// or gs:// location. Bucket drafts are recorded but not yet served: the worker fetch step for them is not built.",
+            "maxLength": 512,
+            "type": "string"
+          },
+          "revision": {
+            "description": "40-character commit of the repository, or the sha256 manifest digest of a bucket location.",
+            "pattern": "^([a-f0-9]{40}|sha256:[a-f0-9]{64})$",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "trained",
+              "published"
+            ],
+            "type": "string"
+          },
+          "training": {
+            "additionalProperties": false,
+            "description": "Content-free provenance a training job reports: counts, a fingerprint of the examples, and offline acceptance. Required for a trained draft.",
+            "properties": {
+              "data_source": {
+                "enum": [
+                  "prompt_set",
+                  "capture",
+                  "public_dataset"
+                ],
+                "type": "string"
+              },
+              "dataset_fingerprint": {
+                "pattern": "^sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "examples": {
+                "maximum": 200000,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "framework": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "framework_version": {
+                "maxLength": 64,
+                "type": "string"
+              },
+              "held_out_acceptance": {
+                "description": "Per draft position, the share of held-out positions where the draft's token equalled the model's own. An offline estimate; only a campaign measures speed.",
+                "items": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              "held_out_examples": {
+                "maximum": 200000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "produced_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "start_acceptance": {
+                "description": "The same estimate for the draft training started from.",
+                "items": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              "training_tokens": {
+                "maximum": 200000000,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "framework",
+              "framework_version",
+              "data_source",
+              "dataset_fingerprint",
+              "examples",
+              "held_out_examples",
+              "training_tokens",
+              "produced_at"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "method",
+          "repository",
+          "revision",
+          "base_model",
+          "base_revision",
+          "draft_tokens"
+        ],
+        "type": "object"
+      },
       "TargetCreate": {
         "properties": {
           "name": {
@@ -14032,7 +16828,7 @@
   "info": {
     "description": "Durable, authenticated control-plane operations. Mutation responses may outlive the requesting client.",
     "title": "InferCrane Control API",
-    "version": "2.0.2"
+    "version": "2.1.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -22318,6 +25114,48 @@
         ]
       }
     },
+    "/api/v1/metrics": {
+      "get": {
+        "operationId": "getWorkspaceResultMetrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "description": "Prometheus text exposition format 0.0.4, returned unless Accept names application/json.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the workspace's Release Guard, rollback, routing, and optimization run results as Prometheus series, or as JSON when Accept is application/json",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
     "/api/v1/model-api-catalog": {
       "get": {
         "operationId": "listModelAPICatalog",
@@ -23151,6 +25989,55 @@
         ]
       }
     },
+    "/api/v1/optimization/band-study": {
+      "get": {
+        "operationId": "getOptimizationBandStudy",
+        "parameters": [
+          {
+            "description": "2 to 8 campaign IDs, comma-separated: one finished campaign per load, with the same model, current setup, and objective.",
+            "in": "query",
+            "name": "campaigns",
+            "required": true,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 3,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationBandStudy"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read finished campaigns, one per load, as a verdict per load band with the band table a per-server switch serves from",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/optimization/campaigns": {
       "get": {
         "operationId": "listOptimizationCampaigns",
@@ -23667,6 +26554,101 @@
         ]
       }
     },
+    "/api/v1/optimization/proof-report": {
+      "get": {
+        "operationId": "getProofReport",
+        "parameters": [
+          {
+            "description": "1 to 16 finished campaign IDs, comma-separated: the runs of the engagement. Runs of one model on one traffic and GPU form one workload, one run per load.",
+            "in": "query",
+            "name": "campaigns",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The report's title, one line of at most 120 characters. Defaults to Proof Report.",
+            "in": "query",
+            "name": "title",
+            "required": false,
+            "schema": {
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Who the report is prepared for, one line of at most 120 characters.",
+            "in": "query",
+            "name": "prepared_for",
+            "required": false,
+            "schema": {
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "description": "json (the default) returns the signed envelope; markdown and html return the same report rendered for print, as an attachment.",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "enum": [
+                "json",
+                "markdown",
+                "html"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofReportEnvelope"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "description": "The report as one self-contained, print-ready HTML page: no scripts or network requests.",
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "description": "The report as Markdown, ready to print or convert to PDF.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read finished runs as a signed before-and-after Proof Report: output per GPU, latency against your limits, cost per million tokens where the price is known, answer quality, and the verified saving",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
     "/api/v1/optimization/proposals": {
       "post": {
         "operationId": "proposeOptimization",
@@ -23708,6 +26690,281 @@
           }
         ],
         "summary": "Generate bounded reviewed configuration candidates without provider mutation or performance claims",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/results": {
+      "get": {
+        "operationId": "listResultRecords",
+        "parameters": [
+          {
+            "description": "Model ID.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "GPU, for example H100.",
+            "in": "query",
+            "name": "accelerator",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Engine, for example vllm.",
+            "in": "query",
+            "name": "engine",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Traffic kind, for example short.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Metric, for example output_tokens_per_second.",
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Technique ID.",
+            "in": "query",
+            "name": "technique",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The ID of one measurement of one traffic kind at one load.",
+            "in": "query",
+            "name": "cell",
+            "required": false,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Fewest requests at once.",
+            "in": "query",
+            "name": "min_load",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Most requests at once.",
+            "in": "query",
+            "name": "max_load",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "At most this many results, newest first; 200 by default, 2,000 at most.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRecordList"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the organization's measured results, newest first; another organization's results are never returned",
+        "tags": [
+          "Inference optimization"
+        ]
+      },
+      "post": {
+        "operationId": "importResultRecords",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultRecordImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRecordImportReceipt"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add measured results to the organization's own, private unless sharing is numbers",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/results/rank": {
+      "post": {
+        "operationId": "rankResultSetups",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultRankQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRanking"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Rank setups to measure by the measured results of similar traffic, loads, GPUs and models, by the lower bound of their gain over the current setup",
+        "tags": [
+          "Inference optimization"
+        ]
+      }
+    },
+    "/api/v1/optimization/results/{id}": {
+      "get": {
+        "operationId": "getResultRecord",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultRecord"
+                }
+              }
+            },
+            "description": "Success"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Typed API error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one of the organization's measured results",
         "tags": [
           "Inference optimization"
         ]

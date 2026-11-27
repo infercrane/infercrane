@@ -272,6 +272,13 @@ func (d CompositeDriver) recoverInterruption(ctx context.Context, campaign domai
 			}
 			return err
 		}
+		// The setup's first servers answer the task set before the
+		// candidate's is retired, so the verdict can pool both pairs.
+		if pending.Arm == ArmCandidate {
+			if err = d.askFirstAnswers(ctx, campaign, measured, checkpoint, save); err != nil {
+				return err
+			}
+		}
 	}
 	if pending.Stage == "" || pending.Stage == stageRemoving {
 		key := fmt.Sprintf("remove-lost-%s-%d", shortID(measured.ID), pending.Sequence)

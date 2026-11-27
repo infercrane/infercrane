@@ -1,0 +1,123 @@
+{
+  "schema_version": "infercrane.poc-modal-serving-check/v1",
+  "checked_at": "2026-11-21",
+  "purpose": "Before a paid campaign, check that one Modal H100 can serve the harness's pinned model with its publisher's vLLM command on the pinned vLLM image.",
+  "model": {
+    "id": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+    "weights_bytes": 30889963382,
+    "license": "apache-2.0",
+    "chosen_by": "poc_modal.py choose-model on 2026-11-21: most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek (6,506,958 downloads) that fits one H100 and has a published one-H100 vLLM command without speculative decoding"
+  },
+  "publisher_command": {
+    "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.json?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-21; linked from the model card)",
+    "argv": [
+      "vllm",
+      "serve",
+      "Qwen/Qwen3.8-27B-FP8",
+      "--tensor-parallel-size",
+      "1",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--reasoning-parser",
+      "qwen3",
+      "--mm-encoder-tp-mode",
+      "data"
+    ],
+    "env": {
+      "VLLM_USE_RUST_FRONTEND": "1"
+    },
+    "publisher_image": "vllm/vllm-openai:qwen38",
+    "requires": "vLLM >= 0.17.0, transformers >= 5.8.0"
+  },
+  "runtime_image": {
+    "ref": "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7",
+    "vllm": "0.22.1",
+    "transformers": "5.10.2",
+    "torch": "2.11.0+cu130"
+  },
+  "attempts": [
+    {
+      "app": "ap-xqDQq9OnsPyiU9RCUkqwDH",
+      "args_added": [],
+      "env": {
+        "VLLM_USE_RUST_FRONTEND": "1"
+      },
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "620.70.06",
+        "cuda": "unknown"
+      },
+      "result": "did not start",
+      "cause": "ValueError: max_num_seqs (1024) exceeds available Mamba cache blocks (818). Each decode sequence requires one Mamba cache block, so CUDA graph capture cannot proceed. Please lower max_num_seqs to at most 818 or increase gpu_memory_utilization.",
+      "billed_usd": 0.2859
+    },
+    {
+      "app": "ap-A1aIcWZcYvhddvj3bxc3vx",
+      "args_added": [
+        "--max-num-seqs",
+        "512"
+      ],
+      "env": {
+        "VLLM_USE_RUST_FRONTEND": "1"
+      },
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "610.57.04",
+        "cuda": "unknown"
+      },
+      "result": "engine ready, HTTP frontend exited",
+      "cause": "RuntimeError: Process RustFrontend (PID: 76) died with exit code 1",
+      "billed_usd": 0.4616
+    },
+    {
+      "app": "ap-0S2lRVjrmXIdqh2JQyQQ4J",
+      "args_added": [
+        "--max-num-seqs",
+        "512"
+      ],
+      "env": {},
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "610.57.04",
+        "cuda": "unknown"
+      },
+      "result": "served",
+      "startup_seconds": 345.4,
+      "request_without_key": 401,
+      "request_with_key": 200,
+      "chat_status": 200,
+      "tool_call": {
+        "status": 200,
+        "called": "get_weather",
+        "arguments": "{\"city\": \"Paris\"}"
+      },
+      "engine_metric_families_exported": {
+        "vllm:num_requests_running": true,
+        "vllm:num_requests_waiting": true,
+        "vllm:kv_cache_usage_perc": true,
+        "vllm:request_queue_time_seconds": true,
+        "vllm:request_prefill_time_seconds": true,
+        "vllm:request_decode_time_seconds": true,
+        "vllm:time_to_first_token_seconds": true,
+        "vllm:e2e_request_latency_seconds": true,
+        "vllm:num_preemptions": true,
+        "vllm:prefix_cache_queries": true
+      },
+      "kv_cache_tokens": 661564,
+      "model_memory_gib": 28.56,
+      "billed_usd": 0.4308
+    }
+  ],
+  "conclusion": [
+    "The publisher's one-H100 command does not start on vLLM 0.22.1: 48 of the model's 64 layers keep a recurrent state, one cache block per running request; vLLM found 818 such blocks and refused its default of 1,024 requests at once. vLLM's defaults alone (InferCrane's generic vLLM starting setup) fail the same way.",
+    "With --max-num-seqs 512 the engine starts, but the Rust HTTP frontend the publisher's environment selects exits; with vLLM's Python frontend the server serves, refuses a request without its key, answers, calls a tool, and exports every engine metric family the control plane scrapes.",
+    "The harness's current setup is therefore the publisher's command plus --max-num-seqs 512, on the Python frontend. A campaign runs 32 requests at once, so the cap changes nothing it measures."
+  ],
+  "billed_usd_total": 1.18,
+  "billing_source": "modal billing report --start 2026-11-21 --resolution h (read 2026-11-21)"
+}

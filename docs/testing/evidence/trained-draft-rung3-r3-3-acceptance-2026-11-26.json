@@ -1,0 +1,227 @@
+{
+ "counters": [
+  "vllm:spec_decode_num_drafts_total",
+  "vllm:spec_decode_num_draft_tokens_total",
+  "vllm:spec_decode_num_accepted_tokens_total",
+  "vllm:spec_decode_num_accepted_tokens_per_pos_total"
+ ],
+ "draft_tokens": 3,
+ "engine": "vllm 0.34.0",
+ "gpu": "L4",
+ "image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+ "model": "Qwen/Qwen3-8B",
+ "model_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+ "schema": "infercrane.draft-acceptance/v1",
+ "source": "vLLM /metrics",
+ "windows": [
+  {
+   "by_load": {
+    "published": {
+     "1": {
+      "drafts": 4028.0,
+      "mean_tokens_per_step": 1.842105,
+      "per_position": [
+       0.433962,
+       0.597254,
+       0.574713
+      ]
+     },
+     "32": {
+      "drafts": 55350.0,
+      "mean_tokens_per_step": 1.655628,
+      "per_position": [
+       0.383758,
+       0.481522,
+       0.471255
+      ]
+     }
+    },
+    "trained": {
+     "1": {
+      "drafts": 3708.0,
+      "mean_tokens_per_step": 1.998921,
+      "per_position": [
+       0.483279,
+       0.638393,
+       0.671329
+      ]
+     },
+     "32": {
+      "drafts": 50636.0,
+      "mean_tokens_per_step": 1.789695,
+      "per_position": [
+       0.432795,
+       0.526169,
+       0.567253
+      ]
+     }
+    }
+   },
+   "candidates": [
+    "published",
+    "trained"
+   ],
+   "control": "none",
+   "held_out": {
+    "published": {
+     "drafts": 18189.0,
+     "mean_tokens_per_step": 1.665622,
+     "per_position": [
+      0.385453,
+      0.489944,
+      0.483552
+     ]
+    },
+    "trained": {
+     "drafts": 16569.0,
+     "mean_tokens_per_step": 1.809946,
+     "per_position": [
+      0.441427,
+      0.528439,
+      0.579819
+     ]
+    }
+   },
+   "held_out_readings": {
+    "published": {
+     "after": {
+      "accepted_per_position": {
+       "0": 31183.0,
+       "1": 15265.0,
+       "2": 7326.0
+      },
+      "accepted_tokens": 53774.0,
+      "draft_tokens": 241548.0,
+      "drafts": 80516.0
+     },
+     "before": {
+      "accepted_per_position": {
+       "0": 24172.0,
+       "1": 11830.0,
+       "2": 5665.0
+      },
+      "accepted_tokens": 41667.0,
+      "draft_tokens": 186981.0,
+      "drafts": 62327.0
+     }
+    },
+    "trained": {
+     "after": {
+      "accepted_per_position": {
+       "0": 32263.0,
+       "1": 17178.0,
+       "2": 9904.0
+      },
+      "accepted_tokens": 59345.0,
+      "draft_tokens": 220911.0,
+      "drafts": 73637.0
+     },
+     "before": {
+      "accepted_per_position": {
+       "0": 24949.0,
+       "1": 13313.0,
+       "2": 7663.0
+      },
+      "accepted_tokens": 45925.0,
+      "draft_tokens": 171204.0,
+      "drafts": 57068.0
+     }
+    }
+   },
+   "readings_by_load": {
+    "published": {
+     "1": {
+      "after": {
+       "accepted_per_position": {
+        "0": 1973.0,
+        "1": 1148.0,
+        "2": 645.0
+       },
+       "accepted_tokens": 3766.0,
+       "draft_tokens": 13890.0,
+       "drafts": 4630.0
+      },
+      "before": {
+       "accepted_per_position": {
+        "0": 225.0,
+        "1": 104.0,
+        "2": 45.0
+       },
+       "accepted_tokens": 374.0,
+       "draft_tokens": 1806.0,
+       "drafts": 602.0
+      }
+     },
+     "32": {
+      "after": {
+       "accepted_per_position": {
+        "0": 24172.0,
+        "1": 11830.0,
+        "2": 5665.0
+       },
+       "accepted_tokens": 41667.0,
+       "draft_tokens": 186981.0,
+       "drafts": 62327.0
+      },
+      "before": {
+       "accepted_per_position": {
+        "0": 2931.0,
+        "1": 1602.0,
+        "2": 845.0
+       },
+       "accepted_tokens": 5378.0,
+       "draft_tokens": 20931.0,
+       "drafts": 6977.0
+      }
+     }
+    },
+    "trained": {
+     "1": {
+      "after": {
+       "accepted_per_position": {
+        "0": 2034.0,
+        "1": 1274.0,
+        "2": 829.0
+       },
+       "accepted_tokens": 4137.0,
+       "draft_tokens": 12774.0,
+       "drafts": 4258.0
+      },
+      "before": {
+       "accepted_per_position": {
+        "0": 242.0,
+        "1": 130.0,
+        "2": 61.0
+       },
+       "accepted_tokens": 433.0,
+       "draft_tokens": 1650.0,
+       "drafts": 550.0
+      }
+     },
+     "32": {
+      "after": {
+       "accepted_per_position": {
+        "0": 24949.0,
+        "1": 13313.0,
+        "2": 7663.0
+       },
+       "accepted_tokens": 45925.0,
+       "draft_tokens": 171204.0,
+       "drafts": 57068.0
+      },
+      "before": {
+       "accepted_per_position": {
+        "0": 3034.0,
+        "1": 1782.0,
+        "2": 1122.0
+       },
+       "accepted_tokens": 5938.0,
+       "draft_tokens": 19296.0,
+       "drafts": 6432.0
+      }
+     }
+    }
+   }
+  }
+ ]
+}

@@ -227,7 +227,7 @@ never delete another deployment's resource:
     ```bash
     kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
       --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
-      get deployment,service \
+      get deployment,service,networkpolicy \
       -l app.kubernetes.io/managed-by=infercrane -o name
 
     kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \

@@ -1,0 +1,105 @@
+{
+ "date": "2026-11-26",
+ "found_on_the_way": [
+  "dry-1: windows voided (control drift 21-28%) because every run sent different prompts and a speculating server's speed depends on what it is asked; every run of a load now sends the same held-out prompts.",
+  "dry-1/dry-2: the stand-in's listen queue (5, then macOS's 128 cap) refused part of 64 and 200 dials; the stand-in queue is raised, the dry run asks 64 at once, and generation retries failed requests once.",
+  "dry-2: windows still voided on stand-in jitter (runs of about 0.2 s paced token by token); the stand-in now paces in groups of eight tokens with fixed answer lengths.",
+  "Caps: one Modal function for every stage made smoke's real cap the 60-minute timeout; each stage now has its own function and timeout and stops its optional work 5 minutes before."
+ ],
+ "measure": {
+  "skipped": [],
+  "windows": [
+   {
+    "concurrency": 1,
+    "requests_per_run": 4,
+    "runs": 17,
+    "same_prompts_every_run": true
+   },
+   {
+    "concurrency": 16,
+    "requests_per_run": 4,
+    "runs": 17,
+    "same_prompts_every_run": true
+   }
+  ]
+ },
+ "prompts": {
+  "dataset": "OpenAssistant/oasst1",
+  "files": {
+   "train": "bbfadf5ed1278ba2208c837fdcad865adf65f5df55d80abadab2745db13fcb5e",
+   "validation": "24002597bb13a7edd42d92f773762f25e285f72c31a70449393d0ded1dc7b416"
+  },
+  "held_out": 512,
+  "held_out_fingerprint": "sha256:d72e14b73302989ea989bd7fae8b6296a6ec521a23e6f01c9eeee7fdb0c8dd02",
+  "revision": "fdf72ae0827c1cda404aff25b6603abec9e3399b",
+  "train": 9772,
+  "train_fingerprint": "sha256:603cca5a3b25e6806b1bf4f6beeb2c4809eb1a52e9cdc601b4f9bca2ed578a68"
+ },
+ "rules": "tools/trained-draft/rules-qwen3-8b-oasst1-2026-11-26.md",
+ "smoke": {
+  "checkpoint_files": [
+   "config.json",
+   "config.py",
+   "model.safetensors"
+  ],
+  "passed": true,
+  "prepare_exit": 0,
+  "regenerate_rows": 64,
+  "train_exit": 0
+ },
+ "stand_in_configuration": {
+  "configured_change": {
+   "none": "-28.6%",
+   "trained": "+10.7%"
+  },
+  "none": {
+   "tokens_per_second": 400
+  },
+  "published": {
+   "accept": 0.55,
+   "tokens_per_second": 560
+  },
+  "trained": {
+   "accept": 0.62,
+   "tokens_per_second": 620
+  }
+ },
+ "train": {
+  "of_prompts": 200,
+  "passed": true,
+  "regenerate_rows": 200,
+  "train_mode": "speculators --dry-run (no training step on CPU)"
+ },
+ "verdict": {
+  "pass_bar": {
+   "headline_at_1": "pass: the trained draft is faster than the published draft and quality held",
+   "headline_at_16": "pass: the trained draft is faster than the published draft and quality held",
+   "none_vs_published_at_1": "slower (-28.8%, noise floor 4.8%)",
+   "none_vs_published_at_16": "slower (-29.4%, noise floor 8.2%)",
+   "quality_trained_vs_published": "held",
+   "trained_vs_published_at_1": "faster (+10.2%, noise floor 5.2%)",
+   "trained_vs_published_at_16": "faster (+10.6%, noise floor 9.7%)",
+   "training_report": "valid"
+  },
+  "report": {
+   "artifact_digest": "sha256:f4e3b61b49e78fe135f905eccbe17e5a635d2481ef5fcb6285f53f3f676d9e93",
+   "dataset_fingerprint": "sha256:798b5061dae66e1880b030cd8c6fd20bb318ae5a4e4eec3b94b3a23c8ca2ffdd",
+   "examples": 200,
+   "expected_tokens_per_step": 2.2809924139825273,
+   "start_expected_tokens_per_step": 2.0663101028741604,
+   "training_tokens": 9600,
+   "valid": true
+  },
+  "tasks": {
+   "none": {
+    "items": 40,
+    "verdict": "no_measurable_difference"
+   },
+   "trained": {
+    "items": 40,
+    "verdict": "no_measurable_difference"
+   }
+  }
+ },
+ "what": "Trained-draft proof of concept, $0 dry run on a laptop. Stand-in servers in place of vLLM (their speeds and acceptance are configured, so no number here is a measurement); real oasst1 prompts at the pinned revision; real speculators 0.9.0 prepare-data on the token rows; real `speculators train --dry-run --from-pretrained RedHatAI/Qwen3-8B-speculator.eagle3 --verifier-name-or-path Qwen/Qwen3-8B` (built the draft from the published one and saved a 2.04 GB checkpoint); the real judge (go run ./tools/trained-draft/judge)."
+}

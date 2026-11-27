@@ -16,6 +16,8 @@ import (
 // memoryStore implements the relay store, the control API's audit write, and
 // a credential snapshot that drops revoked keys at once.
 type memoryStore struct {
+	// noQuota is a workspace without a hard request quota.
+	noQuota          bool
 	controlapi.Store // nil: only Audit is reached by the agent routes
 
 	mu           sync.Mutex

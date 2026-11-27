@@ -12,16 +12,22 @@ import (
 )
 
 const (
-	serverMetricsExportName  = "server_metrics_export.json"
-	maxServerMetricsBytes    = 16 << 20
-	maxServerMetricSummaries = 32
+	// AIPerf names its server-metrics export after --profile-export-prefix
+	// (<prefix>_server_metrics.json) and uses serverMetricsExportName only
+	// when no prefix is set.
+	serverMetricsExportName   = "server_metrics_export.json"
+	serverMetricsExportSuffix = "_server_metrics.json"
+	maxServerMetricsBytes     = 16 << 20
+	maxServerMetricSummaries  = 32
 )
 
 // serverMetricKeywords select the runtime signals that explain a serving
 // result: cache occupancy and reuse, preemption, queueing, and speculative
 // acceptance. They are generic name fragments, so no runtime is special-cased
-// and an unknown runtime simply contributes fewer metrics.
-var serverMetricKeywords = []string{"cache", "preempt", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap"}
+// and an unknown runtime simply contributes fewer metrics. "infercrane" keeps
+// the gauges InferCrane's patched engine images add, which a technique's
+// evidence reads (optimizationreport).
+var serverMetricKeywords = []string{"cache", "preempt", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap", "infercrane"}
 
 var serverMetricStats = map[string]struct{}{
 	"avg": {}, "min": {}, "max": {}, "p50": {}, "p95": {}, "p99": {},
@@ -41,10 +47,10 @@ type serverMetricsExport struct {
 // readServerMetrics summarizes the export AIPerf writes when server-metrics
 // collection is on. It never fails the benchmark: the request records are the
 // measurement, and server metrics are supporting evidence.
-func readServerMetrics(directory string) *ServerMetrics {
+func readServerMetrics(directory, prefix string) *ServerMetrics {
 	var paths []string
 	_ = filepath.WalkDir(directory, func(path string, entry fs.DirEntry, err error) error {
-		if err == nil && !entry.IsDir() && entry.Name() == serverMetricsExportName {
+		if err == nil && !entry.IsDir() && (entry.Name() == prefix+serverMetricsExportSuffix || entry.Name() == serverMetricsExportName) {
 			paths = append(paths, path)
 		}
 		return nil

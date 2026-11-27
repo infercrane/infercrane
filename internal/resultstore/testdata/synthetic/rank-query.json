@@ -1,0 +1,55 @@
+{
+ "model": {
+  "id": "example/dense-8b",
+  "architecture": "dense",
+  "params_b": 8.2,
+  "checkpoint": "bf16"
+ },
+ "accelerator": "L4",
+ "engine_version": "0.34.0",
+ "kind": "short",
+ "load": 32,
+ "metric": "output_tokens_per_second",
+ "current": {
+  "engine": "vllm"
+ },
+ "candidates": [
+  {
+   "name": "fp8-weights",
+   "knobs": {
+    "engine": "vllm",
+    "quantization": "fp8"
+   }
+  },
+  {
+   "name": "fp8-kv-cache",
+   "knobs": {
+    "engine": "vllm",
+    "kv_cache": "fp8"
+   }
+  },
+  {
+   "name": "fp8-weights-and-kv-cache",
+   "knobs": {
+    "engine": "vllm",
+    "quantization": "fp8",
+    "kv_cache": "fp8"
+   }
+  },
+  {
+   "name": "prompt-lookup",
+   "knobs": {
+    "engine": "vllm",
+    "speculation": "ngram"
+   }
+  },
+  {
+   "name": "mtp-3",
+   "knobs": {
+    "engine": "vllm",
+    "speculation": "mtp",
+    "drafts": 3
+   }
+  }
+ ]
+}

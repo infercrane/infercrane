@@ -369,6 +369,56 @@ func TestRunPodPodsUsesExactPersistentModelVolumeAndRegion(t *testing.T) {
 	}
 }
 
+// A Pod is reached with the credential it was started with. One that was
+// started with another credential is neither adopted as this replica nor
+// recorded as holding this adapter's scoped credential.
+func TestRunPodPodsTieAReplicaToTheWorkerCredentialItWasStartedWith(t *testing.T) {
+	workload := testRunPodWorkload()
+	command := expandWorkloadCommand(workload.Command, "org/model", "commit", workload.Port, nil)
+	listing := func(environment string) string {
+		return `{"pods":[{"id":"pod-1","name":"` + clusterName("key") + `","status":"RUNNING","image":"` + workload.Image + `","entrypoint":["vllm"],"cmd":` + mustJSON(t, command[1:]) + `,"disk":100,"mounts":{},"ports":["8000/http"],"env":` + environment + `,"dataCenterId":"EU-RO-1","cost":3.99,"createdAt":"2026-11-17T00:00:00Z","gpu":{"id":"NVIDIA H200","count":4}}],"pagination":{"nextCursor":null,"hasNextPage":false}}`
+	}
+	version := func(t *testing.T, environment string) (string, error) {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(listing(environment))) }))
+		defer server.Close()
+		provider := RunPodPods{APIKey: "provider-secret", WorkerAPIKey: "scoped-key", WorkerCredentialVersion: "tenant-hmac-v1", BaseURL: server.URL, Client: server.Client()}
+		observation, err := provider.ObserveReplica(context.Background(), ProviderHandle{ResourceID: "pod-1"}, 8000)
+		if err != nil || !observation.Exists {
+			t.Fatalf("observe: %#v %v", observation, err)
+		}
+		var details struct {
+			Version *string `json:"worker_credential_version"`
+		}
+		if err = json.Unmarshal([]byte(observation.Details), &details); err != nil || details.Version == nil {
+			t.Fatalf("details do not state the worker credential version: %s", observation.Details)
+		}
+		spec := ReplicaSpec{ExternalKey: "key", Model: "org/model", ModelRevision: "commit", Cloud: "runpod", Region: "EU-RO-1", GPU: "H200", GPUCount: 4, Workload: workload}
+		_, ensureErr := provider.EnsureReplica(context.Background(), spec)
+		return *details.Version, ensureErr
+	}
+
+	if got, err := version(t, `{"INFERCRANE_WORKER_API_KEY":"scoped-key","VLLM_API_KEY":"scoped-key"}`); got != "tenant-hmac-v1" || err != nil {
+		t.Fatalf("Pod started with this credential: version=%q adopt=%v", got, err)
+	}
+	// RunPod may leave the environment out of a listing. The Pod is then taken
+	// at this adapter's word, as before.
+	if got, err := version(t, `{}`); got != "tenant-hmac-v1" || err != nil {
+		t.Fatalf("Pod with no listed environment: version=%q adopt=%v", got, err)
+	}
+	// A Pod started before scoped credentials still holds the older shared one.
+	got, err := version(t, `{"INFERCRANE_WORKER_API_KEY":"older-shared-key","VLLM_API_KEY":"older-shared-key"}`)
+	if got != "" {
+		t.Fatalf("a Pod holding another credential was recorded as scoped (%q); it would be sent a credential it does not accept", got)
+	}
+	if !errors.Is(err, ErrInvalidReplicaSpec) {
+		t.Fatalf("a Pod holding another credential was adopted as this replica: %v", err)
+	}
+	if _, err = version(t, `{"INFERCRANE_WORKER_API_KEY":"scoped-key","VLLM_API_KEY":"older-shared-key"}`); !errors.Is(err, ErrInvalidReplicaSpec) {
+		t.Fatalf("a Pod whose engine holds another credential was adopted: %v", err)
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)

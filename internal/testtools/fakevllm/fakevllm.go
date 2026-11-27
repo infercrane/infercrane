@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 // ToolCall is the function call the fake makes when a request offers tools.
@@ -22,6 +23,9 @@ var DefaultToolCall = ToolCall{Name: "weather", Arguments: `{"city":"Berlin"}`}
 type Options struct {
 	Worker, Model, APIKey string
 	ToolCall              ToolCall
+	// Delay is added before every chat answer, so one fake can serve
+	// slower than another of the same setup.
+	Delay time.Duration
 }
 
 // Handler serves the fake's routes.
@@ -53,6 +57,13 @@ func Handler(options Options) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		if options.Delay > 0 {
+			select {
+			case <-time.After(options.Delay):
+			case <-r.Context().Done():
+				return
+			}
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if streaming, _ := body["stream"].(bool); streaming {

@@ -33,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/admission"
+	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/agentrelay"
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
@@ -50,6 +51,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/enginetelemetry"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
@@ -74,6 +76,7 @@ import (
 	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/requestquota"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -194,7 +197,7 @@ func computeProviderInventory(cfg config.Config, configuredSkyPilotProviders []c
 	return providers
 }
 
-var version = "2.0.2"
+var version = "2.1.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 
@@ -328,6 +331,12 @@ func runLegacy(ctx context.Context, args []string) error {
 	}
 	if args[0] == "optimize" {
 		return optimizeCommand(ctx, args[1:])
+	}
+	if args[0] == "results" {
+		return resultsCommand(ctx, args[1:])
+	}
+	if args[0] == "report" {
+		return reportCommand(ctx, args[1:])
 	}
 	if args[0] == "discover" {
 		return discoverCommand(ctx, args[1:])
@@ -2008,6 +2017,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	strategy := "round-robin"
 	runtimeArgs := []string{}
 	var runtimeEnv map[string]string
+	var kernelConfigs *domain.KernelConfigSet
 	var runtimeWorkload runtimecontract.Workload
 	var servingTopology servingcontract.Topology
 	runtimeEngine := *runtimeFlag
@@ -2047,6 +2057,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
 		runtimeEnv = file.Runtime.Env
+		kernelConfigs = file.Runtime.KernelConfigs
 		runtimeWorkload = file.Runtime.Workload
 		servingTopology = file.Serving
 		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
@@ -2108,7 +2119,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, ModelSecretReferenceID: modelSecretReferenceID, ModelAdapters: modelAdapters, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, ModelSecretReferenceID: modelSecretReferenceID, ModelAdapters: modelAdapters, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, KernelConfigs: kernelConfigs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
 			ComputeConnectionID: selfServe.connectionID, BillingMode: selfServe.billingMode, ManagedRuntimeSeconds: selfServe.runtimeSeconds}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
@@ -4251,7 +4262,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			revisionSpec = domain.DeploymentRevisionSpec{
 				Model: candidate.Model.ID, ModelRevision: candidate.Model.Revision,
 				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args, RuntimeEnv: candidate.Runtime.Env,
-				RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
+				KernelConfigs: candidate.Runtime.KernelConfigs, RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
 				AutoscalingEnabled: candidate.Scaling.MaxReplicas > candidate.Scaling.MinReplicas, ComputeMode: candidate.Compute.Mode,
 				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, GPUCount: candidate.Resources.GPUCount, Region: candidate.Provider.Region,
 				Workload: candidate.Runtime.Workload, Serving: candidate.Serving,
@@ -4416,12 +4427,22 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		defer cancel()
 		_ = recorder.Close(closeCtx)
 	}()
+	// Anything that calls a worker directly presents the credential that worker
+	// was started with; the control-plane API key reaches only workers on
+	// operator compute that share it. A development control plane with no
+	// credential at all keeps scraping its local workers without one.
+	var engineCredential func(string, autoscale.Target) string
+	if cfg.APIKey != "" || cfg.WorkerCredentialKey != "" {
+		engineCredential = func(deploymentID string, target autoscale.Target) string {
+			return workercredential.Source{Master: cfg.WorkerCredentialKey, Shared: cfg.APIKey}.Credential(target.TenantID, deploymentID, target.ComputeConnectionID, target.ProviderDetails)
+		}
+	}
 	rec := &reconcile.Reconciler{Store: s, Routes: directory, Router: backend, RouterAPIKey: cfg.APIKey, WorkerCredential: func(tenant, deploymentID, version string) string {
 		if version != workercredential.Version {
 			return ""
 		}
 		return workercredential.Derive(cfg.WorkerCredentialKey, tenant, deploymentID)
-	}, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, APIKey: cfg.APIKey}}
+	}, Runtimes: runtimeBackends, Interval: cfg.HealthInterval, RouterStartPort: cfg.RouterStartPort, InstanceID: cfg.InstanceID, Logger: logger, DirectTargets: map[string]reconcile.DirectTargetBackend{"runpod-serverless": {Provider: "runpod", APIKey: cfg.RunPodAPIKey, Status: serverless}}, ExternalFallback: externalCoordinator, QueueSignals: autoscale.VLLMSignals{Targets: s, Credential: engineCredential}}
 	go purgeRequests(ctx, s, cfg.RequestRetention, logger)
 	go func() {
 		_ = rec.Run(ctx)
@@ -4809,6 +4830,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
 	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secretResolvers, SealedSecrets: secretResolvers.Sealed, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secretResolvers}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
+	controlAPI.ResultReports = &controlapi.ResultReports{}
 	huggingFaceSearch, huggingFaceSearchErr := huggingfacesearch.New(huggingfacesearch.Options{})
 	if huggingFaceSearchErr != nil {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
@@ -4836,13 +4858,18 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	bindUpstreamCredentials(&controlAPI, rec, upstreamCredentials)
 	// The agent protocol is part of the open-source core: any control plane
 	// can accept agents. Agents only ever dial in; nothing here dials them.
-	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
+	dataPlaneValidity, err := agentDataPlaneValidity()
+	if err != nil {
+		return err
+	}
+	agentService := &agentrelay.Service{Store: s, RecommendedAgentVersion: version, DataPlaneValidity: dataPlaneValidity, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
 		backend, err := runtimeBackends.ForRuntime(runtime)
 		if err != nil {
 			return runtimecontract.ProtocolCapabilities{}
 		}
 		return backend.Profile.ProtocolCapabilities()
 	}}
+	controlAPI.Agents = agentService
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {
@@ -4908,12 +4935,13 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		provider.HFTokenSecret = ""
 		return provider, provision.RunPodAvailability{APIKey: providerKey}, workerKey, nil
 	}
+	resolveOperatorRunPod := operatorRunPodResolver(cfg.WorkerCredentialKey, runPodPods, capacity)
 	artifactCacheAdapters["runpod"] = runPodPods
 	for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 		// A configured SkyPilot manifest is the default only for the runtimes it
 		// explicitly lists. Native RunPod Pods remains available as an exact
 		// adapter and owns every undeclared runtime.
-		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity, ResolveProvider: resolveTenantRunPod})
+		elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "runpod-pods", Cloud: "runpod", Runtime: runtimeName, Default: !skyPilotRuntime["runpod\x00"+runtimeName], Profile: runPodPodsProfile, Provider: runPodPods, Capacity: capacity, ResolveProvider: resolveTenantRunPod, ResolveOperatorProvider: resolveOperatorRunPod})
 	}
 	if cfg.AWSEnabled() {
 		awsProfile, profileErr := integrationRegistry.Provider("aws-ec2")
@@ -4951,7 +4979,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
 		}
-		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs, ObjectStoreSecretName: cfg.KubernetesObjectStoreSecret, S3FetchImage: cfg.KubernetesS3FetchImage, GCSFetchImage: cfg.KubernetesGCSFetchImage, Tolerations: cfg.KubernetesTolerations}
+		engineIngress, _, _ := engineingress.Parse(cfg.KubernetesEngineIngress)
+		kubernetesProvider := provision.Kubernetes{EngineIngress: engineIngress, Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs, ObjectStoreSecretName: cfg.KubernetesObjectStoreSecret, S3FetchImage: cfg.KubernetesS3FetchImage, GCSFetchImage: cfg.KubernetesGCSFetchImage, Tolerations: cfg.KubernetesTolerations}
 		artifactCacheAdapters["kubernetes"] = kubernetesProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
@@ -4995,20 +5024,39 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	}
 	candidateBackends := make(map[string]optimizationcampaign.BenchmarkBackend, len(benchmarkBackends))
 	for name, backend := range benchmarkBackends {
-		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv}
+		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv, WorkerMaster: backend.WorkerMaster}
 	}
-	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
+	// A configured prompt corpus that cannot be read stops the start: falling
+	// back to synthetic text would measure another workload than the operator
+	// asked for.
+	var promptCorpus *replay.PromptCorpus
+	if cfg.ReplayPromptCorpusFile != "" {
+		if promptCorpus, err = replay.LoadPromptCorpus(cfg.ReplayPromptCorpusFile); err != nil {
+			return fmt.Errorf("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE: %w", err)
+		}
+		identity := promptCorpus.Identity()
+		logger.Info("replay measurement composes prompts from the operator's corpus", "name", identity.Name, "digest", identity.Digest, "license", identity.License, "passages", identity.Passages, "prompts", identity.Prompts)
+	}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, PromptCorpus: promptCorpus, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
 	qualitySigner, err := builtinQualitySigner(passportKey, logger)
 	if err != nil {
 		return err
 	}
 	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
 	migrationCheck := optimizationcampaign.MigrationQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Credentials: closedAPICredentials{upstreamCredentials}, Signer: qualitySigner}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s}
+	composite := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s, PromptCorpus: promptCorpus}
+	// A run on an agent's endpoint is measured by its agent in the customer's
+	// cluster; the control plane only judges the numbers it reports.
+	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner}
+	driver := optimizationcampaign.SiteDriver{Repository: s, Control: composite, Agent: agentDriver}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range optimizationcampaign.ActivationHandlers(s, rec.RefreshEndpoints, nil) {
+	// The winner of a run on an agent's endpoint is rolled out there: the
+	// agent starts it, the endpoint switches on Release Guard's PASS, and a
+	// watch window promotes it or rolls it back.
+	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}}
+	for kind, handler := range optimizationcampaign.ActivationHandlersWith(s, rec.RefreshEndpoints, nil, agentRollout) {
 		handlers[kind] = handler
 	}
 	// The gateway exists before the control API's handler so the dashboard's
@@ -5042,7 +5090,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			}
 		}()
 	}
-	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, APIKey: cfg.APIKey}, Fleet: s}
+	autoscaler := autoscale.Controller{Repository: s, Signals: autoscale.VLLMSignals{Targets: s, Client: client, Credential: engineCredential}, Fleet: s}
 	go runAutoscaler(ctx, autoscaler, cfg.HealthInterval, logger)
 	go (&enginetelemetry.Collector{Targets: rec, Recorder: s, Client: client, Logger: logger}).Run(ctx)
 	gatewayTelemetry := &gateway.Telemetry{Extra: func(w io.Writer) {
@@ -5087,14 +5135,46 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	return err
 }
 
+// operatorRunPodResolver returns the provider for one deployment on the
+// operator's RunPod account. A Pod there serves one workspace's deployment and
+// may run that workspace's own image, so it is started with a credential
+// scoped to that workspace and deployment and never with the control-plane API
+// key. Without INFERCRANE_WORKER_CREDENTIAL_KEY only the bootstrap operator
+// may start Pods there, on the one credential that operator already holds.
+func operatorRunPodResolver(workerCredentialKey string, pods provision.RunPodPods, capacity workflows.CapacityAdvisor) func(context.Context, string, string) (workflows.ReplicaProvider, workflows.CapacityAdvisor, string, error) {
+	return func(_ context.Context, tenant, deploymentID string) (workflows.ReplicaProvider, workflows.CapacityAdvisor, string, error) {
+		if tenant == "" {
+			// A deployment stored without a workspace belongs to the bootstrap one.
+			tenant = secrets.BootstrapTenant
+		}
+		if workerCredentialKey == "" {
+			if tenant != secrets.BootstrapTenant {
+				return nil, nil, "", errors.New("operator RunPod capacity needs INFERCRANE_WORKER_CREDENTIAL_KEY before another workspace's deployment can run on it")
+			}
+			return pods, capacity, "", nil
+		}
+		workerKey := workercredential.Derive(workerCredentialKey, tenant, deploymentID)
+		if workerKey == "" {
+			return nil, nil, "", errors.New("worker credential derivation needs the deployment's workspace and identity")
+		}
+		provider := pods
+		provider.WorkerAPIKey = workerKey
+		provider.WorkerCredentialVersion = workercredential.Version
+		return provider, capacity, workerKey, nil
+	}
+}
+
 func baseBenchmarkBackends(cfg config.Config) map[string]controlapi.BackendMetadata {
 	return map[string]controlapi.BackendMetadata{
 		"runpod-serverless": {APIKey: cfg.RunPodAPIKey, APIKeyEnv: "RUNPOD_API_KEY", Serverless: true},
 		// Native RunPod Pods expose the InferCrane worker API directly. The
 		// provider credential is only used to create and destroy the pod; direct
 		// revision benchmarks must authenticate with the worker credential just
-		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends.
-		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY"},
+		// like AWS, GCP, Kubernetes, and SkyPilot elastic backends. A Pod is
+		// started with a credential scoped to its tenant and deployment, so a
+		// benchmark derives that one; APIKey reaches only Pods the bootstrap
+		// operator started without one.
+		"runpod-pods": {APIKey: cfg.APIKey, APIKeyEnv: "INFERCRANE_WORKER_API_KEY", WorkerMaster: cfg.WorkerCredentialKey},
 	}
 }
 
@@ -5455,4 +5535,19 @@ func humanWindow(window time.Duration) string {
 	default:
 		return window.String()
 	}
+}
+
+// agentDataPlaneValidity reads INFERCRANE_AGENT_DATA_PLANE_VALIDITY: how long an
+// agent may serve on a data plane snapshot it could not refresh (default 15m,
+// 1m to 24h). Unset keeps the default.
+func agentDataPlaneValidity() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("INFERCRANE_AGENT_DATA_PLANE_VALIDITY"))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < time.Minute || value > agentprotocol.MaxDataPlaneValidity {
+		return 0, errors.New("INFERCRANE_AGENT_DATA_PLANE_VALIDITY must be a duration from 1m to 24h")
+	}
+	return value, nil
 }

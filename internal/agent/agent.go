@@ -36,6 +36,16 @@ type Config struct {
 	// agent-managed endpoints there with InferCrane API keys, routes,
 	// admission, and quota pulled from the control plane. Empty turns it off.
 	Serve string
+	// OfflineGrace is how long past its snapshot's validity the data plane
+	// keeps serving the endpoints' own servers while it cannot reach the
+	// control plane (at most agentprotocol.MaxOfflineGrace). Zero refuses at
+	// the snapshot's validity, as before. Inside the grace a key revoked
+	// meanwhile keeps working until the agent reconnects.
+	OfflineGrace time.Duration
+	// StateDir keeps the last data plane snapshot (key digests, never keys),
+	// so a restart during an outage serves inside the grace. Empty keeps
+	// nothing.
+	StateDir string
 	// Executor runs candidate runs the control plane queues for this agent.
 	// Nil means the agent takes no commands.
 	Executor CandidateExecutor
@@ -95,6 +105,9 @@ type Agent struct {
 	poll       time.Duration
 	dataPlane  *DataPlane
 	serving    string
+	// launched are the servers rollouts started, by server key: served
+	// like servers the agent found, and registered on their endpoint.
+	launched map[string]LaunchedServer
 }
 
 // New prepares an agent.
@@ -175,9 +188,16 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 	hardware := a.config.Hardware.Inventory(ctx)
 	a.setHardware(hardware)
 	a.emit(Event{Kind: "hardware", Message: HardwareSummary(hardware)})
+	a.findLaunched(ctx)
 	a.Probe(ctx)
 	if err := a.firstSync(ctx); err != nil {
-		return nil, err
+		// An agent allowed to serve out of contact starts on the snapshot it
+		// kept when the control plane cannot be reached; a refused key or
+		// agent still stops it.
+		if fatal(err) || !a.canServeOffline() {
+			return nil, err
+		}
+		a.emit(Event{Kind: "retrying", Message: fmt.Sprintf("the control plane cannot be reached (%v); serving the kept snapshot inside the offline grace", err)})
 	}
 	if err := a.register(ctx); err != nil {
 		return nil, err
@@ -190,6 +210,10 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 	}
 	if a.config.Serve != "" {
 		dataPlane := newDataPlane(a)
+		if err := dataPlane.load(); err != nil {
+			a.emit(Event{Kind: "retrying", Message: err.Error()})
+		}
+		dataPlane.Compile()
 		a.mu.Lock()
 		a.dataPlane = dataPlane
 		a.mu.Unlock()
@@ -202,7 +226,13 @@ func (a *Agent) Start(ctx context.Context) (<-chan error, error) {
 			return nil, err
 		}
 	}
-	return gatewayErrors, a.sync(ctx, true)
+	if err := a.sync(ctx, true); err != nil {
+		if fatal(err) || !a.canServeOffline() {
+			return gatewayErrors, err
+		}
+		a.emit(Event{Kind: "retrying", Message: fmt.Sprintf("sync: %v", err)})
+	}
+	return gatewayErrors, nil
 }
 
 func (a *Agent) refreshDataPlane(ctx context.Context) error {
@@ -337,9 +367,15 @@ func (a *Agent) pollInterval() time.Duration {
 // Probe reads every candidate server, records health, and keeps each engine
 // scrape for the next relay.
 func (a *Agent) Probe(ctx context.Context) {
-	candidates := Candidates(a.config.Servers, a.config.AutoDetect)
+	configured := append([]ServerConfig(nil), a.config.Servers...)
+	a.mu.Lock()
+	for _, server := range a.launched {
+		configured = append(configured, ServerConfig{URL: server.BaseURL, AuthHeader: "Bearer " + server.Token})
+	}
+	a.mu.Unlock()
+	candidates := Candidates(configured, a.config.AutoDetect)
 	explicit := map[string]bool{}
-	for _, server := range a.config.Servers {
+	for _, server := range configured {
 		if base, err := NormalizeBaseURL(server.URL); err == nil {
 			explicit[base] = true
 		}
@@ -414,10 +450,18 @@ func (a *Agent) register(ctx context.Context) error {
 		if single && a.config.EndpointName != "" {
 			name = a.config.EndpointName
 		}
-		request := agentprotocol.RegisterServerRequest{ServerKey: server.Key, Endpoint: name, Model: model, Engine: server.Engine, Address: server.Address}
+		a.mu.Lock()
+		launched, rollout := a.launched[server.Key]
+		a.mu.Unlock()
+		if rollout {
+			// A server a rollout started joins the endpoint it was started
+			// for; it never becomes an endpoint of its own.
+			name = launched.Endpoint
+		}
+		request := agentprotocol.RegisterServerRequest{ServerKey: server.Key, Endpoint: name, Model: model, Engine: server.Engine, Address: server.Address, Rollout: rollout}
 		response, err := a.config.Client.Register(ctx, request)
 		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict && agentName != "" && !(single && a.config.EndpointName != "") {
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict && agentName != "" && !rollout && !(single && a.config.EndpointName != "") {
 			request.Endpoint = EndpointName(agentName + "-" + name)
 			response, err = a.config.Client.Register(ctx, request)
 		}
@@ -708,4 +752,43 @@ func Describe(server ServerStatus) string {
 		parts = append(parts, "loaded "+server.ActiveModel)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// findLaunched serves again the servers rollouts started before the agent
+// restarted. A listing that fails leaves them unserved until the next start;
+// their endpoint then falls back to the customer's own server.
+func (a *Agent) findLaunched(ctx context.Context) {
+	servers, ok := a.config.Executor.(ServerExecutor)
+	if !ok {
+		return
+	}
+	launched, err := servers.LaunchedServers(ctx)
+	if err != nil {
+		a.emit(Event{Kind: "retrying", Message: "servers started by rollouts could not be listed: " + err.Error()})
+		return
+	}
+	for _, server := range launched {
+		a.addLaunched(server)
+	}
+}
+
+func (a *Agent) addLaunched(server LaunchedServer) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.launched == nil {
+		a.launched = map[string]LaunchedServer{}
+	}
+	a.launched[ServerKey(server.BaseURL)] = server
+}
+
+func (a *Agent) forgetLaunched(key string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.launched, key)
+}
+
+// canServeOffline reports whether the agent may start and serve on a kept
+// snapshot while its control plane cannot be reached.
+func (a *Agent) canServeOffline() bool {
+	return a.config.Serve != "" && a.config.OfflineGrace > 0 && a.config.StateDir != ""
 }

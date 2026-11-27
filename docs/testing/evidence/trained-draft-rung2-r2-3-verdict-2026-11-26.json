@@ -1,0 +1,748 @@
+{
+ "run": "r2-3",
+ "plan": "l4-qwen3-1.7b",
+ "rules": "rules-rung2-l4-qwen3-1.7b-2026-11-26.md",
+ "report": {
+  "artifact_digest": "sha256:91079f5ca770fac049684abe6ee2ff41067a1335627cd186e54e978cca0990f8",
+  "dataset_fingerprint": "sha256:e0743fb8b56af2be39fb717be7594ba2ea93c7e1cde8aaa2e8216a97e0ff8efc",
+  "examples": 4000,
+  "expected_tokens_per_step": 1.825474463619304,
+  "start_expected_tokens_per_step": 1.5177990847767662,
+  "training_tokens": 1711301,
+  "valid": true
+ },
+ "windows": [
+  {
+   "control": "none",
+   "candidates": [
+    "published",
+    "trained"
+   ],
+   "loads": [
+    {
+     "concurrency": 1,
+     "requests_per_run": 8,
+     "output_token_throughput": {
+      "published": {
+       "higher_is_better": true,
+       "control_mean": 67.6585830303148,
+       "control_spread": 0.000852015733510724,
+       "candidate_mean": 92.92109050014089,
+       "candidate_uncertainty": 0.0004950927194178415,
+       "delta": 0.37340764884165645,
+       "noise_floor": 0.016984149242649016,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": true,
+       "control_mean": 67.6585830303148,
+       "control_spread": 0.000852015733510724,
+       "candidate_mean": 108.43787289165208,
+       "candidate_uncertainty": 0.001730593053916529,
+       "delta": 0.602621632750646,
+       "noise_floor": 0.01711807582721847,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 14.725457817407333,
+       "control_spread": 0.0011438575484424803,
+       "candidate_mean": 14.47670372411763,
+       "candidate_uncertainty": 0.00013162703927621034,
+       "delta": -0.01689900174098702,
+       "noise_floor": 0.016963626770926776,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 14.725457817407333,
+       "control_spread": 0.0011438575484424803,
+       "candidate_mean": 13.859607176862806,
+       "candidate_uncertainty": 0.00028942715389565846,
+       "delta": -0.05871945561393954,
+       "noise_floor": 0.01695765005917038,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 35.58914456112221,
+       "control_spread": 0.13132064166370372,
+       "candidate_mean": 39.454722924966745,
+       "candidate_uncertainty": 0.031175910821427868,
+       "delta": 0.10730018626465876,
+       "noise_floor": 0.11417907152563767,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 35.58914456112221,
+       "control_spread": 0.13132064166370372,
+       "candidate_mean": 40.47053571250103,
+       "candidate_uncertainty": 0.10234909260926116,
+       "delta": 0.13250232804853934,
+       "noise_floor": 0.09374434521450903,
+       "decision": "regressed",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "published": {
+       "drafts": 4412,
+       "mean_tokens_per_step": 1.714415,
+       "per_position": [
+        0.399819,
+        0.489796,
+        0.606481
+       ]
+      },
+      "trained": {
+       "drafts": 3776,
+       "mean_tokens_per_step": 2.008475,
+       "per_position": [
+        0.494703,
+        0.608137,
+        0.707746
+       ]
+      }
+     }
+    },
+    {
+     "concurrency": 8,
+     "requests_per_run": 32,
+     "output_token_throughput": {
+      "published": {
+       "higher_is_better": true,
+       "control_mean": 436.96092492166287,
+       "control_spread": 0.014320346310204589,
+       "candidate_mean": 479.7112674217803,
+       "candidate_uncertainty": 0.0002774881212495265,
+       "delta": 0.09843925980730583,
+       "noise_floor": 0.018779894143542197,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": true,
+       "control_mean": 436.96092492166287,
+       "control_spread": 0.014320346310204589,
+       "candidate_mean": 569.3358413544508,
+       "candidate_uncertainty": 0.004624580229904828,
+       "delta": 0.3037212491188215,
+       "noise_floor": 0.01845829411755684,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 15.940383059028859,
+       "control_spread": 0.0013103321649633537,
+       "candidate_mean": 15.89520219109461,
+       "candidate_uncertainty": 0.00020022387103909236,
+       "delta": -0.0027779001844240314,
+       "noise_floor": 0.016959191409538388,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 15.940383059028859,
+       "control_spread": 0.0013103321649633537,
+       "candidate_mean": 15.087387830098056,
+       "candidate_uncertainty": 0.0007226634975084543,
+       "delta": -0.0535212181053335,
+       "noise_floor": 0.016972919981178558,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 61.72417213332816,
+       "control_spread": 0.12810132767621327,
+       "candidate_mean": 64.83219853753184,
+       "candidate_uncertainty": 0.006715804777648353,
+       "delta": 0.053222621625885314,
+       "noise_floor": 0.09446635701695727,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 61.72417213332816,
+       "control_spread": 0.12810132767621327,
+       "candidate_mean": 69.60758131248639,
+       "candidate_uncertainty": 0.16652292527363502,
+       "delta": 0.1148082871392182,
+       "noise_floor": 0.2349204220183274,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "published": {
+       "drafts": 19076,
+       "mean_tokens_per_step": 1.474733,
+       "per_position": [
+        0.304886,
+        0.38033,
+        0.464738
+       ]
+      },
+      "trained": {
+       "drafts": 15937,
+       "mean_tokens_per_step": 1.775679,
+       "per_position": [
+        0.437724,
+        0.504731,
+        0.529679
+       ]
+      }
+     }
+    }
+   ],
+   "held_out_acceptance": {
+    "published": {
+     "drafts": 19861,
+     "mean_tokens_per_step": 1.517799,
+     "per_position": [
+      0.323549,
+      0.40943,
+      0.466363
+     ]
+    },
+    "trained": {
+     "drafts": 16542,
+     "mean_tokens_per_step": 1.825475,
+     "per_position": [
+      0.443175,
+      0.541945,
+      0.591744
+     ]
+    }
+   },
+   "same_answers": {
+    "none_again": {
+     "compared": 128,
+     "identical": 34,
+     "share": 0.265625
+    },
+    "prompts": 128,
+    "published": {
+     "compared": 128,
+     "identical": 21,
+     "share": 0.1640625
+    },
+    "reference": "none",
+    "trained": {
+     "compared": 128,
+     "identical": 22,
+     "share": 0.171875
+    }
+   }
+  },
+  {
+   "control": "none",
+   "candidates": [
+    "ngram",
+    "suffix"
+   ],
+   "loads": [
+    {
+     "concurrency": 1,
+     "requests_per_run": 8,
+     "output_token_throughput": {
+      "ngram": {
+       "higher_is_better": true,
+       "control_mean": 67.65432177627723,
+       "control_spread": 0.0010540981051509156,
+       "candidate_mean": 86.06882602405625,
+       "candidate_uncertainty": 0.0005128655841200979,
+       "delta": 0.2721738853128892,
+       "noise_floor": 0.016956834630837747,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": true,
+       "control_mean": 67.65432177627723,
+       "control_spread": 0.0010540981051509156,
+       "candidate_mean": 394.0288468880281,
+       "candidate_uncertainty": 0.7948902566821662,
+       "delta": 3.871164983398395,
+       "noise_floor": 6.096488328118835,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "ngram": {
+       "higher_is_better": false,
+       "control_mean": 14.726546381808298,
+       "control_spread": 0.0010281030769050958,
+       "candidate_mean": 13.963546105588263,
+       "candidate_uncertainty": 0.0003162732816398343,
+       "delta": -0.05180465571123671,
+       "noise_floor": 0.01695662816788568,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": false,
+       "control_mean": 14.726546381808298,
+       "control_spread": 0.0010281030769050958,
+       "candidate_mean": 4.804445736862937,
+       "candidate_uncertainty": 1.8185264994647725,
+       "delta": -0.7782352227705567,
+       "noise_floor": 8.496467863532956,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "ngram": {
+       "higher_is_better": false,
+       "control_mean": 35.16275448889954,
+       "control_spread": 0.03340038535620258,
+       "candidate_mean": 35.156652850000114,
+       "candidate_uncertainty": 0.008045232499943608,
+       "delta": -0.002114840459346179,
+       "noise_floor": 0.023985615291187035,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": false,
+       "control_mean": 35.16275448889954,
+       "control_spread": 0.03340038535620258,
+       "candidate_mean": 36.43772259999878,
+       "candidate_uncertainty": 0.05415236684271403,
+       "delta": 0.03802917362631275,
+       "noise_floor": 0.07460016734560249,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "ngram": {
+       "drafts": 5780,
+       "mean_tokens_per_step": 1.310035,
+       "per_position": [
+        0.144637,
+        0.674641,
+        0.695035
+       ]
+      },
+      "suffix": {
+       "drafts": 1961,
+       "mean_tokens_per_step": 3.900561,
+       "per_position": [
+        0.464049,
+        0.871429,
+        0.91425,
+        0.955862,
+        0.963925,
+        0.964072,
+        0.981366,
+        0.985759
+       ]
+      }
+     }
+    },
+    {
+     "concurrency": 8,
+     "requests_per_run": 32,
+     "output_token_throughput": {
+      "ngram": {
+       "higher_is_better": true,
+       "control_mean": 437.8454722777126,
+       "control_spread": 0.014799324407478645,
+       "candidate_mean": 454.9982131728872,
+       "candidate_uncertainty": 0.0004714511715682104,
+       "delta": 0.03951521645276279,
+       "noise_floor": 0.019140046773143737,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": true,
+       "control_mean": 437.8454722777126,
+       "control_spread": 0.014799324407478645,
+       "candidate_mean": 1011.3381177628742,
+       "candidate_uncertainty": 0.636394456916457,
+       "delta": 1.1462384694035652,
+       "noise_floor": 2.138364632431463,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "ngram": {
+       "higher_is_better": false,
+       "control_mean": 15.949532712946304,
+       "control_spread": 0.004627048460403924,
+       "candidate_mean": 16.44446982284274,
+       "candidate_uncertainty": 0.0004827717783645216,
+       "delta": 0.03100477925241063,
+       "noise_floor": 0.017265091101597685,
+       "decision": "regressed",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": false,
+       "control_mean": 15.949532712946304,
+       "control_spread": 0.004627048460403924,
+       "candidate_mean": 11.550857736733358,
+       "candidate_uncertainty": 0.43272510296854394,
+       "delta": -0.29356016397041995,
+       "noise_floor": 0.8375228572164226,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "ngram": {
+       "higher_is_better": false,
+       "control_mean": 60.47371076668292,
+       "control_spread": 0.13674342693559588,
+       "candidate_mean": 62.383216149947884,
+       "candidate_uncertainty": 0.03498693670280013,
+       "delta": 0.02700151217705571,
+       "noise_floor": 0.10189261333562238,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      },
+      "suffix": {
+       "higher_is_better": false,
+       "control_mean": 60.47371076668292,
+       "control_spread": 0.13674342693559588,
+       "candidate_mean": 58.64379392482988,
+       "candidate_uncertainty": 0.039924065129692196,
+       "delta": -0.03297521495099209,
+       "noise_floor": 0.15286894988023914,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 2,
+       "confidence": 0.975,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "ngram": {
+       "drafts": 25260,
+       "mean_tokens_per_step": 1.113698,
+       "per_position": [
+        0.061283,
+        0.537468,
+        0.591346
+       ]
+      },
+      "suffix": {
+       "drafts": 11691,
+       "mean_tokens_per_step": 2.411342,
+       "per_position": [
+        0.282268,
+        0.751515,
+        0.8375,
+        0.910448,
+        0.950291,
+        0.948804,
+        0.969501,
+        0.966122
+       ]
+      }
+     }
+    }
+   ],
+   "held_out_acceptance": {
+    "ngram": {
+     "drafts": 25833,
+     "mean_tokens_per_step": 1.171486,
+     "per_position": [
+      0.08493,
+      0.615314,
+      0.656296
+     ]
+    },
+    "suffix": {
+     "drafts": 18862,
+     "mean_tokens_per_step": 1.606616,
+     "per_position": [
+      0.193829,
+      0.588348,
+      0.651325,
+      0.767309,
+      0.852093,
+      0.887555,
+      0.915129,
+      0.922043
+     ]
+    }
+   },
+   "same_answers": {
+    "ngram": {
+     "compared": 128,
+     "identical": 23,
+     "share": 0.1796875
+    },
+    "none_again": {
+     "compared": 128,
+     "identical": 25,
+     "share": 0.1953125
+    },
+    "prompts": 128,
+    "reference": "none",
+    "suffix": {
+     "compared": 128,
+     "identical": 25,
+     "share": 0.1953125
+    }
+   }
+  }
+ ],
+ "pass_bar": {
+  "bar_acceptance_moved": "pass (+0.308 tokens a verify step: trained 1.825 against published 1.518 over 16542 and 19861 drafts, vLLM's counters; bar +0.05)",
+  "bar_answers_held": "pass: no sign of changed answers (identical greedy answers 22 of 128 for the trained draft, 34 of 128 for none's own second pass); quality not shown, since identical-answer agreement cannot carry a quality claim",
+  "bar_climb": "pass: every check of the rung's bar passed",
+  "bar_faster": "pass: the trained draft against none at 1 at once: faster (+60.3%, noise floor 1.7%)",
+  "bar_training_ran": "pass (the training report is valid and the trained draft served)",
+  "bar_validity": "pass (0 failed requests, no void or skipped measurement)",
+  "headline_trained_vs_none_at_1": "pass: the trained draft is faster than none and its greedy answers matched as often as the control's own second pass",
+  "headline_trained_vs_none_at_8": "pass: the trained draft is faster than none and its greedy answers matched as often as the control's own second pass",
+  "ngram_vs_none_at_1": "faster (+27.2%, noise floor 1.7%)",
+  "ngram_vs_none_at_8": "faster (+4.0%, noise floor 1.9%)",
+  "published_vs_none_at_1": "faster (+37.3%, noise floor 1.7%)",
+  "published_vs_none_at_8": "faster (+9.8%, noise floor 1.9%)",
+  "suffix_vs_none_at_1": "no measurable difference (+387.1%, noise floor 609.6%)",
+  "suffix_vs_none_at_8": "no measurable difference (+114.6%, noise floor 213.8%)",
+  "trained_beats_published_at_1": "yes (+60.3% against +37.3% over none; floors 1.7% and 1.7%)",
+  "trained_beats_published_at_8": "yes (+30.4% against +9.8% over none; floors 1.8% and 1.9%)",
+  "trained_vs_none_at_1": "faster (+60.3%, noise floor 1.7%)",
+  "trained_vs_none_at_8": "faster (+30.4%, noise floor 1.8%)",
+  "training_report": "valid"
+ },
+ "results": [
+  {
+   "schema_version": "infercrane.dev/technique-result/v1",
+   "technique": "trained-draft",
+   "technique_version": "0.1.0",
+   "candidate": "trained",
+   "hardware": {
+    "accelerator": "L4",
+    "count": 1
+   },
+   "software": {
+    "engine": "vllm",
+    "engine_version": "0.34.0",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1"
+   },
+   "workload": {
+    "shape_digest": "sha256:9dcbbcf2030654cafde6de13fa50dd9896a5b77924b8804ca355885ea4e2fea0",
+    "kind": "chat",
+    "load": 1,
+    "requests": 8
+   },
+   "precision": {
+    "weights": "bf16",
+    "kv_cache": "bf16"
+   },
+   "baseline": {
+    "setup": "none",
+    "basis": "same-machine"
+   },
+   "correctness": {
+    "method": "answer-agreement",
+    "verdict": "passed"
+   },
+   "measured": {
+    "metric": "output_token_throughput",
+    "change": 0.602621632750646,
+    "noise_floor": 0.01711807582721847,
+    "decision": "improved"
+   },
+   "reproduction": {
+    "command": "TRAINED_DRAFT_PLAN=l4-qwen3-1.7b modal run tools/trained-draft/trained_draft.py::launch --stage measure --run-id r2-3 --budget-usd 1.25",
+    "commit": "05356480b9545c9f09ba8b60050b47bed4ba8163",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "traffic_shape": "traffic-shape.json"
+   },
+   "required_evidence": [
+    "draft-acceptance"
+   ],
+   "evidence": [
+    {
+     "name": "draft-acceptance",
+     "digest": "sha256:e0e6f16308c626fe4892678599952db82f925a7b43b3c8f7477158a8d7fd5848",
+     "summary": "2.01 tokens a verify step over 3776 drafts at 1 at once, from vLLM's speculation counters"
+    }
+   ],
+   "claim": "not shown",
+   "unknown": [
+    "evidence.fresh-machine-confirmation"
+   ]
+  },
+  {
+   "schema_version": "infercrane.dev/technique-result/v1",
+   "technique": "trained-draft",
+   "technique_version": "0.1.0",
+   "candidate": "trained",
+   "hardware": {
+    "accelerator": "L4",
+    "count": 1
+   },
+   "software": {
+    "engine": "vllm",
+    "engine_version": "0.34.0",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1"
+   },
+   "workload": {
+    "shape_digest": "sha256:9dcbbcf2030654cafde6de13fa50dd9896a5b77924b8804ca355885ea4e2fea0",
+    "kind": "chat",
+    "load": 8,
+    "requests": 32
+   },
+   "precision": {
+    "weights": "bf16",
+    "kv_cache": "bf16"
+   },
+   "baseline": {
+    "setup": "none",
+    "basis": "same-machine"
+   },
+   "correctness": {
+    "method": "answer-agreement",
+    "verdict": "passed"
+   },
+   "measured": {
+    "metric": "output_token_throughput",
+    "change": 0.3037212491188215,
+    "noise_floor": 0.01845829411755684,
+    "decision": "improved"
+   },
+   "reproduction": {
+    "command": "TRAINED_DRAFT_PLAN=l4-qwen3-1.7b modal run tools/trained-draft/trained_draft.py::launch --stage measure --run-id r2-3 --budget-usd 1.25",
+    "commit": "05356480b9545c9f09ba8b60050b47bed4ba8163",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "traffic_shape": "traffic-shape.json"
+   },
+   "required_evidence": [
+    "draft-acceptance"
+   ],
+   "evidence": [
+    {
+     "name": "draft-acceptance",
+     "digest": "sha256:e0e6f16308c626fe4892678599952db82f925a7b43b3c8f7477158a8d7fd5848",
+     "summary": "1.78 tokens a verify step over 15937 drafts at 8 at once, from vLLM's speculation counters"
+    }
+   ],
+   "claim": "not shown",
+   "unknown": [
+    "evidence.fresh-machine-confirmation"
+   ]
+  }
+ ]
+}

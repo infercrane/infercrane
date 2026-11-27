@@ -63,8 +63,11 @@ fly checks list -a YOUR_APP_NAME
 ```
 
 To enable the first self-serve InferCrane Cloud lane on Fly after its real-provider qualification,
-add `RUNPOD_API_KEY` and `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` as Fly secrets. The RunPod
-key is the platform's supply credential, not a tenant BYOC credential. Leave the flag absent or
+add `RUNPOD_API_KEY`, `INFERCRANE_WORKER_CREDENTIAL_KEY`, and
+`INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED=true` as Fly secrets. The RunPod
+key is the platform's supply credential, not a tenant BYOC credential. The worker credential key
+gives each managed Pod its own credential; the control plane refuses to start with the flag set and
+the key missing. Leave the flag absent or
 false until current price ingestion, Stripe funding, auto-stop, provider deletion, and settlement
 are all operational.
 
@@ -96,6 +99,16 @@ tenant-and-deployment-scoped worker credentials. Neither is a RunPod credential.
 rotate them through an explicit credential migration and controlled worker replacement. Keep the
 operator `RUNPOD_API_KEY` separate. Customer deployments never receive the control plane's global
 API key.
+
+The same worker credential key scopes every Pod on the operator's own RunPod account, including
+InferCrane Cloud Pods and the bootstrap operator's own. Set it on any control plane that uses the
+RunPod supply key.
+
+Pods started before the key was set, or by a release that did not yet scope operator Pods, still
+hold the control-plane API key. They keep serving and are still reached with that credential. To
+finish the change, replace those deployments' Pods (redeploy, or delete and create), confirm no Pod
+on the RunPod account predates the change, and then rotate `INFERCRANE_API_KEY`. Rotating first
+makes the older Pods unreachable.
 
 The Fly Machine hostname is the default replica identity. Do not set `INFERCRANE_INSTANCE_ID` to
 one shared value: two live replicas with the same identity would violate lease ownership and route
@@ -153,7 +166,7 @@ credit, and the evidence boundary for capacity-derived pricing.
 For a single-host first installation, copy `.env.production.example` to a private path, replace
 every example secret and URL, then render and start the maintained production stack:
 
-The example pins the published `v2.0.2` image. Hosted documentation follows `main`, which may
+The example pins the published `v2.1.0` image. Hosted documentation follows `main`, which may
 describe work scheduled for the next release. Do not combine a release image with a newer schema
 or configuration contract without following [upgrade and compatibility](/upgrade).
 
@@ -272,10 +285,14 @@ Health and telemetry endpoints:
 - `/livez`: process liveness; it does not depend on downstream services.
 - `/readyz`: PostgreSQL connectivity with a bounded timeout.
 - `/metrics`: Prometheus-format gateway request, failure, active request, byte, duration histogram,
-  and operation claim, completion, failure, retry, and cancellation counters.
+  and operation claim, completion, failure, retry, and cancellation counters. It needs no
+  credential and names no deployment, endpoint, or workspace.
+- `/api/v1/metrics`: one workspace's Release Guard verdicts, rollbacks, canary traffic shares, and
+  optimization results, for an API key with read permission. See
+  [Grafana and Prometheus](/integrations/grafana).
 
 Import the baseline rules at `deploy/prometheus-rules.yaml` from the repository, then tune thresholds
-from real model latency and traffic. Follow the [compatibility policy](compatibility.md) and perform
+from real model latency and traffic. The dashboard is `deploy/grafana/infercrane-dashboard.json`. Follow the [compatibility policy](compatibility.md) and perform
 the [backup/restore drill](runbooks/backup-restore.md) for every release containing migrations.
 
 Use a disruption budget, topology spread constraints, anti-affinity across failure domains, and

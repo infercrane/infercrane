@@ -1,0 +1,88 @@
+---
+title: "Proof Report"
+description: "One signed before-and-after document for your finished runs: output per GPU, latency against your limits, cost per million tokens, answer quality, and the saving, counted only when it is verified."
+---
+
+The Proof Report puts the runs of a proof side by side, one workload and one load at a time, before
+and after. It is the document you read at the end of a proof: what changed, what it saves, what it
+does not cover, and how to check every number yourself.
+
+```bash
+infercrane report proof RUN_A RUN_B --prepared-for "Example Labs" --html proof.html
+infercrane report proof RUN_A RUN_B --output json > proof.json
+infercrane report proof verify proof.json
+```
+
+The dashboard shows the same report on **Savings review**: open a finished run, then **More actions →
+Savings review**, and pick the other runs of the engagement. It downloads the report as Markdown or
+print-ready HTML (print the HTML to PDF). The page shows costs per token and the saving, never an
+hourly rate.
+
+## What it states
+
+For each workload (one model on one kind of traffic and GPU), and for each load it was measured at:
+
+| Part | What it holds |
+|---|---|
+| Before and after | Both setups exactly: model and revision, GPU and count, engine and version, image digest, flags, and the hourly price recorded with the measurement. |
+| Outcomes | Output per GPU, output within your limits (when the run set one), cost per 1M output tokens, time to first token at p95, and output speed per user. Each with its change, the measured noise it had to clear, and the decision. |
+| Your limits | Each limit the run was given (first-token time, time per token, failed requests, throughput), and whether each setup met it in its own measurement. |
+| Answer quality | The verdict, the scores before and after, the eval and how many prompts it had, and the rule it was read by. |
+| Claim | `shown` or `not shown`, under the shared rule below, and what a `not shown` claim lacks. |
+| Saving | `verified`, `not_shown`, `none`, or `in_progress`. Only a verified saving states amounts: output per GPU, cost per 1M output tokens, GPU hours for the same traffic, and, with your captured traffic volume and a recorded price, the month and the year. |
+| Evidence | The run's own signed report, by digest, with the command that checks it, and every record it rests on. |
+| Measure it again | The command that runs the same request again: same model, GPU, objective, traffic shape, load and limits. |
+
+A workload measured at two or more loads also gets the judge's verdict per load. Its saving is the
+smallest verified saving across its loads, and only when every load verified one; traffic meets every
+load. The summary adds the workloads that have a verified monthly saving and says how many that is.
+
+## When a saving counts
+
+The report uses the one claim rule every result uses ([technique contract](/features/technique-contract)):
+
+- The change cleared the measured noise against your current setup, measured side by side on the same
+  traffic.
+- A fresh machine measured it again. One machine and one window can be that machine.
+- The answers held. A setup that can change answers (other weights, another precision, an FP8 KV cache)
+  must hold within 1 point of your current setup's task score; not shown to hold is never a pass.
+- Every field a reader needs to rerun it is present: GPU, engine version, image digest, traffic shape,
+  the build commit that measured it.
+
+A saving is then verified when, in addition, the answer-quality verdict is pass, no guard held the
+setup back (more failed requests or shorter answers), and output per GPU or cost per output token
+improved beyond the noise. A run on CPUs or a simulated accelerator never counts. A gain in latency
+alone is a better setup, not a saving, and the report says so.
+
+Everything else stays as measured, with the reasons it does not count. Nothing is estimated: a missing
+price, a run without your captured traffic, or a measurement that was not side by side stays
+**unknown**, and the report lists each one under "Unknown, never estimated".
+
+The monthly figure is cost per output token times your captured output-token volume. It assumes
+servers stay busy, so idle capacity is not included. The year is twelve such months, a projection.
+Prices are your own compute's hourly price as recorded with each measurement; the report holds no
+InferCrane price.
+
+## Signed by content digest
+
+`report_digest` is the SHA-256 of the report's compact JSON with that field emptied. Once every run
+has finished, the control plane signs the digest with its passport signing key (Ed25519); the same
+runs always give the same report and signature. Before then, or without a key, `signature` is `null`
+and `unsigned_reason` says why (`proof_not_finished`, `signing_key_not_configured`).
+
+`infercrane report proof verify FILE` checks a report saved with `--output json` without the control
+plane: the schema, the digest recomputed from the bytes, and the signature. `--public-key KEY` also
+checks that your operator's key signed it. Whitespace does not matter; any other change fails.
+
+## API
+
+`GET /api/v1/optimization/proof-report?campaigns=RUN_A,RUN_B` (viewer) returns the signed envelope
+(`ProofReportEnvelope`). It reads 1 to 16 runs, each inside your workspace; a run elsewhere is not
+found. `title` and `prepared_for` head the report (one line, at most 120 characters each).
+`format=markdown` and `format=html` return the same report rendered, as an attachment; the HTML page
+is self-contained, with no scripts or network requests.
+
+## Next
+
+- [Read the outcome of one run](/features/optimization#read-the-outcome-of-a-run)
+- [Measured results](/features/results-store)

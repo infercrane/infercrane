@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS builder
-ARG INFERCRANE_VERSION=2.0.2
+ARG INFERCRANE_VERSION=2.1.0
 WORKDIR /build
 COPY go.mod go.sum ./
 # Keep the module cache in the builder layer. The same builder image is used as

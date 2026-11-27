@@ -31,7 +31,7 @@ steps.
 | Answers with no text | If the reference gives no answer text and makes no tool call to any prompt within the token limit, for example because a reasoning model was cut off mid-reasoning or its server returned only reasoning, the check stops without a score. The candidate ends `inconclusive` with `quality_reference_unanswered`. Use an eval set with a larger `max_tokens`. |
 | Score | The mean over prompts. The reference's own row records 1. |
 | Verdict | `PASS` for a drop up to 5%, `WATCH` above 5% and up to 10%, `BLOCK` above 10%, using the same classifier as Release Guard. A candidate that breaks a tool call the reference made correctly is `BLOCK` whatever its score. `BLOCK` records `passed: false`. |
-| Evidence | Evaluator `infercrane-builtin` version 3, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, the tool-call score in `distribution.tool_calls` when the eval set has tool cases, and an artifact digest that commits to a hash of every answer and call. Signed with the control plane's key. Evidence from version 2 is not compared with version 3. |
+| Evidence | Evaluator `infercrane-builtin` version 3, suite version `VERSION@sha256:DIGEST`, a paired score per prompt, the tool-call score in `distribution.tool_calls` when the eval set has tool cases, a precision change's [divergence](#divergence-of-a-precision-change) in `distribution.divergence`, and an artifact digest that commits to a hash of every answer and call. Signed with the control plane's key. Evidence from version 2 is not compared with version 3. |
 | Provenance | `source: infercrane` and the reference's revision ID. Only the worker writes these rows; the attach API always records `source: customer` and refuses the evaluator name `infercrane-builtin`. |
 
 Answers are compared in memory and discarded. Prompts of the built-in suite live in the product;
@@ -101,7 +101,7 @@ Schema v2 accepts everything v1 does. A case may also hold a conversation in `me
 `examples/evaluation/eval-set-tools.json` has a fuller example, with a conversation that carries an
 earlier call and its result.
 
-Up to 200 cases and 512 KiB. Case IDs are 1 to 64 letters, digits, dots, dashes, or underscores and
+Up to 200 cases and 512 KiB (a [task set](#task-sets) up to 1,000 cases and 1 MiB). Case IDs are 1 to 64 letters, digits, dots, dashes, or underscores and
 must be unique. A case sets either `prompt` (with an optional `system`) or `messages`. A conversation
 holds 1 to 64 turns with roles `system`, `user`, `assistant`, and `tool`, and ends with a user or tool
 turn. An assistant turn may carry earlier `tool_calls` to declared functions, and each tool turn
@@ -109,14 +109,85 @@ answers one of them by `tool_call_id`. Each case declares 1 to 64 functions; a f
 `parameters` must be a JSON Schema (draft-07 or 2020-12) without remote `$ref`, and `tool_choice` is
 `auto`, `none`, `required`, or a declared function. Unknown fields are rejected.
 
-Expected answers are accepted only in a **graded** set, which names its `grading` (`exact_match` or
-`token_f1`) and gives every prompt 1 to 8 `expected` answers; an ungraded set with expected answers is
+Expected answers are accepted only in a **graded** set, which names its `grading` (`exact_match`,
+`token_f1`, or `answer_line` for a [task set](#task-sets)) and gives every prompt 1 to 8 `expected` answers; an ungraded set with expected answers is
 refused, because the ordinary check scores agreement with the reference's answers, not stored answers.
 A graded set scores answer text, so its cases may hold conversations but not tools. A graded set is
 what a [migration Proof](/features/migration) scores both the closed API and each setup against
 (evaluator `infercrane-graded`), compared with a paired bootstrap into a signed PASS, BLOCK, or
-UNKNOWN verdict. The evaluator names `infercrane-builtin` and `infercrane-graded` are reserved: your
-own evidence cannot claim them.
+UNKNOWN verdict. The evaluator names `infercrane-builtin`, `infercrane-graded`, and `infercrane-task`
+are reserved: your own evidence cannot claim them.
+
+#### Task sets
+
+A word-overlap check cannot tell a real loss from noise once answers are long: two servers of the
+same setup under load wrote different texts for most prompts. A **task set** scores whether answers
+are right instead. Set `grading` to `answer_line` and give every prompt one `expected` answer: a number,
+or a letter from `A` to `D`. Each answer is read from its last `Answer:` line: the first number after
+it, or the first of `A` to `D` that stands alone after it. A text without that line counts its last
+number for a number item and is wrong for a letter item; an empty answer is wrong.
+
+When the run's eval set is a task set, the check asks the reference and the candidate every item and
+scores both against the gold answers (evaluator `infercrane-task`). The two are compared item by item:
+the mean of the per-item differences, with a 95% interval of 1.96 standard errors.
+
+| Interval of the difference | Verdict | Setup |
+|---|---|---|
+| Above zero | better | passes |
+| Inside ±3 points | no measurable difference | passes |
+| Below zero | worse | blocked |
+| Reaches past ±3 points without excluding zero | not settled | blocked: the items cannot show it is safe |
+
+A setup that changes answers by design is read by a stricter rule. That is a setup that serves
+other weights or numeric precision (another checkpoint, `--quantization`, `--kv-cache-dtype`,
+`--dtype`), or one a technique made whose manifest declares `changes_answers`. Its answers count
+as held only when the lower end of the 95% interval lies above −1 point:
+
+| Interval of the difference | Verdict | Setup |
+|---|---|---|
+| Below zero | worse | blocked |
+| Above zero | better | passes |
+| Lower end above −1 point | answers held within 1 point | passes |
+| Anything else | answers not shown to hold within 1 point | not promoted, whatever its speed |
+
+A setup whose answers were not shown to hold ends inconclusive (`quality_answers_not_shown_held`),
+never "no measurable difference", and the report says what it gained and why that is not enough,
+for example "faster by 62% (output throughput), but its answers were not shown to hold within 1
+point on one server each". Its evidence records the rule (`task_rule`), the verdict
+(`task_verdict`), and how many servers of each setup answered (`task_servers`). One pair of
+servers answering 1,000 items gives an interval about ±1.5 points wide, so a loss near a point
+usually cannot be shown either way on one pair.
+
+A setup that changes answers and gains in its first window is measured again on fresh servers
+(Optimization, "A gain is measured again on fresh servers"). Before its first server is retired for that, the first servers
+answer the task set too, and the check after the fresh window pools both pairs: each item's score
+on a side is the share of that side's servers that got it right, and the interval is read over
+items as before. Two pairs halve the servers' disagreement on the same items, so the interval
+narrows, and `task_servers` records 2. The 1-point bar does not move: a lower end of −1.03 points
+is not held, pooled or not. Pairs pool only when every reference server ran one revision and every
+candidate server another, on the same task set; otherwise the verdict rests on the fresh pair and
+the candidate's evidence says why (`task_pool_refused`). If the first servers could not answer,
+the checkpoint records why and the verdict rests on the fresh pair alone. A run that evolves a live
+endpoint keeps its control's server, so that one server answers once per pair. A setup without a
+gain is not measured again, and its answers stay on one pair: it is not promoted on speed anyway.
+A run on an endpoint an InferCrane agent serves pools the same way: the agent answers the task set
+in its first window and again in the window on a new server, and the control plane judges both
+pairs by this rule ([the agent page](/architecture/agent#optimization-runs-on-an-agent%E2%80%99s-endpoint)).
+
+A task set may hold up to 1,000 items, 1 MiB, and an answer limit of 2,048 tokens, because answers
+with working need about 1,000 tokens. The check asks each server 32 items at a time, the
+reference's first and then the candidate's, so batching treats both alike, and each answer keeps
+its item's place. Whether two identical setups score within the measured noise at 32 at once has
+not been tested in the product yet. The evidence records the concurrency in its distribution
+(`items_at_once`). A 1,000-item set takes about 12 minutes of each server on an L4. A check on a
+task set may run 45 minutes; other checks 30. The reference's row records its own share right, and the
+candidate's row its share right and the verdict. `tools/task-set/from_fast_track.py` turns the
+fast-track map's 1,000-item task set (GSM8K and MMLU items, both MIT) into one.
+
+Setups the optimizer plans carry a risk class. Lower numeric precision, other kernels, and
+speculation can change what the model writes, so their `required_evidence` asks for a task score
+against the starting setup. Every other change schedules the same computation and keeps the short
+check. The evaluator name `infercrane-task` is reserved like the other two.
 
 #### Tool calls
 
@@ -185,6 +256,73 @@ infercrane evaluation set stay-optimized chat default
 
 The command checks that the eval set is uploaded and changes only that field of the endpoint's saved
 policy. A run already proposed keeps the eval set it was proposed with.
+
+### Divergence of a precision change
+
+Word agreement cannot separate a lossy precision change from noise: two servers of one setup can
+already differ in long answers under load. So for a setup that changes numeric precision, the
+built-in check also measures how far its next-token distribution moved. A setup changes precision
+when it serves another checkpoint than the campaign's control, or another value of
+`--quantization`, `--kv-cache-dtype`, or `--dtype`.
+
+It reads long answers, because a precision change shows in what the model writes. With a
+[task set](#task-sets) it reads the task set's own items, whose worked answers are long. Otherwise
+it reads `infercrane-divergence`, 32 built-in open prompts that each ask for about 150 words. It
+does not read the built-in answer-check prompts, which ask for a number or a word. Each reference
+answer is capped at 256 tokens, so a reading holds up to 8,192 answer positions.
+
+For up to 32 of those prompts without tools, the reference first answers greedily. Both servers then read
+that prompt and answer as one forced sequence: a chat request whose last message is the answer,
+with `continue_final_message`, and `prompt_logprobs` set to 16. A second request counts the
+prompt's tokens. At every position, the KL divergence of the setup from the reference is taken over
+the reference's 16 most likely tokens and one bucket for the rest of the vocabulary. A token the
+setup did not return shares its unreturned mass. Coarser buckets can only lower a divergence, so the
+value reads low rather than high. Both servers read identical inputs, so the value does not depend on
+where two answers first part.
+
+Token IDs name the same text only within one tokenizer, so both servers must read with the same
+tokenizer and chat template. A setup serving the control's model at the same revision does. For a
+setup serving another repository, such as a published FP8 checkpoint, the proposal records each
+model's tokenizer digest in `input.model_tokenizers`. The control plane reads it from Hugging Face
+when it makes the proposal: the sha256 of the files a server reads text with (`tokenizer.json`,
+`tokenizer_config.json`, the chat template, the vocabulary, merges, and special and added tokens),
+each named by its content hash. The divergence is read only when both digests are recorded and
+equal; otherwise it is unknown, and the answers alone decide.
+
+The result is recorded in the evidence's `distribution.divergence`, and in the candidate's
+`quality.divergence`:
+
+| Field | Meaning |
+|---|---|
+| `method` | `forced-decoding-kl-top-k-v1`. |
+| `top_k` | Tokens compared per position: 16. |
+| `prompts` | Prompts both servers read alike. A prompt whose token counts differ between the servers is left out. |
+| `prefill_tokens`, `prefill_mean_kl` | The prompt's positions and their mean KL per token. |
+| `generation_tokens`, `generation_mean_kl`, `generation_max_kl` | The answer's positions (the sample size), their mean KL per token, and the largest single position. |
+| `prompt_set`, `prompt_set_version`, `max_answer_tokens` | The prompts read (a task set's name, or `infercrane-divergence`), their `version@digest`, and the cap on each answer. |
+
+It is evidence: it passes and blocks nothing. No threshold has been set from measurements yet. A
+threshold needs many readings on long answers, set against the same setups' task scores. It does
+not come from one reading. Readings on the answer-check prompts, from before the check read long
+answers, carry no `prompt_set`; their few answer positions are a small sample. It is
+absent when not measured: for a setup that changes no precision, for a closed API, when a server
+does not return prompt log probabilities, when the two servers are not known to read with the same
+tokenizer, or when no prompt could be read alike. The reference's own
+evidence never carries one. Prompts, answers, and log probabilities are read in memory and never
+stored.
+
+The same measurement runs without a control plane, between any two OpenAI-compatible servers that
+return prompt log probabilities:
+
+```bash
+infercrane evaluation divergence --reference http://127.0.0.1:8000 --candidate http://127.0.0.1:8001 --model MODEL
+infercrane evaluation divergence --reference URL --candidate URL --model MODEL --eval-set eval-set.json --output json
+```
+
+It reads the built-in long-answer prompts (`infercrane-divergence`) unless `--eval-set` names a
+file, which is read as given, each answer capped at 256 tokens. `--api-key-env` names a variable
+holding a bearer key both servers accept. Two servers of the same setup give the divergence that
+nondeterminism alone causes, which is the floor any precision change is read against.
 
 ### Signing key
 

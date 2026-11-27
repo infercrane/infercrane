@@ -319,6 +319,10 @@ class ControlAPI:
         request_path = f"/endpoints/{quote(name, safe='')}/monitoring"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
 
+    def get_workspace_result_metrics(self) -> dict[str, Any]:
+        request_path = "/metrics"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
     def get_endpoint_g_p_u_profile(self, name: str) -> dict[str, Any]:
         request_path = f"/endpoints/{quote(name, safe='')}/gpu-profile"
         return cast(dict[str, Any], self._transport.request("GET", request_path))
@@ -610,6 +614,30 @@ class ControlAPI:
     def list_migration_verdicts(self, id: str) -> ObjectList:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/migration-verdicts"
         return cast(ObjectList, self._transport.request("GET", request_path))
+
+    def get_proof_report(self) -> dict[str, Any]:
+        request_path = "/optimization/proof-report"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def get_optimization_band_study(self) -> dict[str, Any]:
+        request_path = "/optimization/band-study"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def list_result_records(self) -> dict[str, Any]:
+        request_path = "/optimization/results"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
+
+    def import_result_records(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/optimization/results"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def rank_result_setups(self, *, body: dict[str, Any]) -> dict[str, Any]:
+        request_path = "/optimization/results/rank"
+        return cast(dict[str, Any], self._transport.request("POST", request_path, body=body))
+
+    def get_result_record(self, id: str) -> dict[str, Any]:
+        request_path = f"/optimization/results/{quote(id, safe='')}"
+        return cast(dict[str, Any], self._transport.request("GET", request_path))
 
     def get_optimization_campaign_report(self, id: str) -> dict[str, Any]:
         request_path = f"/optimization/campaigns/{quote(id, safe='')}/report"

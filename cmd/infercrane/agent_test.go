@@ -10,9 +10,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/agent"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/testtools/fakeengine"
 )
@@ -144,15 +146,16 @@ func TestAgentRunTolerationsAreParsedStrictlyAndReachTestSetupPods(t *testing.T)
 	if err != nil || !reflect.DeepEqual(flags.tolerations, want) {
 		t.Fatalf("tolerations=%#v err=%v", flags.tolerations, err)
 	}
-	provider := flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key")
-	if !reflect.DeepEqual(provider.Tolerations, want) || provider.Context != "in-cluster" || provider.Namespace != "models" || provider.WorkloadAPI != "deployment" ||
+	agentPods := []engineingress.Peer{{PodLabels: map[string]string{"app.kubernetes.io/name": "infercrane-agent"}}}
+	provider := flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key", agentPods)
+	if !reflect.DeepEqual(provider.Tolerations, want) || !reflect.DeepEqual(provider.EngineIngress, agentPods) || provider.Context != "in-cluster" || provider.Namespace != "models" || provider.WorkloadAPI != "deployment" ||
 		provider.ServiceAccount != "infercrane-runtime" || provider.WorkerSecretName != "infercrane-worker" || provider.WorkerSecretKey != "api-key" ||
 		provider.GPUResource != "nvidia.com/gpu" || provider.GPUProductLabel != "nvidia.com/gpu.product" || provider.ArtifactCachePolicy != "disabled" {
 		t.Fatalf("provider=%#v", provider)
 	}
 	// Without the flag, test setup pods get no tolerations, as before.
 	flags, err = parseAgentFlags("agent run", []string{"--executor", "kubernetes", "--kubernetes-namespace", "models"}, true)
-	if err != nil || flags.tolerations != nil || flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key").Tolerations != nil {
+	if err != nil || flags.tolerations != nil || flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key", agentPods).Tolerations != nil {
 		t.Fatalf("tolerations without the flag: %#v err=%v", flags.tolerations, err)
 	}
 	for _, args := range [][]string{
@@ -170,5 +173,86 @@ func TestAgentRunTolerationsAreParsedStrictlyAndReachTestSetupPods(t *testing.T)
 	}
 	if _, err = parseAgentFlags("agent detect", []string{"--tolerations", gpuTaint}, false); err == nil {
 		t.Fatal("agent detect accepted --tolerations")
+	}
+}
+
+// The in-cluster executor needs a choice of who may reach its test setup
+// pods, as the control plane's Kubernetes adapter does: the flag, else the
+// shared setting, or an explicit none. Without one it refuses to start,
+// before it calls the cluster.
+func TestAgentExecutorRequiresEngineIngress(t *testing.T) {
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "")
+	t.Setenv("INFERCRANE_WORKER_KEY", "worker-key")
+	flags, err := parseAgentFlags("agent run", []string{"--executor", "kubernetes", "--kubernetes-context", "kind-unused", "--kubernetes-namespace", "models",
+		"--worker-secret", "agent-worker/api-key", "--allow-image", "vllm/vllm-openai"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = flags.candidateExecutor(context.Background()); err == nil || !strings.Contains(err.Error(), "--executor kubernetes needs --engine-ingress") {
+		t.Fatalf("executor without engine ingress: %v", err)
+	}
+	if _, err = agentEngineIngress("agent"); err == nil || !strings.Contains(err.Error(), "not an address range") {
+		t.Fatalf("malformed engine ingress: %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "none")
+	if peers, err := agentEngineIngress(""); err != nil || peers != nil {
+		t.Fatalf("none: peers=%v err=%v", peers, err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "10.8.0.0/16")
+	if peers, err := agentEngineIngress(""); err != nil || len(peers) != 1 || peers[0].CIDR != "10.8.0.0/16" {
+		t.Fatalf("setting: peers=%v err=%v", peers, err)
+	}
+	peers, err := agentEngineIngress("namespace:kubernetes.io/metadata.name=models;pods:app.kubernetes.io/name=infercrane-agent")
+	if err != nil || len(peers) != 1 || peers[0].NamespaceLabels["kubernetes.io/metadata.name"] != "models" || peers[0].PodLabels["app.kubernetes.io/name"] != "infercrane-agent" {
+		t.Fatalf("the flag wins over the setting: peers=%v err=%v", peers, err)
+	}
+}
+
+// A serving agent keeps serving its endpoints' own servers for 24 hours
+// through a control-plane outage unless its operator says otherwise: 0
+// fails closed, the flag wins over the environment, a value that is not a
+// duration is refused rather than read as 24 hours, and an agent that does
+// not serve has no grace.
+func TestAgentOfflineGraceDefaultsTo24HoursWhenServing(t *testing.T) {
+	parse := func(args ...string) (time.Duration, error) {
+		flags, err := parseAgentFlags("agent run", args, true)
+		return flags.offlineGrace, err
+	}
+	serve := []string{"--serve", "127.0.0.1:8080"}
+	t.Setenv("INFERCRANE_AGENT_OFFLINE_GRACE", "")
+	for _, test := range []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{"serving", serve, 24 * time.Hour},
+		{"observing only", nil, 0},
+		{"fail closed", append(serve, "--offline-grace", "0s"), 0},
+		{"an hour", append(serve, "--offline-grace", "1h"), time.Hour},
+	} {
+		if got, err := parse(test.args...); err != nil || got != test.want {
+			t.Fatalf("%s: %v %v, want %v", test.name, got, err, test.want)
+		}
+	}
+	if _, err := parse("--offline-grace", "1h"); err == nil || !strings.Contains(err.Error(), "needs --serve") {
+		t.Fatalf("a grace without --serve: %v", err)
+	}
+	if _, err := parse(append(serve, "--offline-grace", "25h")...); err == nil || !strings.Contains(err.Error(), "between 0 and 24h") {
+		t.Fatalf("25h: %v", err)
+	}
+	t.Setenv("INFERCRANE_AGENT_OFFLINE_GRACE", "0")
+	if got, err := parse(serve...); err != nil || got != 0 {
+		t.Fatalf("environment 0: %v %v", got, err)
+	}
+	t.Setenv("INFERCRANE_AGENT_OFFLINE_GRACE", "2h")
+	if got, err := parse(serve...); err != nil || got != 2*time.Hour {
+		t.Fatalf("environment 2h: %v %v", got, err)
+	}
+	if got, err := parse(append(serve, "--offline-grace", "30m")...); err != nil || got != 30*time.Minute {
+		t.Fatalf("the flag over the environment: %v %v", got, err)
+	}
+	t.Setenv("INFERCRANE_AGENT_OFFLINE_GRACE", "24 hours")
+	if _, err := parse(serve...); err == nil || !strings.Contains(err.Error(), "INFERCRANE_AGENT_OFFLINE_GRACE") {
+		t.Fatalf("a typo was not refused: %v", err)
 	}
 }

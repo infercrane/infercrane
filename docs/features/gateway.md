@@ -62,7 +62,11 @@ These are what a [migration Proof](./migration.mdx) prices and replays.
 
 ## Failure behavior
 
-- Unknown aliases return an OpenAI-compatible 404.
+- Unknown aliases return an OpenAI-compatible 404. So does a deployment whose route the
+  reconciler withdrew because no server passed its health probe. A server that was healthy keeps
+  its route through one missed probe (event `replica_probe_missed`) and loses it at the second in
+  a row, so one slow health answer under a burst does not turn every new request away. Such a
+  refusal happens before admission and is not in the request records.
 - Upstream connection failures return 503; timeouts return 504.
 - A buffered request on a `primary-fallback` endpoint whose binding gave no response byte
   (connection failure, `502`, `503` or `504`) moves to the next published binding it has not

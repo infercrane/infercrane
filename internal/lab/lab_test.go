@@ -84,6 +84,17 @@ func TestEvaluateComparesActiveAndCandidateWithIdenticalLoad(t *testing.T) {
 	if err = json.Unmarshal([]byte(result.ResultsJSON), &candidates); err != nil || len(candidates) != 2 || !candidates[0].Comparable || candidates[0].EvidenceID != "candidate" || !candidates[0].Selected || candidates[0].WorkloadDigest != candidates[1].WorkloadDigest {
 		t.Fatalf("active/candidate load was not compared: candidates=%#v err=%v", candidates, err)
 	}
+	// An agent-measured setup's windows and nodes are provenance too.
+	agentActive := `{"profile":"interactive","concurrency":1,"measured_by":"agent","agent_windows":[{"stage":"first","command_id":"window-1"}],"fresh_machine":""}`
+	agentCandidate := `{"profile":"interactive","concurrency":1,"measured_by":"agent","agent_windows":[{"stage":"first","command_id":"window-3"},{"stage":"confirm","command_id":"window-4"}],"fresh_machine":"a fresh machine: the setup ran on another node"}`
+	if WorkloadDigest(agentActive) != WorkloadDigest(agentCandidate) || WorkloadDigest(agentActive) == WorkloadDigest(strings.Replace(agentActive, `"concurrency":1`, `"concurrency":2`, 1)) {
+		t.Fatal("an agent's windows and nodes changed the workload identity, or a load change did not")
+	}
+	// An agent-measured row and a row the control plane measured under the
+	// same load stay apart: who measured it is not provenance.
+	if WorkloadDigest(agentActive) == WorkloadDigest(`{"profile":"interactive","concurrency":1}`) {
+		t.Fatal("an agent-measured row shares a workload identity with a control-plane row")
+	}
 	rows = append(rows, domain.BenchmarkResult{ID: "changed", ModelIdentity: "model@commit", RequestCount: 10, TTFTP95MS: number(100), WorkloadJSON: changedLoad, CostMetadataJSON: `{}`})
 	result, err = Evaluate(Input{ModelIdentity: "model@commit", Objective: ObjectiveLatency}, rows)
 	if err != nil {

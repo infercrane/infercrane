@@ -64,10 +64,15 @@ running inference? Connect it in observe-only mode without migrating or transfer
 
 ## Measured evidence
 
-On the recorded `Qwen/Qwen3.8-27B-FP8`, one-H200, 4K-input/512-output, concurrency-12 workload,
-the selected configuration moved aggregate output throughput from 810.4 to 1,393.6 tokens/s and
-median TTFT from 1,591 ms to 739 ms. That is exact-tuple evidence, not a universal model or provider
-claim. Read the [benchmark index](/benchmarks) and the linked raw receipt before reusing the result.
+A change InferCrane reports is measured on your traffic against your current setup, confirmed again
+on fresh servers, and, when it changes answers, checked on a scored task set. An early September
+screen on `Qwen/Qwen3.8-27B-FP8` did not meet that bar: it measured 1.72× from turning on the
+publisher's documented speculation option, using synthetic prompts that repeat one sentence. Run
+again on 23 November on real text with three fresh servers per setup, the same change gave 12% to 33%
+at 12 requests at once, and the publisher's documented setup on vLLM 0.34.0 was faster than
+September's setup in every case measured. The
+[re-run's receipt](/testing/qwen38-27b-fp8-h200-rerun-2026-11-23) has every number; the
+[benchmark index](/benchmarks) keeps September's receipts as a dated record.
 
 ## The production operating loop
 

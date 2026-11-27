@@ -15,7 +15,10 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/releaseguard"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -86,6 +89,9 @@ type CompositeDriver struct {
 	// checks it before any provider mutation, so a campaign that cannot
 	// replay its trace fails before it spends.
 	Replays ReplayTraceSource
+	// PromptCorpus is the same corpus the benchmark executor renders with, so
+	// a trace it cannot render fails here too.
+	PromptCorpus *replay.PromptCorpus
 	// Migration decides the candidates of a migration campaign against the
 	// closed API they would replace.
 	Migration MigrationChecker
@@ -99,7 +105,7 @@ func (d CompositeDriver) Provision(ctx context.Context, candidateID string, cand
 	if err != nil {
 		return ProvisionResult{}, err
 	}
-	if _, err = resolveBoundReplay(ctx, d.Replays, candidate.TenantID, campaignRequest(campaign)); err != nil {
+	if _, err = resolveBoundReplay(ctx, d.Replays, candidate.TenantID, campaignRequest(campaign), d.PromptCorpus); err != nil {
 		var failure operations.Failure
 		if errors.As(err, &failure) {
 			return ProvisionResult{}, failure
@@ -260,6 +266,12 @@ func (d CompositeDriver) validateMigration(ctx context.Context, campaign domain.
 
 func evidenceResult(row domain.QualityEvidence) ValidationResult {
 	if !row.Passed {
+		// A setup that changes answers and could not show them held within a
+		// point is not worse; it is unknown, and unknown never qualifies.
+		var distribution qualityevidence.Distribution
+		if row.DistributionJSON != "" && json.Unmarshal([]byte(row.DistributionJSON), &distribution) == nil && distribution.TaskVerdict == qualitycheck.CodeTaskNotShownHeld {
+			return ValidationResult{QualityEvidenceID: row.ID, Inconclusive: true, FailureCode: FailureQualityAnswersNotShownHeld}
+		}
 		return ValidationResult{QualityEvidenceID: row.ID, Passed: false, FailureCode: FailureQualityRejected}
 	}
 	return ValidationResult{QualityEvidenceID: row.ID, Passed: true}
@@ -579,11 +591,11 @@ func childComplete(operation domain.Operation, label string) error {
 }
 
 func draftCloudRequest(draft optimizer.DeploymentDraft) workflows.CloudRequest {
-	return workflows.CloudRequest{Name: draft.Name, Model: draft.Model.ID, ModelRevision: draft.Model.Revision, ModelSecretReferenceID: draft.ModelSecretReferenceID, ModelAdapters: draft.Model.Adapters, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, RuntimeEnv: draft.Runtime.Env, Workload: draft.Runtime.Workload, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeConnectionID: draft.ComputeConnectionID, ComputeMode: draft.Compute.Mode, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, Serving: draft.Serving}
+	return workflows.CloudRequest{Name: draft.Name, Model: draft.Model.ID, ModelRevision: draft.Model.Revision, ModelSecretReferenceID: draft.ModelSecretReferenceID, ModelAdapters: draft.Model.Adapters, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, RuntimeEnv: draft.Runtime.Env, KernelConfigs: draft.Runtime.KernelConfigs, Workload: draft.Runtime.Workload, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeConnectionID: draft.ComputeConnectionID, ComputeMode: draft.Compute.Mode, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, Serving: draft.Serving}
 }
 
 func draftRevisionSpec(draft optimizer.DeploymentDraft) domain.DeploymentRevisionSpec {
-	return domain.DeploymentRevisionSpec{Model: draft.Model.ID, ModelRevision: draft.Model.Revision, ModelSecretReferenceID: draft.ModelSecretReferenceID, ModelAdapters: draft.Model.Adapters, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, RuntimeEnv: draft.Runtime.Env, Workload: draft.Runtime.Workload, RoutingStrategy: draft.Routing.Strategy, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, AutoscalingEnabled: draft.Scaling.MaxReplicas > draft.Scaling.MinReplicas, ComputeMode: draft.Compute.Mode, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeConnectionID: draft.ComputeConnectionID, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, Serving: draft.Serving}
+	return domain.DeploymentRevisionSpec{Model: draft.Model.ID, ModelRevision: draft.Model.Revision, ModelSecretReferenceID: draft.ModelSecretReferenceID, ModelAdapters: draft.Model.Adapters, Runtime: draft.Runtime.Engine, RuntimeVersion: draft.Runtime.Version, RuntimeArgs: draft.Runtime.Args, RuntimeEnv: draft.Runtime.Env, KernelConfigs: draft.Runtime.KernelConfigs, Workload: draft.Runtime.Workload, RoutingStrategy: draft.Routing.Strategy, MinReplicas: draft.Scaling.MinReplicas, MaxReplicas: draft.Scaling.MaxReplicas, AutoscalingEnabled: draft.Scaling.MaxReplicas > draft.Scaling.MinReplicas, ComputeMode: draft.Compute.Mode, Cloud: draft.Provider.Cloud, ProviderAdapter: draft.Provider.Adapter, ComputeConnectionID: draft.ComputeConnectionID, GPU: draft.Resources.GPU, GPUCount: draft.Resources.GPUCount, Region: draft.Provider.Region, Serving: draft.Serving}
 }
 
 func childKey(candidateID, step string) string { return "optimization:" + candidateID + ":" + step }

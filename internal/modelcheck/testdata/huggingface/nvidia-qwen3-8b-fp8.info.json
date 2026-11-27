@@ -1,0 +1,81 @@
+{
+ "id": "nvidia/Qwen3-8B-FP8",
+ "sha": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5",
+ "pipeline_tag": "text-generation",
+ "library_name": "Model Optimizer",
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "Qwen/Qwen3-8B"
+  ]
+ },
+ "tags": [
+  "safetensors",
+  "text-generation",
+  "license:apache-2.0"
+ ],
+ "gated": false,
+ "private": false,
+ "disabled": false,
+ "config": {
+  "architectures": [
+   "Qwen3ForCausalLM"
+  ],
+  "model_type": "qwen3"
+ },
+ "safetensors": {
+  "parameters": {
+   "BF16": 1244967936,
+   "F8_E4M3": 6945767424
+  },
+  "total": 8190735360
+ },
+ "siblings": [
+  {
+   "rfilename": "added_tokens.json",
+   "blobId": "b54f9135e44c1e81047e8d05cb027af8bc039eed"
+  },
+  {
+   "rfilename": "chat_template.jinja",
+   "blobId": "01be9b307daa2d425f7c168c9fb145a286e0afb4"
+  },
+  {
+   "rfilename": "config.json",
+   "blobId": "cabe251593435e2b13879240e68efdfc7eaeeb0a"
+  },
+  {
+   "rfilename": "generation_config.json",
+   "blobId": "8bee77cd88686bbc41a923369862d4969c596c7e"
+  },
+  {
+   "rfilename": "merges.txt",
+   "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+  },
+  {
+   "rfilename": "model-00001-of-00002.safetensors",
+   "blobId": "7e59725a40f5283ce711b0a6667d92899f3ee514",
+   "lfs": {
+    "sha256": "03c026459da42bd970a6c4de97a14eb11f1d43919385d3e6fed4f184d4fc01af"
+   }
+  },
+  {
+   "rfilename": "special_tokens_map.json",
+   "blobId": "9d0327fbaf1691eebf8ed3120327fc40f5774a55"
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "blobId": "cd71f61a15a522601badb3dc960d800d9cb3766c",
+   "lfs": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   }
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "blobId": "eb89444dcfb54dacaadc35b8735b57b677b8662a"
+  },
+  {
+   "rfilename": "vocab.json",
+   "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569"
+  }
+ ]
+}

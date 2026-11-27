@@ -76,6 +76,8 @@ spec:
             - name: INFERCRANE_API_KEY
               valueFrom: {secretKeyRef: {name: control-plane, key: api-key}}
             - {name: INFERCRANE_HOST, value: "0.0.0.0"}
+            # A short snapshot validity, so the outage step can pass it.
+            - {name: INFERCRANE_AGENT_DATA_PLANE_VALIDITY, value: "1m"}
           readinessProbe:
             httpGet: {path: /readyz, port: 8080}
             periodSeconds: 3

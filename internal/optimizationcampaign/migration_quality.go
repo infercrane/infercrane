@@ -165,7 +165,7 @@ func (c MigrationQualityCheck) gradedVerdict(ctx context.Context, campaign domai
 	if err != nil {
 		return MigrationResult{}, fmt.Errorf("resolve candidate deployment: %w", err)
 	}
-	candidateArm, _, err := directReplica(ctx, c.Store, c.Backends, candidate, deployment.Deployment.ID, draft)
+	candidateArm, _, err := directReplica(ctx, c.Store, c.Backends, candidate, deployment.Deployment, draft)
 	if err != nil {
 		return MigrationResult{}, fmt.Errorf("candidate: %w", err)
 	}

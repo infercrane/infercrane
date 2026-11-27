@@ -15,6 +15,11 @@ The Modal app is ephemeral and lives exactly as long as this process, so
 stopping the broker stops every container it started. The ledger it writes is
 the run's GPU-time record; Modal's billing report is the authority for cost.
 
+With --local the stand-in servers of a rehearsal run on this machine instead
+(--dry is implied): no Modal app, no container, no spend. The pods reach them at
+--local-host. It rehearses everything a run does on the laptop and in the
+cluster, and nothing of the path through Modal.
+
     uv run --no-project --with modal==1.6.4 python tools/poc-modal/broker.py \
         --token-file .infercrane/poc-modal/state.json --budget-usd 9
 """
@@ -22,13 +27,18 @@ the run's GPU-time record; Modal's billing report is the authority for cost.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
+import os
 import re
 import secrets
 import signal
+import socket
+import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -37,9 +47,10 @@ import modal_gpu  # noqa: E402
 
 import modal  # noqa: E402
 
-# Modal list prices (modal.com/pricing, read 2026-11-20): H100 SXM5 $0.001097/s,
-# $0.0000131 per physical core per second, $0.00000222 per GiB per second.
-H100_PER_SECOND = 0.001097
+# Modal list prices (modal.com/pricing): the GPU's rate is the run's accelerator's
+# (models.ACCELERATORS), plus $0.0000131 per physical core per second and $0.00000222 per
+# GiB per second (read 2026-11-20).
+GPU_PER_SECOND = modal_gpu.ACCELERATOR.usd_per_second
 CORE_PER_SECOND = 0.0000131
 GIB_PER_SECOND = 0.00000222
 POD_SILENCE_SECONDS = 120
@@ -49,24 +60,109 @@ LIVE = ("requested", "starting", "ready", "stopping")
 # A container on a host whose NVIDIA driver differs from the run's pinned driver stops
 # before loading the model; the lease is started again on another host this many times.
 MAX_DRIVER_RETRIES = 3
+# A refused container stays warm for a moment (the Function's scaledown_window), and Modal
+# hands the next call to a warm container, which is the same host. Seen on 2026-11-23: two
+# leases used all their retries within a minute on the one refused host. So the next start
+# waits until that container is gone.
+RESPAWN_DELAY_SECONDS = 15
 
 
-def rate_per_second(dry: bool) -> float:
+class LocalStore:
+    """Holds the lease records on this machine, in place of the Modal Dict the broker
+    and its containers share."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, dict] = {}
+        self.lock = threading.Lock()
+
+    def get(self, key: str, default: dict | None = None) -> dict | None:
+        with self.lock:
+            return copy.deepcopy(self.rows.get(key, default))
+
+    def put(self, key: str, value: dict) -> None:
+        with self.lock:
+            self.rows[key] = copy.deepcopy(value)
+
+
+class LocalCall:
+    """One stand-in server on this machine, with what the broker asks of a Modal call."""
+
+    def __init__(self, lease_id: str, args: list[str], api_key: str, model: str, host: str) -> None:
+        self.object_id = f"local-{lease_id}"
+        self.process: subprocess.Popen | None = None
+        self.thread = threading.Thread(target=self.serve, args=(lease_id, args, api_key, model, host), daemon=True)
+        self.thread.start()
+
+    def get(self, timeout: float = 0) -> None:
+        if self.thread.is_alive():
+            raise TimeoutError("still serving")
+
+    def cancel(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            self.process.kill()
+
+    def serve(self, lease_id: str, args: list[str], api_key: str, model: str, host: str) -> None:
+        """What modal_gpu._serve does for a stand-in, without the container and the tunnel."""
+        started = time.time()
+        modal_gpu._publish(lease_id, {"state": "starting", "container_started_at": started, "dry": True, "args": args, "runtime_image": "stand-in on this machine"})
+        reason, error = "", ""
+        try:
+            modal_gpu.check_args(args, model)
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            self.process = subprocess.Popen([sys.executable, "-c", modal_gpu.FAKE_SERVER, str(port), api_key, model, *args], env=dict(os.environ, STAND_IN_BIND="127.0.0.1"),
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 60
+            while True:
+                if self.process.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError("the stand-in server did not start")
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as response:
+                        if response.status == 200:
+                            break
+                except OSError:
+                    time.sleep(0.5)
+            ready = time.time()
+            modal_gpu._publish(lease_id, {"state": "ready", "url": f"http://{host}:{port}", "ready_at": ready, "startup_seconds": round(ready - started, 1)})
+            while not reason:
+                if self.process.poll() is not None:
+                    raise RuntimeError(f"the stand-in server exited with {self.process.returncode}")
+                reason = modal_gpu._stop_reason(lease_id, started)
+                time.sleep(1)
+        except Exception as failure:  # noqa: BLE001 - recorded on the lease, never retried
+            error = f"{type(failure).__name__}: {failure}"
+        finally:
+            if self.process is not None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+        modal_gpu._publish(lease_id, {"state": "failed" if error else "stopped", "stopped_at": time.time(), "reason": reason or "error", "error": error})
+
+
+def rate_per_second(dry: bool, local: bool = False) -> float:
+    if local:
+        return 0.0
     if dry:
-        return 0.5 * CORE_PER_SECOND + 1 * GIB_PER_SECOND
-    return H100_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
+        # Non-preemptible CPU Functions bill three times the list price.
+        return 3 * (modal_gpu.DRY_CPU * CORE_PER_SECOND + modal_gpu.DRY_MEMORY_MIB / 1024 * GIB_PER_SECOND)
+    return GPU_PER_SECOND + modal_gpu.GPU_CPU * CORE_PER_SECOND + modal_gpu.GPU_MEMORY_MIB / 1024 * GIB_PER_SECOND
 
 
 class Broker:
-    def __init__(self, token: str, budget: float, max_gpus: int, max_starts: int, ledger: Path, dry: bool, driver: str | None = None) -> None:
+    def __init__(self, token: str, budget: float, max_gpus: int, max_starts: int, ledger: Path, dry: bool, driver: str | None = None, local_host: str | None = None) -> None:
         self.token, self.budget, self.max_gpus, self.max_starts = token, budget, max_gpus, max_starts
+        # Set when the stand-in servers run on this machine: the name the pods reach it by.
+        self.local_host = local_host
         # Every setup of a run must serve on the same NVIDIA driver; set from --driver or
         # from the first GPU host that reports one (the baseline, which runs alone first).
         self.required_driver = driver
         self.ledger_path, self.dry = ledger, dry
-        self.rate = rate_per_second(dry)
+        self.rate = rate_per_second(dry, local_host is not None)
         self.leases: dict[str, dict] = {}
-        self.calls: dict[str, modal.FunctionCall] = {}
+        self.calls: dict[str, modal.FunctionCall | LocalCall] = {}
         self.lock = threading.RLock()
         self.modal_lock = threading.Lock()  # one Modal call at a time
         self.exhausted = False
@@ -115,17 +211,23 @@ class Broker:
             lease = {"lease_id": lease_id, "pod": pod, "model": model, "args": list(args), "state": "requested",
                      "requested_at": now, "last_heartbeat": now, "api_key": secrets.token_urlsafe(24), "dry": self.dry}
             self.leases[lease_id] = lease
-        deadline = now + (self.budget - spent) / self.rate  # this lease alone could not pass the cap after this
+        # This lease alone could not pass the cap after this. A server on this machine costs nothing.
+        deadline = now + ((self.budget - spent) / self.rate if self.rate else modal_gpu.GPU_TIMEOUT_SECONDS)
         lease["deadline"] = deadline
         with self.modal_lock:
             modal_gpu.leases.put(f"ctl:{lease_id}", self.control(now, deadline))
-            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
-            self.calls[lease_id] = function.spawn(lease_id, list(args), lease["api_key"], model)
+            self.calls[lease_id] = self.spawn(lease)
         with self.lock:
             lease["state"], lease["call_id"] = "starting", self.calls[lease_id].object_id
         log(f"lease {lease_id} for pod {pod}: {' '.join(args)}")
         self.save()
         return 201, self.public(lease) | {"api_key": lease["api_key"]}
+
+    def spawn(self, lease: dict) -> modal.FunctionCall | LocalCall:
+        if self.local_host is not None:
+            return LocalCall(lease["lease_id"], list(lease["args"]), lease["api_key"], lease["model"], self.local_host)
+        function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_gpu
+        return function.spawn(lease["lease_id"], list(lease["args"]), lease["api_key"], lease["model"])
 
     def control(self, now: float, deadline: float) -> dict:
         control = {"expires_at": now + modal_gpu.STARTUP_SECONDS, "deadline": deadline}
@@ -142,18 +244,34 @@ class Broker:
             if retries >= MAX_DRIVER_RETRIES or self.exhausted or self.spend(now) + 10 * 60 * self.rate > self.budget:
                 return False
             lease["prior_seconds"] = self.lease_seconds(lease, now)
-            for key in ("container_started_at", "ready_at", "url", "error", "reason", "log_tail", "startup_seconds", "stopped_at"):
+            for key in ("container_started_at", "ready_at", "url", "error", "reason", "log_tail", "startup_seconds", "stopped_at", "engine_answers"):
                 lease.pop(key, None)
             lease["requested_at"], lease["last_heartbeat"], lease["driver_retries"] = now, now, retries + 1
             lease.setdefault("refused_hosts", []).append(why)
         with self.modal_lock:
             modal_gpu.leases.put(f"st:{lease['lease_id']}", {"state": "requested"})
             modal_gpu.leases.put(f"ctl:{lease['lease_id']}", self.control(now, float(lease.get("deadline", now + modal_gpu.GPU_TIMEOUT_SECONDS))))
-            function = modal_gpu.serve_dry if self.dry else modal_gpu.serve_h100
-            self.calls[lease["lease_id"]] = function.spawn(lease["lease_id"], list(lease["args"]), lease["api_key"], lease["model"])
         with self.lock:
-            lease["state"], lease["call_id"] = "starting", self.calls[lease["lease_id"]].object_id
-        log(f"lease {lease['lease_id']}: {why}; starting again on another host ({retries + 1} of {MAX_DRIVER_RETRIES})")
+            # The refused call is over; until the next one exists the watchdog must not
+            # read its end as the end of this lease.
+            self.calls.pop(lease["lease_id"], None)
+            lease.pop("call_id", None)
+            lease["state"] = "starting"
+
+        def start() -> None:
+            with self.lock:
+                if lease["state"] != "starting":
+                    return  # stopped while it waited
+            with self.modal_lock:
+                call = self.spawn(lease)
+            with self.lock:
+                self.calls[lease["lease_id"]], lease["call_id"] = call, call.object_id
+
+        log(f"lease {lease['lease_id']}: {why}; starting again on another host in {RESPAWN_DELAY_SECONDS} s ({retries + 1} of {MAX_DRIVER_RETRIES})")
+        if RESPAWN_DELAY_SECONDS > 0:
+            threading.Timer(RESPAWN_DELAY_SECONDS, start).start()
+        else:
+            start()
         return True
 
     def refresh(self, lease: dict) -> dict:
@@ -165,7 +283,8 @@ class Broker:
             remote = modal_gpu.leases.get(f"st:{lease['lease_id']}", {}) or {}
         with self.lock:
             lease["refreshed_at"] = time.time()
-            for key in ("url", "error", "gpu", "gpu_facts", "vllm_version", "startup_seconds", "container_started_at", "ready_at", "stopped_at", "reason", "runtime_image", "server_env", "log_tail"):
+            for key in ("url", "error", "gpu", "gpu_facts", "vllm_version", "startup_seconds", "container_started_at", "ready_at", "stopped_at", "reason", "runtime_image", "server_env", "log_tail",
+                        "engine_answers"):
                 if key in remote:
                     lease[key] = remote[key]
             state = remote.get("state")
@@ -287,7 +406,9 @@ class Broker:
                 row["estimated_usd"] = round(row["seconds"] * self.rate, 4)
                 rows.append(row)
             return {"schema_version": "infercrane.poc-modal-ledger/v1", "dry": self.dry, "budget_usd": self.budget,
-                    "rate_usd_per_second": self.rate, "rate_basis": "Modal list price: H100 SXM5 + container CPU and memory requests",
+                    "rate_usd_per_second": self.rate,
+                    "rate_basis": "stand-in servers on this machine: no Modal, no spend" if self.local_host is not None else f"Modal list price: {modal_gpu.ACCELERATOR.description} + container CPU and memory requests",
+                    "engine": modal_gpu.ENGINE.key, "runtime_image": modal_gpu.VLLM_IMAGE, "gpu_type": modal_gpu.ACCELERATOR.key,
                     "billing_basis": f"from the container's reported start minus {START_MARGIN_SECONDS} s (from the request until the start is known) to its end",
                     "estimated_usd": round(self.spend(now), 4), "exhausted": self.exhausted, "started_at": self.started,
                     "updated_at": now, "leases": rows}
@@ -375,20 +496,27 @@ def main() -> int:
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--dry", action="store_true", help="CPU stand-in servers, no GPU")
     parser.add_argument("--driver", help="NVIDIA driver every setup must serve on (default: the first GPU host's)")
+    parser.add_argument("--local", action="store_true", help="stand-in servers on this machine: no Modal app, no container, no spend")
+    parser.add_argument("--local-host", default="host.docker.internal", help="the name the pods reach this machine by (with --local)")
     args = parser.parse_args()
+    args.dry = args.dry or args.local
     token = json.loads(Path(args.token_file).read_text())["api_key"]
     if args.max_gpus > modal_gpu.MAX_GPUS:
         raise SystemExit(f"--max-gpus may not exceed {modal_gpu.MAX_GPUS}")
-    broker = Broker(token, args.budget_usd, args.max_gpus, args.max_starts, Path(args.ledger), args.dry, args.driver)
+    broker = Broker(token, args.budget_usd, args.max_gpus, args.max_starts, Path(args.ledger), args.dry, args.driver, args.local_host if args.local else None)
     host, port = args.listen.rsplit(":", 1)
     server = ThreadingHTTPServer((host, int(port)), handler(broker))
-    kind = "dry run (CPU stand-in)" if args.dry else "H100"
+    kind = "stand-in servers on this machine" if args.local else "CPU stand-in servers" if args.dry else f"{modal_gpu.ACCELERATOR.key} with {modal_gpu.ENGINE.key}"
     log(f"{kind}: cap ${args.budget_usd:.2f}, at most {args.max_gpus} at once and {args.max_starts} in total, ${broker.rate * 3600:.4f}/h each; listening on {args.listen}")
+    if broker.required_driver:
+        # Named by the run, so no first host pins it and the line that says so is never written.
+        log(f"every setup of this run must serve on NVIDIA driver {broker.required_driver} (named by the run)")
     def interrupt(*_: object) -> None:
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, interrupt)
-    with modal.enable_output(), modal_gpu.app.run():
+
+    def serve() -> None:
         threading.Thread(target=broker.watch, daemon=True).start()
         try:
             server.serve_forever()
@@ -397,7 +525,18 @@ def main() -> int:
         finally:
             broker.stop_all("broker stopping")
             broker.save()
-            log(f"stopped; estimated ${broker.spend():.2f}; the ephemeral app stops every container now")
+
+    if args.local:
+        modal_gpu.leases = LocalStore()  # the lease records never leave this machine
+        serve()
+        time.sleep(3)  # the stand-in servers see the stop within a second
+        for call in broker.calls.values():
+            call.cancel()
+        log("stopped; stand-in servers on this machine, nothing spent")
+        return 0
+    with modal.enable_output(), modal_gpu.app.run():
+        serve()
+        log(f"stopped; estimated ${broker.spend():.2f}; the ephemeral app stops every container now")
     return 0
 
 

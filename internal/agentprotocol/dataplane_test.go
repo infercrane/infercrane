@@ -129,3 +129,44 @@ func TestCandidateResultCarriesNumbersOnly(t *testing.T) {
 		t.Fatal("a running update with a failure code was accepted")
 	}
 }
+
+// A candidate's extra arguments to a vLLM or SGLang server are a reviewed
+// set, and a few flags are refused in any command.
+func TestCandidateRunSpecChecksEngineArguments(t *testing.T) {
+	base := func(command []string, args ...string) CandidateRunSpec {
+		return CandidateRunSpec{
+			Endpoint: "support-bot", Label: "candidate", Model: "Qwen/Qwen3-8B",
+			Workload:    runtimecontract.Workload{Image: "vllm/vllm-openai@sha256:" + strings.Repeat("a", 64), Command: command, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 20},
+			RuntimeArgs: args, Accelerator: "H100", GPUCount: 1, Load: CandidateLoad{Requests: 20, Concurrency: 2, InputTokens: 64, OutputTokens: 16},
+			Quality: CandidateQuality{EvalSet: "local:support"}, TimeoutSecs: 900,
+		}
+	}
+	vllm := []string{"vllm", "serve", "Qwen/Qwen3-8B", "--port", "8000"}
+	// The agent refuses interpreters, so its SGLang candidates use `sglang serve`.
+	sglang := []string{"sglang", "serve", "--model-path", "Qwen/Qwen3-8B"}
+	for name, spec := range map[string]CandidateRunSpec{
+		"vLLM batch":      base(vllm, "--max-num-seqs", "256"),
+		"SGLang policy":   base(sglang, "--schedule-policy", "lpm"),
+		"other server":    base([]string{"/app/llama-server", "--port", "8000"}, "--parallel", "8"),
+		"product command": base(vllm),
+	} {
+		if err := spec.Validate(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for name, test := range map[string]struct {
+		spec CandidateRunSpec
+		want string
+	}{
+		"remote code":       {base(vllm, "--trust-remote-code"), "--trust-remote-code is refused"},
+		"logit processor":   {base(sglang, "--enable-custom-logit-processor"), "is refused"},
+		"in the command":    {base(append(append([]string{}, sglang...), "--enable-custom-logit-processor")), "workload: engine argument --enable-custom-logit-processor is refused"},
+		"remote code, any":  {base([]string{"/app/llama-server"}, "--trust-remote-code"), "is refused"},
+		"unreviewed vLLM":   {base(vllm, "--tool-parser-plugin", "/models/p.py"), "--tool-parser-plugin is not reviewed for vllm"},
+		"unreviewed SGLang": {base(sglang, "--api-key", "x"), "--api-key is not reviewed for sglang"},
+	} {
+		if err := test.spec.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%s: err=%v, want %q", name, err, test.want)
+		}
+	}
+}

@@ -1,0 +1,65 @@
+---
+title: "Ranking from measured results"
+description: "How the ranking of measured results is meant to join the planner's plan, and how it is scored without a GPU."
+---
+
+[Measured results](/features/results-store) keeps every measured setup and ranks setups to measure
+from similar results (`internal/resultprior`). This page is for contributors: how that ranking is
+meant to join the planner's own plan, and how it is scored.
+
+## Joining the planner's plan
+
+The planner does not call the ranking yet; `resultprior.Merge` is the order it is meant to use. The
+planner's rules choose techniques from what limits the server, and the ranking works on that list,
+conservatively:
+
+1. The rules' first choice keeps its place, unless similar results measured its setup losing. The
+   rules see limits the ranking cannot, such as the KV cache room that moves the best setup between
+   two measured loads.
+2. Up to two setups the rules did not choose, whose lower bound in similar results is above zero,
+   come right after it, best first. Each is built from the planner's own technique, so it can start,
+   and its reason says it came from measured results.
+3. Then the rules' other choices, in their order; last, the ones similar results measured losing.
+
+With no measured results nothing changes: every plan stays exactly the rules' plan. Helpers:
+`KnobsFromArgs` and `KnobsOfChange` read a setup from vLLM or SGLang flags, `KindOf` names a
+diagnosis's traffic kind from its prompt and answer lengths, and `Suggest` lists setups the most
+similar results measured that a list lacks.
+
+## Scoring it
+
+```bash title="Score the ranking on measured cells"
+go test -count=1 -run '^TestPriorGym$' -v ./internal/resultprior
+```
+
+The gym reads the runs listed in `datasets.json` of its data directory, as measured results. In the
+repository that is `internal/resultstore/testdata/synthetic`: runs in the shape of real ones (a
+map, a screen and its confirmation, two engines, the rules' answers, a benchmark run) where every
+number is made up, written by `generate.py` there from a fixed seed (`generate.py --check` compares).
+Real runs are scored the same way from a directory kept outside the repository:
+`INFERCRANE_PRIOR_GYM_DATA=DIR`. The floors hold for the synthetic runs only; they guard the code,
+not a result.
+
+For each cell, current setup and way of counting output, the gym ranks the setups measured there
+and scores the ranking with the planner gym's judge: a setup wins when its measured range reaches
+the best setup's. The cell asked about is never among the results the ranking reads, in two ways:
+
+| Hold-out | Removed | Stands for |
+|---|---|---|
+| Cell held out | every result of the same model, GPU, traffic kind and load, from every run | the customer's own earlier measurements |
+| Model and GPU held out | every result of the same model on the same GPU | a new customer |
+
+It reports the first pick and the first three, on the cells where some setup beats the current one
+(where the current setup already wins, measuring it finds that anyway). Beside them it reports what a
+random order would get on the same cells, what the rules' own answers get (in the format
+`TestPlannerPredict` writes, trimmed), and the two
+ways the planner can use the ranking: the rules' list merged with it, and the rules' list plus the
+ranking's suggestions, merged. `INFERCRANE_PRIOR_GYM_OUT=FILE` writes the report as Markdown.
+`TestPriorGym` fails when the ranking falls below its floors.
+
+Read the score with its limits:
+
+- When each cell measured only a few setups, a random first three often holds the winner, so the
+  first pick is the number that tells pickers apart.
+- The rules were written from the same runs the gym reads, so their score is not a held-out score.
+- The gym cannot show how the ranking does on setups or traffic no run has measured.

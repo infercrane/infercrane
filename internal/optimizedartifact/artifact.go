@@ -16,6 +16,9 @@ const (
 	KindQuantized      = "quantized_checkpoint"
 	KindSpeculator     = "speculator_checkpoint"
 	KindTensorRTEngine = "tensorrt_engine"
+	// KindKernelConfigs is an engine's own kernels tuned for one GPU and a
+	// model's shapes: data files the engine reads (internal/kerneltuning).
+	KindKernelConfigs = "kernel_configs"
 
 	StatePlanned  = "planned"
 	StateBuilding = "building"
@@ -28,6 +31,7 @@ var supportedTools = map[string]map[string]struct{}{
 	KindQuantized:      {"llm-compressor": {}, "modelopt": {}},
 	KindSpeculator:     {"vllm-speculators": {}},
 	KindTensorRTEngine: {"tensorrt-llm": {}},
+	KindKernelConfigs:  {"infercrane-kernel-tune": {}},
 }
 
 type Plan struct {

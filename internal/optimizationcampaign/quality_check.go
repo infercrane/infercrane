@@ -3,8 +3,10 @@ package optimizationcampaign
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -20,10 +22,16 @@ const (
 	FailureQualityReferenceUnavailable = "quality_reference_unavailable"
 	FailureQualityReferenceUnanswered  = "quality_reference_unanswered"
 	FailureQualityRejected             = "quality_gate_rejected"
-	retryQualityEvidencePending        = "optimization_quality_evidence_pending"
-	retryQualityEvalSetPending         = "optimization_quality_eval_set_pending"
-	retryQualityCheckFailed            = "optimization_quality_check_failed"
-	maxQualityCheckDuration            = 30 * time.Minute
+	// FailureQualityAnswersNotShownHeld ends a setup that changes answers and
+	// could not show them held within a point: unknown, never qualified.
+	FailureQualityAnswersNotShownHeld = "quality_answers_not_shown_held"
+	retryQualityEvidencePending       = "optimization_quality_evidence_pending"
+	retryQualityEvalSetPending        = "optimization_quality_eval_set_pending"
+	retryQualityCheckFailed           = "optimization_quality_check_failed"
+	maxQualityCheckDuration           = 30 * time.Minute
+	// maxTaskQualityCheckDuration bounds a check on a task set: up to 1,000 items with worked
+	// answers on both servers, 32 at a time (qualitycheck), about 25 minutes on an L4.
+	maxTaskQualityCheckDuration = 45 * time.Minute
 )
 
 var (
@@ -72,6 +80,9 @@ type BuiltinQualityCheck struct {
 type qualityArm struct {
 	target     armTarget
 	deployment string
+	// model and revision are what the arm serves, when known: the
+	// tokenizer guard compares them (tokenizerPair).
+	model, revision string
 }
 
 func (c BuiltinQualityCheck) Check(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) (domain.QualityEvidence, error) {
@@ -97,27 +108,40 @@ func (c BuiltinQualityCheck) Check(ctx context.Context, campaign domain.Optimiza
 	}); row != nil {
 		return *row, nil
 	}
-	draft, err := candidateDraft(candidate)
+	target, draft, err := c.candidateTarget(ctx, candidate)
 	if err != nil {
 		return domain.QualityEvidence{}, err
 	}
-	resolved, err := c.Store.ResolveForTenant(ctx, candidate.TenantID, candidate.DeploymentName)
-	if err != nil {
-		return domain.QualityEvidence{}, fmt.Errorf("resolve candidate deployment: %w", err)
-	}
-	target, _, err := directReplica(ctx, c.Store, c.Backends, candidate, resolved.Deployment.ID, draft)
-	if err != nil {
-		return domain.QualityEvidence{}, fmt.Errorf("candidate: %w", err)
-	}
-	deadline := c.now().Add(maxQualityCheckDuration)
-	if campaign.ApprovalExpiresAt != nil && campaign.ApprovalExpiresAt.Before(deadline) {
-		deadline = *campaign.ApprovalExpiresAt
-	}
-	checkCtx, cancel := context.WithTimeout(ctx, time.Until(deadline))
+	checkCtx, cancel := c.checkContext(ctx, campaign, set)
 	defer cancel()
-	comparison, err := qualitycheck.Compare(checkCtx, c.Completer, set, reference.target.qualityTarget(), target.qualityTarget(), c.now)
+	// A setup that changes answers (other weights or precision, or a technique
+	// that declares it) must show its answers held within a point.
+	var options []qualitycheck.CompareOption
+	if reference.target.revisionID != candidate.RevisionID && changesAnswers(campaign, candidate, draft) {
+		options = append(options, qualitycheck.RequireAnswersHeld())
+	}
+	// A setup measured again on fresh servers answered the task set on its
+	// first servers too, before they were retired (AskFirstPair): the verdict
+	// pools both pairs.
+	if checkpoint, ok := DecodeMeasurementCheckpoint(candidate.MeasurementCheckpointJSON); ok && checkpoint.Confirmation != nil && checkpoint.Confirmation.FirstAnswers != nil {
+		options = append(options, qualitycheck.PoolWith(*checkpoint.Confirmation.FirstAnswers))
+	}
+	comparison, err := qualitycheck.Compare(checkCtx, c.Completer, set, reference.target.qualityTarget(), target.qualityTarget(), c.now, options...)
 	if err != nil {
 		return domain.QualityEvidence{}, err
+	}
+	// A change of numeric precision also gets the candidate's divergence
+	// from the reference on forced decoding, read on long answers: the task
+	// set's items when the campaign has one, else the embedded long-answer
+	// prompts (qualitycheck.DivergencePrompts). It is evidence: a server that
+	// does not report log probabilities, or any failure to read it, leaves
+	// it unknown and the check stands on its answers.
+	if scorer, ok := c.Completer.(qualitycheck.ForcedScorer); ok && reference.target.revisionID != candidate.RevisionID && changesPrecision(campaign, draft) {
+		referenceTarget, candidateTarget := reference.target.qualityTarget(), target.qualityTarget()
+		referenceTarget.Tokenizer, candidateTarget.Tokenizer = tokenizerPair(campaign, reference, draft)
+		if divergence, divergenceErr := qualitycheck.MeasureDivergence(checkCtx, c.Completer, scorer, qualitycheck.DivergencePrompts(set), referenceTarget, candidateTarget); divergenceErr == nil {
+			comparison.Divergence = divergence
+		}
 	}
 	if reference.target.revisionID != candidate.RevisionID {
 		if err = c.recordReference(ctx, candidate.TenantID, reference.deployment, set, comparison); err != nil {
@@ -125,6 +149,100 @@ func (c BuiltinQualityCheck) Check(ctx context.Context, campaign domain.Optimiza
 		}
 	}
 	return c.record(ctx, candidate.TenantID, candidate.DeploymentName, comparison.Payload(candidate.DeploymentName, false), comparison.ReferenceID)
+}
+
+// signedEvidence signs an InferCrane-run payload with the control plane's key
+// and decodes it exactly as customer evidence is decoded, so both paths store
+// verified rows.
+func signedEvidence(signer ed25519.PrivateKey, payload qualityevidence.Payload, referenceRevisionID string) (domain.QualityEvidence, error) {
+	envelope, err := passport.Sign(payload, signer)
+	if err != nil {
+		return domain.QualityEvidence{}, err
+	}
+	// Decode verifies the signature and the payload exactly as it does for
+	// customer evidence.
+	verified, err := qualityevidence.Decode(envelope)
+	if err != nil {
+		return domain.QualityEvidence{}, err
+	}
+	row, err := qualityevidence.Record(verified, envelope)
+	if err != nil {
+		return domain.QualityEvidence{}, err
+	}
+	row.Source, row.ReferenceRevisionID = domain.QualityEvidenceSourceInferCrane, referenceRevisionID
+	return row, nil
+}
+
+// candidateTarget is the candidate's own server, which a check asks, and its
+// draft.
+func (c BuiltinQualityCheck) candidateTarget(ctx context.Context, candidate domain.OptimizationCandidateRun) (armTarget, optimizer.DeploymentDraft, error) {
+	draft, err := candidateDraft(candidate)
+	if err != nil {
+		return armTarget{}, draft, err
+	}
+	resolved, err := c.Store.ResolveForTenant(ctx, candidate.TenantID, candidate.DeploymentName)
+	if err != nil {
+		return armTarget{}, draft, fmt.Errorf("resolve candidate deployment: %w", err)
+	}
+	target, _, err := directReplica(ctx, c.Store, c.Backends, candidate, resolved.Deployment, draft)
+	if err != nil {
+		return armTarget{}, draft, fmt.Errorf("candidate: %w", err)
+	}
+	return target, draft, nil
+}
+
+// checkContext bounds one check: a task set may take longer than prompts,
+// and nothing runs past the approval.
+func (c BuiltinQualityCheck) checkContext(ctx context.Context, campaign domain.OptimizationCampaign, set qualitycheck.EvalSet) (context.Context, context.CancelFunc) {
+	limit := maxQualityCheckDuration
+	if set.Task() {
+		limit = maxTaskQualityCheckDuration
+	}
+	deadline := c.now().Add(limit)
+	if campaign.ApprovalExpiresAt != nil && campaign.ApprovalExpiresAt.Before(deadline) {
+		deadline = *campaign.ApprovalExpiresAt
+	}
+	return context.WithTimeout(ctx, time.Until(deadline))
+}
+
+// AskFirstPair asks a setup's first servers, and the reference, the
+// campaign's task set before a confirmation retires them, so the verdict can
+// pool their answers with the fresh servers' (rule 3). Answers on one server
+// each rarely show a change of answers held within a point; two pairs halve
+// the servers' disagreement on the same items. It asks only a setup that
+// changes answers, on a task set; for any other it returns false. Nothing is
+// recorded: the verdict is the check after the fresh window (Check).
+func (c BuiltinQualityCheck) AskFirstPair(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) (qualitycheck.ServerPair, bool, error) {
+	if c.Store == nil || c.Completer == nil {
+		return qualitycheck.ServerPair{}, false, nil
+	}
+	set, err := c.evalSet(ctx, campaign)
+	if err != nil || !set.Task() {
+		return qualitycheck.ServerPair{}, false, err
+	}
+	reference, err := c.reference(ctx, campaign, candidate)
+	if err != nil {
+		return qualitycheck.ServerPair{}, false, err
+	}
+	draft, err := candidateDraft(candidate)
+	if err != nil {
+		return qualitycheck.ServerPair{}, false, err
+	}
+	if reference.target.revisionID == candidate.RevisionID || !changesAnswers(campaign, candidate, draft) {
+		return qualitycheck.ServerPair{}, false, nil
+	}
+	target, _, err := c.candidateTarget(ctx, candidate)
+	if err != nil {
+		return qualitycheck.ServerPair{}, false, err
+	}
+	checkCtx, cancel := c.checkContext(ctx, campaign, set)
+	defer cancel()
+	comparison, err := qualitycheck.Compare(checkCtx, c.Completer, set, reference.target.qualityTarget(), target.qualityTarget(), c.now, qualitycheck.RequireAnswersHeld())
+	if err != nil {
+		return qualitycheck.ServerPair{}, false, err
+	}
+	pair, ok := comparison.Pair()
+	return pair, ok, nil
 }
 
 // recordReference keeps one InferCrane-run reference row per reference
@@ -143,21 +261,10 @@ func (c BuiltinQualityCheck) recordReference(ctx context.Context, tenant, deploy
 }
 
 func (c BuiltinQualityCheck) record(ctx context.Context, tenant, deployment string, payload qualityevidence.Payload, referenceRevisionID string) (domain.QualityEvidence, error) {
-	envelope, err := passport.Sign(payload, c.Signer)
+	row, err := signedEvidence(c.Signer, payload, referenceRevisionID)
 	if err != nil {
 		return domain.QualityEvidence{}, err
 	}
-	// Decode verifies the signature and the payload exactly as it does for
-	// customer evidence.
-	verified, err := qualityevidence.Decode(envelope)
-	if err != nil {
-		return domain.QualityEvidence{}, err
-	}
-	row, err := qualityevidence.Record(verified, envelope)
-	if err != nil {
-		return domain.QualityEvidence{}, err
-	}
-	row.Source, row.ReferenceRevisionID = domain.QualityEvidenceSourceInferCrane, referenceRevisionID
 	row, _, err = c.Store.RecordQualityEvidence(ctx, tenant, deployment, row)
 	if err != nil {
 		return domain.QualityEvidence{}, fmt.Errorf("record built-in quality evidence: %w", err)
@@ -194,9 +301,17 @@ func (c BuiltinQualityCheck) reference(ctx context.Context, campaign domain.Opti
 		}
 		if err == nil && resolved.Deployment.ActiveRevisionID != "" && resolved.Deployment.ActiveRevisionID != candidate.RevisionID {
 			active := domain.OptimizationCandidateRun{ID: candidate.ID, TenantID: campaign.TenantID, RevisionID: resolved.Deployment.ActiveRevisionID}
-			target, _, targetErr := directReplica(ctx, c.Store, c.Backends, active, resolved.Deployment.ID, activeDraft(candidate, resolved.Deployment.Model))
+			target, _, targetErr := directReplica(ctx, c.Store, c.Backends, active, resolved.Deployment, activeDraft(candidate, resolved.Deployment.Model))
 			if targetErr == nil {
-				return qualityArm{target: target, deployment: campaign.TargetDeployment}, nil
+				// The active revision's commit is the campaign control's when
+				// the control serves the endpoint's model; otherwise unknown.
+				arm := qualityArm{target: target, deployment: campaign.TargetDeployment, model: resolved.Deployment.Model}
+				if control, found := CampaignControl(campaign); found {
+					if draft, draftErr := candidateDraft(control); draftErr == nil && draft.Model.ID == resolved.Deployment.Model {
+						arm.revision = draft.Model.Revision
+					}
+				}
+				return arm, nil
 			}
 			if !errors.Is(targetErr, errNoDirectEndpoint) {
 				return qualityArm{}, targetErr
@@ -223,11 +338,101 @@ func (c BuiltinQualityCheck) reference(ctx context.Context, campaign domain.Opti
 	if err != nil {
 		return qualityArm{}, fmt.Errorf("resolve control deployment: %w", err)
 	}
-	target, _, err := directReplica(ctx, c.Store, c.Backends, control, resolved.Deployment.ID, draft)
+	target, _, err := directReplica(ctx, c.Store, c.Backends, control, resolved.Deployment, draft)
 	if err != nil {
 		return qualityArm{}, fmt.Errorf("control: %w", err)
 	}
-	return qualityArm{target: target, deployment: control.DeploymentName}, nil
+	return qualityArm{target: target, deployment: control.DeploymentName, model: draft.Model.ID, revision: draft.Model.Revision}, nil
+}
+
+// tokenizerPair is what each arm reads text with, for the divergence's
+// tokenizer guard: one model at one revision on both reads the same files;
+// two models are compared by the tokenizer digests the proposal recorded
+// (input.model_tokenizers). Anything not recorded is empty, so the
+// divergence is unknown, never a pass or a failure.
+func tokenizerPair(campaign domain.OptimizationCampaign, reference qualityArm, candidate optimizer.DeploymentDraft) (string, string) {
+	if reference.model == "" || candidate.Model.ID == "" {
+		return "", ""
+	}
+	// The same model and revision as both drafts state it (a revision left
+	// to the catalog is resolved alike for both setups of one campaign).
+	if reference.model == candidate.Model.ID && reference.revision == candidate.Model.Revision {
+		same := "model:" + optimizer.TokenizerKey(reference.model, reference.revision)
+		return same, same
+	}
+	if reference.revision == "" || candidate.Model.Revision == "" {
+		return "", ""
+	}
+	var proposal struct {
+		Input struct {
+			ModelTokenizers map[string]string `json:"model_tokenizers"`
+		} `json:"input"`
+	}
+	if json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) != nil {
+		return "", ""
+	}
+	recorded := proposal.Input.ModelTokenizers
+	return recorded[optimizer.TokenizerKey(reference.model, reference.revision)], recorded[optimizer.TokenizerKey(candidate.Model.ID, candidate.Model.Revision)]
+}
+
+// changesAnswers reports whether a candidate gives other answers than the
+// campaign's control by design: it serves other numbers (changesPrecision) or
+// a technique whose manifest declares it changes answers made it.
+func changesAnswers(campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) bool {
+	if changesPrecision(campaign, draft) {
+		return true
+	}
+	var proposal optimizer.Proposal
+	if json.Unmarshal([]byte(campaign.ProposalJSON), &proposal) != nil {
+		return false
+	}
+	for _, proposed := range proposal.Candidates {
+		if proposed.ID == candidate.ProposalCandidateID && proposed.Technique != nil {
+			manifest, known := optimizer.TechniqueManifest(proposed.Technique.ID)
+			return known && manifest.ChangesAnswers
+		}
+	}
+	return false
+}
+
+// precisionFlags are the engine flags that set numeric precision.
+var precisionFlags = []string{"--quantization", "--kv-cache-dtype", "--dtype"}
+
+// changesPrecision reports whether the candidate serves other numbers than
+// the campaign's control: another checkpoint, or another value of a flag that
+// sets weight, KV cache, or activation precision. Without a readable control
+// it says no, so the divergence is not measured.
+func changesPrecision(campaign domain.OptimizationCampaign, candidate optimizer.DeploymentDraft) bool {
+	control, found := CampaignControl(campaign)
+	if !found {
+		return false
+	}
+	reference, err := candidateDraft(control)
+	if err != nil {
+		return false
+	}
+	if reference.Model.ID != candidate.Model.ID || reference.Model.Revision != candidate.Model.Revision {
+		return true
+	}
+	value := func(args []string, flag string) string {
+		for index, arg := range args {
+			name, setting, inline := strings.Cut(arg, "=")
+			if name != flag {
+				continue
+			}
+			if !inline && index+1 < len(args) {
+				setting = args[index+1]
+			}
+			return strings.ToLower(setting)
+		}
+		return ""
+	}
+	for _, flag := range precisionFlags {
+		if value(reference.Runtime.Args, flag) != value(candidate.Runtime.Args, flag) {
+			return true
+		}
+	}
+	return false
 }
 
 // activeDraft names the model the active revision serves. Replicas of one
@@ -253,7 +458,11 @@ func (t armTarget) qualityTarget() qualitycheck.Target {
 }
 
 func builtinEvidence(row domain.QualityEvidence, set qualitycheck.EvalSet) bool {
-	return row.Source == domain.QualityEvidenceSourceInferCrane && row.Evaluator == qualitycheck.Evaluator && row.EvaluatorVersion == qualitycheck.EvaluatorVersion && row.Suite == set.Name && row.SuiteVersion == set.SuiteVersion()
+	evaluator, version := qualitycheck.Evaluator, qualitycheck.EvaluatorVersion
+	if set.Task() {
+		evaluator, version = qualitycheck.TaskEvaluator, qualitycheck.TaskEvaluatorVersion
+	}
+	return row.Source == domain.QualityEvidenceSourceInferCrane && row.Evaluator == evaluator && row.EvaluatorVersion == version && row.Suite == set.Name && row.SuiteVersion == set.SuiteVersion()
 }
 
 // newestEvidence returns the newest row for revision that matches keep.

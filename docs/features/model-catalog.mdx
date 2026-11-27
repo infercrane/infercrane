@@ -282,7 +282,7 @@ reads what Hugging Face publishes for one exact commit and answers four question
 
 | Check | What is read | Result |
 | --- | --- | --- |
-| Architecture | `config.json` `architectures`, compared with a committed snapshot of the vLLM 0.22.1 and SGLang 0.5.12 model registries | `supported` (with the runtime), `unsupported` (with the reason), or `unknown` |
+| Architecture | `config.json` `architectures`, compared with a committed snapshot of the vLLM 0.34.0 and SGLang 0.5.23 model registries | `supported` (with the runtime), `unsupported` (with the reason), or `unknown` |
 | Size | Hugging Face's safetensors summary: parameters by tensor type, and stored bytes | Read, or unknown when the repository has no safetensors |
 | GPU fit | Weights plus KV cache for the target load, against GPUs this control plane has a current price for | The fewest GPUs, then the smallest GPU, that hold it, with tensor parallelism across them; or `does_not_fit`, or unknown |
 | License and access | The model card's license, and Hugging Face's `gated` and `private` flags | Shown as declared; a gated or private model needs a Hugging Face token |

@@ -205,6 +205,9 @@ func (g GCPCompute) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if err := refuseModelInputs("gcp-compute", spec, ModelInputs{}); err != nil {
 		return ProviderHandle{}, err
 	}
+	if err := refuseKernelConfigs("gcp-compute", spec); err != nil {
+		return ProviderHandle{}, err
+	}
 	if err := g.validate(spec); err != nil {
 		return ProviderHandle{}, fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}

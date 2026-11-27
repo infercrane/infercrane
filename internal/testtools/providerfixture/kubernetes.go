@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -21,6 +22,8 @@ type KubernetesCLI struct {
 	ApplyFailure        bool
 	KServeInstalled     bool
 	DynamoInstalled     bool
+	// DeniedResources answers "no" to `auth can-i` for these resources.
+	DeniedResources []string
 }
 
 func NewKubernetesCLI() *KubernetesCLI {
@@ -50,6 +53,11 @@ func (k *KubernetesCLI) Run(_ context.Context, _ []string, args ...string) ([]by
 		}
 		return []byte("inferenceservices.serving.kserve.io\n"), nil
 	case "auth":
+		for _, denied := range k.DeniedResources {
+			if slices.Contains(args[index+1:], denied) {
+				return []byte("no\n"), nil
+			}
+		}
 		return []byte("yes\n"), nil
 	case "apply":
 		return k.apply(args[index+1:])
@@ -194,6 +202,8 @@ func normalizeKubernetesKind(value string) string {
 		return "deployment"
 	case strings.HasPrefix(value, "service"):
 		return "service"
+	case strings.HasPrefix(value, "networkpolic"):
+		return "networkpolicy"
 	case strings.HasPrefix(value, "inferenceservice"):
 		return "inferenceservice"
 	case strings.HasPrefix(value, "dynamographdeployment"):

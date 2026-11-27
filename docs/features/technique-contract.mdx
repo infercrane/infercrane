@@ -1,0 +1,213 @@
+---
+title: "Technique contract"
+description: "How an optimization technique plugs into InferCrane, and the record of every result it produces."
+---
+
+An optimization technique is anything that changes how a model is served: an engine option, a draft
+trained on your traffic, speculation that changes with load, or a kernel config tuned to your
+shapes. Every technique plugs in the same way. It declares what it needs and what it does, and then
+proposes candidate setups. It never measures them. The screen and the judge measure every candidate
+the same way, so a technique earns nothing by being one.
+
+The contract is public and versioned, so a technique can be added, and a result read, without
+InferCrane's hosted control plane:
+
+| Contract | Schema | Go |
+|---|---|---|
+| Technique manifest | [`schemas/technique-v1.schema.json`](https://github.com/infercrane/infercrane/blob/main/schemas/technique-v1.schema.json), `infercrane.dev/technique/v1` | `technique.Manifest` |
+| Static technique file | the same schema, `infercrane.dev/technique-static/v1` | `technique.LoadStatic` |
+| Result record | [`schemas/technique-result-v1.schema.json`](https://github.com/infercrane/infercrane/blob/main/schemas/technique-result-v1.schema.json), `infercrane.dev/technique-result/v1` | `technique.Result` |
+
+The Go types are in `internal/technique`. Its tests check that the schemas and the Go validation
+accept and refuse the same documents.
+
+## The manifest
+
+| Field | Meaning |
+|---|---|
+| `id`, `version` | A stable lowercase ID and the technique's own semantic version. A candidate and its results name both, so a change of method is a new version. |
+| `label`, `license` | A short name, and the SPDX expression of the technique's code and every dependency it adds. Anything that is not Apache-2.0, MIT, or BSD compatible is named and kept optional. |
+| `requires` | `engines` with exact `versions`, `accelerators`, and optional `model_features` such as `native_mtp`. Every list names exact values: a version range or an empty list is refused, because a wildcard would claim support nobody has measured. Optional `signals_at_most` puts a ceiling on the diagnosis's readings of the traffic. A setup whose reading is above it, or that has no such reading, is refused. For example, a technique that serves with prefix caching off requires `{"runtime_prefix_cache_hit_rate": 0.02}`, so it never reaches traffic that shares prefixes. |
+| `relieves`, `costs` | The limits it relieves and costs: `decode-steps`, `kv-cache-room`, `prefill-compute`, `kernel-time`, `host-overhead`, `first-token`, `gpu-memory`, `host-memory`, `build-time`. For example, speculation relieves `decode-steps` and costs `kv-cache-room`; switching between sleeping engines costs `host-memory`, a pinned host copy of each idle engine's weights. |
+| `prediction` | The `metric` its predictions are stated in, such as `output_tokens_per_second`, and their `basis`, such as `cache-room`, `acceptance-offline`, `amdahl`, or `none`. A prediction orders and prunes the list; measurement decides. |
+| `artifact` | Absent, or the artifact it builds before it can serve. `kind` is an [optimized artifact](/features/optimization) kind such as `speculator_checkpoint`. `runs_in` is `customer-account` or `disposable-gpu-container`, and `produces` says what comes out and what it is pinned to. A build that reads your prompts or answers (`uses_customer_content`) always runs in your account. A technique with an artifact costs `build-time`. |
+| `changes_answers` | Whether it can change what the model writes. If so, the task-score and [divergence](/features/semantic-quality#divergence-of-a-precision-change) checks apply to every candidate. |
+| `runtime.policy` | `static`, one setup at every load, or `adaptive`, a setup per load band. Each band's setup is judged at that band's load. |
+| `fallback` | What serves when the artifact is missing or the engine changed (`starting-setup` or `engine-default`), and why that is safe. |
+| `evidence` | Optional. What every result must carry besides the five fields, as lowercase names, for example `kernel-invocation-proof` (the engine log shows the tuned file was read), `draft-acceptance`, or `swap-timings`. Listing it here lets anyone see what a technique has to prove. |
+| `disclosures` | Optional, at most 8 sentences of up to 400 characters each. Every claim of the technique carries them word for word, for example a view in which it lost, or a cost it showed. A result record copies them into its own `disclosures`. A record that drops one is "not shown", whatever its numbers. |
+
+```json title="A trained draft"
+{
+  "schema_version": "infercrane.dev/technique/v1",
+  "id": "trained-draft",
+  "version": "0.1.0",
+  "label": "A draft trained on your traffic",
+  "license": "Apache-2.0",
+  "requires": {"engines": [{"name": "vllm", "versions": ["0.34.0"]}], "accelerators": ["L4", "H100"]},
+  "relieves": ["decode-steps"],
+  "costs": ["kv-cache-room", "build-time"],
+  "prediction": {"metric": "output_tokens_per_second", "basis": "acceptance-offline"},
+  "artifact": {"kind": "speculator_checkpoint", "runs_in": "customer-account", "uses_customer_content": true,
+               "produces": "a draft checkpoint pinned to the model revision, engine version, and GPU"},
+  "changes_answers": true,
+  "runtime": {"policy": "static"},
+  "fallback": {"serves": "starting-setup", "reason": "without the draft the starting setup serves unchanged"},
+  "evidence": ["draft-acceptance"]
+}
+```
+
+## Candidates
+
+A technique in Go implements `technique.Technique`: `Manifest()`, and `Candidates(ctx, setup)`, which
+returns the setups it proposes for a starting setup, or a reason it proposes none. The starting setup
+carries:
+
+- the model, engine and accelerator;
+- the engine flags and environment;
+- the diagnosis's readings;
+- the load bands to judge at;
+- the run's goal: `objective`, for example `useful-output`, and `first_token_limit_ms`, the first-token
+  limit that goal counts output within.
+
+A technique proven for one goal proposes nothing for another. The setup never carries a prompt or an
+answer.
+
+A `technique.Registry` asks every technique whose `requires` the setup meets, and holds each candidate
+to its manifest. A candidate:
+
+- names its technique and version;
+- carries the manifest's `changes_answers`;
+- names its artifact by ID, kind, and `sha256:` digest exactly when the manifest declares one;
+- holds `bands`, increasing up to an open last band (`up_to` 0), exactly when the policy is adaptive,
+  with at least two bands;
+- predicts, if at all, in the manifest's metric;
+- has a label and a reason;
+- names, if the technique changes the engine itself, the engine `image`. That is an OCI reference
+  pinned by `@sha256:` digest, the `command` that starts it, and optionally an `identity` saying what
+  the image is made of. The setup never runs on another image.
+
+A candidate that breaks any of these is refused, and the run does not start.
+
+## How a technique's setups reach a proposal
+
+The optimizer asks the registry once per proposal and turns every setup a technique offers into a
+candidate the same way:
+
+- the starting setup with the setup's flags and environment, and the artifact it serves (a tuned
+  kernel set travels with the deployment as `runtime.kernel_configs`; a trained draft is named in
+  its flags);
+- `source` `technique-contract`, with the technique's `id@version`, and the same in a `technique`
+  feature;
+- the required evidence: a paired measurement against the starting setup, the task score when the
+  technique `changes_answers`, and one line for each name in the manifest's `evidence`.
+
+The starting setup the registry sees carries the model features the pinned `config.json` declares.
+Each technique package reads its own: `native_mtp` for the model's prediction head, and
+`fused_moe_fp8_block` (kernel tuning) for MoE layers on the engine's block-FP8 fused-MoE kernel. A
+tuned block-FP8 set also counts as that feature, because it was built from the model's own MoE
+shape.
+
+Whether and where a setup is measured stays the diagnosis's decision for a technique a rule can
+choose: a trained draft is measured beside the other speculation the rules chose. A technique no
+rule chooses, such as [kernels tuned for your shapes](/features/kernel-tuning), is measured after
+the rules' choices, within the requested number of setups; a setup that does not fit adds a warning
+instead.
+
+Planner names equal manifest IDs: `trained-draft`, `tuned-moe-kernels`, `adaptive-speculation`.
+Proposals stored under the earlier names `speculative-trained-draft` and `tuned-kernels` still
+validate.
+
+### In a run and its report
+
+A campaign candidate made by a contract technique carries a `technique` object, and so does its
+row in the run's report:
+
+- the manifest's `id`, `version`, `label`, `relieves`, `costs`, `changes_answers`, its `evidence`
+  names as `required_evidence`, its `fallback`, and the `artifact` (kind, digest, where it builds,
+  whether the build reads your content);
+- `result`: the campaign's own measurement as a [result record](#the-result-record), once the setup
+  is measured:
+  - the GPU and engine;
+  - the served image's digest;
+  - the traffic shape and load;
+  - the precision read from the setup's flags;
+  - the baseline (`interleaved`, or `interleaved+fresh-servers` when the gain was measured again);
+  - the deciding quality check;
+  - the objective's comparison;
+  - the serving command;
+- `claim` (`shown` or `not shown`) and `unknown`, the fields and evidence names a shown claim still
+  needs.
+
+A first-window gain counts only when the fresh-server window measured one too, and then at the
+smaller of the two changes against the larger noise floor. That window's record is the result's
+`fresh-machine-confirmation` evidence. The claim is judged against the
+technique's own manifest, so a record that leaves out a required evidence name is still "not
+shown". A run records no kernel invocation proof or draft acceptance yet, so those techniques'
+claims say which evidence is missing.
+
+## Static techniques
+
+Planned, not shipped: static techniques follow the launch. A static file will name a reviewed
+capability (a mechanism and its parameters, `internal/optimizationcapability`) instead of raw
+flags, so its flags come from the capability compiler and the reviewed engine argument list. A
+capability not yet qualified for the pinned engine lists the technique without measuring it.
+Today suffix decoding, the attention backend, and a host KV tier are all in that state for vLLM
+0.34.0. The format below is the current schema.
+
+An engine option needs no code. A static technique file is a manifest and up to 16 fixed changes:
+flags to `set` (replacing the starting setup's own value in place) and flags to `remove`. It builds
+no artifact and serves one setup at every load. A change the starting setup already makes is
+skipped.
+
+```json title="Suffix decoding as a file"
+{
+  "schema_version": "infercrane.dev/technique-static/v1",
+  "manifest": {
+    "schema_version": "infercrane.dev/technique/v1",
+    "id": "suffix-decoding",
+    "version": "0.1.0",
+    "label": "Suffix decoding with adaptive verification",
+    "license": "Apache-2.0",
+    "requires": {"engines": [{"name": "vllm", "versions": ["0.34.0"]}], "accelerators": ["L4", "H100"]},
+    "relieves": ["decode-steps"],
+    "costs": ["first-token"],
+    "prediction": {"metric": "output_tokens_per_second", "basis": "none"},
+    "changes_answers": true,
+    "runtime": {"policy": "static"},
+    "fallback": {"serves": "engine-default", "reason": "without the flag the engine decodes one token a step"}
+  },
+  "changes": [
+    {"label": "Suffix decoding", "reason": "Repeated text in agentic and code traffic drafts itself.",
+     "set": [{"name": "--speculative-config", "value": "{\"method\":\"suffix\",\"enable_adaptive_verification\":true}"}]}
+  ]
+}
+```
+
+## The result record
+
+Every measured candidate produces one record per load. It carries the five fields a performance
+number needs, and what it takes to reproduce it:
+
+| Field | Holds |
+|---|---|
+| `hardware` | `accelerator`, `count`, and the `driver` when known. |
+| `software` | `engine`, `engine_version`, and the served `image_digest`. |
+| `workload` | `shape_digest` of the content-free traffic shape (lengths and order, never text), its `kind`, the `load` in requests at once, and the `requests` measured. |
+| `precision` | `weights` and `kv_cache` as served. |
+| `baseline` | The `setup` it was compared with, and the `basis`: `same-machine` (in turn on one machine) or `interleaved` (paired runs on two servers), with `+fresh-servers` when a fresh machine measured it again. |
+| `correctness` | The `method` (`task-score`, `answer-agreement`, `task-score+kl`) and its `verdict`. |
+| `measured` | The `metric`, the relative `change`, the `noise_floor` the change had to clear, and the `decision`: `improved`, `no_measurable_difference`, `regressed`, or `unknown`. |
+| `reproduction` | The exact `command`, the `commit`, the `image_digest`, and the `traffic_shape` file. |
+| `required_evidence`, `evidence` | The manifest's `evidence` names, copied when the record is made, and the evidence carried: each item's `name`, the `digest` (sha256) of the file that holds it, and an optional `summary`. |
+
+A record is **shown** only when every field is present, every evidence item the technique requires
+is carried, answers held (`verdict` `passed`), the decision is `improved`, and the change is larger
+than a measured noise floor above zero. Every record also needs `fresh-machine-confirmation`: the
+digest of a second window on a fresh machine that measured the gain again. A gain from one machine
+and one run is **not shown**, whatever the technique's manifest says, and `unknown` names
+`evidence.fresh-machine-confirmation`. The evidence is checked against the technique's own
+manifest, not only the list the record copied, so a record cannot drop a requirement. The noise
+comes from the same machine or a copy of the current setup, never a constant. Anything less is
+**not shown**, and `Unknown()` names the missing fields. Nothing in a record is a claim until it is
+shown.

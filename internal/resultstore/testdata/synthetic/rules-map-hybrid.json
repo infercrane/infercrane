@@ -1,0 +1,1063 @@
+{
+ "schema": "infercrane.planner-predictions/v1",
+ "rules_version": "synthetic-rules",
+ "model": {
+  "id": "example/hybrid-27b-fp8",
+  "revision": "1111111111111111111111111111111111111111",
+  "features": [
+   "native_mtp"
+  ]
+ },
+ "gpu": "H100",
+ "note": "Synthetic rules' answers in TestPlannerPredict's trimmed format; made up to exercise every path, not asked of the planner.",
+ "cells": [
+  {
+   "key": "long/128",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "long/128",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "long/128",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "long/32",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "long/32",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "long/32",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "output/128",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/128",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/128",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation off",
+       "setup": "plain"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/32",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/32",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/32",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "output/4",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/4",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "output/4",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "prefix/128",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/128",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/128",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation off",
+       "setup": "plain"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/32",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/32",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/32",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "prefix/4",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/4",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "prefix/4",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "short/128",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft",
+       "measured": "no change"
+      },
+      {
+       "label": "FP8 KV cache",
+       "measured": "unmeasured: 1 draft tokens with a fp8 KV cache and the model's own weights"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/128",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "FP8 KV cache",
+       "setup": "plain-fp8-kv"
+      },
+      {
+       "label": "Larger batches",
+       "measured": "cannot start: --max-num-seqs 2048, the engine holds at most 904"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/128",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation off",
+       "setup": "plain"
+      },
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 32"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/32",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/32",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/32",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "short/32/reasoning",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/32/reasoning",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "short/4",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/4",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/4",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "short/48",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/48",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/48",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/64",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/64",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/64",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/96",
+   "current": "one-draft",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Fewer requests at once",
+       "measured": "unmeasured: --max-num-seqs 48"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/96",
+   "current": "plain",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 3 draft tokens",
+       "setup": "three-drafts"
+      },
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/96",
+   "current": "three-drafts",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "Speculation, 1 draft token",
+       "setup": "one-draft"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

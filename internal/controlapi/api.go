@@ -56,18 +56,22 @@ import (
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/proofreport"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/recipe"
 	"github.com/infercrane/infercrane/internal/releaseguard"
+	"github.com/infercrane/infercrane/internal/resultprior"
+	"github.com/infercrane/infercrane/internal/resultstore"
 	"github.com/infercrane/infercrane/internal/sandboxprovider"
 	"github.com/infercrane/infercrane/internal/secrets"
 	"github.com/infercrane/infercrane/internal/store"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/trainingartifact"
 	"github.com/infercrane/infercrane/internal/upstreamcredential"
+	"github.com/infercrane/infercrane/internal/workercredential"
 	"github.com/infercrane/infercrane/internal/workflows"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
@@ -414,6 +418,9 @@ type API struct {
 	// connection. Empty keeps that process-wide inventory bootstrap-only, which
 	// is what a hosted multi-customer control plane needs.
 	OperatorComputeTenants []string
+	// ResultReports caches the outcome and cost the metrics route reads from
+	// optimization run reports. Nil leaves those series absent.
+	ResultReports *ResultReports
 	// SealedSecrets seals a workspace's own secret values with the tenant
 	// credential key. Without that key, sealed secrets are unavailable.
 	SealedSecrets      secrets.Sealed
@@ -483,7 +490,18 @@ type BackendMetadata struct {
 	APIKey     string
 	APIKeyEnv  string
 	Serverless bool
+	// WorkerMaster derives the credential of a worker that was started with
+	// its own tenant-and-deployment-scoped one. APIKey is then sent only to
+	// workers on operator compute that share the operator's credential.
+	WorkerMaster string
 }
+
+// workerCredential returns what a direct request to one of this backend's
+// workers presents, or "" when nothing may be sent to it.
+func (b BackendMetadata) workerCredential(deployment domain.Deployment, replica domain.Replica) string {
+	return workercredential.Source{Master: b.WorkerMaster, Shared: b.APIKey}.Credential(deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, replica.ProviderDetails)
+}
+
 type identityKey struct{}
 
 func (a API) decisions() (decisionStore, bool) {
@@ -602,6 +620,12 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/optimization/campaigns", a.auth(authz.Deploy, a.createOptimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}", a.auth(authz.Read, a.optimizationCampaign))
 	mux.HandleFunc("GET /api/v1/optimization/campaigns/{id}/report", a.auth(authz.Read, a.optimizationCampaignReport))
+	mux.HandleFunc("GET /api/v1/optimization/band-study", a.auth(authz.Read, a.optimizationBandStudy))
+	mux.HandleFunc("GET /api/v1/optimization/proof-report", a.auth(authz.Read, a.optimizationProofReport))
+	mux.HandleFunc("GET /api/v1/optimization/results", a.auth(authz.Read, a.listResultRecords))
+	mux.HandleFunc("POST /api/v1/optimization/results", a.auth(authz.Deploy, a.importResultRecords))
+	mux.HandleFunc("POST /api/v1/optimization/results/rank", a.auth(authz.Read, a.rankResultSetups))
+	mux.HandleFunc("GET /api/v1/optimization/results/{id}", a.auth(authz.Read, a.resultRecord))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/approve", a.auth(authz.Deploy, a.approveOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/activate", a.auth(authz.Deploy, a.activateOptimizationCampaign))
 	mux.HandleFunc("POST /api/v1/optimization/campaigns/{id}/cancel", a.auth(authz.Deploy, a.cancelOptimizationCampaign))
@@ -664,6 +688,7 @@ func (a API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/monitoring", a.auth(authz.Read, a.endpointMonitoring))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/optimization-readiness", a.auth(authz.Read, a.endpointOptimizationReadiness))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profile", a.auth(authz.Read, a.endpointGPUProfile))
+	mux.HandleFunc("GET /api/v1/metrics", a.auth(authz.Read, a.resultMetrics))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles", a.auth(authz.Read, a.endpointGPUProfiles))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/compare", a.auth(authz.Read, a.compareEndpointGPUProfiles))
 	mux.HandleFunc("GET /api/v1/endpoints/{name}/gpu-profiles/{id}", a.auth(authz.Read, a.endpointGPUProfileByID))
@@ -771,7 +796,7 @@ func (a API) recordQualityEvidence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reservedEvaluator(payload.Evaluator) {
-		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator names "+qualitycheck.Evaluator+" and "+qualitycheck.GradedEvaluator+" are reserved for InferCrane's own checks")
+		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator names "+qualitycheck.Evaluator+", "+qualitycheck.GradedEvaluator+" and "+qualitycheck.TaskEvaluator+" are reserved for InferCrane's own checks")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -1079,6 +1104,10 @@ func customerQualificationNote(qualification string) string {
 type optimizationProposalBody struct {
 	optimizer.Request
 	DiagnosisEndpoint string `json:"diagnosis_endpoint,omitempty"`
+	// DeclaredSetup is what an agent endpoint's server runs, declared by its
+	// operator; the agent cannot read an engine's flags. Only with
+	// diagnosis_endpoint naming an endpoint one InferCrane agent serves.
+	DeclaredSetup *optimizer.DeclaredSetup `json:"declared_setup,omitempty"`
 }
 
 func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
@@ -1091,8 +1120,8 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "provider_adapter is derived from the selected tenant compute connection")
 		return
 	}
-	if request.Diagnosis != nil {
-		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "diagnosis is read by the server; name the endpoint in diagnosis_endpoint instead")
+	if request.Diagnosis != nil || request.StartingSetup != nil {
+		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "diagnosis and starting_setup are read by the server; name the endpoint in diagnosis_endpoint instead")
 		return
 	}
 	if endpoint := strings.TrimSpace(body.DiagnosisEndpoint); endpoint != "" {
@@ -1114,6 +1143,32 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		request.Diagnosis = diagnosis
+		// The plan starts from what the endpoint runs: the active revision of
+		// the one deployment it routes to. Without one, the plan starts from
+		// its own setup, as before.
+		if setups, ok := a.Store.(endpointSetupStore); ok {
+			name, revision, spec, setupErr := setups.EndpointActiveSetup(r.Context(), actor.TenantID, endpoint)
+			switch {
+			case setupErr == nil:
+				request.StartingSetup = &optimizer.StartingSetup{Deployment: name, Revision: revision, Engine: spec.Runtime, Version: spec.RuntimeVersion,
+					Args: spec.RuntimeArgs, Env: spec.RuntimeEnv, GPU: spec.GPU, GPUCount: spec.GPUCount}
+			case errors.Is(setupErr, domain.ErrNotFound):
+			default:
+				writeError(w, http.StatusInternalServerError, "internal", "the endpoint's active setup could not be read")
+				return
+			}
+		}
+		if body.DeclaredSetup != nil {
+			declared, refused := a.declaredAgentSetup(r.Context(), actor.TenantID, endpoint, *body.DeclaredSetup, request.StartingSetup != nil)
+			if refused != "" {
+				writeError(w, http.StatusUnprocessableEntity, "invalid_declared_setup", refused)
+				return
+			}
+			request.StartingSetup = &declared
+		}
+	} else if body.DeclaredSetup != nil {
+		writeError(w, http.StatusBadRequest, "invalid_optimization_request", "declared_setup describes the server of the endpoint named in diagnosis_endpoint")
+		return
 	}
 	request.ComputeConnectionID = strings.TrimSpace(request.ComputeConnectionID)
 	if request.ComputeConnectionID != "" {
@@ -1155,7 +1210,19 @@ func (a API) proposeOptimization(w http.ResponseWriter, r *http.Request) {
 		writeError(w, failure.Status, failure.Code, failure.Message)
 		return
 	}
-	proposal, err := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations).Propose(r.Context(), request)
+	// The results store's prior orders the diagnosis's choices from the
+	// caller's measured cells and other organizations' shared numbers.
+	if results, ok := a.Store.(resultstore.Store); ok {
+		ctx, tenant := r.Context(), r.Context().Value(identityKey{}).(domain.Principal).TenantID
+		request.Prior = func(query resultprior.Query) (resultprior.Ranking, error) {
+			return resultprior.StorePrior{Store: results, UseShared: true}.Rank(ctx, tenant, query)
+		}
+	}
+	source := optimizer.NewCatalogSource(curatedrecipe.All(), a.Integrations)
+	request = a.withModelTokenizers(r.Context(), request, func(request optimizer.Request) (optimizer.Proposal, error) {
+		return source.Propose(r.Context(), request)
+	})
+	proposal, err := source.Propose(r.Context(), request)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_request", err.Error())
 		return
@@ -1363,11 +1430,18 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		Proposal         optimizer.Proposal `json:"proposal"`
 		Intent           string             `json:"intent"`
 		TargetDeployment string             `json:"target_deployment,omitempty"`
+		// TargetEndpoint names an endpoint an InferCrane agent serves: the
+		// agent measures every setup in the customer's cluster.
+		TargetEndpoint string `json:"target_endpoint,omitempty"`
 	}
 	if !decodeMutationBody(w, r, &request) {
 		return
 	}
 	if err := optimizer.ValidateProposal(request.Proposal); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
+		return
+	}
+	if err := validateCandidateEngineArgs(request.Proposal.Candidates); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", err.Error())
 		return
 	}
@@ -1404,10 +1478,19 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "intent must be new_endpoint or evolve_endpoint")
 		return
 	}
-	request.TargetDeployment = strings.TrimSpace(request.TargetDeployment)
-	if request.Intent == optimizationcampaign.IntentNewEndpoint && request.TargetDeployment != "" || request.Intent == optimizationcampaign.IntentEvolveEndpoint && request.TargetDeployment == "" {
-		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment")
+	request.TargetDeployment, request.TargetEndpoint = strings.TrimSpace(request.TargetDeployment), strings.TrimSpace(request.TargetEndpoint)
+	targets := boolCount(request.TargetDeployment != "") + boolCount(request.TargetEndpoint != "")
+	if request.Intent == optimizationcampaign.IntentNewEndpoint && targets != 0 || request.Intent == optimizationcampaign.IntentEvolveEndpoint && targets != 1 {
+		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment, or target_endpoint for an endpoint an agent serves")
 		return
+	}
+	agentID := ""
+	if request.TargetEndpoint != "" {
+		var refused string
+		if agentID, refused = a.agentRunTarget(r.Context(), actor.TenantID, request.TargetEndpoint, request.Proposal); refused != "" {
+			writeError(w, http.StatusUnprocessableEntity, "invalid_agent_run", refused)
+			return
+		}
 	}
 	if migration := request.Proposal.Input.Migration; migration != nil {
 		if request.Intent != optimizationcampaign.IntentNewEndpoint {
@@ -1423,7 +1506,7 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusRequestEntityTooLarge, "proposal_too_large", "optimization proposal exceeds the one MiB storage boundary")
 		return
 	}
-	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, Intent: request.Intent, TargetDeployment: request.TargetDeployment, ProposalJSON: string(proposalJSON)}
+	campaign := domain.OptimizationCampaign{TenantID: actor.TenantID, IdempotencyKey: key, InputDigest: request.Proposal.InputDigest, ModelIdentity: request.Proposal.Input.ModelIdentity, Objective: request.Proposal.Input.Objective, Source: request.Proposal.AlgorithmVersion, Intent: request.Intent, TargetDeployment: request.TargetDeployment, TargetEndpoint: request.TargetEndpoint, AgentID: agentID, ProposalJSON: string(proposalJSON)}
 	candidates, invalid := campaignCandidateRuns(request.Proposal)
 	if invalid != "" {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_proposal", invalid)
@@ -1553,6 +1636,99 @@ func (a API) optimizationCampaignReport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, document)
+}
+
+// optimizationBandStudy reads the caller's finished campaigns, one per load,
+// as a verdict per load band. Every campaign is read inside the caller's
+// workspace; one that is not there is not found.
+func (a API) optimizationBandStudy(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationreport.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run reports are not configured")
+		return
+	}
+	var ids []string
+	for _, id := range strings.Split(r.URL.Query().Get("campaigns"), ",") {
+		if id = strings.TrimSpace(id); id != "" && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	study, err := optimizationreport.LoadBandStudy(r.Context(), store, actor.TenantID, ids)
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "an optimization run of the study was not found")
+	case errors.Is(err, optimizationreport.ErrStudyMismatch):
+		writeError(w, http.StatusUnprocessableEntity, "band_study_mismatch", err.Error())
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "the band study could not be assembled")
+	default:
+		writeJSON(w, http.StatusOK, study)
+	}
+}
+
+// optimizationProofReport serves the Proof Report of the caller's finished
+// runs: before and after per workload and load, signed by content digest
+// once every run has finished. Every run is read inside the caller's
+// workspace; one that is not there is not found. format=markdown and
+// format=html return the same report rendered for print, as an attachment.
+func (a API) optimizationProofReport(w http.ResponseWriter, r *http.Request) {
+	store, ok := a.Store.(optimizationreport.Store)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "capability_unavailable", "optimization run reports are not configured")
+		return
+	}
+	query := r.URL.Query()
+	format := query.Get("format")
+	if format == "" {
+		format = "json"
+	}
+	if format != "json" && format != "markdown" && format != "html" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "format must be json, markdown, or html")
+		return
+	}
+	request := proofreport.Request{Title: query.Get("title"), PreparedFor: query.Get("prepared_for"), CampaignIDs: strings.Split(query.Get("campaigns"), ",")}
+	actor := r.Context().Value(identityKey{}).(domain.Principal)
+	report, err := proofreport.Load(r.Context(), store, actor.TenantID, request)
+	switch {
+	case errors.Is(err, proofreport.ErrInvalidRequest):
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "an optimization run of the report was not found")
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "internal", "the proof report could not be assembled")
+		return
+	}
+	document, err := proofreport.Sign(report, a.PassportPrivateKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "report_signing_failed", "the proof report could not be signed")
+		return
+	}
+	var body []byte
+	switch format {
+	case "json":
+		writeJSON(w, http.StatusOK, document)
+		return
+	case "markdown":
+		body = proofreport.Markdown(document)
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="proof-report.md"`)
+	default:
+		if body, err = proofreport.HTML(document); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "the proof report could not be rendered")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="proof-report.html"`)
+		// The page is self-contained: nothing may load, run, or frame it.
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox")
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 func (a API) acceleratorLabCapabilities(w http.ResponseWriter, _ *http.Request) {
@@ -1694,6 +1870,12 @@ func (a API) approveCampaign(ctx context.Context, store optimizationCampaignStor
 	// says how many lost machines per setup the cap covers.
 	replacementsCovered := optimizationcampaign.MaxMachineReplacements
 	for _, candidate := range pending.Candidates {
+		if optimizationcampaign.AgentRun(pending) {
+			// An agent measures each setup on the customer's own GPUs;
+			// InferCrane buys no machine, so there is no price to source.
+			// The approval still bounds how long the run may measure.
+			break
+		}
 		var draft optimizer.DeploymentDraft
 		if json.Unmarshal([]byte(candidate.DeploymentSpecJSON), &draft) != nil {
 			return campaignApproval{}, &campaignFailure{http.StatusUnprocessableEntity, "optimization_candidate_invalid", "a setup's deployment specification is invalid"}
@@ -1840,13 +2022,20 @@ func optimizationCampaignResponse(campaign domain.OptimizationCampaign, quality 
 		if reason := recorded.Reasons[candidate.ProposalCandidateID]; reason != nil {
 			view["reason"] = reason
 		}
+		var row *domain.QualityEvidence
+		if evidence, found := quality.evidence[candidate.QualityEvidenceID]; found {
+			row = &evidence
+		}
+		if made := optimizationreport.CandidateTechnique(campaign, candidate, row); made != nil {
+			view["technique"] = made
+		}
 		candidates = append(candidates, view)
 	}
 	proofBoundary := "modeled evidence cannot qualify; measured benchmark, quality, and cost evidence are required before human activation"
 	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
 		proofBoundary = "modeled evidence cannot qualify; measured benchmark, quality, cost, and Release Guard evidence are required before human promotion"
 	}
-	response := map[string]any{"progress": optimizationcampaign.Progress(campaign, time.Now()), "id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
+	response := map[string]any{"progress": optimizationcampaign.Progress(campaign, time.Now()), "id": campaign.ID, "input_digest": campaign.InputDigest, "model_identity": campaign.ModelIdentity, "objective": campaign.Objective, "source": campaign.Source, "intent": campaign.Intent, "target_deployment": campaign.TargetDeployment, "target_endpoint": nullableText(campaign.TargetEndpoint), "agent_id": nullableText(campaign.AgentID), "state": campaign.State, "max_candidates": campaign.MaxCandidates, "approved_max_cost_usd": campaign.ApprovedMaxCostUSD, "approval_expires_at": campaign.ApprovalExpiresAt, "approved_by": campaign.ApprovedBy, "approved_at": campaign.ApprovedAt, "cancel_requested": campaign.CancelRequested, "failure_code": campaign.FailureCode, "created_at": campaign.CreatedAt, "updated_at": campaign.UpdatedAt, "candidates": candidates, "proof_boundary": proofBoundary}
 	if origin, proposed := continualoptimizer.DecodeOrigin(campaign.OriginJSON); proposed {
 		response["origin"] = origin
 	}
@@ -2906,6 +3095,12 @@ func (a API) readinessAssessment(ctx context.Context, store monitoringStore, ten
 }
 
 var errDiagnosisUnsupported = errors.New("endpoint diagnosis is not supported by this store")
+
+// endpointSetupStore reads what an endpoint runs now, for a plan that starts
+// from it.
+type endpointSetupStore interface {
+	EndpointActiveSetup(context.Context, string, string) (string, int, domain.DeploymentRevisionSpec, error)
+}
 
 // diagnosisWindowSeconds is the monitoring window a proposal diagnoses, the
 // same default the readiness endpoint uses.
@@ -4737,18 +4932,23 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "internal", "selected revision replica lookup failed")
 			return
 		}
+		var selected domain.Replica
 		selectedOrdinal := int(^uint(0) >> 1)
 		for _, replica := range replicas {
 			if replica.RevisionID == selectedRevisionID && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Endpoint != "" && replica.Ordinal < selectedOrdinal {
-				endpoint, provider, selectedOrdinal = replica.Endpoint, replica.Provider, replica.Ordinal
+				selected, selectedOrdinal = replica, replica.Ordinal
 			}
 		}
+		endpoint, provider = selected.Endpoint, selected.Provider
 		if provider == "" {
 			writeError(w, 409, "candidate_not_ready", "selected revision has no healthy ready endpoint")
 			return
 		}
 		backend := a.Backends[provider]
-		credential = backend.APIKey
+		// The replica is sent the credential it was started with and no other:
+		// its address belongs to the workload, which may be the tenant's own
+		// image in the tenant's own account.
+		credential = backend.workerCredential(deployment, selected)
 		if credential == "" {
 			writeError(w, 503, "benchmark_unavailable", "candidate benchmark credential is not configured for provider "+provider)
 			return
@@ -4811,7 +5011,12 @@ func (a API) runBenchmark(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	workload, _ := json.Marshal(map[string]any{"endpoint_type": "chat", "streaming": streaming, "request_count": request.Requests, "request_count_per_run": request.Requests, "profile_runs": request.Runs, "warmup_requests": request.WarmupRequests, "run_cooldown_seconds": request.Cooldown, "arrival_pattern": request.ArrivalPattern, "request_rate": request.RequestRate, "concurrency": request.Concurrency, "random_seed": request.RandomSeed, "input_tokens": request.InputTokens, "output_tokens": request.OutputTokens, "profile": request.Profile, "profile_version": request.ProfileVersion, "ttft_slo_ms": request.TTFTSLOMS, "tpot_slo_ms": request.TPOTSLOMS, "latency_slo_ms": request.LatencySLOMS, "confidence_95": measured.Confidence, "server_token_count": true, "revision_selector": selector, "direct_revision_validation": selectedRevisionID != deployment.ActiveRevisionID, "replicas": benchmarkReplicaCount})
-	runtimeConfig, _ := json.Marshal(support.BenchmarkRuntimeConfig(revisionSpec.RuntimeArgs, revisionSpec.RuntimeEnv))
+	recordedRuntime := support.BenchmarkRuntimeConfig(revisionSpec.RuntimeArgs, revisionSpec.RuntimeEnv)
+	if revisionSpec.KernelConfigs != nil {
+		// A benchmark of a revision with tuned kernels names the set it served.
+		recordedRuntime["kernel_configs"] = revisionSpec.KernelConfigs.Digest
+	}
+	runtimeConfig, _ := json.Marshal(recordedRuntime)
 	var gpuCount *int
 	if revisionSpec.GPU != "" {
 		count := revisionSpec.GPUCount

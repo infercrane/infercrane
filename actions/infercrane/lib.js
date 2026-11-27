@@ -10,11 +10,15 @@ const child = require("node:child_process");
 function stripAnsi(value) {
   return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
 }
+// Inputs whose names look secret but whose values are public: a comment
+// label and a public signing key. Masking them would garble the output.
+const PUBLIC_INPUTS = new Set(["INPUT_COMMENT_KEY", "INPUT_PUBLIC_KEY"]);
 function secretValues(env) {
   return Object.entries(env)
     .filter(
       ([key, value]) =>
         /(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL)/i.test(key) &&
+        !PUBLIC_INPUTS.has(key.toUpperCase()) &&
         typeof value === "string" &&
         value.length >= 4,
     )

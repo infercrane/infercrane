@@ -1,7 +1,8 @@
 // Command checkpoint-catalog-sync refreshes the reviewed checkpoint catalog in
 // two explicit steps: `fetch --network` records a Hugging Face snapshot, and
 // `plan` turns a recorded snapshot into a proposed catalog and a reviewable
-// diff without any network access.
+// diff without any network access. `regate` applies the eligibility gates
+// again to the committed catalog after an engine pin moves, also offline.
 package main
 
 import (
@@ -43,13 +44,15 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: checkpoint-catalog-sync fetch --network --out DIR | plan --snapshot DIR [--write --reviewed-at YYYY-MM-DD]")
+		return errors.New("usage: checkpoint-catalog-sync fetch --network --out DIR | plan --snapshot DIR [--write --reviewed-at YYYY-MM-DD] | regate [--write]")
 	}
 	switch args[0] {
 	case "fetch":
 		return fetch(ctx, args[1:], stderr)
 	case "plan":
 		return plan(args[1:], stdout)
+	case "regate":
+		return regate(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }
@@ -153,6 +156,39 @@ func plan(args []string, stdout io.Writer) error {
 		}
 		fmt.Fprintf(stdout, "wrote %s\n", *catalogPath)
 	}
+	return nil
+}
+
+// regate applies the eligibility gates again to the committed catalog against
+// the runtime images pinned in this build, and lists the entries whose
+// eligibility moved. Only --write replaces the catalog.
+func regate(args []string, stdout io.Writer) error {
+	flags := flag.NewFlagSet("regate", flag.ContinueOnError)
+	catalogPath := flags.String("catalog", defaultCatalog, "committed catalog")
+	write := flags.Bool("write", false, "replace --catalog with the regated catalog")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	committed, err := loadPrevious(*catalogPath, false)
+	if err != nil {
+		return err
+	}
+	regated, changes := checkpointsync.Regate(committed)
+	for _, change := range changes {
+		fmt.Fprintf(stdout, "%s: %s %s -> %s %s\n", change.ID, change.Before.State, strings.Join(change.Before.Blockers, "; "), change.After.State, strings.Join(change.After.Blockers, "; "))
+	}
+	fmt.Fprintf(stdout, "%d of %d entries changed eligibility\n", len(changes), len(regated.Entries))
+	if !*write || len(changes) == 0 {
+		return nil
+	}
+	formatted, err := checkpointsync.FormatCatalog(regated)
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(*catalogPath, formatted, 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote %s\n", *catalogPath)
 	return nil
 }
 

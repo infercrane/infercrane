@@ -28,6 +28,11 @@ gateway; InferCrane records only their timing and token counts. The candidates' 
 check's requests to the closed API cost money: approve the run's spend cap before it starts.
 </Warning>
 
+On a self-hosted control plane, `connect --token-env` stores the key encrypted. That needs
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY`, each at least 32
+bytes, on the control plane: see
+[keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials).
+
 ## 1. Measure your current API
 
 Connect the closed API as a traffic-managed endpoint and point your application at InferCrane's
@@ -92,7 +97,9 @@ answers that count as right, and both the closed API and each setup are scored a
 ```
 
 `exact_match` scores 1 when the answer's words equal an expected answer's, ignoring case and
-punctuation; `token_f1` scores the best word overlap. A migration needs at least 30 graded
+punctuation; `token_f1` scores the best word overlap; `answer_line` scores a
+[task set](/features/semantic-quality#task-sets) by the answer's last `Answer:` line, with one
+expected number or letter from A to D per prompt. A migration needs at least 30 graded
 prompts. Upload the set with `infercrane evaluation set upload` and pass its digest as `--eval-set`.
 
 InferCrane asks the closed API and each setup every prompt with greedy decoding (`--dialect openai`

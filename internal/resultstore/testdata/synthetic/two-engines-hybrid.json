@@ -1,0 +1,324 @@
+{
+ "schema": "infercrane.planner-gym/v1",
+ "title": "Synthetic: the hybrid model on one H200 on two engines, every number made up",
+ "set": "synthetic-two-engines",
+ "recorded_at": "2001-01-05T03:00:00Z",
+ "basis": "separate-servers",
+ "model": {
+  "id": "example/hybrid-27b-fp8",
+  "revision": "1111111111111111111111111111111111111111",
+  "features": [
+   "native_mtp"
+  ]
+ },
+ "model_facts": {
+  "id": "example/hybrid-27b-fp8",
+  "architecture": "hybrid",
+  "params_b": 27,
+  "checkpoint": "fp8",
+  "features": [
+   "native_mtp"
+  ]
+ },
+ "gpu": "H200",
+ "engine": "vllm",
+ "engine_version": "0.34.0",
+ "max_num_seqs": 0,
+ "baseline": "vllm-plain",
+ "current_setups": [
+  "vllm-plain"
+ ],
+ "setups": {
+  "vllm-plain": {
+   "label": "The model's plain command on vLLM",
+   "engine": "vllm",
+   "engine_version": "0.34.0",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  },
+  "vllm-mtp": {
+   "label": "Plus speculation, 3 draft tokens",
+   "engine": "vllm",
+   "engine_version": "0.34.0",
+   "drafts": 3,
+   "speculation": "mtp",
+   "kv_cache_dtype": "auto",
+   "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  },
+  "sglang-fp8": {
+   "label": "SGLang with an FP8 KV cache",
+   "engine": "sglang",
+   "engine_version": "0.5.20",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8_e4m3",
+   "flags": [
+    "--context-length=65536",
+    "--mem-fraction-static=0.90"
+   ],
+   "image_digest": "sha256:af071aa1fca44e706b15adc8ce82b24bea9329307d14e2e2250f771aa995ddfa"
+  },
+  "sglang-mtp": {
+   "label": "SGLang with speculation and bounded graphs",
+   "engine": "sglang",
+   "engine_version": "0.5.20",
+   "drafts": 3,
+   "speculation": "mtp",
+   "kv_cache_dtype": "fp8_e4m3",
+   "flags": [
+    "--context-length=65536",
+    "--cuda-graph-bs-decode=1 2 4 8 16 32",
+    "--mem-fraction-static=0.90"
+   ],
+   "image_digest": "sha256:af071aa1fca44e706b15adc8ce82b24bea9329307d14e2e2250f771aa995ddfa"
+  }
+ },
+ "cells": [
+  {
+   "key": "long/4",
+   "kind": "long",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 272.73,
+      "min": 268.96,
+      "max": 273.81,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 477.27,
+      "min": 475.16,
+      "max": 479.29,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 259.09,
+      "min": 258.5,
+      "max": 259.43,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 395.45,
+      "min": 393.18,
+      "max": 395.99,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "long/12",
+   "kind": "long",
+   "requests_at_once": 12,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 692.31,
+      "min": 682.29,
+      "max": 701.67,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 935.02,
+      "min": 927.62,
+      "max": 945.71,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 657.69,
+      "min": 650.3,
+      "max": 665.52,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 729.53,
+      "min": 726.57,
+      "max": 732.62,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "long/32",
+   "kind": "long",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 1333.33,
+      "min": 1329.65,
+      "max": 1347.89,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 1325.33,
+      "min": 1309.05,
+      "max": 1340.58,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 1266.67,
+      "min": 1253.15,
+      "max": 1281.78,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 933.33,
+      "min": 929.51,
+      "max": 946.36,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "short/4",
+   "kind": "short",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 363.83,
+      "min": 361.03,
+      "max": 368.6,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 636.7,
+      "min": 633.05,
+      "max": 642.26,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 345.64,
+      "min": 343.42,
+      "max": 348.21,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 527.55,
+      "min": 520.4,
+      "max": 530.77,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "short/12",
+   "kind": "short",
+   "requests_at_once": 12,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 1005.88,
+      "min": 996.68,
+      "max": 1009.99,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 1473.32,
+      "min": 1460.22,
+      "max": 1481.01,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 955.59,
+      "min": 942.63,
+      "max": 961.47,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 1059.96,
+      "min": 1049.46,
+      "max": 1065.71,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "short/32",
+   "kind": "short",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "measured": {
+    "vllm-plain": {
+     "output": {
+      "median": 2242.62,
+      "min": 2232.3,
+      "max": 2255.1,
+      "servers": 3
+     }
+    },
+    "vllm-mtp": {
+     "output": {
+      "median": 2713.57,
+      "min": 2675.75,
+      "max": 2742.56,
+      "servers": 3
+     }
+    },
+    "sglang-fp8": {
+     "output": {
+      "median": 2130.49,
+      "min": 2102.24,
+      "max": 2142.78,
+      "servers": 3
+     }
+    },
+    "sglang-mtp": {
+     "output": {
+      "median": 1569.84,
+      "min": 1548.1,
+      "max": 1586.48,
+      "servers": 3
+     }
+    }
+   }
+  }
+ ],
+ "built_from": [
+  {
+   "file": "generate.py",
+   "sha256": "synthetic"
+  }
+ ]
+}

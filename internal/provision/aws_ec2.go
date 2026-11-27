@@ -144,6 +144,9 @@ func (a AWSEC2) Handle(externalKey string) ProviderHandle {
 }
 
 func (a AWSEC2) EnsureReplica(ctx context.Context, spec ReplicaSpec) (ProviderHandle, error) {
+	if err := refuseKernelConfigs("aws-ec2", spec); err != nil {
+		return ProviderHandle{}, err
+	}
 	if !spec.Workload.Empty() {
 		spec.Port = spec.Workload.Port
 	}

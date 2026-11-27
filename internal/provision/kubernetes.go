@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
+	"github.com/infercrane/infercrane/internal/engineingress"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/secrets"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 const kubernetesFieldManager = "infercrane-provider-v1"
@@ -31,6 +34,11 @@ type Kubernetes struct {
 	ImageCachePolicy                                  string
 	ArtifactCachePolicy                               string
 	ArtifactPVCs                                      map[string]string
+	// EngineIngress are the only sources allowed to reach an engine pod's
+	// port: the control plane's gateway and router. With any set, each
+	// replica gets a NetworkPolicy beside its Deployment and Service; empty
+	// applies none (the control plane's configuration requires a choice).
+	EngineIngress []engineingress.Peer
 	// ObjectStoreSecretName optionally names a Secret in the namespace whose
 	// keys become the environment of the object store fetch container, for
 	// example AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_ENDPOINT_URL
@@ -107,6 +115,9 @@ func (k Kubernetes) Check(ctx context.Context) error {
 		return fmt.Errorf("probe Kubernetes API: %w", err)
 	}
 	resources := []string{"deployments.apps", "services"}
+	if k.engineIngressEnabled() {
+		resources = append(resources, "networkpolicies.networking.k8s.io")
+	}
 	if k.WorkloadAPI == "kserve" {
 		resources = []string{"inferenceservices.serving.kserve.io"}
 		output, err := k.run(ctx, false, "api-resources", "--api-group=serving.kserve.io", "-o", "name")
@@ -195,12 +206,25 @@ func (k Kubernetes) ObserveReplica(ctx context.Context, handle ProviderHandle, p
 		for _, item := range objects {
 			if item.Kind == "Deployment" && generationObserved(item) && item.Status.AvailableReplicas > 0 {
 				state = "ready"
-				endpoint = fmt.Sprintf("http://%s.%s.svc:%d", k.resourceName(handle.ExternalKey), k.Namespace, port)
+				endpoint = k.ServiceAddress(handle, port)
 			}
 		}
 	}
 	details, _ := json.Marshal(k.nativeDetails(objects))
 	return Observation{Exists: true, State: state, Endpoint: endpoint, Details: string(details)}, nil
+}
+
+// ServiceAddress is the address a replica's Service answers on, ready or
+// not: the external key fixes it for a Deployment. It is empty for KServe,
+// whose controller assigns the address.
+func (k Kubernetes) ServiceAddress(handle ProviderHandle, port int) string {
+	if k.WorkloadAPI == "kserve" || handle.ExternalKey == "" {
+		return ""
+	}
+	if port == 0 {
+		port = 8000
+	}
+	return fmt.Sprintf("http://%s.%s.svc:%d", k.resourceName(handle.ExternalKey), k.Namespace, port)
 }
 
 func (k Kubernetes) DeleteReplica(ctx context.Context, handle ProviderHandle) error {
@@ -222,6 +246,8 @@ func (k Kubernetes) DeleteReplica(ctx context.Context, handle ProviderHandle) er
 			resources = append(resources, "deployment/"+name)
 		case "Service":
 			resources = append(resources, "service/"+name)
+		case "NetworkPolicy":
+			resources = append(resources, "networkpolicy.networking.k8s.io/"+name)
 		case "InferenceService":
 			resources = append(resources, "inferenceservice.serving.kserve.io/"+name)
 		default:
@@ -311,6 +337,9 @@ func (k Kubernetes) objects(ctx context.Context, externalKey string) ([]kubernet
 		args = []string{"get", "inferenceservice.serving.kserve.io/" + name, "--ignore-not-found=true", "-o", "json"}
 	} else {
 		args = []string{"get", "deployment.apps/" + name, "service/" + name, "--ignore-not-found=true", "-o", "json"}
+		if k.engineIngressEnabled() {
+			args = []string{"get", "deployment.apps/" + name, "service/" + name, "networkpolicy.networking.k8s.io/" + name, "--ignore-not-found=true", "-o", "json"}
+		}
 	}
 	output, err := k.run(ctx, true, args...)
 	if err != nil {
@@ -343,8 +372,21 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	}
 	inputs := modelInputs(spec)
 	fetchHub := hubFetchNeeded(spec)
+	tuned, err := kernelConfigs(spec)
+	if err != nil {
+		return nil, err
+	}
+	prelude := ""
+	if tuned != nil {
+		// The tuned files are written before the server starts, into a
+		// folder of the Pod's own, and the engine is told where they are.
+		prelude = kernelConfigScript(*tuned)
+	}
 	if fetchHub {
-		command = wrapWithFetch(command, fetchScript(spec, false, true))
+		prelude += fetchScript(spec, false, true)
+	}
+	if prelude != "" {
+		command = wrapWithFetch(command, prelude)
 	}
 	labels := map[string]any{"app.kubernetes.io/name": "infercrane-runtime", "app.kubernetes.io/instance": name, "app.kubernetes.io/managed-by": "infercrane", "infercrane.dev/external-key-hash": k.externalKeyHash(spec.ExternalKey)}
 	intentHash, err := k.intentHash(spec)
@@ -360,6 +402,9 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	}
 	for _, variable := range engineVariables {
 		environment = append(environment, map[string]any{"name": variable, "value": spec.RuntimeEnv[variable]})
+	}
+	if tuned != nil {
+		environment = append(environment, kernelConfigEnvironment(*tuned)...)
 	}
 	if spec.ModelCredential != nil {
 		// The token stays in the cluster's own Secret; the control plane only
@@ -394,6 +439,10 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 		)
 		volumes = append(volumes, map[string]any{"name": "model-cache", "persistentVolumeClaim": map[string]any{"claimName": artifactClaim, "readOnly": true}})
 	}
+	if tuned != nil {
+		volumes = append(volumes, map[string]any{"name": "infercrane-kernel-configs", "emptyDir": map[string]any{"sizeLimit": "1Mi"}})
+		mounts = append(mounts, map[string]any{"name": "infercrane-kernel-configs", "mountPath": kerneltuning.MountPath})
+	}
 	if inputs.Objects || fetchHub {
 		// Fetched weights and adapters live on the Pod's own volume.
 		volumes = append(volumes, map[string]any{"name": "infercrane-fetch", "emptyDir": map[string]any{}})
@@ -422,7 +471,39 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	}
 	deployment := map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": metadata, "spec": map[string]any{"replicas": 1, "strategy": map[string]any{"type": "Recreate"}, "progressDeadlineSeconds": 1800, "selector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/instance": name}}, "template": map[string]any{"metadata": map[string]any{"labels": labels}, "spec": podSpec}}}
 	service := map[string]any{"apiVersion": "v1", "kind": "Service", "metadata": metadata, "spec": map[string]any{"selector": map[string]any{"app.kubernetes.io/instance": name}, "ports": []any{map[string]any{"name": "http", "port": port, "targetPort": "http"}}}}
-	return json.Marshal(map[string]any{"apiVersion": "v1", "kind": "List", "items": []any{deployment, service}})
+	items := []any{deployment, service}
+	if k.engineIngressEnabled() {
+		items = append(items, k.engineNetworkPolicy(name, metadata, port))
+	}
+	return json.Marshal(map[string]any{"apiVersion": "v1", "kind": "List", "items": items})
+}
+
+// engineNetworkPolicy admits traffic to the engine pod's port only from the
+// configured sources. The pod's other ports take no traffic at all.
+func (k Kubernetes) engineNetworkPolicy(name string, metadata map[string]any, port int) map[string]any {
+	from := make([]any, 0, len(k.EngineIngress))
+	for _, peer := range k.EngineIngress {
+		entry := map[string]any{}
+		if peer.CIDR != "" {
+			entry["ipBlock"] = map[string]any{"cidr": peer.CIDR}
+		}
+		if len(peer.PodLabels) > 0 {
+			entry["podSelector"] = map[string]any{"matchLabels": peer.PodLabels}
+		}
+		if len(peer.NamespaceLabels) > 0 {
+			entry["namespaceSelector"] = map[string]any{"matchLabels": peer.NamespaceLabels}
+		}
+		from = append(from, entry)
+	}
+	return map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": metadata, "spec": map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/instance": name}},
+		"policyTypes": []any{"Ingress"},
+		"ingress":     []any{map[string]any{"from": from, "ports": []any{map[string]any{"protocol": "TCP", "port": port}}}},
+	}}
+}
+
+func (k Kubernetes) engineIngressEnabled() bool {
+	return k.WorkloadAPI == "deployment" && len(k.EngineIngress) > 0
 }
 
 // objectFetchContainer downloads object store weights and adapters with the
@@ -506,6 +587,12 @@ func (k Kubernetes) validate(spec ReplicaSpec) error {
 	}
 	if spec.GPUCount < 0 || spec.GPUCount > 1024 {
 		return errors.New("Kubernetes GPU count must be between 1 and 1024")
+	}
+	// A cluster whose device plugin exposes an accelerator that is not
+	// qualified, such as a GKE TPU node pool, could schedule it; the spec
+	// checks refuse it first, and the adapter refuses it again here.
+	if err := support.RefuseNotQualified(spec.GPU); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidReplicaSpec, err)
 	}
 	// The configured device-plugin resource decides which GPUs the cluster
 	// can schedule. An AMD GPU requested through nvidia.com/gpu, or an NVIDIA
@@ -703,16 +790,20 @@ func (k Kubernetes) ownerSetComplete(objects []kubernetesObject) bool {
 	if k.WorkloadAPI == "kserve" {
 		return len(objects) == 1 && objects[0].Kind == "InferenceService"
 	}
-	deployment, service := 0, 0
+	// A replica created before its NetworkPolicy existed is still complete:
+	// readiness never waits on the policy, which the next ensure applies.
+	deployment, service, policy := 0, 0, 0
 	for _, item := range objects {
 		switch item.Kind {
 		case "Deployment":
 			deployment++
 		case "Service":
 			service++
+		case "NetworkPolicy":
+			policy++
 		}
 	}
-	return deployment == 1 && service == 1 && len(objects) == 2
+	return deployment == 1 && service == 1 && policy <= 1 && len(objects) == 2+policy
 }
 
 func (k Kubernetes) owned(item kubernetesObject, externalKey string) bool {
@@ -882,4 +973,52 @@ func validKubernetesSecretKey(value string) bool {
 		return false
 	}
 	return true
+}
+
+// ReplicaNodes names the nodes a replica's pods are scheduled on. It reads
+// pods (get, list) and changes nothing; a caller without that grant gets an
+// error and treats the node as unknown.
+func (k Kubernetes) ReplicaNodes(ctx context.Context, handle ProviderHandle) ([]string, error) {
+	if handle.ExternalKey == "" {
+		return nil, errors.New("Kubernetes provider handle requires an external key")
+	}
+	out, err := k.run(ctx, true, "get", "pods", "-l", "app.kubernetes.io/instance="+k.resourceName(handle.ExternalKey), "-o", "jsonpath={.items[*].spec.nodeName}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+}
+
+// ServiceNodes names the nodes of the pods behind a Service in namespace,
+// read-only: the Service's selector, then its pods.
+func (k Kubernetes) ServiceNodes(ctx context.Context, namespace, service string) ([]string, error) {
+	if namespace == "" || service == "" {
+		return nil, errors.New("a namespace and a service are required")
+	}
+	raw, err := k.run(ctx, false, "--namespace", namespace, "get", "service", service, "-o", "json")
+	if err != nil {
+		return nil, err
+	}
+	var object struct {
+		Spec struct {
+			Selector map[string]string `json:"selector"`
+		} `json:"spec"`
+	}
+	if err = json.Unmarshal(raw, &object); err != nil || len(object.Spec.Selector) == 0 {
+		return nil, errors.New("the service selects no pods by label")
+	}
+	keys := make([]string, 0, len(object.Spec.Selector))
+	for key := range object.Spec.Selector {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	selector := make([]string, 0, len(keys))
+	for _, key := range keys {
+		selector = append(selector, key+"="+object.Spec.Selector[key])
+	}
+	out, err := k.run(ctx, false, "--namespace", namespace, "get", "pods", "-l", strings.Join(selector, ","), "-o", "jsonpath={.items[*].spec.nodeName}")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
 }

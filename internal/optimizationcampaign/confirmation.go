@@ -1,8 +1,13 @@
 package optimizationcampaign
 
 import (
+	"context"
 	"fmt"
 	"math"
+
+	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/qualitycheck"
 )
 
 // A gain in one measurement window can come from the machines rather than
@@ -34,7 +39,9 @@ const (
 	ReplacementPurposeConfirmation = "confirmation"
 
 	// DecisionNotConfirmed is a candidate that measured better than the
-	// control in its first window but not again on fresh servers.
+	// control in its first window but not again in a valid window on fresh
+	// servers. A gain whose second window is missing, invalid, or without
+	// the objective is unknown instead (controlDecisionUnknown).
 	DecisionNotConfirmed = "not_confirmed"
 	// FailureNotConfirmed is its rejection code.
 	FailureNotConfirmed = "measured_gain_not_confirmed"
@@ -50,6 +57,54 @@ type ConfirmationState struct {
 	// KeepControl is true when the control's server serves production and is
 	// not retired.
 	KeepControl bool `json:"keep_control,omitempty"`
+	// Attempt is 1 once an invalid window on fresh servers is being
+	// measured again (measurementSession.measureAgain).
+	Attempt int `json:"attempt,omitempty"`
+	// FirstAnswers is the task set as the setup's first servers and the
+	// reference answered it before the candidate's server was retired
+	// (FirstAnswersAsker). The answer check after the fresh window pools it.
+	FirstAnswers *qualitycheck.ServerPair `json:"first_answers,omitempty"`
+	// FirstAnswersSkipped says why the first servers' answers were not read;
+	// the verdict then rests on the fresh servers alone.
+	FirstAnswersSkipped string `json:"first_answers_skipped,omitempty"`
+}
+
+// FirstAnswersAsker asks a setup's first servers the campaign's task set
+// before a confirmation retires them (BuiltinQualityCheck.AskFirstPair).
+type FirstAnswersAsker interface {
+	AskFirstPair(context.Context, domain.OptimizationCampaign, domain.OptimizationCandidateRun) (qualitycheck.ServerPair, bool, error)
+}
+
+// askFirstAnswers keeps the first servers' answers in the checkpoint before
+// the candidate's server is retired for a confirmation, once. The built-in
+// check asks them only for a setup that changes answers, on a task set. A
+// failure to ask is recorded and does not stop the confirmation: the verdict
+// then rests on the fresh servers alone, as before.
+func (d CompositeDriver) askFirstAnswers(ctx context.Context, campaign domain.OptimizationCampaign, measured domain.OptimizationCandidateRun, checkpoint *MeasurementCheckpoint, save func() error) error {
+	confirmation := checkpoint.Confirmation
+	if confirmation == nil || confirmation.FirstAnswers != nil || confirmation.FirstAnswersSkipped != "" {
+		return nil
+	}
+	asker, ok := d.Quality.(FirstAnswersAsker)
+	if !ok || QualityWaitsForCustomer(campaign) || campaignRequest(campaign).Migration != nil {
+		return nil
+	}
+	pair, asked, err := asker.AskFirstPair(ctx, campaign, measured)
+	switch {
+	case ctx.Err() != nil:
+		return operations.Retryable(retryQualityCheckFailed, ctx.Err())
+	case err != nil:
+		reason := "the first servers' answers could not be read: " + err.Error()
+		if len(reason) > 512 {
+			reason = reason[:512]
+		}
+		confirmation.FirstAnswersSkipped = reason
+	case asked:
+		confirmation.FirstAnswers = &pair
+	default:
+		return nil
+	}
+	return save()
 }
 
 // advanceConfirmation moves the confirmation on once arm's server was
@@ -79,6 +134,16 @@ type ConfirmationEvidence struct {
 	Comparison     map[string]MetricComparison `json:"comparison,omitempty"`
 	FreshCandidate bool                        `json:"fresh_candidate"`
 	FreshControl   bool                        `json:"fresh_control"`
+	// Discarded is an earlier try at this window that came out invalid; the
+	// window was then measured once more on the same servers.
+	Discarded *DiscardedWindow `json:"discarded,omitempty"`
+}
+
+// DiscardedWindow is a try at the window on fresh servers whose control
+// check failed. It is kept for audit and decides nothing.
+type DiscardedWindow struct {
+	Control ControlEvidence `json:"control"`
+	Runs    []RunSummary    `json:"runs"`
 }
 
 // scaleByCost turns a throughput comparison into one of throughput per hourly
@@ -114,23 +179,36 @@ func objectiveComparison(comparisons map[string]MetricComparison, metric string,
 // second window's, which is free of the first window's selection), and the
 // reason. A measurement made before confirmations existed is returned
 // unchanged.
+//
+// Only a valid second window that compared the objective can show that a
+// gain did not hold. Without one, whether the gain holds is unknown: the
+// candidate is not selected, and it is not reported as a gain that failed
+// to repeat, because nothing measured it failing.
 func confirmedDecision(measured *MeasuredEvidence, first MetricComparison, metric, label string, costScale bool, ratio float64) (string, MetricComparison, string) {
 	reason := fmt.Sprintf("%s changed %+.1f%% against a %.1f%% noise floor in interleaved runs", label, first.Delta*100, first.NoiseFloor*100)
 	if first.Decision != DecisionImproved || measured == nil || measured.Method != MeasurementMethod {
 		return first.Decision, first, reason
 	}
+	const unknown = ", so whether the gain holds is unknown"
 	confirmation := measured.Confirmation
 	if confirmation == nil {
-		return DecisionNotConfirmed, first, reason + "; it was not measured again on fresh servers"
+		return controlDecisionUnknown, first, reason + "; it was not measured again on fresh servers" + unknown
 	}
 	if confirmation.Control.Role != ControlRoleBracketed {
-		return DecisionNotConfirmed, first, reason + "; the measurement on fresh servers was invalid (" + confirmation.Control.Reason + ")"
+		twice := ""
+		if confirmation.Discarded != nil {
+			twice = ", and again when measured once more"
+		}
+		return controlDecisionUnknown, first, reason + "; the measurement on fresh servers was invalid (" + confirmation.Control.Reason + ")" + twice + unknown
 	}
 	second, found := objectiveComparison(confirmation.Comparison, metric, costScale, ratio)
 	if !found {
-		return DecisionNotConfirmed, first, reason + "; " + metric + " was not comparable on fresh servers"
+		return controlDecisionUnknown, first, reason + "; " + metric + " was not comparable on fresh servers" + unknown
 	}
 	reason = fmt.Sprintf("%s changed %+.1f%% (noise ±%.1f%%), then %+.1f%% (noise ±%.1f%%) measured again on fresh servers", label, first.Delta*100, first.NoiseFloor*100, second.Delta*100, second.NoiseFloor*100)
+	if confirmation.Discarded != nil {
+		reason += " (the first try there was invalid, " + confirmation.Discarded.Control.Reason + ", so the window was measured once more)"
+	}
 	if second.Decision != DecisionImproved {
 		return DecisionNotConfirmed, second, reason
 	}

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -55,7 +56,18 @@ func main() {
 	captured := &capture{paths: map[string]int{}}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1
+	// outageUntil makes the proxy stand in for a control plane outage: the
+	// agent's calls are refused until then (POST /outage?seconds=N).
+	var outageMu sync.Mutex
+	var outageUntil time.Time
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outageMu.Lock()
+		down := time.Now().Before(outageUntil)
+		outageMu.Unlock()
+		if down {
+			http.Error(w, "control plane outage (test)", http.StatusServiceUnavailable)
+			return
+		}
 		raw, readErr := io.ReadAll(io.LimitReader(r.Body, 64<<20))
 		if readErr != nil {
 			http.Error(w, "unreadable body", http.StatusBadRequest)
@@ -79,6 +91,17 @@ func main() {
 		captured.mu.Lock()
 		defer captured.mu.Unlock()
 		_, _ = w.Write(captured.bodies.Bytes())
+	})
+	reportMux.HandleFunc("POST /outage", func(w http.ResponseWriter, r *http.Request) {
+		seconds, err := strconv.Atoi(r.URL.Query().Get("seconds"))
+		if err != nil || seconds < 0 || seconds > 3600 {
+			http.Error(w, "seconds must be 0..3600", http.StatusBadRequest)
+			return
+		}
+		outageMu.Lock()
+		outageUntil = time.Now().Add(time.Duration(seconds) * time.Second)
+		outageMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	})
 	reportMux.HandleFunc("GET /stats", func(w http.ResponseWriter, _ *http.Request) {
 		captured.mu.Lock()

@@ -558,7 +558,7 @@ func runtimeGate(requirements []checkpointcatalog.EngineRequirement, runtime str
 }
 
 // pinnedEngines returns, for each built-in runtime, the engine versions of its
-// pinned images on the platforms that serve this hardware: the reviewed
+// current pinned images on the platforms that serve this hardware: the reviewed
 // accelerators' platforms for their compiler targets, or the default CUDA
 // platform for the CUDA vendor. Hardware the product cannot run has none.
 func pinnedEngines(hardware checkpointcatalog.Hardware) map[string][]string {
@@ -575,7 +575,9 @@ func pinnedEngines(hardware checkpointcatalog.Hardware) map[string][]string {
 		}
 	}
 	out := map[string][]string{}
-	for _, image := range support.RuntimeImages() {
+	// Only current images: a legacy release serves the revisions that already
+	// record it, never a new setup from the catalog.
+	for _, image := range support.CurrentRuntimeImages() {
 		if slices.Contains(platforms, image.Platform) && !slices.Contains(out[image.Runtime], image.EngineVersion) {
 			out[image.Runtime] = append(out[image.Runtime], image.EngineVersion)
 		}

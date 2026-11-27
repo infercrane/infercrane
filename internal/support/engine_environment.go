@@ -48,6 +48,22 @@ const (
 	// sets AITER_ROCM_ARCH=gfx942;gfx950 and does not set
 	// VLLM_ROCM_USE_AITER (image configuration read on 2026-11-17).
 	sourceVLLMROCmImage = "https://hub.docker.com/layers/vllm/vllm-openai-rocm/v0.22.1/images/sha256-368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031"
+	// vLLM 0.34.0 reads VLLM_ROCM_USE_AITER the same way ("1" or "true",
+	// default False), and VLLM_USE_RUST_FRONTEND with int(), default 0: "1"
+	// starts the vllm-rs HTTP server shipped in the package instead of the
+	// Python one.
+	sourceVLLM034Envs = "https://github.com/vllm-project/vllm/blob/v0.34.0/vllm/envs.py"
+	// The pinned vllm/vllm-openai-rocm:v0.34.0 image (sha256:3cb773d2…) sets
+	// AITER_ROCM_ARCH=gfx942;gfx950 and does not set VLLM_ROCM_USE_AITER
+	// (image configuration read on 2026-11-26).
+	sourceVLLM034ROCmImage = "https://hub.docker.com/layers/vllm/vllm-openai-rocm/v0.34.0/images/sha256-3cb773d23f063afa86291ef75773cdd486154ddea94c213300f4ed7cc42b7af1"
+	// The Rust front end's routes, its API key check, and its access log.
+	sourceVLLM034RustServer = "https://github.com/vllm-project/vllm/tree/v0.34.0/rust/src/server/src"
+	// On one H100 with the pinned 0.34.0 CUDA image, a server with
+	// VLLM_USE_RUST_FRONTEND=1 started, refused a request without its key,
+	// answered, called a tool, and exported every engine metric family the
+	// control plane reads.
+	sourceVLLM034RustCheck = "docs/testing/evidence/qwen38-27b-fp8-h100-vllm034-serving-check-2026-11-23.json"
 	// AMD: AITER provides fused kernels for MI300X/MI325X and MI350 Series
 	// GPUs in vLLM V1, enabled by the master switch VLLM_ROCM_USE_AITER=1.
 	sourceROCmVLLMOptimization = "https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/inference-optimization/vllm-optimization.html"
@@ -58,6 +74,20 @@ const (
 var engineEnvironment = []EngineEnvironmentVariable{
 	{
 		Runtime: DefaultRuntime, EngineVersion: DefaultRuntimeVersion,
+		Platforms: []string{provideridentity.PlatformROCmGFX942, provideridentity.PlatformROCmGFX950},
+		Name:      "VLLM_ROCM_USE_AITER", Label: "AMD AITER kernels", Values: []string{"0", "1"}, Default: "0",
+		Description: "Turns on AMD's AITER kernels for attention, linear layers, MoE, and RMSNorm in vLLM on AMD Instinct GPUs.",
+		Sources:     []string{sourceVLLM034Envs, sourceVLLM034ROCmImage, sourceROCmVLLMOptimization, sourceVLLMRecipesAMD},
+	},
+	{
+		Runtime: DefaultRuntime, EngineVersion: DefaultRuntimeVersion,
+		Platforms: []string{provideridentity.PlatformCUDA},
+		Name:      "VLLM_USE_RUST_FRONTEND", Label: "Rust front end", Values: []string{"0", "1"}, Default: "0",
+		Description: "Serves vLLM's HTTP API from its Rust server instead of the Python one. Same paths, metrics, and API key; its access log lines differ, and it refuses the Anthropic Messages and batch routes.",
+		Sources:     []string{sourceVLLM034Envs, sourceVLLM034RustServer, sourceVLLM034RustCheck},
+	},
+	{
+		Runtime: DefaultRuntime, EngineVersion: LegacyVLLMRuntimeVersion,
 		Platforms: []string{provideridentity.PlatformROCmGFX942, provideridentity.PlatformROCmGFX950},
 		Name:      "VLLM_ROCM_USE_AITER", Label: "AMD AITER kernels", Values: []string{"0", "1"}, Default: "0",
 		Description: "Turns on AMD's AITER kernels for attention, linear layers, MoE, and RMSNorm in vLLM on AMD Instinct GPUs.",
@@ -78,7 +108,7 @@ func EngineEnvironment() []EngineEnvironmentVariable {
 // version, and accelerator platform. Anything else is not reviewed.
 func LookupEngineEnvironment(runtime, version, platform, name string) (EngineEnvironmentVariable, bool) {
 	runtime = defaultRuntime(strings.TrimSpace(runtime))
-	if version == "" {
+	if version = NormalizeRuntimeVersion(version); version == "" {
 		version = defaultEngineVersion(runtime)
 	}
 	for _, variable := range engineEnvironment {
@@ -101,7 +131,7 @@ func ValidateRuntimeEnv(runtime, version, gpu string, workload runtimecontract.W
 		return fmt.Errorf("runtime env must not set more than %d variables", MaxRuntimeEnv)
 	}
 	runtime = defaultRuntime(strings.TrimSpace(runtime))
-	if version == "" {
+	if version = NormalizeRuntimeVersion(version); version == "" {
 		version = defaultEngineVersion(runtime)
 	}
 	if strings.TrimSpace(gpu) == "" {
@@ -122,8 +152,8 @@ func ValidateRuntimeEnv(runtime, version, gpu string, workload runtimecontract.W
 			return fmt.Errorf("runtime env variable %s must be one of %s", name, strings.Join(variable.Values, ", "))
 		}
 	}
-	pinned, ok := RuntimeWorkload(runtime, platform)
-	if !ok || ServedWorkload(runtime, gpu, workload).Image != pinned.Image {
+	pinned, ok := RuntimeWorkloadFor(runtime, version, platform)
+	if !ok || ServedWorkloadFor(runtime, version, gpu, workload).Image != pinned.Image {
 		return fmt.Errorf("runtime env is reviewed only for the pinned %s %s image on platform %s", runtime, version, platform)
 	}
 	return nil

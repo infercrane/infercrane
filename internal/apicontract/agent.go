@@ -88,6 +88,7 @@ func agentSchemas() map[string]any {
 					"bindings": map[string]any{"type": "array", "maxItems": 16, "items": map[string]any{"type": "object", "additionalProperties": true, "properties": map[string]any{
 						"binding_id": map[string]any{"type": "string"}, "target_id": map[string]any{"type": "string"}, "server_key": serverKey,
 						"upstream_model": map[string]any{"type": "string"}, "runtime": map[string]any{"type": "string"}, "weight": map[string]any{"type": "integer", "minimum": 0, "maximum": 100}, "capabilities": free,
+						"rollout": map[string]any{"type": "boolean", "description": "A server a rollout started beside the endpoint's own. An agent serving out of contact with the control plane, inside its offline grace, routes only to the endpoint's own servers."},
 					}}},
 				}}},
 				"credentials": map[string]any{"type": "array", "maxItems": 10000, "items": map[string]any{"type": "object", "additionalProperties": true, "properties": map[string]any{

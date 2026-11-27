@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"io"
 	"net/http"
 	"net/url"
@@ -93,10 +95,13 @@ type agentFlags struct {
 	keyEnv                string
 	once                  bool
 	serve, executor       string
+	offlineGrace          time.Duration
+	stateDir              string
 	kubeContext, kubeNS   string
 	runtimeSA             string
 	workerSecret          string
 	workerKeyEnv          string
+	engineIngress         string
 	gpuResource, gpuLabel string
 	tolerations           []provision.KubernetesToleration
 	allowImages           stringList
@@ -122,12 +127,15 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 		fs.StringVar(&flags.keyEnv, "key-env", "INFERCRANE_AGENT_KEY", "environment variable holding the agent key")
 		fs.BoolVar(&flags.once, "once", false, "detect, register, sync once, and exit")
 		fs.StringVar(&flags.serve, "serve", "", "serve this agent's agent-managed endpoints on this address, for example 0.0.0.0:8080")
+		fs.DurationVar(&flags.offlineGrace, "offline-grace", 0, "with --serve: keep serving the endpoints' own servers this long past the data plane snapshot's validity while the control plane cannot be reached, at most 24h (default 24h, or $INFERCRANE_AGENT_OFFLINE_GRACE); a key revoked meanwhile keeps working until the agent reconnects or the grace ends; 0 refuses at the validity")
+		fs.StringVar(&flags.stateDir, "state-dir", os.Getenv("INFERCRANE_AGENT_STATE_DIR"), "with --serve: keep the last data plane snapshot (key digests, never keys) in this directory, so a restart during an outage serves inside the offline grace")
 		fs.StringVar(&flags.executor, "executor", "", "test setups the control plane queues, in this cluster: kubernetes")
 		fs.StringVar(&flags.kubeContext, "kubernetes-context", "", "kubectl context for setup tests (default: this pod's service account)")
 		fs.StringVar(&flags.kubeNS, "kubernetes-namespace", "", "namespace test setups are started in")
 		fs.StringVar(&flags.runtimeSA, "runtime-service-account", "infercrane-runtime", "service account of test setup pods")
 		fs.StringVar(&flags.workerSecret, "worker-secret", "", "Secret NAME/KEY mounted into test setup pods as their API key")
 		fs.StringVar(&flags.workerKeyEnv, "worker-key-env", "INFERCRANE_WORKER_KEY", "environment variable holding that Secret's value")
+		fs.StringVar(&flags.engineIngress, "engine-ingress", "", "the only sources that may reach test setup pods: pods:KEY=VALUE, namespace:KEY=VALUE, address ranges, or none (default: $INFERCRANE_KUBERNETES_ENGINE_INGRESS)")
 		fs.StringVar(&flags.gpuResource, "gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
 		fs.StringVar(&flags.gpuLabel, "gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
 		fs.StringVar(&tolerations, "tolerations", "", `taints test setup pods tolerate, as JSON: [{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]`)
@@ -156,6 +164,17 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 	if flags.serve != "" && flags.once {
 		return agentFlags{}, errors.New("--serve runs until stopped; it cannot be combined with --once")
 	}
+	if run {
+		if err := flags.resolveOfflineGrace(fs); err != nil {
+			return agentFlags{}, err
+		}
+	}
+	if flags.offlineGrace < 0 || flags.offlineGrace > agentprotocol.MaxOfflineGrace {
+		return agentFlags{}, errors.New("--offline-grace must be between 0 and 24h")
+	}
+	if flags.offlineGrace > 0 && flags.serve == "" {
+		return agentFlags{}, errors.New("--offline-grace applies to the data plane; it needs --serve")
+	}
 	// Tolerations are checked here, before the agent contacts anything, so a
 	// setting the provider would refuse never reaches a manifest.
 	parsed, err := provision.ParseKubernetesTolerations(tolerations)
@@ -170,14 +189,39 @@ func parseAgentFlags(name string, args []string, run bool) (agentFlags, error) {
 }
 
 // kubernetesProvider is the namespaced provider test setups start with: one
-// Deployment and one Service per setup, no model cache, and the operator's
-// tolerations for tainted GPU nodes.
-func (f agentFlags) kubernetesProvider(contextName, secretName, secretKey string) provision.Kubernetes {
+// Deployment and one Service per setup, no model cache, the sources that may
+// reach the pods, and the operator's tolerations for tainted GPU nodes.
+func (f agentFlags) kubernetesProvider(contextName, secretName, secretKey string, engineIngress []engineingress.Peer) provision.Kubernetes {
 	return provision.Kubernetes{
 		Context: contextName, Namespace: f.kubeNS, WorkloadAPI: "deployment", ServiceAccount: f.runtimeSA,
 		WorkerSecretName: secretName, WorkerSecretKey: secretKey, GPUResource: f.gpuResource, GPUProductLabel: f.gpuLabel,
-		ArtifactCachePolicy: "disabled", Tolerations: f.tolerations,
+		ArtifactCachePolicy: "disabled", EngineIngress: engineIngress, Tolerations: f.tolerations,
 	}
+}
+
+// resolveOfflineGrace picks the offline grace: the flag when given, else
+// INFERCRANE_AGENT_OFFLINE_GRACE when set, else 24h for an agent that serves
+// and none for one that does not. A value that is not a duration is refused
+// rather than read as the default, so a typo never turns into 24 hours of
+// serving keys the control plane may have revoked.
+func (f *agentFlags) resolveOfflineGrace(fs *flag.FlagSet) error {
+	given := false
+	fs.Visit(func(set *flag.Flag) { given = given || set.Name == "offline-grace" })
+	if given {
+		return nil
+	}
+	if value := strings.TrimSpace(os.Getenv("INFERCRANE_AGENT_OFFLINE_GRACE")); value != "" {
+		grace, err := time.ParseDuration(value)
+		if err != nil {
+			return errors.New("INFERCRANE_AGENT_OFFLINE_GRACE must be a duration such as 24h, or 0s to refuse at the snapshot's validity")
+		}
+		f.offlineGrace = grace
+		return nil
+	}
+	if f.serve != "" {
+		f.offlineGrace = agentprotocol.DefaultOfflineGrace
+	}
+	return nil
 }
 
 // candidateExecutor builds the in-cluster executor from flags. It refuses to
@@ -197,6 +241,10 @@ func (f agentFlags) candidateExecutor(ctx context.Context) (agent.CandidateExecu
 	workerKey := strings.TrimSpace(os.Getenv(f.workerKeyEnv))
 	if workerKey == "" {
 		return nil, fmt.Errorf("environment variable %s (the worker Secret's value) is empty or unset", f.workerKeyEnv)
+	}
+	engineIngress, err := agentEngineIngress(f.engineIngress)
+	if err != nil {
+		return nil, err
 	}
 	contextName := f.kubeContext
 	if contextName == "" {
@@ -230,7 +278,7 @@ func (f agentFlags) candidateExecutor(ctx context.Context) (agent.CandidateExecu
 		evalSets[name] = set
 	}
 	executor := agent.KubernetesExecutor{
-		Provider:  f.kubernetesProvider(contextName, secretName, secretKey),
+		Provider:  f.kubernetesProvider(contextName, secretName, secretKey, engineIngress),
 		WorkerKey: workerKey, AllowedImages: f.allowImages, AllowedAccelerators: f.allowAccelerators, EvalSets: evalSets,
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -239,6 +287,22 @@ func (f agentFlags) candidateExecutor(ctx context.Context) (agent.CandidateExecu
 		return nil, fmt.Errorf("test setups cannot start in namespace %s: %w", f.kubeNS, err)
 	}
 	return executor, nil
+}
+
+// agentEngineIngress reads which sources may reach test setup pods, from
+// --engine-ingress or else INFERCRANE_KUBERNETES_ENGINE_INGRESS, the setting
+// the control plane's Kubernetes adapter reads. A choice is required, as it
+// is for the control plane: the agent's own pods, by label, or "none".
+func agentEngineIngress(flag string) ([]engineingress.Peer, error) {
+	value := flag
+	if strings.TrimSpace(value) == "" {
+		value = os.Getenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS")
+	}
+	peers, _, err := engineingress.Parse(value)
+	if err != nil {
+		return nil, fmt.Errorf("--executor kubernetes needs --engine-ingress: %w; name this agent's pods (pods:<label>=<value>) or address ranges that may reach test setup pods, or set none", err)
+	}
+	return peers, nil
 }
 
 func (f agentFlags) serverConfigs(auth string) ([]agent.ServerConfig, error) {
@@ -453,11 +517,16 @@ func agentRunCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if kubernetes, ok := executor.(agent.KubernetesExecutor); ok {
+		// Nodes are named by a digest keyed like the request hashes.
+		kubernetes.NodeKey = hashKey
+		executor = kubernetes
+	}
 	runner := agent.New(agent.Config{
 		Client:  agent.Client{ControlURL: cfg.ControlURL, Key: key, HTTP: client, UserAgent: "infercrane-agent/" + version},
 		Version: version, Servers: explicit, AutoDetect: !flags.noDetect, HashKey: hashKey,
 		Model: flags.model, EndpointName: flags.endpoint, Gateway: flags.gateway, GatewayServer: flags.gatewayFor,
-		Serve: flags.serve, Executor: executor,
+		Serve: flags.serve, Executor: executor, OfflineGrace: flags.offlineGrace, StateDir: flags.stateDir,
 		Once: flags.once, Hardware: agentHardware, Events: agentEventPrinter(human),
 	})
 	if human {

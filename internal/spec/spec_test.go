@@ -1,10 +1,15 @@
 package spec
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 func writeSpec(t *testing.T, body string) string {
@@ -202,6 +207,24 @@ func TestLoadPlacesAMDInstinctGPUsOnlyWhereTheirPlatformIsQualified(t *testing.T
 	}
 }
 
+func TestLoadRefusesAcceleratorsThatAreNotQualified(t *testing.T) {
+	// TPUs, Gaudi, and Intel GPUs resolve to their own platforms, which have
+	// no selectable image or placement, so every spec naming one is refused
+	// before anything is stored or provisioned, whatever the runtime.
+	for name, body := range map[string]string{
+		"gke tpu":          "resources: {gpu: tpu-v6e-slice}\nprovider: {cloud: kubernetes}",
+		"custom image tpu": "runtime: {engine: custom-oci, workload: {image: \"vllm/vllm-tpu@sha256:450e37c04b8bf4dd2568e38672dcd94d0f22f131510962725d577eb249839440\", command: [vllm, serve, \"${MODEL}\"], port: 8000, readiness_path: /health}}\nresources: {gpu: tpu7x}\nprovider: {cloud: kubernetes}",
+		"skypilot tpu":     "resources: {gpu: tpu-v6e-8}\nprovider: {cloud: gcp, region: us-east5}",
+		"gaudi":            "resources: {gpu: Gaudi 3}\nprovider: {cloud: kubernetes}",
+		"sglang gaudi":     "runtime: {engine: sglang}\nresources: {gpu: Gaudi 2}\nprovider: {cloud: kubernetes}",
+		"intel gpu":        "resources: {gpu: Arc Pro B60}\nprovider: {cloud: kubernetes}",
+	} {
+		if _, err := Load(writeSpec(t, "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\n"+body+"\n")); err == nil || !strings.Contains(err.Error(), "platform, which is not qualified") {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+}
+
 func TestLoadAdmitsOnlyReviewedEngineEnvironment(t *testing.T) {
 	base := "name: qwen\nmodel: {id: Qwen/Qwen3-8B}\nprovider: {cloud: runpod, adapter: runpod-pods}\n"
 	loaded, err := Load(writeSpec(t, base+"resources: {gpu: MI300X}\nruntime: {engine: vllm, version: 0.22.1, env: {VLLM_ROCM_USE_AITER: \"1\"}}\n"))
@@ -266,5 +289,58 @@ resources: {gpu: L40S}
 `))
 	if err == nil || !strings.Contains(err.Error(), "readyness_path") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLoadRefusesAnEngineReleaseWithoutAPinnedImage(t *testing.T) {
+	base := "name: qwen\nmodel: {id: Qwen/Qwen3-8B, revision: 0123456789abcdef0123456789abcdef01234567}\nprovider: {cloud: runpod, adapter: runpod-pods}\nresources: {gpu: H100}\n"
+	for _, version := range []string{"0.34.0", "v0.34.0", "0.22.1", ""} {
+		if _, err := Load(writeSpec(t, base+"runtime: {engine: vllm, version: \""+version+"\"}\n")); err != nil {
+			t.Fatalf("pinned release %q: %v", version, err)
+		}
+	}
+	if _, err := Load(writeSpec(t, base+"runtime: {engine: vllm, version: 0.30.0}\n")); err == nil || !strings.Contains(err.Error(), "runtime vllm 0.30.0 is not pinned; pinned releases: 0.34.0, 0.22.1") {
+		t.Fatalf("unpinned release err=%v", err)
+	}
+}
+
+func TestLoadAdmitsOnlyATunedKernelSetThatFitsTheEngine(t *testing.T) {
+	shape := kerneltuning.FusedMoEShape{Experts: 256, Intermediate: 512, DType: "fp8_w8a8", BlockN: 128, BlockK: 128}
+	file, err := kerneltuning.NewFile(shape, "NVIDIA_H100_80GB_HBM3", map[int]kerneltuning.TileConfig{128: {BlockSizeM: 16, BlockSizeN: 64, BlockSizeK: 128, GroupSizeM: 1, NumWarps: 4, NumStages: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := kerneltuning.NewSet("vllm", support.DefaultRuntimeVersion, "NVIDIA_H100_80GB_HBM3", []domain.KernelConfigFile{file})
+	encoded, _ := json.Marshal(set) // JSON is YAML flow style
+	base := "name: qwen\nmodel: {id: Qwen/Qwen3.6-35B-A3B-FP8}\nprovider: {cloud: kubernetes, adapter: kubernetes}\n"
+	loaded, err := Load(writeSpec(t, base+"resources: {gpu: H100}\nruntime: {engine: vllm, kernel_configs: "+string(encoded)+"}\n"))
+	if err != nil || loaded.Runtime.KernelConfigs == nil || loaded.Runtime.KernelConfigs.Digest != set.Digest {
+		t.Fatalf("spec=%#v err=%v", loaded.Runtime.KernelConfigs, err)
+	}
+	for name, body := range map[string]string{
+		"another GPU":            "resources: {gpu: H200}\nruntime: {engine: vllm, kernel_configs: " + string(encoded) + "}",
+		"another engine version": "resources: {gpu: H100}\nruntime: {engine: vllm, version: " + support.LegacyVLLMRuntimeVersion + ", kernel_configs: " + string(encoded) + "}",
+		"tampered": "resources: {gpu: H100}\nruntime: {engine: vllm, kernel_configs: " +
+			strings.Replace(string(encoded), `\"num_stages\":3`, `\"num_stages\":5`, 1) + "}",
+	} {
+		if _, err := Load(writeSpec(t, base+body+"\n")); err == nil || !strings.Contains(err.Error(), "runtime.kernel_configs") {
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+}
+
+func TestLoadChecksEngineArguments(t *testing.T) {
+	base := "name: qwen\nmodel: {id: Qwen/Qwen3-8B, revision: 0123456789abcdef0123456789abcdef01234567}\nprovider: {cloud: runpod, adapter: runpod-pods}\nresources: {gpu: H100}\n"
+	if _, err := Load(writeSpec(t, base+"runtime: {engine: vllm, args: [--max-model-len, \"8192\"]}\n")); err != nil {
+		t.Fatalf("reviewed arguments: %v", err)
+	}
+	for args, want := range map[string]string{
+		"[--trust-remote-code]":                "--trust-remote-code is refused",
+		"[--tool-parser-plugin, /models/p.py]": "--tool-parser-plugin is not reviewed for vllm",
+		"[--enable-custom-logit-processor]":    "is refused",
+	} {
+		if _, err := Load(writeSpec(t, base+"runtime: {engine: vllm, args: "+args+"}\n")); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err=%v, want %q", args, err, want)
+		}
 	}
 }

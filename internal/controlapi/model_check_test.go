@@ -25,7 +25,8 @@ const recordedToken = "hf_recorded_test_token"
 // test token.
 func recordedHub(t *testing.T) (*modelcheck.Resolver, *atomic.Int64) {
 	t.Helper()
-	fixtures := map[string]string{"microsoft/phi-4": "phi-4", "RWKV/rwkv-4-169m-pile": "rwkv-4-169m", "meta-llama/Llama-3.2-1B-Instruct": "llama-3.2-1b-gated"}
+	fixtures := map[string]string{"microsoft/phi-4": "phi-4", "RWKV/rwkv-4-169m-pile": "rwkv-4-169m", "meta-llama/Llama-3.2-1B-Instruct": "llama-3.2-1b-gated",
+		"Qwen/Qwen3-8B": "qwen3-8b", "Qwen/Qwen3-8B-FP8": "qwen3-8b-fp8", "nvidia/Qwen3-8B-FP8": "nvidia-qwen3-8b-fp8"}
 	read := func(name string) []byte {
 		raw, err := os.ReadFile(filepath.Join("..", "modelcheck", "testdata", "huggingface", name))
 		if err != nil {

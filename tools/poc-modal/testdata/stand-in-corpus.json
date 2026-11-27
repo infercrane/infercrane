@@ -1,0 +1,215 @@
+{
+  "schema_version": "infercrane.prompt-corpus/v1",
+  "name": "InferCrane rehearsal corpus",
+  "license": "Apache-2.0",
+  "source": "Written for the InferCrane repository (tools/poc-modal/testdata/stand-in-corpus.json); not a measurement corpus",
+  "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+  "passages": [
+    {
+      "tokens": 164,
+      "text": "Tides rise and fall because the Moon's gravity pulls harder on the side of the Earth that faces it than on the far side. The difference stretches the oceans into two bulges, one under the Moon and one opposite it. As the Earth turns, a coast passes through both bulges, which is why most places see two high tides and two low tides in a little over a day. The Sun adds a smaller pull of its own. When the Sun and Moon line up, at new and full moon, their pulls add and the range between high and low water is largest; these are spring tides. When they pull at right angles, at the quarter moons, the range is smallest; these are neap tides. The shape of a bay or channel can multiply the range many times over.",
+      "questions": [
+        {
+          "tokens": 13,
+          "text": "Why do most coasts see two high tides a day?"
+        },
+        {
+          "tokens": 14,
+          "text": "What is the difference between a spring tide and a neap tide?"
+        }
+      ]
+    },
+    {
+      "tokens": 148,
+      "text": "Bread rises because yeast eats sugars in the dough and gives off carbon dioxide. The gas is trapped by gluten, a stretchy network that forms when two wheat proteins meet water and are worked by kneading. A dough kneaded too little tears and lets the gas escape; a dough left to rise too long over-stretches and collapses in the oven. Salt slows the yeast and tightens the gluten, so a loaf made without it rises fast, tastes flat and has a coarse crumb. In the oven the gas expands, the water turns to steam, and the loaf springs up during the first ten minutes. Then the crust sets, the starches gel, and the surface browns as sugars and proteins react in the heat.",
+      "questions": [
+        {
+          "tokens": 9,
+          "text": "What does kneading do to bread dough?"
+        },
+        {
+          "tokens": 9,
+          "text": "What happens to a loaf made without salt?"
+        }
+      ]
+    },
+    {
+      "tokens": 143,
+      "text": "A bicycle stays upright mostly because the rider steers it back under the centre of mass whenever it starts to lean. Turn the bars toward the fall and the wheels move across to catch it. Two design features help the bicycle do part of this by itself. The front wheel touches the ground behind the line of the steering axis, a distance called trail, so a lean turns the wheel into the fall. A spinning front wheel also resists being tipped and turns slightly toward the lean. Neither effect is strictly needed: experimental bicycles with no trail and cancelled gyroscopic forces still balance, because of how their mass is distributed. At walking speed these effects are weak, which is why riding very slowly is harder than riding fast.",
+      "questions": [
+        {
+          "tokens": 13,
+          "text": "What is trail on a bicycle, and what does it do?"
+        },
+        {
+          "tokens": 10,
+          "text": "Why is riding very slowly harder than riding fast?"
+        }
+      ]
+    },
+    {
+      "tokens": 148,
+      "text": "A hash table stores each value in a slot chosen by running its key through a hash function, so a lookup goes straight to the slot instead of searching. Two keys can land in the same slot. One fix keeps a short list in every slot; another, open addressing, probes the following slots until it finds a free one. Both stay fast only while the table is not too full, so a table tracks its load factor, the share of slots in use, and grows when that passes a threshold. Growing means allocating a larger array and inserting every entry again, which is slow once but rare enough that the average cost of an insert stays constant. A poor hash function that sends many keys to few slots turns every lookup into a scan.",
+      "questions": [
+        {
+          "tokens": 14,
+          "text": "How does open addressing handle two keys that land in the same slot?"
+        },
+        {
+          "tokens": 14,
+          "text": "Why does a hash table grow when its load factor passes a threshold?"
+        }
+      ]
+    },
+    {
+      "tokens": 149,
+      "text": "Honeybees tell their nestmates where food is by dancing on the comb. A forager that has found flowers close to the hive walks in a circle. For food farther away she performs the waggle dance: a straight run while shaking her body, then a loop back to the start, repeated many times. The angle of the straight run from vertical matches the angle between the Sun and the food as seen from the hive entrance. The length of the run tells the distance, roughly one second for each kilometre. Other bees follow her in the dark, feeling the vibrations and tasting the nectar she carries. Because the Sun moves across the sky, a bee that dances for a long time shifts her angle to keep the direction right.",
+      "questions": [
+        {
+          "tokens": 12,
+          "text": "How does the waggle dance encode the direction of food?"
+        },
+        {
+          "tokens": 12,
+          "text": "How do other bees read a dance in the dark hive?"
+        }
+      ]
+    },
+    {
+      "tokens": 140,
+      "text": "Concrete hardens through a chemical reaction, not by drying. When water meets cement, the compounds in it form crystals that grow into one another and bind the sand and gravel. The reaction, called hydration, continues for weeks, so concrete is usually judged by its strength after twenty-eight days. Too much water makes the mix easy to pour and leaves pores behind when the excess evaporates, so the result is weaker. Fresh concrete has to be kept damp for several days, because a surface that dries early stops reacting and cracks. Concrete resists crushing very well and pulling apart very badly, which is why steel bars are cast into beams and slabs: the steel carries the tension the concrete cannot.",
+      "questions": [
+        {
+          "tokens": 8,
+          "text": "Why does adding extra water weaken concrete?"
+        },
+        {
+          "tokens": 9,
+          "text": "Why are steel bars cast into concrete beams?"
+        }
+      ]
+    },
+    {
+      "tokens": 145,
+      "text": "A sourdough starter is a mixture of flour and water in which wild yeast and bacteria live together. The bacteria make lactic and acetic acid, which give the bread its sour taste and keep most other microbes out. The yeast tolerates that acid and makes the gas that raises the dough. A starter is fed by discarding part of it and adding fresh flour and water, usually once a day at room temperature or once a week in a refrigerator. A warm, wet starter favours lactic acid and a mild flavour; a cool, stiff one favours acetic acid and a sharper one. A starter is ready to use when it has roughly doubled in volume a few hours after feeding and smells pleasantly sour.",
+      "questions": [
+        {
+          "tokens": 17,
+          "text": "How do the yeast and bacteria in a sourdough starter depend on each other?"
+        },
+        {
+          "tokens": 10,
+          "text": "How does temperature change the flavour of a starter?"
+        }
+      ]
+    },
+    {
+      "tokens": 136,
+      "text": "Version control records a project's history as a series of snapshots called commits. Each commit stores the state of the files, a message, and a pointer to the commit before it, so the history forms a chain. A branch is only a movable name that points at one commit; creating one costs almost nothing. Work on a branch adds commits without disturbing the others. Merging joins two lines of history: when both changed different parts of a file the tool combines them, and when both changed the same lines it stops and asks a person to decide. Because every commit names its parent by a hash of its contents, no one can alter old history without changing every commit that follows.",
+      "questions": [
+        {
+          "tokens": 8,
+          "text": "What is a branch in version control?"
+        },
+        {
+          "tokens": 13,
+          "text": "What happens when two branches change the same lines of a file?"
+        }
+      ]
+    },
+    {
+      "tokens": 142,
+      "text": "The seasons come from the tilt of the Earth's axis, not from its distance to the Sun. The axis leans about twenty-three degrees from upright and keeps pointing the same way as the planet goes round its orbit. For half the year the northern half leans toward the Sun. Sunlight then strikes it more directly and the days are longer, so it warms: this is northern summer and southern winter. Six months later the situation is reversed. The Earth is in fact closest to the Sun in early January, in the middle of northern winter. Near the equator the angle of the Sun changes little through the year, which is why the tropics have wet and dry seasons instead of warm and cold ones.",
+      "questions": [
+        {
+          "tokens": 15,
+          "text": "Why is it summer in the north when it is winter in the south?"
+        },
+        {
+          "tokens": 9,
+          "text": "When is the Earth closest to the Sun?"
+        }
+      ]
+    },
+    {
+      "tokens": 138,
+      "text": "A cast-iron pan is seasoned by baking thin layers of oil onto it. Heated past its smoke point, the oil breaks down and links into a hard film bonded to the metal. Many thin coats give a smooth black surface that releases food and protects the iron from rust. Thick coats stay sticky and flake off. Acidic food, such as tomato sauce simmered for a long time, slowly dissolves the film, and soaking the pan in water lets rust start underneath it. A little soap does no harm to a well-seasoned pan, despite the common advice. After washing, the pan should be dried over heat and wiped with a few drops of oil while still warm.",
+      "questions": [
+        {
+          "tokens": 13,
+          "text": "How does oil turn into seasoning on a cast-iron pan?"
+        },
+        {
+          "tokens": 11,
+          "text": "What damages the seasoning of a cast-iron pan?"
+        }
+      ]
+    },
+    {
+      "tokens": 142,
+      "text": "Public-key cryptography uses two keys that belong together. Anything locked with the public key can be opened only with the private key, and a signature made with the private key can be checked by anyone holding the public one. The public key can be published; the private key never leaves its owner. This solves a problem older ciphers had: two people no longer need to meet and agree on a secret before they can talk safely. The method is slow, so in practice it is used to agree on a short random key, and a faster cipher then protects the conversation. Its security rests on mathematical problems that are easy to set up and very hard to reverse, such as factoring the product of two large primes.",
+      "questions": [
+        {
+          "tokens": 12,
+          "text": "What problem of older ciphers does public-key cryptography solve?"
+        },
+        {
+          "tokens": 13,
+          "text": "Why is public-key cryptography combined with a faster cipher in practice?"
+        }
+      ]
+    },
+    {
+      "tokens": 145,
+      "text": "A sailing boat can travel toward the wind, though never straight into it. Its sail works like a wing: air flowing along both sides is turned, and the sail is pushed sideways and forward. A keel or centreboard under the hull resists the sideways part, so what remains drives the boat ahead. Most boats can point within about forty-five degrees of the wind. To reach a place directly upwind the crew sails a zigzag, turning the bow through the wind at each corner, which is called tacking. Sailing with the wind behind is slower than it looks, because the boat can never go faster than the wind that pushes it; across the wind, a fast boat can exceed the wind's speed.",
+      "questions": [
+        {
+          "tokens": 11,
+          "text": "How does a sailing boat make progress toward the wind?"
+        },
+        {
+          "tokens": 16,
+          "text": "Why can a boat sail faster across the wind than with the wind behind it?"
+        }
+      ]
+    }
+  ],
+  "prompts": [
+    {
+      "tokens": 11,
+      "text": "Write a haiku about rain on a tin roof."
+    },
+    {
+      "tokens": 17,
+      "text": "Give me three names for a small bakery, with one line on why each fits."
+    },
+    {
+      "tokens": 17,
+      "text": "Explain what a load balancer does to someone who has never run a server."
+    },
+    {
+      "tokens": 19,
+      "text": "What are the trade-offs between renting and buying a home? Keep it to five bullet points."
+    },
+    {
+      "tokens": 22,
+      "text": "Rewrite this sentence so it is polite and firm: Your invoice is late again and we will stop work."
+    },
+    {
+      "tokens": 26,
+      "text": "I have eggs, spinach, a tin of chickpeas and some stale bread. Suggest a dinner and give the steps."
+    },
+    {
+      "tokens": 28,
+      "text": "Write a Python function that returns the n most common words in a text file, ignoring case and punctuation, and explain how it handles ties."
+    },
+    {
+      "tokens": 25,
+      "text": "Summarise the plot of a detective story you invent in four sentences, then say which clue the reader should have noticed."
+    },
+    {
+      "tokens": 60,
+      "text": "My team keeps missing its sprint goals. We estimate in story points, work in two-week sprints, and get about three urgent requests a week from support that were not planned. Suggest three changes to try, in order, and say how we would know after a month whether each one worked."
+    }
+  ]
+}

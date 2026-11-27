@@ -1,5 +1,11 @@
 # Qwen3.8 OpenRouter launch decision
 
+> Superseded: the gains below were measured on synthetic repeated prompts, which are unusually easy
+> for speculation to predict. On 2026-11-23 the comparison was run again on real text with three
+> fresh servers per setup, and the publisher's documented setup was faster
+> ([receipt](../../docs/testing/qwen38-27b-fp8-h200-rerun-2026-11-23.md)). The gains below are not
+> cited; this file stays as a dated record.
+
 Date: 2026-09-23
 
 Maintainer decision record for the campaign in this directory. It is not part of the

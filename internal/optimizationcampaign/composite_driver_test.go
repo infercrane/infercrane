@@ -13,6 +13,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -325,7 +326,7 @@ func compositeFixture(t *testing.T, intent string, now time.Time) (*compositeSto
 	t.Helper()
 	draft := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: "qwen-interactive"}
 	draft.Model.ID, draft.Model.Revision = "Qwen/Qwen3-8B", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	draft.Runtime.Engine, draft.Runtime.Version = "vllm", "0.8.5.post1"
+	draft.Runtime.Engine, draft.Runtime.Version = "vllm", support.DefaultRuntimeVersion
 	draft.Compute.Mode, draft.Resources.GPU = "elastic", "L40S"
 	draft.Provider.Cloud, draft.Provider.Adapter, draft.Provider.Region = "aws", "aws-ec2", "eu-central-1"
 	draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = 1, 1

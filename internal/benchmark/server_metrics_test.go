@@ -9,9 +9,12 @@ import (
 )
 
 // serverMetricsRunner writes the AIPerf record export and, optionally, a
-// server-metrics export shaped like AIPerf's ServerMetricsExportData.
+// server-metrics export shaped like AIPerf's ServerMetricsExportData. AIPerf
+// 0.12.0 names that export after --profile-export-prefix; unprefixed writes
+// the name AIPerf uses when no prefix is set.
 type serverMetricsRunner struct {
 	export      string
+	unprefixed  bool
 	profileArgs []string
 }
 
@@ -26,13 +29,40 @@ func (r *serverMetricsRunner) Run(ctx context.Context, name string, args ...stri
 	if r.export == "" {
 		return nil, nil
 	}
-	directory := ""
+	directory, name := "", serverMetricsExportName
 	for index := range args {
 		if args[index] == "--artifact-dir" && index+1 < len(args) {
 			directory = args[index+1]
 		}
+		if args[index] == "--profile-export-prefix" && index+1 < len(args) && !r.unprefixed {
+			name = args[index+1] + serverMetricsExportSuffix
+		}
 	}
-	return nil, os.WriteFile(filepath.Join(directory, serverMetricsExportName), []byte(r.export), 0o600)
+	return nil, os.WriteFile(filepath.Join(directory, name), []byte(r.export), 0o600)
+}
+
+// AIPerf 0.12.0, run with the prefix InferCrane passes, writes
+// infercrane_server_metrics.json. Reading only server_metrics_export.json
+// left every run's engine counters, speculation acceptance among them,
+// "not collected".
+func TestRunReadsTheServerMetricsExportUnderEitherAIPerfName(t *testing.T) {
+	export := `{"schema_version":"1.1","metrics":{
+		"vllm:spec_decode_num_draft_tokens":{"type":"counter","series":[{"stats":{"total":120,"rate":252.7}}]},
+		"vllm:spec_decode_num_accepted_tokens":{"type":"counter","series":[{"stats":{"total":40,"rate":84.2}}]}
+	}}`
+	for name, runner := range map[string]*serverMetricsRunner{"prefixed": {export: export}, "unprefixed": {export: export, unprefixed: true}} {
+		result, err := run(context.Background(), Config{Endpoint: "http://example", Model: "m", Requests: 1, Concurrency: 1, ServerMetrics: true}, runner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(runner.profileArgs, " "), "--profile-export-prefix infercrane") {
+			t.Fatalf("%s: the run no longer sets the export prefix this test names: %v", name, runner.profileArgs)
+		}
+		metrics := result.ServerMetrics
+		if metrics == nil || !metrics.Collected || metrics.Metrics["vllm:spec_decode_num_draft_tokens"].Stats["total"] != 120 || metrics.Metrics["vllm:spec_decode_num_accepted_tokens"].Stats["total"] != 40 {
+			t.Fatalf("%s: speculation counters were not read: %+v", name, metrics)
+		}
+	}
 }
 
 func TestRunKeepsServerMetricsOffUnlessRequested(t *testing.T) {
@@ -109,5 +139,19 @@ func TestConfidence95RefusesUnsupportedSampleCounts(t *testing.T) {
 	interval, ok := Confidence95([]float64{10, 12, 14})
 	if !ok || interval.Samples != 3 || interval.Mean != 12 || interval.Lower95 >= 12 || interval.Upper95 <= 12 {
 		t.Fatalf("interval=%+v ok=%t", interval, ok)
+	}
+}
+
+// The gauges InferCrane's patched engine images add are kept, including one
+// whose name has no other keyword, so a technique's evidence can read them.
+func TestTheSummaryKeepsInferCranesEngineGauges(t *testing.T) {
+	summary := summarizeServerMetrics([]byte(`{"metrics":{
+		"vllm:infercrane_state_by_draft_receipt_verified":{"type":"gauge","series":[{"stats":{"avg":1,"min":1,"max":1}}]},
+		"vllm:infercrane_running_mixed_reservations":{"type":"gauge","series":[{"stats":{"avg":3.5,"min":0,"max":12}}]},
+		"vllm:request_success":{"type":"counter","series":[{"stats":{"total":100}}]}
+	}}`))
+	receipt, kept := summary.Metrics["vllm:infercrane_state_by_draft_receipt_verified"]
+	if !summary.Collected || !kept || receipt.Stats["min"] != 1 || summary.Metrics["vllm:infercrane_running_mixed_reservations"].Stats["max"] != 12 || len(summary.Metrics) != 2 {
+		t.Fatalf("summary %+v", summary)
 	}
 }

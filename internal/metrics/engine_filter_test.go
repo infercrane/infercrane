@@ -58,3 +58,25 @@ func TestFilterEngineExpositionRefusesPayloadsWithoutAnEngine(t *testing.T) {
 		t.Fatal("mixed engines accepted")
 	}
 }
+
+// vLLM's cache_config_info carries the whole cache configuration as labels.
+// The filter keeps only the labels ParseEngine reads and the engine core.
+func TestFilterEngineExpositionTrimsInfoLabels(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "vllm_0.34_hybrid_mtp3.prom"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, _, err := FilterEngineExposition(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `vllm:cache_config_info{block_size="832",engine="0",mamba_page_size_padded="3407872",num_gpu_blocks="779"} 1.0`
+	if !strings.Contains(filtered, want+"\n") {
+		t.Fatalf("filtered:\n%s", filtered)
+	}
+	for _, dropped := range []string{"gpu_memory_utilization", "kv_offloading_backend", "prefix_caching_hash_algo", "mamba_ssm_cache_dtype"} {
+		if strings.Contains(filtered, dropped) {
+			t.Fatalf("label %s left the machine:\n%s", dropped, filtered)
+		}
+	}
+}

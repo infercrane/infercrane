@@ -69,3 +69,60 @@ groups:
           severity: warning
         annotations:
           summary: Productive token rate exceeds the qualified capacity by more than 10%
+  # Results of the authenticated workspace scrape (GET /api/v1/metrics).
+  # deploy/grafana/prometheus-scrape.yaml shows the scrape job. The counters
+  # count stored records, so increase() fires once per new record and never
+  # on a restart of the control plane.
+  - name: infercrane-results
+    rules:
+      - alert: InferCraneReleaseGuardBlocked
+        expr: sum by (deployment) (increase(infercrane_release_guard_quality_verdicts_total{verdict="BLOCK"}[15m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: Release Guard blocked a candidate of {{ $labels.deployment }} on answer quality
+          description: >-
+            The latest Release Guard evaluation of {{ $labels.deployment }} gave a BLOCK quality verdict,
+            so the candidate was rejected and production traffic did not move. Run
+            `infercrane rollout inspect {{ $labels.deployment }}` for the failing eval and its scores.
+      - alert: InferCraneReleaseGuardRejected
+        expr: sum by (deployment) (increase(infercrane_release_guard_decisions_total{decision="REJECT"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Release Guard rejected a candidate of {{ $labels.deployment }}
+          description: >-
+            A measured regression, failed readiness, or a compatibility mismatch rejected the candidate.
+            Production traffic did not move. Run `infercrane rollout inspect {{ $labels.deployment }}`.
+      - alert: InferCraneQualityWatch
+        expr: sum by (deployment) (increase(infercrane_release_guard_quality_verdicts_total{verdict="WATCH"}[15m])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: Answer quality of {{ $labels.deployment }} dropped inside the watch band
+          description: The candidate was accepted with a WATCH verdict that records a follow-up.
+      - alert: InferCraneRolledBack
+        expr: sum by (deployment, trigger) (increase(infercrane_rollbacks_total[15m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.deployment }} rolled back to its retained revision ({{ $labels.trigger }})'
+          description: >-
+            automatic: the post-promotion observation found a regression and restored the retained
+            revision. operator: someone ran rollout rollback. Run `infercrane explain rollout {{ $labels.deployment }}`.
+      - alert: InferCraneEndpointGuardRejected
+        expr: sum by (endpoint) (increase(infercrane_endpoint_guard_decisions_total{decision="REJECT"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Endpoint Release Guard rejected a candidate serving plan of {{ $labels.endpoint }}
+      - alert: InferCraneResultsScrapeFailing
+        expr: up{job="infercrane-results"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus cannot read InferCrane results
+          description: >-
+            The workspace scrape failed for 10 minutes, so Release Guard and rollback alerts cannot fire.
+            Check the API key and that it has read permission.

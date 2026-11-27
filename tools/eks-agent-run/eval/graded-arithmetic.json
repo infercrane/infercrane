@@ -1,0 +1,289 @@
+{
+ "schema": "infercrane.dev/quality-eval-set/v1",
+ "name": "eks-qual-arithmetic",
+ "version": "1",
+ "grading": "exact_match",
+ "max_tokens": 32,
+ "prompts": [
+  {
+   "id": "arith-01",
+   "prompt": "What is 32 + 30? Reply with the number only. /no_think",
+   "expected": [
+    "62"
+   ]
+  },
+  {
+   "id": "arith-02",
+   "prompt": "What is 41 + 44? Reply with the number only. /no_think",
+   "expected": [
+    "85"
+   ]
+  },
+  {
+   "id": "arith-03",
+   "prompt": "What is 20 + 22? Reply with the number only. /no_think",
+   "expected": [
+    "42"
+   ]
+  },
+  {
+   "id": "arith-04",
+   "prompt": "What is 42 - 42? Reply with the number only. /no_think",
+   "expected": [
+    "0"
+   ]
+  },
+  {
+   "id": "arith-05",
+   "prompt": "What is 28 - 8? Reply with the number only. /no_think",
+   "expected": [
+    "20"
+   ]
+  },
+  {
+   "id": "arith-06",
+   "prompt": "What is 17 + 36? Reply with the number only. /no_think",
+   "expected": [
+    "53"
+   ]
+  },
+  {
+   "id": "arith-07",
+   "prompt": "What is 43 - 36? Reply with the number only. /no_think",
+   "expected": [
+    "7"
+   ]
+  },
+  {
+   "id": "arith-08",
+   "prompt": "What is 46 - 27? Reply with the number only. /no_think",
+   "expected": [
+    "19"
+   ]
+  },
+  {
+   "id": "arith-09",
+   "prompt": "What is 25 - 15? Reply with the number only. /no_think",
+   "expected": [
+    "10"
+   ]
+  },
+  {
+   "id": "arith-10",
+   "prompt": "What is 6 + 38? Reply with the number only. /no_think",
+   "expected": [
+    "44"
+   ]
+  },
+  {
+   "id": "arith-11",
+   "prompt": "What is 47 - 8? Reply with the number only. /no_think",
+   "expected": [
+    "39"
+   ]
+  },
+  {
+   "id": "arith-12",
+   "prompt": "What is 40 - 27? Reply with the number only. /no_think",
+   "expected": [
+    "13"
+   ]
+  },
+  {
+   "id": "arith-13",
+   "prompt": "What is 35 - 25? Reply with the number only. /no_think",
+   "expected": [
+    "10"
+   ]
+  },
+  {
+   "id": "arith-14",
+   "prompt": "What is 28 - 4? Reply with the number only. /no_think",
+   "expected": [
+    "24"
+   ]
+  },
+  {
+   "id": "arith-15",
+   "prompt": "What is 13 - 3? Reply with the number only. /no_think",
+   "expected": [
+    "10"
+   ]
+  },
+  {
+   "id": "arith-16",
+   "prompt": "What is 23 + 13? Reply with the number only. /no_think",
+   "expected": [
+    "36"
+   ]
+  },
+  {
+   "id": "arith-17",
+   "prompt": "What is 15 - 10? Reply with the number only. /no_think",
+   "expected": [
+    "5"
+   ]
+  },
+  {
+   "id": "arith-18",
+   "prompt": "What is 41 - 31? Reply with the number only. /no_think",
+   "expected": [
+    "10"
+   ]
+  },
+  {
+   "id": "arith-19",
+   "prompt": "What is 40 - 27? Reply with the number only. /no_think",
+   "expected": [
+    "13"
+   ]
+  },
+  {
+   "id": "arith-20",
+   "prompt": "What is 29 - 7? Reply with the number only. /no_think",
+   "expected": [
+    "22"
+   ]
+  },
+  {
+   "id": "arith-21",
+   "prompt": "What is 47 + 35? Reply with the number only. /no_think",
+   "expected": [
+    "82"
+   ]
+  },
+  {
+   "id": "arith-22",
+   "prompt": "What is 33 + 10? Reply with the number only. /no_think",
+   "expected": [
+    "43"
+   ]
+  },
+  {
+   "id": "arith-23",
+   "prompt": "What is 36 + 14? Reply with the number only. /no_think",
+   "expected": [
+    "50"
+   ]
+  },
+  {
+   "id": "arith-24",
+   "prompt": "What is 43 - 28? Reply with the number only. /no_think",
+   "expected": [
+    "15"
+   ]
+  },
+  {
+   "id": "arith-25",
+   "prompt": "What is 46 - 39? Reply with the number only. /no_think",
+   "expected": [
+    "7"
+   ]
+  },
+  {
+   "id": "arith-26",
+   "prompt": "What is 32 - 9? Reply with the number only. /no_think",
+   "expected": [
+    "23"
+   ]
+  },
+  {
+   "id": "arith-27",
+   "prompt": "What is 38 - 22? Reply with the number only. /no_think",
+   "expected": [
+    "16"
+   ]
+  },
+  {
+   "id": "arith-28",
+   "prompt": "What is 38 + 48? Reply with the number only. /no_think",
+   "expected": [
+    "86"
+   ]
+  },
+  {
+   "id": "arith-29",
+   "prompt": "What is 20 - 19? Reply with the number only. /no_think",
+   "expected": [
+    "1"
+   ]
+  },
+  {
+   "id": "arith-30",
+   "prompt": "What is 23 - 13? Reply with the number only. /no_think",
+   "expected": [
+    "10"
+   ]
+  },
+  {
+   "id": "arith-31",
+   "prompt": "What is 34 + 39? Reply with the number only. /no_think",
+   "expected": [
+    "73"
+   ]
+  },
+  {
+   "id": "arith-32",
+   "prompt": "What is 15 + 24? Reply with the number only. /no_think",
+   "expected": [
+    "39"
+   ]
+  },
+  {
+   "id": "arith-33",
+   "prompt": "What is 37 + 41? Reply with the number only. /no_think",
+   "expected": [
+    "78"
+   ]
+  },
+  {
+   "id": "arith-34",
+   "prompt": "What is 26 + 20? Reply with the number only. /no_think",
+   "expected": [
+    "46"
+   ]
+  },
+  {
+   "id": "arith-35",
+   "prompt": "What is 30 - 11? Reply with the number only. /no_think",
+   "expected": [
+    "19"
+   ]
+  },
+  {
+   "id": "arith-36",
+   "prompt": "What is 29 - 24? Reply with the number only. /no_think",
+   "expected": [
+    "5"
+   ]
+  },
+  {
+   "id": "arith-37",
+   "prompt": "What is 19 + 48? Reply with the number only. /no_think",
+   "expected": [
+    "67"
+   ]
+  },
+  {
+   "id": "arith-38",
+   "prompt": "What is 2 + 27? Reply with the number only. /no_think",
+   "expected": [
+    "29"
+   ]
+  },
+  {
+   "id": "arith-39",
+   "prompt": "What is 42 - 35? Reply with the number only. /no_think",
+   "expected": [
+    "7"
+   ]
+  },
+  {
+   "id": "arith-40",
+   "prompt": "What is 10 + 27? Reply with the number only. /no_think",
+   "expected": [
+    "37"
+   ]
+  }
+ ]
+}

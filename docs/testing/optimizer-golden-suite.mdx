@@ -191,20 +191,27 @@ A task fails when any of these differ from the expectation:
 
 | Field | Checks |
 | --- | --- |
-| `expected_order` | Every proposed setup by rank: `control`, then techniques such as `fp8-kv-cache`. |
+| `expected_order` | Every diagnosed setup by rank: `control`, then techniques such as `fp8-kv-cache`. The [setups that test the plan](/features/optimization#setups-that-test-the-plan) (roles `reference` and `copy`) are not part of the order, but `must_not_use_args` still applies to them. They count against `max_candidates`, so each task's limit leaves room for two of them. |
 | `expected_state` | The plan state: `applied`, `not_ready`, `reliability_blocked`, `no_actionable_findings`, or `no_starting_setup`. |
 | `must_not_propose` | Techniques no setup may apply. |
 | `must_not_use_args` | Flag fragments no setup other than the control may carry, such as a method that lost on recorded hardware. |
 | `expected_skipped` | Chosen techniques the plan must record as skipped, with a reason. |
 | `expected_needed_evidence` | Exactly the evidence the plan asks for: `fresh_traffic`, `engine_metrics`, or `fewer_errors`. |
 
-Current result: 31 of 31 plans as reviewed, rule set `diagnosis-technique-rules-v4`. Version 2
+Current result: 33 of 33 plans as reviewed, rule set `diagnosis-technique-rules-v12`. Versions 6 to 12
+changed no task's expectation: version 6 reads the cache room the engine reports before ranking
+speculation, version 7 plans for the present load and caps larger batches at the engine's
+cache blocks, version 8 starts from the endpoint's own setup and can turn speculation off, version 9 predicts the cache room and step reads of precision changes from the model's memory, which no task's diagnosis carries, version 10 lists [speculation that changes with load](/features/adaptive-speculation) past the room three draft tokens leave, without a candidate, and version 11 measures speculative drafts the plan's input names ([drafts trained on your traffic](/features/trained-drafts)) and a reviewed publisher's FP8 checkpoint of the exact model beside FP8 at load, which no task names, and version 12 chooses [speculation that changes with load in one engine](/features/adaptive-speculation#one-engine-prefix-caching-off) in place of the two-engine switch when its patched image is available, which no task's run has. Their cases are measured ones, in the [planner gym](#planner-gym). Version 2
 widened the FP8 gate to the reviewed AMD Instinct GPUs; two MI300X tasks check that the same
 diagnosis chooses the same plan there and that RunPod's MI300X name resolves to its 192 GB memory.
 Version 3 reads the trace analysis of a GPU profile capture; six `gpu_trace` tasks check it.
 Version 4 adds AMD's AITER kernels for vLLM on reviewed AMD Instinct GPUs
 (`accelerator.kernels_off_by_default`); five `accelerator_kernels` tasks check where it is chosen
 and where it must not be, and the two earlier MI300X tasks now also forbid it.
+Version 5 also chooses speculation with the model's own prediction head when writing answers is
+the bottleneck above four running requests, with three drafted tokens instead of one; two
+`decode_high_concurrency` tasks check its place in the order at 12 and at 64 running requests, and
+the two earlier decode tasks record it as skipped for a model that declares no prediction head.
 
 | Task | Diagnosis | Expected setups after the control |
 | --- | --- | --- |
@@ -220,6 +227,8 @@ and where it must not be, and the two earlier MI300X tasks now also forbid it.
 | `rtx4090-short-prompts-collect-engine-metrics` | First-token bound, 278-token prompts, no engine metrics | Nothing; asks for engine metrics |
 | `h100-high-concurrency-long-context-decode` | 64 running, 9,000-token contexts, throughput goal | FP8 KV cache, larger batches, FP8 weights |
 | `h100-high-concurrency-short-context-no-fp8-kv` | 64 running, 1,500-token contexts, interactive goal | FP8 weights only |
+| `h100-decode-12-running-native-head-speculation-first` | 12 running, 3,000-token contexts, prediction head declared, throughput goal | Speculation with three drafted tokens, larger batches, FP8 weights |
+| `h100-decode-64-running-long-context-native-head-speculation-after-fp8-kv` | 64 running, 9,000-token contexts, prediction head declared, throughput goal | FP8 KV cache, speculation, larger batches, FP8 weights |
 | `b200-low-concurrency-checkpoint-not-rankable` | Two running on B200 | FP8 weights; the NVFP4 checkpoint is left out |
 | `h200-pinned-image-kv-fp8-first` | Evictions on the pinned SGLang image | The image's FP8 KV cache setup |
 | `h200-pinned-image-low-concurrency-speculation-first` | 1.5 running, prediction head declared | The image's speculation setups |
@@ -254,8 +263,85 @@ the rule table before you run the planner, and record the reason in `why`. Categ
 `decode_high_concurrency`, `gpu_profile`, `gpu_trace`, `not_ready`, `reliability`,
 `recorded_gpu_run`, `publisher_checkpoint`, `pinned_image_setups`, and `accelerator_kernels`, and
 the test fails if any of them loses its last task. A change to a rule, priority, or flag value must
-bump the rule set version (now `diagnosis-technique-rules-v4`) and explain each changed expectation
+bump the rule set version (now `diagnosis-technique-rules-v12`) and explain each changed expectation
 in its task's `why`.
+
+## Planner gym
+
+Planning tasks check the order a reviewer wrote down. The planner gym checks whether the planner's
+first choice wins on cells that were measured. It needs no GPU and runs in seconds:
+
+```bash title="Score the planner on measured cells"
+make planner-gym
+```
+
+The cases are one file per measured campaign set, under `internal/optimizer/testdata/planner-gym/`,
+written by `tools/planner-gym/build_cases.py` from the runs' own records. The file names every
+record it read with its sha256. Each case is one cell (one kind of traffic at one load) and one
+current setup. The gym:
+
+1. builds the endpoint diagnosis for that cell and setup;
+2. asks the planner, as a customer would;
+3. takes the first proposed setup the GPU can run. A setup whose arguments the engine refuses, such
+   as more requests at once than its cache holds, is skipped, as a campaign skips it. With nothing
+   left, the current setup stays;
+4. compares that setup with the best setup measured in the cell.
+
+There are two kinds of case, scored apart:
+
+| Kind | Planner input |
+| --- | --- |
+| Map window | Rebuilt from the readings inside the measured window: requests running and waiting, cache use, the engine's cache layout, prompt and answer lengths, first-token and request times. It goes through the product's own readiness assessment. A reading the run did not record is left out, so no rule fires on it. |
+| Product reading | The diagnosis the product recorded when it was asked about the same cell, or before a campaign. Values the agent did not relay at the time are added from the same setup's measured servers, and the case names each one. |
+
+Every case is scored in two columns: all output tokens per second, and output tokens per second of
+requests whose first token came within the limit the file states. The gym asks the planner with
+that limit set for the second column.
+
+- A **hit** is a first proposal whose measured range reaches the best setup's: inside the spread
+  between servers counts as a hit.
+- **Given up** is the share of the best setup's output the customer would not get. It assumes the
+  judge keeps the better of the proposal and the current setup.
+- **Unknown** means the first proposal makes a setup no run measured in that cell. It is counted
+  apart and never as a hit or a miss.
+
+Each case also says whether the planner's rules were written from that cell. The gym reports cells
+the rules were built from apart from the rest: a rule that scores well on its own cells shows
+nothing about other traffic. `TestPlannerGym` fails when a table's hits fall below its floor. A
+change that lifts a score raises the floor in the same commit; a floor is never lowered to let a
+change pass. `INFERCRANE_PLANNER_GYM_OUT=FILE` also writes the table as Markdown.
+
+Two more uses of the same code:
+
+- **Score another run.** `build_cases.py --screen SCREEN.json` turns a screen (every setup in turn
+  on one machine, `tools/fast-track-map`) into a cases file; `INFERCRANE_PLANNER_GYM_CASES=FILE make
+  planner-gym` scores the planner on it, asked from the screen's current setup. The floors hold for
+  the committed file only. A screen has one machine, so its spread is what the current setup's
+  two runs (first and last) differ by: the best setup is ahead of another only by more than that,
+  as `screen.py` decides its finalists. Without two runs of the current setup that difference is
+  unknown and only the best setup itself is a hit.
+- **Predict before measuring.** `build_cases.py --server SERVER.json` turns one measured server of
+  the current setup into a cases file, and
+
+  ```bash
+  INFERCRANE_PLANNER_PREDICT_CASES=cases.json INFERCRANE_PLANNER_PREDICT_OUT=predictions.json \
+    go test -count=1 -run '^TestPlannerPredict$' ./internal/optimizer
+  ```
+
+  writes, per cell and per goal (all output, and useful output), the diagnosis, every proposal with
+  its arguments, what was skipped and why, and the cache room. Written and kept before the other
+  setups are measured, it is what a later run scores: with `INFERCRANE_PLANNER_GYM_CASES` set to
+  the screen's cases file, `INFERCRANE_PLANNER_GYM_PREDICTIONS=predictions.json` adds a table per
+  goal that scores the file as written, by the same judge, without asking the planner again.
+
+A small model's cases file carries `model_memory` (served weight bytes, KV cache bytes per token)
+when `build_cases.py` knows the model, as the product's model check would read it, and the gym adds
+it to each diagnosis. A screen whose cells a rule set was written from, after the screen was seen,
+marks them `rules_built_from`.
+
+What the gym cannot show: how the planner does on another model, engine or GPU than the file's,
+and whether a setup it proposes outside the measured ones would win. Those stay unknown until a
+run measures them.
 
 ## Limits
 

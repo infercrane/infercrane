@@ -10,7 +10,7 @@ InferCrane binds every benchmark to an exact model, runtime, accelerator, worklo
 measured win is not generalized to another provider, GPU, context length, concurrency level, or
 production network path.
 
-## Qwen3.8-27B on one H200
+## Qwen3.8-27B on one H200: September screen, superseded
 
 | Field | Value |
 | --- | --- |
@@ -21,25 +21,27 @@ production network path.
 | Workload | 4,096 input tokens, 512 output tokens, concurrency 12 |
 | Selected recipe | FP8 weights and KV cache, bounded CUDA graphs, native NEXTN/MTP |
 
-| Measurement | Control | Selected | Change |
-| --- | ---: | ---: | ---: |
-| Aggregate output throughput | 810.4 tok/s | 1,393.6 tok/s | 1.72× |
-| Per-request p50 output speed | 76.1 tok/s | 141.0 tok/s | 1.85× |
-| p50 TTFT | 1,591 ms | 739 ms | 53.6% lower |
-| p95 inter-token latency | 14.02 ms | 8.67 ms | 38.1% lower |
-| Successful requests | 24/24 | 24/24 | equal |
+This one-run screen measured 1.72× output throughput at concurrency 12 from turning on native
+multi-token prediction (with bounded CUDA graphs), the speculation option the model's publisher
+documents. Its prompts were synthetic: one sentence repeated to the target length. Repeated text is
+unusually easy for speculation to predict.
 
-The paired run used the same model, image, workload, hardware, and output checks. Deterministic
-outputs matched. Streaming and buffered usage, finish reasons, structured output, forced tools,
-malformed-request handling, and prompt-token accounting passed.
+On 2026-11-23 the same pair was run again on real text (OpenAssistant and CNN/DailyMail prompts)
+with three fresh servers per setup. At 12 requests at once the same change gave +12% on short
+prompts and +33% on 3,900-token prompts; across the six load and prompt-length cells it ranged from
+−22% to +68%. The publisher's documented setup on vLLM 0.34.0 was faster than the recipe selected
+here in every cell, by 5% to 113%. The screen's throughput and latency changes are therefore not
+cited. Read the [re-run's receipt](/testing/qwen38-27b-fp8-h200-rerun-2026-11-23).
+
+September's receipts stay as a dated record:
 
 - [Inspect the machine-readable receipt](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json)
 - [Inspect raw measurements](https://github.com/infercrane/infercrane/blob/main/docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z-raw.json)
 
 <Warning>
-  This is a controlled Modal H200 qualification, not an OpenRouter leaderboard or public-Internet
-  result. The launch context boundary stayed at 32K because the near-262K run missed its
-  pre-registered p95 TTFT limit. Hardware and workload changes require new evidence.
+  A change InferCrane reports now is measured on your traffic against your current setup, confirmed
+  again on fresh servers, and, when it changes answers, checked on a scored task set. Read
+  [optimization](/features/optimization) and [semantic quality](/features/semantic-quality).
 </Warning>
 
 ## Rejections are part of the result

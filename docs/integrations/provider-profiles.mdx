@@ -29,14 +29,31 @@ Use `infercrane integrations` rather than relying on this prose for the running 
 
 ## Exact selection
 
-Use an adapter only when a cloud/runtime pair has multiple installed implementations:
+Use an adapter only when a cloud/runtime pair has multiple installed implementations. This example
+deploys from a spec file because a 24 GB GPU such as the L4 can't hold the model's full context, so
+the spec caps it with `--max-model-len 8192`:
+
+```yaml
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen-gcp
+model:
+  id: Qwen/Qwen3-8B
+runtime:
+  engine: vllm
+  args:
+    - --max-model-len
+    - "8192"
+resources:
+  gpu: nvidia-l4
+provider:
+  cloud: gcp
+  adapter: gcp-compute
+  region: europe-west4
+```
 
 ```bash
-infercrane deploy Qwen/Qwen3-8B \
-  --cloud gcp \
-  --provider-adapter gcp-compute \
-  --region europe-west4 \
-  --gpu nvidia-l4
+infercrane deploy deployment.yaml
 ```
 
 The adapter identity is persisted in immutable revision state. Reconciliation therefore resumes the

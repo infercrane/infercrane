@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/technique-result-v1.schema.json",
+  "title": "InferCrane technique result v1",
+  "description": "One measured candidate at one load, with the five fields every performance number needs (hardware and software, workload, precision, baseline, correctness method) and what it takes to reproduce it. A missing field leaves the number 'not shown'. See docs/features/technique-contract.mdx.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "technique", "technique_version", "candidate", "hardware", "software", "workload", "precision", "baseline", "correctness", "measured", "reproduction"],
+  "properties": {
+    "schema_version": {"const": "infercrane.dev/technique-result/v1"},
+    "technique": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"},
+    "technique_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "candidate": {"type": "string", "minLength": 1},
+    "hardware": {"type": "object", "additionalProperties": false, "required": ["accelerator", "count"],
+      "properties": {"accelerator": {"type": "string"}, "count": {"type": "integer", "minimum": 0}, "driver": {"type": "string"}}},
+    "software": {"type": "object", "additionalProperties": false, "required": ["engine", "engine_version", "image_digest"],
+      "properties": {"engine": {"type": "string"}, "engine_version": {"type": "string"}, "image_digest": {"type": "string"}}},
+    "workload": {"type": "object", "additionalProperties": false, "required": ["shape_digest", "kind", "load", "requests"],
+      "properties": {"shape_digest": {"type": "string"}, "kind": {"type": "string"}, "load": {"type": "integer", "minimum": 0}, "requests": {"type": "integer", "minimum": 0}}},
+    "precision": {"type": "object", "additionalProperties": false, "required": ["weights", "kv_cache"],
+      "properties": {"weights": {"type": "string"}, "kv_cache": {"type": "string"}}},
+    "baseline": {"type": "object", "additionalProperties": false, "required": ["setup", "basis"],
+      "properties": {"setup": {"type": "string"}, "basis": {"type": "string"}}},
+    "correctness": {"type": "object", "additionalProperties": false, "required": ["method", "verdict"],
+      "properties": {"method": {"type": "string"}, "verdict": {"type": "string"}}},
+    "measured": {"type": "object", "additionalProperties": false, "required": ["metric", "change", "noise_floor", "decision"],
+      "properties": {
+        "metric": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"},
+        "change": {"type": "number"},
+        "noise_floor": {"type": "number", "minimum": 0},
+        "decision": {"enum": ["improved", "no_measurable_difference", "regressed", "unknown"]}
+      }},
+    "reproduction": {"type": "object", "additionalProperties": false, "required": ["command", "commit", "image_digest", "traffic_shape"],
+      "properties": {"command": {"type": "string"}, "commit": {"type": "string"}, "image_digest": {"type": "string"}, "traffic_shape": {"type": "string"}}},
+    "required_evidence": {"type": "array", "maxItems": 16, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"},
+      "description": "The technique manifest's evidence, copied when the record is made."},
+    "evidence": {"type": "array", "maxItems": 16, "items": {
+      "type": "object", "additionalProperties": false, "required": ["name", "digest"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"},
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "sha256 of the file that holds the evidence."},
+        "summary": {"type": "string", "maxLength": 256}
+      }}},
+    "disclosures": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 400, "pattern": "\\S"},
+      "description": "The technique manifest's disclosures, carried with the number word for word. A record that drops one is 'not shown'."}
+  }
+}

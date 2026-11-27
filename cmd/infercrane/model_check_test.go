@@ -15,6 +15,7 @@ import (
 	"github.com/infercrane/infercrane/internal/modelcheck"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/spec"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 func checkedEnvelope(t *testing.T) intentplan.Envelope {
@@ -26,9 +27,9 @@ func checkedEnvelope(t *testing.T) intentplan.Envelope {
 	model := modelcheck.Model{Repository: "microsoft/phi-4", RequestedRevision: "main", Commit: "2db69c1c3e91a05d2c64a3185acfbaf36f744e25", PipelineTag: "text-generation", License: "mit", Architectures: []string{"Phi3ForCausalLM"},
 		Weights: &modelcheck.Weights{Parameters: 14659507200, ByDType: map[string]int64{"BF16": 14659507200}}, Config: &modelcheck.Config{Layers: 40, HiddenSize: 5120, AttentionHeads: 40, KVHeads: 10, ContextLength: 16384}, ConfigState: modelcheck.ConfigRead}
 	report := modelcheck.Evaluate(model, modelcheck.EvaluateOptions{GPUs: []modelcheck.GPU{{Name: "L40S", MemoryGiB: 48}}, Registries: registries, Now: time.Now()})
-	draft := intentplan.DeploymentDraft{Name: "phi-4", EndpointName: "phi-4", Model: "microsoft/phi-4", ModelRevision: report.Revision, Runtime: "vllm", RuntimeVersion: "0.22.1", Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeMode: "elastic", GPU: "L40S", GPUCount: 1, RuntimeArgs: []string{"--max-model-len", "8192"}, MinReplicas: 1, MaxReplicas: 1}
+	draft := intentplan.DeploymentDraft{Name: "phi-4", EndpointName: "phi-4", Model: "microsoft/phi-4", ModelRevision: report.Revision, Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, Cloud: "runpod", ProviderAdapter: "runpod-pods", ComputeMode: "elastic", GPU: "L40S", GPUCount: 1, RuntimeArgs: []string{"--max-model-len", "8192"}, MinReplicas: 1, MaxReplicas: 1}
 	plan := intentplan.Plan{Status: "ready", Model: &intentplan.Model{Review: intentplan.ReviewCheckedAutomatically, Name: "microsoft/phi-4", Repository: "microsoft/phi-4", Revision: report.Revision}, ModelCheck: &report,
-		Configuration: &intentplan.Configuration{Runtime: "vllm", RuntimeVersion: "0.22.1", GPU: "L40S", GPUCount: 1, Provider: "runpod", RuntimeArgs: draft.RuntimeArgs}}
+		Configuration: &intentplan.Configuration{Runtime: "vllm", RuntimeVersion: support.DefaultRuntimeVersion, GPU: "L40S", GPUCount: 1, Provider: "runpod", RuntimeArgs: draft.RuntimeArgs}}
 	return intentplan.Envelope{Plan: plan, DeploymentDraft: &draft}
 }
 
@@ -55,7 +56,7 @@ func TestModelsCheckPrintsTheCheckAndWritesADeploymentSpec(t *testing.T) {
 	if received.Model != "microsoft/phi-4" || received.Concurrency != 4 {
 		t.Fatalf("unexpected planning request: %+v", received)
 	}
-	for _, expected := range []string{"Not reviewed: checked automatically", "Runs on vLLM 0.22.1", "Fits 1 × L40S", "infercrane deploy " + path} {
+	for _, expected := range []string{"Not reviewed: checked automatically", "Runs on vLLM " + support.DefaultRuntimeVersion, "Fits 1 × L40S", "infercrane deploy " + path} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("output is missing %q:\n%s", expected, output)
 		}

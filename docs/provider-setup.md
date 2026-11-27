@@ -78,6 +78,9 @@ deployments use `provider_account` billing on the account configured for the con
 - `*` is refused at startup when managed deployments, managed sandboxes, or hosted sign-up
   auto-provisioning is enabled. Name the workspaces there instead.
 - A provider that is not `ready` stays unavailable whatever the grant says.
+- Workers on these providers read the one worker credential you provisioned for the adapter, which
+  is `INFERCRANE_API_KEY`. A granted workspace can run its own image there, and that image can read
+  the credential. Grant only workspaces you trust as operators of this control plane.
 
 ## Data residency and production qualification
 

@@ -55,9 +55,14 @@ endpoint, the same digests the control plane stores, so it can authenticate requ
 customer's cloud. No key itself leaves the control plane, keys restricted to other endpoints are
 not sent, and an agent with no agent-managed endpoint receives none. A leaked agent key therefore
 also exposes those digests, which cannot be turned back into keys or used against the control
-plane, which never accepts a digest. The agent stops accepting keys when it cannot refresh the
-digests for 15 minutes, so a revoked key stops working on the agent within that window, and at
-once when the agent itself is revoked. Request quota is leased from the shared allocator; an agent
+plane, which never accepts a digest. A revoked key stops working on the agent at its next refresh,
+and every key at once when the agent itself is revoked. When the agent cannot reach the control
+plane, the digests stay valid for 15 minutes; past that, by default, the agent keeps serving the
+endpoints' own servers (never a rollout's or a test setup's) for up to 24 more hours, so a key
+revoked during the outage keeps working until the agent reconnects or that grace ends, and each
+key's own expiry still applies. Its operator can set the grace to 0 to refuse requests at the 15
+minutes instead (`--offline-grace=0s`, Helm `agent.offlineGrace=0s`). The last digests are kept
+in the agent's state directory at mode 0600, never a key. Request quota is leased from the shared allocator; an agent
 without a lease returns `429` rather than serving unmetered. An endpoint with residency
 `customer-cloud` accepts only agent-owned bindings (enforced by a database trigger), and the hosted
 gateway refuses it instead of forwarding its prompts to any supply.
@@ -85,6 +90,30 @@ workspace or is `*`. The wildcard is refused when the control plane sells manage
 auto-provisions workspaces at sign-up. The grant never extends to InferCrane-managed prepaid
 capacity or the RunPod supply key. See
 [Let workspaces use operator compute](/provider-setup#let-workspaces-use-operator-compute).
+
+A worker is started with one bearer credential. A worker's address belongs to its workload, which
+can be a workspace's own image, so whatever the control plane sends there is readable by that
+workload. Every call the control plane makes to a worker's address (routing, health checks, engine
+scrapes, direct benchmarks, optimization measurement, answer checks, and playground prompts)
+therefore presents the credential scoped to that worker's workspace and deployment. The operator's
+shared credential is sent only to workers on operator compute that were started with it, never to a
+worker that records a scoped credential and never to a worker in a tenant's account.
+
+- **RunPod Pods**, on the operator's account and on a tenant's, are started with a credential
+  derived from `INFERCRANE_WORKER_CREDENTIAL_KEY` for that workspace and deployment. A Pod never
+  holds `INFERCRANE_API_KEY`, and one deployment's credential opens no other deployment's workers.
+  `INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED` is refused at startup without the derivation key.
+  Without the key, only the bootstrap operator can start Pods on the operator's account, and those
+  Pods hold the control-plane worker credential described next.
+- **AWS, Google Cloud, Kubernetes, and SkyPilot** workers read one worker credential the operator
+  provisions for the adapter, and that credential is `INFERCRANE_API_KEY`. Code that runs in such a
+  worker can therefore act as the bootstrap operator. Run only workloads you trust as operators
+  there, and treat an operator compute grant as granting that trust to the workspace.
+- A worker in a tenant's own account that records no scoped credential is not called at all, and
+  a scoped worker whose credential cannot be derived is treated as unhealthy. The control plane
+  does not fall back to the shared credential.
+- While a deployment has older workers on the shared credential and newer ones on a scoped
+  credential, only the scoped workers are routed. Replace the older workers to restore capacity.
 
 Gateway authentication uses an in-memory last-known-good credential snapshot so an established data
 plane does not add PostgreSQL latency or fail immediately during a database outage. Rotation and
@@ -185,13 +214,21 @@ Prompt and output content are not recorded by default. Request telemetry stores 
 The built-in answer check of an optimization run sends a small fixed prompt suite to candidate and
 reference revisions and compares the answers in memory; answers are never stored. A customer eval
 set is the one place InferCrane keeps prompts you choose to give it: `infercrane evaluation set
-upload` stores the uploaded file in plaintext, bounded to 512 KiB and 200 prompts, scoped to your
+upload` stores the uploaded file in plaintext, bounded to 512 KiB and 200 prompts (1 MiB and 1,000 items for a task set), scoped to your
 organization, and readable only by the worker. The API returns its metadata, never its prompts, and
 `evaluation set delete` removes it. Do not upload prompts containing personal data or secrets. An
 eval set's conversations, tool definitions, and earlier tool results are stored the same way. Tool
 calls the models make during the check are compared in memory and never executed: the worker
 validates their arguments against the JSON Schema the eval set declares, with no loader, so a
 schema's remote `$ref` is refused at upload and validation fetches nothing.
+
+A prompt corpus for replay measurement (`INFERCRANE_REPLAY_PROMPT_CORPUS_FILE`, see
+[how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates)) is a
+file the operator places on the control plane's disk. InferCrane reads it at start and never writes
+to it, never adds traffic to it, and never stores it in PostgreSQL. Its text goes only to the
+servers a Replay-bound campaign measures, through a staged AIPerf input that is readable by the
+control plane's user alone and deleted when its run ends. Stored evidence names the corpus by its
+SHA-256 digest, name, license, source, and tokenizer, never by its text.
 
 Durable async inference is the explicit exception. It remains disabled until an operator injects
 `INFERCRANE_ASYNC_ENCRYPTION_KEY`, and every submission must acknowledge encrypted content storage.
@@ -206,8 +243,9 @@ disabled until the operator injects separate `INFERCRANE_CREDENTIAL_ENCRYPTION_K
 is verified before storage, encrypted with AES-256-GCM, and bound through associated data to the
 tenant, provider, and connection name. API responses expose only connection metadata. Provider
 calls decrypt the credential in memory, while worker authentication uses a separate deterministic
-tenant-and-deployment-scoped credential. Operator-owned provider keys, volumes, and provider secret
-references are never copied into customer accounts.
+tenant-and-deployment-scoped credential. That credential, never the control-plane API key, is what
+every direct call to the tenant's worker presents. Operator-owned provider keys, volumes, and
+provider secret references are never copied into customer accounts.
 
 Optimization run notification destinations use the same key. A destination URL can itself be a
 bearer credential (a Slack incoming webhook is one), so the URL and the generated signing secret are
@@ -256,4 +294,33 @@ redirects to another host are refused, and the token is never logged, cached, st
 Reads made with a token are cached per workspace and credential. See
 [Check any model automatically](/features/model-catalog#check-any-model-automatically).
 
-Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. Report vulnerabilities through the repository's private GitHub security-advisory flow; do not open a public issue.
+## Engine images
+
+Built-in runtimes start only images pinned by digest (see the
+[runtime contract](/architecture/runtime-contract#engine-releases-and-accelerator-platforms)). New
+revisions get the current release, vLLM 0.34.0. The 0.22.1 images stay pinned only for revisions
+that already record 0.22.1, so an existing deployment keeps its engine until you move it; the
+accelerator catalog marks them `legacy`. Move each one with a revision on 0.34.0 (see
+[Upgrade and compatibility](/upgrade#move-a-deployment-from-vllm-0-22-1-to-0-34-0)).
+
+vLLM 0.34.0 can serve its HTTP API from a Rust front end (`VLLM_USE_RUST_FRONTEND=1`, a reviewed
+engine switch on NVIDIA GPUs). It checks the same `VLLM_API_KEY` as the Python front end.
+
+## Engine access
+
+- Engines take only reviewed extra arguments (see
+  [engine arguments](/deployment-spec#engine-arguments)). Arguments that InferCrane sets itself, and
+  arguments that load code or files named in their value, are not in the set.
+  `--trust-remote-code` and `--enable-custom-logit-processor` are refused on every runtime.
+- Every engine requires the worker key. vLLM reads it from `VLLM_API_KEY`. SGLang reads it from a
+  configuration file that its launcher writes from the worker Secret at start, so the key never
+  appears on a command line.
+- On Kubernetes, each engine replica, and each candidate the agent starts, gets a `NetworkPolicy`
+  that admits only the configured sources (see
+  [who can reach engine pods](/integrations/kubernetes#who-can-reach-engine-pods)). KServe pods
+  are not covered; KServe owns them. Neither are engines on EC2 or Compute Engine machines, whose
+  network access is set by their security groups and firewall rules.
+
+Run the container as its non-root user, pin immutable image tags, restrict network access, and protect `/metrics` according to your environment. The gateway's `/metrics` carries no deployment,
+endpoint, or workspace names; the per-workspace results on `/api/v1/metrics` need an API key with read
+permission and cover that key's workspace only. Report vulnerabilities through the repository's private GitHub security-advisory flow; do not open a public issue.

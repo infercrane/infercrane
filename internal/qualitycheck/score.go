@@ -65,6 +65,12 @@ func Grade(grading string, prompt Prompt, answer string) float64 {
 	if !Answered(answer) {
 		return 0
 	}
+	if grading == GradingAnswerLine {
+		if len(prompt.Expected) == 0 {
+			return 0
+		}
+		return answerLineScore(prompt.Expected[0], answer)
+	}
 	best := 0.0
 	for _, expected := range prompt.Expected {
 		var score float64

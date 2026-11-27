@@ -94,6 +94,9 @@ func (s *Service) DataPlane(ctx context.Context, agent domain.Agent, generation 
 			BindingID: binding.BindingID, TargetID: binding.TargetID, ServerKey: binding.ServerKey,
 			UpstreamModel: binding.UpstreamModel, Runtime: binding.Runtime, Weight: binding.Weight,
 			Capabilities: s.capabilities(binding.Runtime),
+			// An agent out of contact serves only the endpoint's own
+			// servers; it drops the bindings marked here.
+			Rollout: binding.Rollout,
 		})
 	}
 	if len(served) > 0 {

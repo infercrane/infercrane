@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,39 @@ type DataPlane struct {
 	targets     map[string]string // target ID -> server key
 	published   map[string]bool   // endpoint -> published
 	lastError   string
+	// offline is the mode the routes were last compiled for: true while
+	// serving past the snapshot's validity inside the operator's grace.
+	offline bool
+	// saved and savedGeneration are the validity and generation of the
+	// snapshot last written to disk.
+	saved           time.Time
+	savedGeneration string
+}
+
+// Serving modes of the data plane.
+const (
+	modeCurrent = "current" // the snapshot is valid
+	modeOffline = "offline" // past its validity, inside the operator's grace
+	modeStale   = "stale"   // past both: refuse
+)
+
+// mode says how the data plane may serve at now. Past the snapshot's
+// validity it serves only inside the operator's offline grace, and then
+// only the endpoints' own servers.
+func (d *DataPlane) mode(now time.Time) string {
+	d.mu.RLock()
+	held, validUntil := d.held, d.snapshot.ValidUntil
+	d.mu.RUnlock()
+	switch {
+	case !held:
+		return modeStale
+	case !now.After(validUntil):
+		return modeCurrent
+	case d.agent.config.OfflineGrace > 0 && !now.After(validUntil.Add(d.agent.config.OfflineGrace)):
+		return modeOffline
+	default:
+		return modeStale
+	}
 }
 
 func newDataPlane(agent *Agent) *DataPlane {
@@ -91,10 +125,17 @@ func (d *DataPlane) Handler() http.Handler {
 }
 
 func (d *DataPlane) ready(context.Context) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if !d.held || d.now().After(d.snapshot.ValidUntil) {
+	mode := d.mode(d.now())
+	if mode == modeStale {
 		return ErrDataPlaneStale
+	}
+	// Entering or leaving offline mode changes which servers are routed;
+	// recompile before the request is routed.
+	d.mu.RLock()
+	recompile := d.offline != (mode == modeOffline)
+	d.mu.RUnlock()
+	if recompile {
+		d.Compile()
 	}
 	return nil
 }
@@ -105,9 +146,11 @@ func (d *DataPlane) AuthenticatePrincipal(_ context.Context, token string) (doma
 	sum := sha256.Sum256([]byte(token))
 	d.mu.RLock()
 	principal, ok := d.credentials[hex.EncodeToString(sum[:])]
-	held, validUntil := d.held, d.snapshot.ValidUntil
 	d.mu.RUnlock()
-	if !ok || !held || d.now().After(validUntil) {
+	// Out of contact, inside the operator's grace, the last digests still
+	// authenticate: a key revoked since is honoured until the agent
+	// reconnects or the grace ends. Each key's own expiry always applies.
+	if !ok || d.mode(d.now()) == modeStale {
 		return domain.Principal{}, domain.ErrNotFound
 	}
 	if principal.ExpiresAt != nil && !d.now().Before(*principal.ExpiresAt) {
@@ -143,6 +186,10 @@ func (d *DataPlane) Refresh(ctx context.Context) error {
 		}
 		d.mu.Unlock()
 		if current {
+			d.save()
+			if d.mode(d.now()) == modeCurrent {
+				d.Compile()
+			}
 			return nil
 		}
 		// The control plane answered for a snapshot this agent does not
@@ -157,6 +204,20 @@ func (d *DataPlane) Refresh(ctx context.Context) error {
 			return err
 		}
 	}
+	d.apply(snapshot)
+	d.save()
+	// Apply the quota before any route is published, so a quota-limited
+	// workspace is never served unlimited while the pool catches up. A lease
+	// that fails leaves no tokens: requests get 429, not a free pass.
+	if err := d.quota.Refresh(ctx); err != nil {
+		d.agent.emit(Event{Kind: "retrying", Message: fmt.Sprintf("request quota lease: %v", err)})
+	}
+	d.Compile()
+	return nil
+}
+
+// apply makes snapshot the one the data plane serves with.
+func (d *DataPlane) apply(snapshot agentprotocol.DataPlaneSnapshot) {
 	d.mu.Lock()
 	credentials := make(map[string]domain.Principal, len(snapshot.Credentials))
 	for _, credential := range snapshot.Credentials {
@@ -180,14 +241,6 @@ func (d *DataPlane) Refresh(ctx context.Context) error {
 		})
 	}
 	d.admission.Replace(policies)
-	// Apply the quota before any route is published, so a quota-limited
-	// workspace is never served unlimited while the pool catches up. A lease
-	// that fails leaves no tokens: requests get 429, not a free pass.
-	if err := d.quota.Refresh(ctx); err != nil {
-		d.agent.emit(Event{Kind: "retrying", Message: fmt.Sprintf("request quota lease: %v", err)})
-	}
-	d.Compile()
-	return nil
 }
 
 func (d *DataPlane) setError(err error) {
@@ -200,17 +253,25 @@ func (d *DataPlane) setError(err error) {
 // servers this agent currently sees as healthy. A server key the agent did
 // not find is never routed to, whatever the snapshot says.
 func (d *DataPlane) Compile() {
-	d.mu.RLock()
+	offline := d.mode(d.now()) == modeOffline
+	d.mu.Lock()
 	snapshot, held := d.snapshot, d.held
-	d.mu.RUnlock()
+	d.offline = offline
+	d.mu.Unlock()
 	if !held {
 		return
 	}
+	// A server is routed once this agent registered it. After a restart
+	// with the control plane out of reach nothing is registered in this
+	// process yet; then a server the snapshot names is routed when this
+	// agent found it itself serving the binding's model.
 	d.agent.mu.Lock()
 	local := make(map[string]Detected, len(d.agent.detected))
+	registered := map[string]bool{}
 	for key, server := range d.agent.detected {
+		local[key] = server
 		if status := d.agent.status[key]; status != nil && status.Registered {
-			local[key] = server
+			registered[key] = true
 		}
 	}
 	d.agent.mu.Unlock()
@@ -220,9 +281,13 @@ func (d *DataPlane) Compile() {
 		compiled := make([]routes.Snapshot, 0, len(route.Bindings))
 		planned := make([]string, 0, len(route.Bindings))
 		for _, binding := range route.Bindings {
+			if offline && binding.Rollout {
+				// Out of contact, only the endpoint's own servers serve.
+				continue
+			}
 			planned = append(planned, binding.BindingID)
 			server, ok := local[binding.ServerKey]
-			if !ok || server.Health != agentprotocol.HealthHealthy {
+			if !ok || server.Health != agentprotocol.HealthHealthy || !registered[binding.ServerKey] && !slices.Contains(server.Models, binding.UpstreamModel) {
 				continue
 			}
 			targets[binding.TargetID] = binding.ServerKey
@@ -344,6 +409,7 @@ func (r dataPlaneRecorder) RecordRequest(_ context.Context, record domain.Infere
 		Source: agentprotocol.ShapeSourceDataPlane, BindingID: record.BindingID,
 		ResponseModel: agentprotocol.CleanText(record.ResponseModel, agentprotocol.MaxText), QueueMS: record.QueueMS, RetryCount: retries,
 		ParentSessionIDHash: record.ParentSessionIDHash, ToolPauseMS: record.ToolPauseMS,
+		FallbackFromBindingID: record.FallbackFromBindingID,
 	}
 	shape.InputTokens, shape.OutputTokens = boundedTokens(record.InputTokens, record.OutputTokens)
 	if shape.Validate() != nil {

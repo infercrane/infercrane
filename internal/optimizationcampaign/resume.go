@@ -62,6 +62,10 @@ type MeasurementCheckpoint struct {
 	// Confirmation is set once the first window ended with a gain on the
 	// objective; the candidate is then measured again on fresh servers.
 	Confirmation *ConfirmationState `json:"confirmation,omitempty"`
+	// Agent is set when an InferCrane agent measures the windows in the
+	// customer's cluster (AgentDriver): which window comes next and the
+	// agent commands that measured each.
+	Agent *AgentWindowsState `json:"agent,omitempty"`
 }
 
 // MeasurementSegment is one stretch of measuring between interruptions.
@@ -74,6 +78,10 @@ type MeasurementSegment struct {
 	CandidateRuns   int        `json:"candidate_runs"`
 	Ended           string     `json:"ended,omitempty"`
 	Confirmation    bool       `json:"confirmation,omitempty"`
+	// Attempt numbers a confirmation segment's try at the window on fresh
+	// servers: 0, or 1 when the first try came out invalid and the window
+	// was measured once more.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // MeasurementInterruption is one stop of a measurement: which arm's
@@ -138,13 +146,19 @@ func DecodeMeasurementCheckpoint(raw string) (MeasurementCheckpoint, bool) {
 // checkpoint from another candidate revision, control, or load is never
 // resumed.
 func measurementIdentity(candidate armTarget, control ControlEvidence, plan loadPlan, profile, fingerprint string) string {
-	encoded, _ := json.Marshal(map[string]any{
+	identity := map[string]any{
 		"method": MeasurementMethod, "candidate": candidate.candidateID, "candidate_revision": candidate.revisionID,
 		"control_role": control.Role, "control": control.CandidateID, "control_revision": control.RevisionID,
 		"profile": profile, "tokenizer": plan.tokenizer, "requests": plan.requests, "concurrency": plan.concurrency,
 		"input_tokens": plan.inputTokens, "output_tokens": plan.outputTokens, "warmup": plan.warmup, "streaming": plan.streaming,
 		"ttft_slo": plan.ttftSLO, "tpot_slo": plan.tpotSLO, "replay": fingerprint,
-	})
+	}
+	// Runs on another prompt text are another load. The key is absent
+	// without a corpus, so checkpoints stored before corpora existed resume.
+	if plan.trace != nil && plan.trace.Properties.PromptText != nil {
+		identity["prompt_corpus"] = plan.trace.Properties.PromptText.Corpus.Digest
+	}
+	encoded, _ := json.Marshal(identity)
 	sum := sha256.Sum256(encoded)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -172,6 +186,9 @@ type measurementSession struct {
 	// keepControl keeps the control's server for the confirmation because it
 	// serves production.
 	keepControl bool
+	// deadline is when the campaign's approval ends; zero is none. A window
+	// is measured again only while it leaves room for that.
+	deadline time.Time
 }
 
 // windowRuns counts the accepted candidate runs of the first window and of
@@ -180,12 +197,48 @@ func (s *measurementSession) windowRuns() (int, int) {
 	first, second := 0, 0
 	for _, segment := range s.state.Segments {
 		if segment.Confirmation {
-			second += segment.CandidateRuns
+			if segment.Attempt == s.attempt() {
+				second += segment.CandidateRuns
+			}
 		} else {
 			first += segment.CandidateRuns
 		}
 	}
 	return first, second
+}
+
+// attempt is the confirmation window's current try.
+func (s *measurementSession) attempt() int {
+	if s.state.Confirmation == nil {
+		return 0
+	}
+	return s.state.Confirmation.Attempt
+}
+
+// measureAgain starts the window on fresh servers once more, on the same
+// servers, when it came out invalid: an invalid window measured nothing, and
+// a fresh server's slow first run is a usual cause. Once only, and only while
+// the approval leaves at least as long as the invalid try took; the servers
+// are already covered by the approved cap until then. A second invalid
+// window stays unknown (confirmedDecision).
+func (s *measurementSession) measureAgain(measured measurement) bool {
+	confirmation := s.state.Confirmation
+	if confirmation == nil || confirmation.Attempt > 0 || measured.evidence.Confirmation == nil || measured.evidence.Confirmation.Control.Role != ControlRoleInvalid {
+		return false
+	}
+	took := time.Duration(0)
+	for _, segment := range s.state.Segments {
+		if segment.Confirmation && segment.EndedAt != nil {
+			took += segment.EndedAt.Sub(segment.StartedAt)
+		}
+	}
+	if !s.deadline.IsZero() && s.now().Add(took).After(s.deadline) {
+		return false
+	}
+	confirmation.Attempt = 1
+	s.state.Order = append(s.state.Order, "measure-again")
+	s.save()
+	return true
 }
 
 // retire stops the measurement so the driver retires one arm's server and
@@ -222,7 +275,11 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 			return measurement{}, s.retire(ArmControl, *s.control)
 		}
 		if second >= measurementRunsPerArm {
-			return s.finish(), nil
+			measured := s.finish()
+			if !s.measureAgain(measured) {
+				return measured, nil
+			}
+			first, second = s.windowRuns()
 		}
 	}
 	confirming := state.Confirmation != nil
@@ -237,7 +294,7 @@ func (s *measurementSession) run(ctx context.Context) (measurement, error) {
 	}
 	s.runs.base, s.runs.next = state.InvocationBase, state.NextInvocation
 	remaining := measurementRunsPerArm - done
-	state.Segments = append(state.Segments, MeasurementSegment{StartedAt: s.now(), FirstInvocation: state.InvocationBase + state.NextInvocation, Confirmation: confirming})
+	state.Segments = append(state.Segments, MeasurementSegment{StartedAt: s.now(), FirstInvocation: state.InvocationBase + state.NextInvocation, Confirmation: confirming, Attempt: s.attempt()})
 	segment := &state.Segments[len(state.Segments)-1]
 	// Nothing is sent until the segment's start is stored: a resume adds the
 	// invocation gap to the stored counter, so an unstored start could hand a
@@ -347,9 +404,9 @@ func (s *measurementSession) finish() measurement {
 	}
 	evidence := MeasuredEvidence{Method: MeasurementMethod, InvocationBase: state.InvocationBase, Order: state.Order, Control: state.Control, ServerMetricsRequested: s.candidate.serverMetrics, GPUTelemetry: "not_collected"}
 	firstWindow := window{control: state.Control}
-	var second *window
+	var second, discarded *window
 	if state.Confirmation != nil {
-		second = &window{control: state.Control}
+		second, discarded = &window{control: state.Control}, &window{control: state.Control}
 	}
 	// Runs are listed as they ran: each segment's accepted runs are
 	// C X C ... C with a control, or the candidate's runs alone.
@@ -357,8 +414,11 @@ func (s *measurementSession) finish() measurement {
 	var firstCandidates []benchmark.Result
 	for _, segment := range state.Segments {
 		target := &firstWindow
-		if segment.Confirmation && second != nil {
+		switch {
+		case segment.Confirmation && second != nil && segment.Attempt == s.attempt():
 			target = second
+		case segment.Confirmation && discarded != nil:
+			target = discarded
 		}
 		if segment.ControlRuns > 0 && control < len(state.ControlRuns) {
 			target.addControl(state.ControlRuns[control])
@@ -387,6 +447,10 @@ func (s *measurementSession) finish() measurement {
 	if second != nil {
 		confirmation := &ConfirmationEvidence{Runs: second.runs, FreshCandidate: freshServer(state, ArmCandidate), FreshControl: freshServer(state, ArmControl)}
 		confirmation.Control = second.analyze(1, &confirmation.Comparison)
+		if len(discarded.runs) > 0 {
+			var unused map[string]MetricComparison
+			confirmation.Discarded = &DiscardedWindow{Control: discarded.analyze(1, &unused), Runs: discarded.runs}
+		}
 		evidence.Confirmation = confirmation
 	}
 	// The stored candidate row describes the first window, the one its

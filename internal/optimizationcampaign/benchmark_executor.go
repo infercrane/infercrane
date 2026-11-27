@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -17,7 +18,9 @@ import (
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/support"
+	"github.com/infercrane/infercrane/internal/workercredential"
 )
 
 type BenchmarkStore interface {
@@ -30,6 +33,16 @@ type BenchmarkStore interface {
 
 type BenchmarkBackend struct {
 	APIKey, APIKeyEnv string
+	// WorkerMaster derives the credential of a worker that was started with
+	// its own tenant-and-deployment-scoped one. APIKey is then sent only to
+	// workers on operator compute that share the operator's credential.
+	WorkerMaster string
+}
+
+// workerCredential returns what a direct request to one of this backend's
+// workers presents, or "" when nothing may be sent to it.
+func (b BenchmarkBackend) workerCredential(deployment domain.Deployment, replica domain.Replica) string {
+	return workercredential.Source{Master: b.WorkerMaster, Shared: b.APIKey}.Credential(deployment.TenantID, deployment.ID, deployment.ComputeConnectionID, replica.ProviderDetails)
 }
 
 type AIPerfRunner interface {
@@ -38,17 +51,21 @@ type AIPerfRunner interface {
 
 // BenchmarkExecutor measures the exact candidate revision directly. It never
 // relies on a mutable production route and never copies production prompts.
-// A customer-observed campaign replays its bound content-free Replay trace;
+// A customer-observed campaign replays its bound content-free Replay trace,
+// with text from the operator's prompt corpus when one is configured;
 // other campaigns send the versioned synthetic profile. Each server is warmed,
 // every arm runs measurementRunsPerArm times, and when the campaign control is
 // live it is measured in the same window, interleaved with the candidate.
 // Persisted evidence includes exact artifact, runtime, provider, workload,
 // control comparison, and sourced-cost identities.
 type BenchmarkExecutor struct {
-	Store        BenchmarkStore
-	Runner       AIPerfRunner
-	Costs        CostAuthority
-	Replays      ReplayTraceSource
+	Store   BenchmarkStore
+	Runner  AIPerfRunner
+	Costs   CostAuthority
+	Replays ReplayTraceSource
+	// PromptCorpus is the operator's real text for replay measurement; nil
+	// leaves the prompt text to AIPerf's synthetic generator.
+	PromptCorpus *replay.PromptCorpus
 	Backends     map[string]BenchmarkBackend
 	AIPerfBinary string
 	Now          func() time.Time
@@ -93,7 +110,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return domain.BenchmarkResult{}, fmt.Errorf("resolve immutable candidate artifact: %w", err)
 	}
-	target, provider, err := e.directTarget(ctx, candidate, resolved.Deployment.ID, draft)
+	target, provider, err := e.directTarget(ctx, candidate, resolved.Deployment, draft)
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
@@ -131,6 +148,9 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 	}
 	session := measurementSession{runs: runs, candidate: target, control: control, state: &state, sink: e.Checkpoints, owner: candidate, tracker: tracker, now: e.now,
 		confirm: e.confirmation(ctx, campaign, candidate, draft), keepControl: campaign.Intent == IntentEvolveEndpoint}
+	if campaign.ApprovalExpiresAt != nil {
+		session.deadline = campaign.ApprovalExpiresAt.UTC()
+	}
 	measured, err := session.run(ctx)
 	ended := e.now()
 	if err != nil {
@@ -149,7 +169,7 @@ func (e BenchmarkExecutor) Run(ctx context.Context, campaign domain.Optimization
 		"profile_runs": measurementRunsPerArm, "warmup_requests": plan.warmup, "concurrency": plan.concurrency,
 		"random_seed": measurementSeed, "seed_policy": "unique_per_invocation", "measurement_method": MeasurementMethod,
 		"profile": profile.Name, "profile_version": performanceprofile.Version, "ttft_slo_ms": plan.ttftSLO, "tpot_slo_ms": plan.tpotSLO,
-		"server_token_count": true, "revision_selector": revision.ID, "direct_revision_validation": true,
+		"server_token_count": true, "output_token_basis": benchmark.OutputTokenBasis, "revision_selector": revision.ID, "direct_revision_validation": true,
 		"confidence_95": confidence, "measured": measured.evidence,
 	}
 	if plan.trace != nil {
@@ -218,6 +238,15 @@ func (e BenchmarkExecutor) checkpoint(campaign domain.OptimizationCampaign, cand
 // without them the ranking cannot decide on cost either, so nothing is
 // confirmed.
 func (e BenchmarkExecutor) confirmation(ctx context.Context, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) func(MeasuredEvidence) bool {
+	return objectiveGain(ctx, e.Costs, e.now, campaign, candidate, draft)
+}
+
+// objectiveGain is the confirmation trigger every measured run applies,
+// whoever measured the window: whether a finished first window gained on the
+// campaign's objective by the ranking's own rule. A cost objective also needs
+// both setups' sourced hourly rates; without them (costs nil, or no quote)
+// nothing is confirmed, as the ranking cannot decide on cost either.
+func objectiveGain(ctx context.Context, costs CostAuthority, now func() time.Time, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun, draft optimizer.DeploymentDraft) func(MeasuredEvidence) bool {
 	// The same metric the ranking compares, so a buffered latency run is
 	// confirmed on p95 request latency rather than an unmeasured TTFT.
 	request := campaignRequest(campaign)
@@ -237,8 +266,11 @@ func (e BenchmarkExecutor) confirmation(ctx context.Context, campaign domain.Opt
 			if err != nil {
 				return false
 			}
-			controlQuote, controlErr := e.Costs.Quote(ctx, control.TenantID, controlDraft, e.now())
-			candidateQuote, candidateErr := e.Costs.Quote(ctx, candidate.TenantID, draft, e.now())
+			if costs == nil {
+				return false
+			}
+			controlQuote, controlErr := costs.Quote(ctx, control.TenantID, controlDraft, now())
+			candidateQuote, candidateErr := costs.Quote(ctx, candidate.TenantID, draft, now())
 			if controlErr != nil || candidateErr != nil || controlQuote.HourlyUSD <= 0 || candidateQuote.HourlyUSD <= 0 {
 				return false
 			}
@@ -264,8 +296,8 @@ func campaignComparisons(campaign domain.OptimizationCampaign) int {
 
 // directTarget selects the lowest-ordinal healthy ready replica of one exact
 // revision and the server-side credential for its provider.
-func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
-	return directReplica(ctx, e.Store, e.Backends, candidate, deploymentID, draft)
+func (e BenchmarkExecutor) directTarget(ctx context.Context, candidate domain.OptimizationCandidateRun, deployment domain.Deployment, draft optimizer.DeploymentDraft) (armTarget, string, error) {
+	return directReplica(ctx, e.Store, e.Backends, candidate, deployment, draft)
 }
 
 type replicaLister interface {
@@ -274,22 +306,28 @@ type replicaLister interface {
 
 // directReplica is shared by measurement and the built-in answer check, so
 // both address the same exact revision with the same credential.
-func directReplica(ctx context.Context, store replicaLister, backends map[string]BenchmarkBackend, candidate domain.OptimizationCandidateRun, deploymentID string, draft optimizer.DeploymentDraft) (armTarget, string, error) {
-	replicas, err := store.ReplicasForDeployment(ctx, candidate.TenantID, deploymentID)
+func directReplica(ctx context.Context, store replicaLister, backends map[string]BenchmarkBackend, candidate domain.OptimizationCandidateRun, deployment domain.Deployment, draft optimizer.DeploymentDraft) (armTarget, string, error) {
+	replicas, err := store.ReplicasForDeployment(ctx, candidate.TenantID, deployment.ID)
 	if err != nil {
 		return armTarget{}, "", err
 	}
-	endpoint, provider, replicaID, ordinal := "", "", "", int(^uint(0)>>1)
+	var selected domain.Replica
+	ordinal := int(^uint(0) >> 1)
 	for _, replica := range replicas {
 		if replica.RevisionID == candidate.RevisionID && replica.Endpoint != "" && replica.Health == "healthy" && (replica.LifecycleState == "ready" || replica.LifecycleState == "active") && replica.Ordinal < ordinal {
-			endpoint, provider, replicaID, ordinal = replica.Endpoint, replica.Provider, replica.ID, replica.Ordinal
+			selected, ordinal = replica, replica.Ordinal
 		}
 	}
+	endpoint, provider, replicaID := selected.Endpoint, selected.Provider, selected.ID
 	if endpoint == "" || provider == "" {
 		return armTarget{}, "", fmt.Errorf("candidate %w", errNoDirectEndpoint)
 	}
 	backend, ok := backends[provider]
-	if !ok || backend.APIKey == "" {
+	// The replica is sent the credential it was started with and no other: its
+	// address belongs to the workload, which may be the tenant's own image in
+	// the tenant's own account.
+	apiKey := backend.workerCredential(deployment, selected)
+	if !ok || apiKey == "" {
 		return armTarget{}, "", fmt.Errorf("%w: benchmark credential is unavailable for provider %s", errNoDirectEndpoint, provider)
 	}
 	// The runtime contract declares a Prometheus path only when the server
@@ -297,7 +335,7 @@ func directReplica(ctx context.Context, store replicaLister, backends map[string
 	// runtime's draft carries no workload, so read the contract the replica
 	// was provisioned with, not the empty draft.
 	served := support.ServedWorkload(draft.Runtime.Engine, draft.Resources.GPU, draft.Runtime.Workload)
-	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.ServedModel(), replicaID: replicaID, endpoint: endpoint, apiKey: backend.APIKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
+	return armTarget{candidateID: candidate.ID, revisionID: candidate.RevisionID, model: draft.ServedModel(), replicaID: replicaID, endpoint: endpoint, apiKey: apiKey, apiKeyEnv: backend.APIKeyEnv, serverMetrics: served.MetricsPath != ""}, provider, nil
 }
 
 // controlTarget resolves the campaign control's live endpoint. The control is
@@ -332,7 +370,7 @@ func (e BenchmarkExecutor) controlTarget(ctx context.Context, campaign domain.Op
 	if err != nil {
 		return nil, evidence, fmt.Errorf("resolve campaign control deployment: %w", err)
 	}
-	target, _, err := e.directTarget(ctx, control, resolved.Deployment.ID, draft)
+	target, _, err := e.directTarget(ctx, control, resolved.Deployment, draft)
 	if errors.Is(err, errNoDirectEndpoint) {
 		evidence.Reason = boundedReason(err)
 		return nil, evidence, nil
@@ -363,8 +401,15 @@ func liveControlState(state string) bool {
 func (e BenchmarkExecutor) loadPlan(ctx context.Context, campaign domain.OptimizationCampaign, artifact domain.ModelArtifact, profile performanceprofile.Profile) (loadPlan, error) {
 	request := campaignRequest(campaign)
 	plan := loadPlan{tokenizer: artifact.Repository, requests: profile.Requests, concurrency: profile.Concurrency, inputTokens: profile.InputTokens, outputTokens: profile.OutputTokens, streaming: profile.Streaming, ttftSLO: campaignTTFTSLO(campaign), tpotSLO: campaignTPOTSLO(campaign)}
+	at, err := measuredConcurrency(request)
+	if err != nil {
+		return loadPlan{}, err
+	}
+	if at > 0 {
+		plan.concurrency = at
+	}
 	plan.warmup = warmupRequests(plan.concurrency)
-	rendered, err := resolveBoundReplay(ctx, e.Replays, campaign.TenantID, request)
+	rendered, err := resolveBoundReplay(ctx, e.Replays, campaign.TenantID, request, e.PromptCorpus)
 	if err != nil {
 		return loadPlan{}, err
 	}
@@ -383,12 +428,11 @@ func (e BenchmarkExecutor) now() time.Time {
 	return time.Now().UTC()
 }
 
+// campaignTTFTSLO is the first-token limit every request of the campaign is
+// held to: the customer's, else the default of a useful-output objective.
 func campaignTTFTSLO(campaign domain.OptimizationCampaign) float64 {
 	request := campaignRequest(campaign)
-	if request.MaxTTFTP95MS != nil {
-		return *request.MaxTTFTP95MS
-	}
-	return 0
+	return lab.FirstTokenLimitMS(request.Objective, request.MaxTTFTP95MS)
 }
 
 func campaignTPOTSLO(campaign domain.OptimizationCampaign) float64 {
@@ -397,6 +441,25 @@ func campaignTPOTSLO(campaign domain.OptimizationCampaign) float64 {
 		return *request.MaxTPOTP95MS
 	}
 	return 0
+}
+
+// maxMeasuredConcurrency is the most requests at once a campaign measures with
+// when its proposal names the load: four times the overload profile's 128.
+const maxMeasuredConcurrency = 512
+
+// measuredConcurrency is the load a campaign measures with when its proposal
+// names one (target_concurrency, rounded up to whole requests), or 0 for its
+// benchmark profile's. A campaign is then measured at the load it was planned
+// for, and a band study can run one campaign per load from the same proposal.
+func measuredConcurrency(request optimizer.Request) (int, error) {
+	if request.TargetConcurrency == nil {
+		return 0, nil
+	}
+	at := math.Ceil(*request.TargetConcurrency)
+	if at < 1 || at > maxMeasuredConcurrency {
+		return 0, fmt.Errorf("a campaign measures 1 to %d requests at once, not %g", maxMeasuredConcurrency, *request.TargetConcurrency)
+	}
+	return int(at), nil
 }
 
 func campaignRequest(campaign domain.OptimizationCampaign) optimizer.Request {

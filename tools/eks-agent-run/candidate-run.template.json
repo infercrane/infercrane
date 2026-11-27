@@ -1,0 +1,37 @@
+{
+  "endpoint": "@@ENDPOINT_NAME@@",
+  "label": "vLLM interactive profile",
+  "model": "@@MODEL@@",
+  "model_revision": "@@MODEL_REVISION@@",
+  "workload": {
+    "image": "@@VLLM_IMAGE@@",
+    "command": [
+      "vllm", "serve", "${MODEL}", "--revision", "${MODEL_REVISION}",
+      "--host", "0.0.0.0", "--port", "${PORT}",
+      "--max-model-len", "@@MAX_MODEL_LEN@@",
+      "--gpu-memory-utilization", "@@GPU_MEMORY_FRACTION@@",
+      "--enable-prefix-caching"
+    ],
+    "protocol": "openai",
+    "port": 8000,
+    "readiness_path": "/health",
+    "models_path": "/v1/models",
+    "metrics_path": "/metrics",
+    "cancellation": "http-disconnect",
+    "drain": "connection",
+    "shutdown_grace_seconds": 30
+  },
+  "runtime_args": ["--max-num-batched-tokens", "2048"],
+  "accelerator": "@@GPU_PRODUCT@@",
+  "gpu_count": 1,
+  "load": {
+    "requests": @@LOAD_REQUESTS@@,
+    "concurrency": @@LOAD_CONCURRENCY@@,
+    "input_tokens": @@LOAD_INPUT_TOKENS@@,
+    "output_tokens": @@LOAD_OUTPUT_TOKENS@@,
+    "streaming": true,
+    "tokenizer": "@@MODEL@@"
+  },
+  "quality": {"eval_set": "default"},
+  "timeout_seconds": @@CANDIDATE_TIMEOUT_SECONDS@@
+}

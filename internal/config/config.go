@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/pricing"
 	"github.com/infercrane/infercrane/internal/provision"
@@ -22,6 +23,7 @@ import (
 
 type Config struct {
 	DatabaseURL, ControlURL, Host, APIKey, RouterBinary, AIPerfBinary, PassportSigningKeyFile, InstanceID, Environment    string
+	ReplayPromptCorpusFile                                                                                                string
 	TLSCertFile, TLSKeyFile, TLSClientCAFile, ClientTLSCertFile, ClientTLSKeyFile, ClientTLSCAFile                        string
 	AsyncEncryptionKey, AsyncEncryptionKeyReference                                                                       string
 	CredentialEncryptionKey, CredentialEncryptionKeyReference                                                             string
@@ -63,6 +65,9 @@ type Config struct {
 	KubernetesWorkerSecretName, KubernetesWorkerSecretKey, KubernetesImageDigest                                string
 	KubernetesGPUResource, KubernetesGPUProductLabel, KubernetesImageCachePolicy, KubernetesArtifactCachePolicy string
 	KubernetesArtifactPVCs                                                                                      map[string]string
+	// KubernetesEngineIngress names the only sources that may reach an engine
+	// pod (engineingress.Parse), or "none".
+	KubernetesEngineIngress string
 	// KubernetesObjectStoreSecret optionally names a Secret whose keys become
 	// the environment of the container that fetches imported S3 or GCS files;
 	// the fetch images override the pinned AWS and Google Cloud CLI images.
@@ -177,9 +182,15 @@ func loadClientContext(contextName string, requireCredential bool) (Config, erro
 	} else {
 		contextName = "default"
 	}
-	controlURL := selected.URL
+	controlURL, savedConsole := selected.URL, selected.ConsoleURL
 	if value := os.Getenv("INFERCRANE_URL"); value != "" {
 		controlURL = value
+		// A context's saved dashboard belongs to its own control plane. Another
+		// control plane named in INFERCRANE_URL, such as a local stack, gets no
+		// link from it, so a local run never points at the hosted dashboard.
+		if strings.TrimRight(value, "/") != strings.TrimRight(selected.URL, "/") {
+			savedConsole = ""
+		}
 	}
 	if controlURL == "" {
 		controlURL = "http://127.0.0.1:8080"
@@ -188,7 +199,7 @@ func loadClientContext(contextName string, requireCredential bool) (Config, erro
 	if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return Config{}, fmt.Errorf("InferCrane URL must be absolute HTTP(S) without credentials, query, or fragment")
 	}
-	consoleURL, err := ResolveConsoleURL(controlURL, selected.ConsoleURL)
+	consoleURL, err := ResolveConsoleURL(controlURL, savedConsole)
 	if err != nil {
 		return Config{}, err
 	}
@@ -557,6 +568,7 @@ func load(requireAPIKey bool) (Config, error) {
 		APIKey:                              env("INFERCRANE_API_KEY", ""),
 		RouterBinary:                        env("INFERCRANE_ROUTER_BINARY", "vllm-router"),
 		AIPerfBinary:                        env("INFERCRANE_AIPERF_BINARY", "aiperf"),
+		ReplayPromptCorpusFile:              env("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", ""),
 		PassportSigningKeyFile:              env("INFERCRANE_PASSPORT_SIGNING_KEY_FILE", ""),
 		InstanceID:                          env("INFERCRANE_INSTANCE_ID", hostname),
 		Environment:                         env("INFERCRANE_ENV", "development"),
@@ -652,6 +664,7 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesGPUProductLabel:           env("INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL", "nvidia.com/gpu.product"),
 		KubernetesImageCachePolicy:          env("INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY", "prefer"),
 		KubernetesArtifactCachePolicy:       env("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY", "prefer"),
+		KubernetesEngineIngress:             env("INFERCRANE_KUBERNETES_ENGINE_INGRESS", ""),
 		KubernetesArtifactPVCs:              kubernetesArtifactPVCs,
 		KubernetesObjectStoreSecret:         env("INFERCRANE_KUBERNETES_OBJECT_STORE_SECRET", ""),
 		KubernetesS3FetchImage:              env("INFERCRANE_KUBERNETES_S3_FETCH_IMAGE", ""),
@@ -704,6 +717,13 @@ func load(requireAPIKey bool) (Config, error) {
 	if config.ManagedDeploymentsEnabled && config.RunPodAPIKey == "" {
 		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires RUNPOD_API_KEY")
 	}
+	// Managed capacity runs other workspaces' workloads, and their own images,
+	// on the operator's RunPod account. Each must be started with a credential
+	// scoped to it; without the derivation key the only credential left to give
+	// a worker would be the control-plane API key.
+	if config.ManagedDeploymentsEnabled && config.WorkerCredentialKey == "" {
+		return Config{}, fmt.Errorf("INFERCRANE_MANAGED_DEPLOYMENTS_ENABLED requires INFERCRANE_WORKER_CREDENTIAL_KEY")
+	}
 	if err := validateOperatorComputeTenants(config); err != nil {
 		return Config{}, err
 	}
@@ -740,6 +760,9 @@ func load(requireAPIKey bool) (Config, error) {
 	}
 	if config.HealthInterval <= 0 || config.UpstreamTimeout <= 0 || config.ShutdownTimeout <= 0 || config.RequestRetention <= 0 {
 		return Config{}, fmt.Errorf("timeouts must be positive")
+	}
+	if config.ReplayPromptCorpusFile != "" && !filepath.IsAbs(config.ReplayPromptCorpusFile) {
+		return Config{}, errors.New("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE must be an absolute path")
 	}
 	if config.GPUPriceSyncInterval != 0 && (config.GPUPriceSyncInterval < time.Minute || config.GPUPriceSyncInterval > 24*time.Hour) {
 		return Config{}, fmt.Errorf("INFERCRANE_GPU_PRICE_SYNC_SECONDS must be 0 or between 60 and 86400")
@@ -1253,6 +1276,13 @@ func validateKubernetes(config Config) error {
 	}
 	if config.KubernetesImageCachePolicy != "prefer" && config.KubernetesImageCachePolicy != "required" {
 		return errors.New("INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY must be prefer or required")
+	}
+	// Engine pods take traffic only from the sources the operator names; the
+	// choice is required, and "none" is an explicit one.
+	if config.KubernetesWorkloadAPI == "deployment" {
+		if _, _, err := engineingress.Parse(config.KubernetesEngineIngress); err != nil {
+			return fmt.Errorf("INFERCRANE_KUBERNETES_ENGINE_INGRESS: %w; name the control plane's pods (pods:<label>=<value>) or address ranges that may reach engine pods, or set none", err)
+		}
 	}
 	if config.KubernetesArtifactCachePolicy != "disabled" && config.KubernetesArtifactCachePolicy != "prefer" && config.KubernetesArtifactCachePolicy != "required" {
 		return errors.New("INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY must be disabled, prefer, or required")

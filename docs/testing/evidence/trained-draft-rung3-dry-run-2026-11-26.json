@@ -1,0 +1,36 @@
+{
+ "date": "2026-11-26",
+ "rules": "tools/trained-draft/rules-rung3-l4-qwen3-8b-2026-11-26.md",
+ "sleep_mode": {
+  "failed_requests": 0,
+  "sleeps": 46,
+  "wakes": 44
+ },
+ "smoke_passed": true,
+ "tasks": {
+  "arms": [
+   "none",
+   "published",
+   "trained"
+  ],
+  "items": 40
+ },
+ "train_passed": true,
+ "verdict": {
+  "pass_bar": {
+   "headline_trained_vs_none_at_1": "pass: the trained draft is faster than none and the task score held",
+   "headline_trained_vs_none_at_32": "pass: the trained draft is faster than none and the task score held",
+   "published_vs_none_at_1": "faster (+41.2%, noise floor 6.3%)",
+   "published_vs_none_at_32": "faster (+38.1%, noise floor 4.8%)",
+   "quality_published_vs_none": "held",
+   "quality_trained_vs_none": "held",
+   "trained_beats_published_at_1": "not shown (+51.1% against +41.2% over none; floors 10.9% and 6.3%)",
+   "trained_beats_published_at_32": "yes (+52.8% against +38.1% over none; floors 3.1% and 4.8%)",
+   "trained_vs_none_at_1": "faster (+51.1%, noise floor 10.9%)",
+   "trained_vs_none_at_32": "faster (+52.8%, noise floor 3.1%)",
+   "training_report": "valid"
+  },
+  "report_valid": true
+ },
+ "what": "Rung 3 dry run ($0, laptop) of plan l4-qwen3-8b: stand-in servers in place of vLLM (configured speeds; no number is a measurement) that refuse requests while asleep; real oasst1 prompts; real speculators prepare-data and train --dry-run --from-pretrained RedHatAI/Qwen3-8B-speculator.eagle3 on the real Qwen3-8B; the real judge."
+}

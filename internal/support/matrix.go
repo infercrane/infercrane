@@ -13,13 +13,28 @@ import (
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
-const SGLangRuntimeVersion = "0.5.12"
+// SGLangRuntimeVersion is the SGLang release new revisions run.
+// LegacySGLangRuntimeVersion is the release pinned before it, kept only for
+// revisions that record it (see ImageLegacy).
+const (
+	SGLangRuntimeVersion       = "0.5.23"
+	LegacySGLangRuntimeVersion = "0.5.12"
+)
 
-// RuntimeImage is one pinned build of a built-in runtime for one accelerator
-// platform. Every platform of a runtime runs the same engine version, so the
-// engine's flags and defaults are the same on every GPU it serves. Digests
-// were read from the registry's manifest for Tag; a tag can move, the digest
-// cannot.
+// Image statuses. A current image is what a revision of its runtime runs when
+// it names no version, and what new setups are planned on. A legacy image is
+// an older release kept pinned only for revisions that record its version, so
+// a deployment never changes engine when it scales, heals, or rolls back.
+const (
+	ImageCurrent = "current"
+	ImageLegacy  = "legacy"
+)
+
+// RuntimeImage is one pinned build of a built-in runtime release for one
+// accelerator platform. Every platform of a release runs the same engine
+// version, so the engine's flags and defaults are the same on every GPU it
+// serves. Digests were read from the registry's manifest for Tag; a tag can
+// move, the digest cannot.
 type RuntimeImage struct {
 	Runtime       string `json:"runtime"`
 	Platform      string `json:"platform"`
@@ -31,27 +46,60 @@ type RuntimeImage struct {
 	// Targets are the GPU compiler targets the image is built for; empty for
 	// the CUDA images, which cover every CUDA GPU the engine supports.
 	Targets []string `json:"targets,omitempty"`
+	// Status is ImageCurrent or ImageLegacy.
+	Status string `json:"status"`
+	// Note says why a legacy image is still pinned and how revisions leave it.
+	Note string `json:"note,omitempty"`
 }
 
+// legacySGLangNote is shown with every SGLang 0.5.12 image.
+const legacySGLangNote = "Kept only for revisions that record SGLang 0.5.12; move with a revision on SGLang " + SGLangRuntimeVersion + ", which Stay optimized proposes as an engine release."
+
+// legacyVLLMNote is shown with every vLLM 0.22.1 image.
+const legacyVLLMNote = "Kept only for revisions that record vLLM 0.22.1; move with a revision on vLLM " + DefaultRuntimeVersion + ", which Stay optimized proposes as an engine release."
+
 var runtimeImages = []RuntimeImage{
-	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformCUDA, EngineVersion: DefaultRuntimeVersion,
-		Image: "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7", Tag: "vllm/vllm-openai:v0.22.1", Stack: "CUDA 13.0.2"},
+	// vLLM 0.34.0 (tag commit 62d4bc3c): the CUDA image is a manifest list for
+	// amd64 and arm64 built on CUDA 13.0.2; the ROCm image is an amd64 OCI
+	// index labelled rocm100 (ROCm SDK 10.0.0 and AITER v0.1.28.post1 in the
+	// tag's docker/Dockerfile.rocm_base), built for gfx90a, gfx942, and gfx950.
+	// Both read from registry-1.docker.io on 2026-11-26.
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformCUDA, EngineVersion: DefaultRuntimeVersion, Status: ImageCurrent,
+		Image: "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1", Tag: "vllm/vllm-openai:v0.34.0", Stack: "CUDA 13.0.2"},
 	// One vLLM ROCm image serves both CDNA generations: its PyTorch and AITER
 	// builds list gfx942 and gfx950.
-	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX942, EngineVersion: DefaultRuntimeVersion,
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX942, EngineVersion: DefaultRuntimeVersion, Status: ImageCurrent,
+		Image: "vllm/vllm-openai-rocm@sha256:3cb773d23f063afa86291ef75773cdd486154ddea94c213300f4ed7cc42b7af1", Tag: "vllm/vllm-openai-rocm:v0.34.0", Stack: "ROCm 10.0.0, AITER v0.1.28.post1", Targets: []string{"gfx942", "gfx950"}},
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX950, EngineVersion: DefaultRuntimeVersion, Status: ImageCurrent,
+		Image: "vllm/vllm-openai-rocm@sha256:3cb773d23f063afa86291ef75773cdd486154ddea94c213300f4ed7cc42b7af1", Tag: "vllm/vllm-openai-rocm:v0.34.0", Stack: "ROCm 10.0.0, AITER v0.1.28.post1", Targets: []string{"gfx942", "gfx950"}},
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformCUDA, EngineVersion: LegacyVLLMRuntimeVersion, Status: ImageLegacy, Note: legacyVLLMNote,
+		Image: "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7", Tag: "vllm/vllm-openai:v0.22.1", Stack: "CUDA 13.0.2"},
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX942, EngineVersion: LegacyVLLMRuntimeVersion, Status: ImageLegacy, Note: legacyVLLMNote,
 		Image: "vllm/vllm-openai-rocm@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031", Tag: "vllm/vllm-openai-rocm:v0.22.1", Stack: "ROCm 7.2.2, AITER v0.1.13", Targets: []string{"gfx942", "gfx950"}},
-	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX950, EngineVersion: DefaultRuntimeVersion,
+	{Runtime: DefaultRuntime, Platform: provideridentity.PlatformROCmGFX950, EngineVersion: LegacyVLLMRuntimeVersion, Status: ImageLegacy, Note: legacyVLLMNote,
 		Image: "vllm/vllm-openai-rocm@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031", Tag: "vllm/vllm-openai-rocm:v0.22.1", Stack: "ROCm 7.2.2, AITER v0.1.13", Targets: []string{"gfx942", "gfx950"}},
-	{Runtime: "sglang", Platform: provideridentity.PlatformCUDA, EngineVersion: SGLangRuntimeVersion,
+	// SGLang 0.5.23 (tag commit 297e54fd): the CUDA image is a manifest list
+	// for amd64 and arm64 on CUDA 13.0.3, the same digest as the -cu130 tag;
+	// SGLang builds one ROCm image per CDNA generation, here on ROCm 7.2 like
+	// the 0.5.12 pin (rocm724 and rocm10 builds also exist), with AITER
+	// 285579b6 and SGLANG_USE_AITER=1 in the image. Read from
+	// registry-1.docker.io on 2026-11-26.
+	{Runtime: "sglang", Platform: provideridentity.PlatformCUDA, EngineVersion: SGLangRuntimeVersion, Status: ImageCurrent,
+		Image: "lmsysorg/sglang:v0.5.23@sha256:f832b5c39559c9caa900b22ad37c76fcce66470676855c42052102c537812f1f", Tag: "lmsysorg/sglang:v0.5.23", Stack: "CUDA 13.0.3"},
+	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX942, EngineVersion: SGLangRuntimeVersion, Status: ImageCurrent,
+		Image: "lmsysorg/sglang:v0.5.23-rocm720-mi30x@sha256:a3a6eb293187b20012a5abc8f00423e6ab51d0169113a6e58a91da5614200170", Tag: "lmsysorg/sglang:v0.5.23-rocm720-mi30x", Stack: "ROCm 7.2, AITER 285579b6", Targets: []string{"gfx942"}},
+	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX950, EngineVersion: SGLangRuntimeVersion, Status: ImageCurrent,
+		Image: "lmsysorg/sglang:v0.5.23-rocm720-mi35x@sha256:1f45d56fa6708a62a74fdf4211616fb0d57c336131b45729d2646c6db309eff6", Tag: "lmsysorg/sglang:v0.5.23-rocm720-mi35x", Stack: "ROCm 7.2, AITER 285579b6", Targets: []string{"gfx950"}},
+	{Runtime: "sglang", Platform: provideridentity.PlatformCUDA, EngineVersion: LegacySGLangRuntimeVersion, Status: ImageLegacy, Note: legacySGLangNote,
 		Image: "lmsysorg/sglang:v0.5.12@sha256:42194170546745092e74cd5f81ad32a7c6e944c7111fe7bf13588152277ff356", Tag: "lmsysorg/sglang:v0.5.12", Stack: "CUDA 13"},
-	// SGLang builds one ROCm image per CDNA generation (mi30x, mi35x).
-	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX942, EngineVersion: SGLangRuntimeVersion,
+	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX942, EngineVersion: LegacySGLangRuntimeVersion, Status: ImageLegacy, Note: legacySGLangNote,
 		Image: "lmsysorg/sglang:v0.5.12-rocm720-mi30x@sha256:1f5c080be74269393bdc07d2cb30127dd2931c45b0b53e448235fb14d854da63", Tag: "lmsysorg/sglang:v0.5.12-rocm720-mi30x", Stack: "ROCm 7.2, AITER a6bb4993", Targets: []string{"gfx942"}},
-	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX950, EngineVersion: SGLangRuntimeVersion,
+	{Runtime: "sglang", Platform: provideridentity.PlatformROCmGFX950, EngineVersion: LegacySGLangRuntimeVersion, Status: ImageLegacy, Note: legacySGLangNote,
 		Image: "lmsysorg/sglang:v0.5.12-rocm720-mi35x@sha256:3be1556105cdfdede103dc053f002d4d0307bdb229d0e15bfef130d5c53af208", Tag: "lmsysorg/sglang:v0.5.12-rocm720-mi35x", Stack: "ROCm 7.2, AITER a6bb4993", Targets: []string{"gfx950"}},
 }
 
-// RuntimeImages returns every pinned built-in runtime image.
+// RuntimeImages returns every pinned built-in runtime image, current and
+// legacy.
 func RuntimeImages() []RuntimeImage {
 	out := make([]RuntimeImage, len(runtimeImages))
 	for index, image := range runtimeImages {
@@ -61,37 +109,139 @@ func RuntimeImages() []RuntimeImage {
 	return out
 }
 
-// RuntimePlatforms lists the platforms a built-in runtime has an image for,
-// in catalog order. A runtime without built-in images returns nil.
+// CurrentRuntimeImages returns the images new setups are planned on.
+func CurrentRuntimeImages() []RuntimeImage {
+	var out []RuntimeImage
+	for _, image := range RuntimeImages() {
+		if image.Status == ImageCurrent {
+			out = append(out, image)
+		}
+	}
+	return out
+}
+
+// NormalizeRuntimeVersion trims a recorded engine version to the form the
+// image catalog uses: "v0.34.0" and " 0.34.0" both read as "0.34.0".
+func NormalizeRuntimeVersion(version string) string {
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
+}
+
+// CurrentRuntimeVersion is the engine release a built-in runtime runs when a
+// revision names none; "" for a runtime without built-in images.
+func CurrentRuntimeVersion(runtime string) string {
+	return defaultEngineVersion(defaultRuntime(strings.TrimSpace(runtime)))
+}
+
+// RuntimeVersions lists the pinned engine releases of a built-in runtime, the
+// current one first; nil for a runtime without built-in images.
+func RuntimeVersions(runtime string) []string {
+	runtime = defaultRuntime(strings.TrimSpace(runtime))
+	var out []string
+	if current := defaultEngineVersion(runtime); current != "" {
+		out = append(out, current)
+	}
+	for _, image := range runtimeImages {
+		if image.Runtime == runtime && !slices.Contains(out, image.EngineVersion) {
+			out = append(out, image.EngineVersion)
+		}
+	}
+	return out
+}
+
+// PinnedImage is the image of one built-in runtime release on one platform.
+// An empty version is the runtime's current release.
+func PinnedImage(runtime, version, platform string) (RuntimeImage, bool) {
+	runtime = defaultRuntime(strings.TrimSpace(runtime))
+	if version = NormalizeRuntimeVersion(version); version == "" {
+		version = defaultEngineVersion(runtime)
+	}
+	for _, image := range runtimeImages {
+		if image.Runtime == runtime && image.EngineVersion == version && image.Platform == platform {
+			image.Targets = slices.Clone(image.Targets)
+			return image, true
+		}
+	}
+	return RuntimeImage{}, false
+}
+
+// RuntimePlatforms lists the platforms a built-in runtime's current release
+// has an image for, in catalog order. A runtime without built-in images
+// returns nil.
 func RuntimePlatforms(runtime string) []string {
 	var out []string
 	for _, image := range runtimeImages {
-		if image.Runtime == defaultRuntime(strings.TrimSpace(runtime)) {
+		if image.Runtime == defaultRuntime(strings.TrimSpace(runtime)) && image.Status == ImageCurrent {
 			out = append(out, image.Platform)
 		}
 	}
 	return out
 }
 
-// RuntimeWorkload is a built-in runtime's contract on one platform. It
-// reports false when the runtime has no image for that platform.
-func RuntimeWorkload(runtime, platform string) (runtimecontract.Workload, bool) {
+// ValidateRuntimeVersion refuses a built-in runtime release InferCrane has
+// not pinned, and, with a GPU, one that has no image for the GPU's platform.
+// Without this, a revision naming another release would run the pinned
+// image while recording a version it does not run. An empty version is the
+// current release; runtimes without built-in images (custom-oci) are not
+// checked.
+func ValidateRuntimeVersion(runtime, version, gpu string) error {
 	runtime = defaultRuntime(strings.TrimSpace(runtime))
-	for _, image := range runtimeImages {
-		if image.Runtime != runtime || image.Platform != platform {
-			continue
-		}
-		var workload runtimecontract.Workload
-		switch runtime {
-		case DefaultRuntime:
-			workload = vllmContract()
-		case "sglang":
-			workload = sglangContract()
-		}
-		workload.Image = image.Image
-		return workload, true
+	versions := RuntimeVersions(runtime)
+	if len(versions) == 0 {
+		return nil
 	}
-	return runtimecontract.Workload{}, false
+	if version = NormalizeRuntimeVersion(version); version == "" {
+		version = versions[0]
+	}
+	if !slices.Contains(versions, version) {
+		return fmt.Errorf("runtime %s %s is not pinned; pinned releases: %s", runtime, boundedVersion(version), strings.Join(versions, ", "))
+	}
+	if strings.TrimSpace(gpu) == "" {
+		return nil
+	}
+	if err := RefuseNotQualified(gpu); err != nil {
+		return err
+	}
+	platform := provideridentity.AcceleratorPlatform(gpu)
+	if _, ok := PinnedImage(runtime, version, platform); !ok {
+		return fmt.Errorf("runtime %s %s has no pinned image for %s (platform %s)", runtime, version, gpu, platform)
+	}
+	return nil
+}
+
+// boundedVersion echoes only a short, plain version string.
+func boundedVersion(version string) string {
+	if len(version) > 32 || strings.ContainsFunc(version, func(r rune) bool {
+		return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '.' || r == '-' || r == '+')
+	}) {
+		return "(not a version)"
+	}
+	return version
+}
+
+// RuntimeWorkload is a built-in runtime's contract for its current release
+// on one platform. It reports false when that release has no image for the
+// platform.
+func RuntimeWorkload(runtime, platform string) (runtimecontract.Workload, bool) {
+	return RuntimeWorkloadFor(runtime, "", platform)
+}
+
+// RuntimeWorkloadFor is a built-in runtime release's contract on one
+// platform; an empty version is the current release.
+func RuntimeWorkloadFor(runtime, version, platform string) (runtimecontract.Workload, bool) {
+	runtime = defaultRuntime(strings.TrimSpace(runtime))
+	image, ok := PinnedImage(runtime, version, platform)
+	if !ok {
+		return runtimecontract.Workload{}, false
+	}
+	var workload runtimecontract.Workload
+	switch runtime {
+	case DefaultRuntime:
+		workload = vllmContract()
+	case "sglang":
+		workload = sglangContract()
+	}
+	workload.Image = image.Image
+	return workload, true
 }
 
 // VLLMWorkload is vLLM's contract on the default CUDA platform.
@@ -111,32 +261,43 @@ func vllmContract() runtimecontract.Workload {
 }
 
 func sglangContract() runtimecontract.Workload {
-	return runtimecontract.Workload{Command: []string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}", "--revision", "${MODEL_REVISION}", "--host", "0.0.0.0", "--port", "${PORT}"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
+	// SGLang serves /metrics only when started with --enable-metrics (0.5.12
+	// srt/entrypoints/http_server.py:302, 0.5.23 :314).
+	return runtimecontract.Workload{Command: []string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}", "--revision", "${MODEL_REVISION}", "--host", "0.0.0.0", "--port", "${PORT}", "--enable-metrics"}, Protocol: "openai", Port: 8000, ReadinessPath: "/health", ModelsPath: "/v1/models", MetricsPath: "/metrics", Cancellation: "http-disconnect", Drain: "connection", ShutdownGraceSeconds: 30}
 }
 
 // NormalizeWorkload fills the workload a revision stores. SGLang revisions
-// store their image, chosen for the GPU's platform; vLLM revisions leave it
-// empty and provisioning fills it the same way.
-func NormalizeWorkload(runtime, gpu string, workload runtimecontract.Workload) runtimecontract.Workload {
+// store the image of their release, chosen for the GPU's platform; an empty
+// version is the current release. vLLM revisions leave it empty and
+// provisioning fills it the same way.
+func NormalizeWorkload(runtime, version, gpu string, workload runtimecontract.Workload) runtimecontract.Workload {
 	if workload.Empty() && runtime == "sglang" {
-		if served, ok := RuntimeWorkload(runtime, provideridentity.AcceleratorPlatform(gpu)); ok {
+		if served, ok := RuntimeWorkloadFor(runtime, version, provideridentity.AcceleratorPlatform(gpu)); ok {
 			return served
 		}
 	}
 	return workload
 }
 
-// ServedWorkload is the runtime contract a replica actually serves. A
-// built-in runtime revision may leave its workload empty; provisioning then
-// fills in that runtime's contract for the GPU's platform (see
-// integration.RuntimeProfile.WorkloadFor). Readers that need the contract's
-// paths, such as the metrics scrape during measurement, must use this rather
-// than the stored, possibly empty draft.
+// ServedWorkload is the runtime contract a replica of the runtime's current
+// release serves. A built-in runtime revision may leave its workload empty;
+// provisioning then fills in that runtime's contract for the GPU's platform
+// (see integration.RuntimeProfile.WorkloadFor). Readers that need the
+// contract's paths, such as the metrics scrape during measurement, must use
+// this rather than the stored, possibly empty draft. Every pinned release of
+// a runtime has the same paths; a reader that needs the image uses
+// ServedWorkloadFor with the revision's version.
 func ServedWorkload(runtime, gpu string, workload runtimecontract.Workload) runtimecontract.Workload {
+	return ServedWorkloadFor(runtime, "", gpu, workload)
+}
+
+// ServedWorkloadFor is the runtime contract a replica of this release
+// serves; an empty version is the current release.
+func ServedWorkloadFor(runtime, version, gpu string, workload runtimecontract.Workload) runtimecontract.Workload {
 	if !workload.Empty() {
 		return workload
 	}
-	if served, ok := RuntimeWorkload(runtime, provideridentity.AcceleratorPlatform(gpu)); ok {
+	if served, ok := RuntimeWorkloadFor(runtime, version, provideridentity.AcceleratorPlatform(gpu)); ok {
 		return served
 	}
 	return workload
@@ -144,14 +305,17 @@ func ServedWorkload(runtime, gpu string, workload runtimecontract.Workload) runt
 
 const (
 	DefaultRuntime = "vllm"
-	// DefaultRuntimeVersion is the default vLLM runtime qualified by the public
-	// support matrix. Persist it in every revision so benchmarks and
+	// DefaultRuntimeVersion is the vLLM release new revisions run, qualified by
+	// the public support matrix. Persist it in every revision so benchmarks and
 	// explanations never depend on an implicit image default.
-	DefaultRuntimeVersion = "0.22.1"
-	DefaultCloud          = "runpod"
-	DefaultGPU            = "L40S"
-	ElasticMode           = "elastic"
-	ServerlessMode        = "serverless"
+	DefaultRuntimeVersion = "0.34.0"
+	// LegacyVLLMRuntimeVersion is the vLLM release pinned before 0.34.0. Its
+	// images stay pinned only for revisions that record it (see ImageLegacy).
+	LegacyVLLMRuntimeVersion = "0.22.1"
+	DefaultCloud             = "runpod"
+	DefaultGPU               = "L40S"
+	ElasticMode              = "elastic"
+	ServerlessMode           = "serverless"
 )
 
 // Matrix is an immutable-by-convention set of qualified runtime and
@@ -258,12 +422,16 @@ func (m Matrix) AcceleratorPlatforms() []PlatformQualification {
 }
 
 // ValidateAccelerator checks that a provisioned GPU's platform can run: the
-// built-in runtime has a pinned image for it, and the cloud and mode are
-// qualified for it. An operator-declared SkyPilot cloud runs only the default
-// CUDA platform. Attached compute (no GPU) is not checked.
+// platform is qualified, the built-in runtime has a pinned image for it, and
+// the cloud and mode are qualified for it. An operator-declared SkyPilot
+// cloud runs only the default CUDA platform. Attached compute (no GPU) is not
+// checked.
 func (m Matrix) ValidateAccelerator(runtime, cloud, mode, adapter, gpu string) error {
 	if strings.TrimSpace(gpu) == "" {
 		return nil
+	}
+	if err := RefuseNotQualified(gpu); err != nil {
+		return err
 	}
 	platform := provideridentity.AcceleratorPlatform(gpu)
 	if platforms := RuntimePlatforms(runtime); platforms != nil && !slices.Contains(platforms, platform) {

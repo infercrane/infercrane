@@ -388,6 +388,11 @@ export class ControlApi {
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
+  getWorkspaceResultMetrics(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/metrics';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
   getEndpointGPUProfile(name: string): Promise<Record<string, JsonValue>> {
     const requestPath = `/endpoints/${encodeURIComponent(name)}/gpu-profile`;
     return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
@@ -751,6 +756,36 @@ export class ControlApi {
   listMigrationVerdicts(id: string): Promise<ObjectList> {
     const requestPath = `/optimization/campaigns/${encodeURIComponent(id)}/migration-verdicts`;
     return this.transport.request('GET', requestPath) as Promise<ObjectList>;
+  }
+
+  getProofReport(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/proof-report';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  getOptimizationBandStudy(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/band-study';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  listResultRecords(): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/results';
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
+  }
+
+  importResultRecords(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/results';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  rankResultSetups(body: JsonValue): Promise<Record<string, JsonValue>> {
+    const requestPath = '/optimization/results/rank';
+    return this.transport.request('POST', requestPath, { body }) as Promise<Record<string, JsonValue>>;
+  }
+
+  getResultRecord(id: string): Promise<Record<string, JsonValue>> {
+    const requestPath = `/optimization/results/${encodeURIComponent(id)}`;
+    return this.transport.request('GET', requestPath) as Promise<Record<string, JsonValue>>;
   }
 
   getOptimizationCampaignReport(id: string): Promise<Record<string, JsonValue>> {
