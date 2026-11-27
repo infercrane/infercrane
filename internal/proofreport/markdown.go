@@ -131,6 +131,9 @@ func writeRun(b *strings.Builder, run RunView) {
 	line()
 	line("- **Answer quality:** ", md(run.Quality))
 	line("- **", md(run.Claim), "**")
+	for _, disclosure := range run.Disclosures {
+		line("  - Disclosed with this claim: ", md(disclosure))
+	}
 	line("- **", md(run.Saving), "**")
 	for _, reason := range run.Reasons {
 		line("  - ", md(upperFirst(reason)), ".")

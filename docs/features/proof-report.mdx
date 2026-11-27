@@ -28,7 +28,7 @@ For each workload (one model on one kind of traffic and GPU), and for each load 
 | Outcomes | Output per GPU, output within your limits (when the run set one), cost per 1M output tokens, time to first token at p95, and output speed per user. Each with its change, the measured noise it had to clear, and the decision. |
 | Your limits | Each limit the run was given (first-token time, time per token, failed requests, throughput), and whether each setup met it in its own measurement. |
 | Answer quality | The verdict, the scores before and after, the eval and how many prompts it had, and the rule it was read by. |
-| Claim | `shown` or `not shown`, under the shared rule below, and what a `not shown` claim lacks. |
+| Claim | `shown` or `not shown`, under the shared rule below, and what a `not shown` claim lacks. A technique's claim names the technique and carries its disclosures word for word, printed with the claim. |
 | Saving | `verified`, `not_shown`, `none`, or `in_progress`. Only a verified saving states amounts: output per GPU, cost per 1M output tokens, GPU hours for the same traffic, and, with your captured traffic volume and a recorded price, the month and the year. |
 | Evidence | The run's own signed report, by digest, with the command that checks it, and every record it rests on. |
 | Measure it again | The command that runs the same request again: same model, GPU, objective, traffic shape, load and limits. |
@@ -48,6 +48,10 @@ The report uses the one claim rule every result uses ([technique contract](/feat
   must hold within 1 point of your current setup's task score; not shown to hold is never a pass.
 - Every field a reader needs to rerun it is present: GPU, engine version, image digest, traffic shape,
   the build commit that measured it.
+- A setup a technique made carries every disclosure the technique requires, word for word: a view in
+  which it lost, a cost it showed, or how the lab runs differ from the product's. The disclosures are part of
+  the signed report. A claim without one of them is `not shown`, and so is a claim whose technique this
+  build does not know at the version that ran.
 
 A saving is then verified when, in addition, the answer-quality verdict is pass, no guard held the
 setup back (more failed requests or shorter answers), and output per GPU or cost per output token

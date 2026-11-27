@@ -31,9 +31,10 @@ func proofReportSchemas() map[string]any {
 		"before_score": maybe, "after_score": maybe, "delta": maybe,
 		"answer_rule":    map[string]any{"type": "string", "description": "How the task set was read: held_within_1_point for a setup that changes answers, within_margin otherwise."},
 		"answer_verdict": text, "servers_each": maybeInt, "reason": text})
-	claim := object([]string{"claim", "change_percent", "noise_floor_percent", "missing"}, map[string]any{
+	claim := object([]string{"claim", "change_percent", "noise_floor_percent", "missing", "disclosures"}, map[string]any{
 		"claim": map[string]any{"type": "string", "enum": []string{"shown", "not shown"}}, "technique": text, "metric": text, "change_percent": maybe, "noise_floor_percent": maybe,
-		"missing": map[string]any{"type": "array", "items": text, "description": "What a \"shown\" claim still needs, in words."}})
+		"missing":     map[string]any{"type": "array", "items": text, "description": "What a \"shown\" claim still needs, in words."},
+		"disclosures": map[string]any{"type": "array", "items": text, "description": "The sentences a technique's claim carries, word for word from its measured result; empty for a setup no technique made. Show them wherever the claim is shown."}})
 	saving := object([]string{"state", "reasons", "output_per_gpu_change_percent", "cost_per_million_change_percent", "gpu_hours_change_percent", "monthly_output_tokens", "monthly_gpu_hours_before", "monthly_gpu_hours_after", "monthly_cost_before_usd", "monthly_cost_after_usd", "monthly_saving_usd", "annual_saving_usd"}, map[string]any{
 		"state":   map[string]any{"type": "string", "enum": []string{"verified", "not_shown", "none", "in_progress"}, "description": "verified only when the claim is shown, answers passed, no guard held the setup back, and output per GPU or cost per output token improved beyond the noise; the amounts are null otherwise."},
 		"reasons": texts, "output_per_gpu_change_percent": maybe, "cost_per_million_change_percent": maybe, "gpu_hours_change_percent": maybe, "monthly_output_tokens": maybe,
