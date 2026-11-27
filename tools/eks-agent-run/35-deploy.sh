@@ -90,6 +90,14 @@ deploy_phase() {
     fi
   else
     step "1. The docs' command did not serve ($(state_get DEPLOY_DOCS_REASON)); deploying from a spec file with --max-model-len $FULL_MAX_MODEL_LEN"
+    # The failed first deploy keeps its converge operation open, and delete is
+    # refused while it is ("unresolved lifecycle operation", 27 Nov). Cancelling
+    # it rolls the never-served deployment back; delete then finds nothing.
+    local op
+    for op in $(icli operation list --limit 20 2>/dev/null | awk -v r="deployment/$DEPLOYMENT" '$3 == r && $4 !~ /^(cancelled|succeeded|failed|completed)$/ {print $1}'); do
+      icli operation cancel "$op" >>"$RUN_DIR/deploy-docs-delete.txt" 2>&1 || true
+      say "  cancelled the open operation $op"
+    done
     icli delete "$DEPLOYMENT" --yes --wait >>"$RUN_DIR/deploy-docs-delete.txt" 2>&1 || true
     local left="" until_gone=$((SECONDS + 300))
     while [ "$SECONDS" -lt "$until_gone" ]; do
