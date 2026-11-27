@@ -23,7 +23,12 @@ SOURCE_ENDPOINT=support-bot
 SOURCE_URL="http://qwen3.$NAMESPACE_MODELS.svc:8000/v1"
 EVAL_SET="$TOOL_DIR/eval/graded-arithmetic.json"
 SETUPS=${EKS_PROOF_SETUPS:-2}
-CAMPAIGN_MAX_COST_USD=5
+# The rules' cap is $5 of the rate card at the L4's list price. The rate card
+# is the GPU instance's list price (env.sh), so the cap scales with it: on the
+# A10G ($1.006 an hour in us-east-1) $5 was below the planner's sourced worst
+# case of $6.04 (27 Nov). Rate-card dollars are a test value, not money spent;
+# the cluster's own time limit bounds the real cost.
+CAMPAIGN_MAX_COST_USD=$(awk "BEGIN { printf \"%.2f\", 5 * $PRICE_GPU_INSTANCE / 0.8048 }")
 CAMPAIGN_WATCH_MINUTES=120
 
 # icli_stdin FILE ARGS… runs the CLI in the control plane's pod with FILE as
