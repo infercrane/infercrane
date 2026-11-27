@@ -71,6 +71,28 @@ export INFERCRANE_KUBERNETES_ENGINE_INGRESS='pods:app.kubernetes.io/name=infercr
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
 
+### Keys for stored credentials
+
+A self-hosted control plane stores some credentials itself, such as the key of a server you connect
+with `infercrane connect --token-env`. It needs two keys for that, set as separate random values:
+
+| Variable | What it is for |
+|---|---|
+| `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` | Encrypts the credentials the control plane stores: a connected server's key, compute connections, and notification destinations. Without it, `infercrane connect --manage-traffic --token-env` fails with "cannot store server credentials". |
+| `INFERCRANE_WORKER_CREDENTIAL_KEY` | The master key from which the control plane derives each deployment's own worker credential where the provider supports one. The encryption key requires it. |
+
+Each must be at least 32 bytes. The control plane does not start with either key shorter than that,
+or with the encryption key set and the worker key missing. Generate them without a trailing newline:
+
+```bash
+export INFERCRANE_CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32 | tr -d '\n')"
+export INFERCRANE_WORKER_CREDENTIAL_KEY="$(openssl rand -hex 32 | tr -d '\n')"
+```
+
+If you keep them in files for a Kubernetes Secret, write each with `printf '%s'`, as for the worker
+key above. Keep the encryption key stable: a credential stored under another key fails closed until
+it is stored again.
+
 ### Who can reach engine pods
 
 With the `deployment` workload API, `INFERCRANE_KUBERNETES_ENGINE_INGRESS` is required: it names the

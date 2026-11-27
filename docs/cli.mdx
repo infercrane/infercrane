@@ -965,8 +965,9 @@ Use `--model` when the endpoint exposes more than one physical model. Use `--man
 when the endpoint has been qualified and should immediately enter the InferCrane logical route.
 For a server started with an API key, `--token-env VAR` sends the key held in `VAR` once; the control
 plane stores it encrypted and uses it for discovery, health checks, and, with `--manage-traffic`,
-the requests it routes to the server (this needs
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane). `connect` refuses a loopback URL when
+the requests it routes to the server (this needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and
+`INFERCRANE_WORKER_CREDENTIAL_KEY`, each at least 32 bytes, on the control plane: see
+[keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials)). `connect` refuses a loopback URL when
 the control plane runs elsewhere, because the control plane would probe its own machine; use the
 agent for that server.
 The advanced ownership-compatible command remains available:

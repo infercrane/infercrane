@@ -28,6 +28,11 @@ gateway; InferCrane records only their timing and token counts. The candidates' 
 check's requests to the closed API cost money: approve the run's spend cap before it starts.
 </Warning>
 
+On a self-hosted control plane, `connect --token-env` stores the key encrypted. That needs
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and `INFERCRANE_WORKER_CREDENTIAL_KEY`, each at least 32
+bytes, on the control plane: see
+[keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials).
+
 ## 1. Measure your current API
 
 Connect the closed API as a traffic-managed endpoint and point your application at InferCrane's

@@ -712,7 +712,8 @@ and the last characters of the path. To rotate the secret, delete the destinatio
 result, and every destination shows its last delivery. A failed delivery is retried after 30
 seconds, then four times longer each time up to an hour, at most six attempts; a 4xx response other
 than 429 is final. A workspace can have ten destinations. Destinations need
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane; without it the routes return
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, and with it `INFERCRANE_WORKER_CREDENTIAL_KEY`, on the
+control plane; without the encryption key the routes return
 `503 capability_unavailable`. Listing needs read access; changing and testing need an admin.
 
 `infercrane inbox` lists the same waiting runs with the next command to run.
