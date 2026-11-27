@@ -40,10 +40,10 @@ Every inference vendor says it's fast. InferCrane shows it on your traffic. It r
 or SGLang servers you already have, on a laptop, a Kubernetes cluster or a cloud account, and every
 change goes through the same four steps:
 
-1. **Side by side on one machine.** Your current setup runs first and last, next to the candidate
-   and an identical copy of itself, so noise is measured in the same window instead of assumed. Two
-   H100s differed by 13% to 18% in InferCrane's own measurements, so setups are never compared
-   across machines.
+1. **Measured against your current setup.** Setups take turns under the same traffic, and a copy of
+   your current setup is measured the same way, so the run knows its own noise instead of assuming
+   it. When setups run on separate servers, every comparison also carries an allowance for the
+   difference between machines.
 2. **Again on fresh servers.** A gain counts only when it holds on machines that didn't produce it.
 3. **Answers checked.** The candidate answers a graded task set. A setup that changes answers must
    hold within 1 point, or it is refused, however fast it is.
@@ -68,6 +68,8 @@ server's results.
 |---|---|---|
 | A speculation draft trained on chat traffic served **54% more output** at one request at a time and **13% more** at 32 at once, with answers held within 1 point. The published community draft served 41% and 6% more. ([receipt](docs/features/trained-drafts.mdx)) | Qwen3-8B with FP8 weights on one NVIDIA H100, confirmed on a second H100; vLLM 0.34.0; 26 Nov 2026 | Lab-proven, coming to InferCrane. The trainer image and prompt capture aren't built yet |
 | On an NVIDIA L4 at 32 requests at once, both drafts were **slower** than no speculation (−3% and −7%), so speculation stays off there. ([receipt](docs/features/trained-drafts.mdx)) | Qwen3-8B FP8 on two L4s; vLLM 0.34.0 | Measured. This is why every result is per GPU and per load |
+| The model publisher's documented speculation setting served **32.1% more output** than its plain command at 32 requests at once, and **33.1% more** on two fresh servers. A copy of the current setup measured −0.1% and was rejected as no measurable difference. p95 time to first token was 31.4% worse on the fresh servers. ([receipt](docs/testing/qwen38-27b-fp8-h100-campaign-2026-11-23.md)) | Qwen3.8-27B FP8, one NVIDIA H100 per setup, short real-text chat; 23 Nov 2026 | Measured by the product's judge; proposed, not activated |
+| FP8 weights with an FP8 KV cache served **62% to 159% more output** than vLLM's defaults, but scored 85.07% against 86.17% on 1,000 graded tasks (−1.10 points, interval −2.20 to −0.002), so the change was **refused**. ([receipt](docs/testing/qwen3-8b-fp8-l4-confirmation-2026-11-26.md); published FP8 checkpoints: [receipt](docs/testing/qwen3-8b-fp8-checkpoints-l4-2026-11-26.md)) | Qwen3-8B on NVIDIA L4, three fresh servers per setup; vLLM 0.34.0; 26 Nov 2026 | Refused by the run's rules, written before it started; InferCrane's 1-point rule reads it the same way |
 | A September screen measured **1.72×** from one speculation setting, on synthetic prompts that repeat one sentence. Re-run on real text with three fresh servers per setup, the same change ranged from 22% slower to 68% faster, and the publisher's documented setup was faster than September's in every case. ([receipt](docs/testing/qwen38-27b-fp8-h200-rerun-2026-11-23.md)) | Qwen3.8-27B FP8 on NVIDIA H200; vLLM 0.34.0 and SGLang 0.5.20; 23 Nov 2026 | **Withdrawn** and re-measured |
 
 What the trained-draft result does and doesn't cover:
