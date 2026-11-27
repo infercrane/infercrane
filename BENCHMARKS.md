@@ -50,6 +50,52 @@ A change InferCrane reports now is measured on the customer's traffic against th
 confirmed again on fresh servers, and, when it changes answers, checked on a scored task set: see
 [optimization](docs/features/optimization.mdx) and [semantic quality](docs/features/semantic-quality.mdx).
 
+## Qwen3.8-27B — a speculation setting confirmed on fresh H100s by the product's judge
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-23 |
+| Model | `Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81` |
+| Runtime | vLLM 0.34.0 |
+| Accelerator | 1× NVIDIA H100 SXM5 80GB per setup |
+| Workload | The first 100 rows of the Mooncake trace, scaled to short chat, real text, 32 requests at once, reasoning on |
+| Evidence level | Product campaign: a first window, a second window on two fresh servers, and a copy of the current setup |
+| Control | The publisher's vLLM command, plus `--max-num-seqs 512` so it starts on one H100 |
+| Confirmed | The publisher's documented speculation option: multi-token prediction, 3 draft tokens |
+
+InferCrane's campaign judge measured the speculation option at +32.1% output tokens per second in
+its first window and +33.1% on two fresh H100s; a copy of the current setup came out −0.1% and was
+rejected as no measurable difference. Each setup had its own H100, taking turns with the current
+setup's. On the fresh servers p95 time to first token regressed by 31.4%. The answer check was a
+word-overlap guard on 24 short prompts, not a quality score. See the
+[campaign's receipt](docs/testing/qwen38-27b-fp8-h100-campaign-2026-11-23.md).
+
+## Qwen3-8B — FP8 on one L4, refused on answers
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-26 |
+| Model | `Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218` |
+| Runtime | vLLM 0.34.0 |
+| Accelerator | 1× NVIDIA L4 per server, three fresh servers per setup |
+| Workload | Short chat at 16 and 64, long context at 4 and 16, long output at 16; a 1,000-item task set (GSM8K and MMLU) |
+| Evidence level | Confirmation run in the test harness, rules committed before any server |
+| Control | vLLM's defaults |
+| Candidates | FP8 weights, and FP8 weights with an FP8 KV cache, both quantized at load |
+
+FP8 weights with an FP8 KV cache served 62.1% to 158.7% more output tokens per second than the
+defaults in every cell, and scored 1.10 points lower on the task set (interval −2.20 to −0.002);
+FP8 weights alone were 48.2% to 110.8% faster and 1.37 points lower. By the rules a setup that is
+worse on the task set is confirmed nowhere, so neither was confirmed. See the
+[run's receipt](docs/testing/qwen3-8b-fp8-l4-confirmation-2026-11-26.md).
+
+A second run checked two published FP8 checkpoints of the same model on answers only, three fresh
+L4s per setup: an FP8 checkpoint that also quantizes the KV cache scored 1.33 points lower than the
+original (interval −2.57 to −0.10), and the model publisher's FP8 checkpoint scored the same, 85.77%
+against 85.77% (interval −1.03 to +1.03), which InferCrane's 1-point rule reads as not shown to hold
+within 1 point. Its speed is not part of that run. See the
+[checkpoints' receipt](docs/testing/qwen3-8b-fp8-checkpoints-l4-2026-11-26.md).
+
 ## Reading InferCrane evidence
 
 InferCrane distinguishes modeled proposals, screening measurements, qualification evidence, and

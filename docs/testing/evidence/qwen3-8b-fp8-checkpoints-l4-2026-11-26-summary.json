@@ -1,0 +1,66 @@
+{
+ "published": {
+  "note": "Published 2026-11-27 from the run's own files. Local paths are anonymised as <evidence> and <corpus>; answer texts, request rows and call ids are removed (see 'removed'). The harness (tools/fast-track-map) is on an unreleased branch, so this records what ran, not a reproduction script in this release.",
+  "original_file": "summary.json",
+  "original_sha256": "bdaf6c646d4091fbe3289ef510729bfca6b4ad29c5df4e6d606bbe71122593d4",
+  "removed": [
+   "source: a local path, anonymised as <evidence>",
+   "the name of the third-party checkpoint's publisher in its setup id (published as l4-8b-fp8-ckpt-fp8-kv)"
+  ],
+  "rules": {
+   "file": "tools/fast-track-map/rules-l4-qwen3-8b-fp8-ckpt-confirm-2026-11-26.md",
+   "sha256": "a5d9ad334902be7537381c90f3e65f2e34dc4e28e69b64a1b4f07a2d7526fb1b",
+   "commit": "c0af74e7048382c93e066021f330016d45484e28"
+  }
+ },
+ "schema": "infercrane.fast-track-l4-confirm-summary/v1",
+ "plan": "l4-qwen3-8b-fp8-ckpt-confirm",
+ "rules": "rules-l4-qwen3-8b-fp8-ckpt-confirm-2026-11-26.md",
+ "source": "<evidence>",
+ "servers": {
+  "l4-8b-defaults": [
+   1,
+   2,
+   3
+  ],
+  "l4-8b-fp8-ckpt-fp8-kv": [
+   1,
+   2,
+   3
+  ],
+  "l4-8b-fp8-ckpt-qwen": [
+   1,
+   2,
+   3
+  ]
+ },
+ "cells": {},
+ "tasks": {
+  "l4-8b-fp8-ckpt-fp8-kv": {
+   "baseline_score": 0.85767,
+   "setup_score": 0.84433,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 71,
+   "items_only_setup_right": 48,
+   "difference": -0.01333,
+   "low": -0.02567,
+   "high": -0.00099,
+   "verdict": "worse",
+   "items": 1000
+  },
+  "l4-8b-fp8-ckpt-qwen": {
+   "baseline_score": 0.85767,
+   "setup_score": 0.85767,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 34,
+   "items_only_setup_right": 45,
+   "difference": 0.0,
+   "low": -0.01034,
+   "high": 0.01034,
+   "verdict": "no measurable difference",
+   "items": 1000
+  }
+ }
+}
