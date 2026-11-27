@@ -3,6 +3,46 @@
 This evidence was captured on 2026-08-23 from the private AWS BYOC qualification in
 `eu-central-1`. It is release qualification, not a public performance comparison.
 
+## EKS customer install on one A10G, 27 Nov 2026
+
+The customer's install, end to end, on a real GPU Kubernetes cluster: Amazon EKS 1.36
+(`v1.36.5-eks-91f89a9`) in `us-east-1`, one `g5.xlarge` in `us-east-1f` (NVIDIA A10G, 23028 MiB,
+EKS AL2023 NVIDIA AMI `1.36.5-20261119`, driver 580.178.04, CUDA 13.0) and one `m7g.xlarge` system
+node. Rules: `tools/eks-agent-run/rules-2026-11-26.md`; full record with every check line:
+[eks-customer-install-a10g-2026-11-27.json](./evidence/eks-customer-install-a10g-2026-11-27.json).
+It proves a path on one GPU and measures no speed.
+
+The rules named the NVIDIA L4 (`g6.xlarge`). AWS refused it in every zone of `eu-central-1` (26 Nov,
+192 answers) and `us-east-1` (26 and 27 Nov), so the A10G fallback ran, and the record qualifies the
+A10G tuple only.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Device plugin and GPU feature discovery, control plane on the bootstrap's Role, `doctor --kubernetes` | Pass |
+| 2 | The docs' `infercrane deploy Qwen/Qwen3-8B --cloud kubernetes --gpu NVIDIA-A10G` | **Fail**: no context length; vLLM needs 5.62 GiB of KV cache for 40960 tokens, 3.72 GiB free. From a spec file with `--max-model-len 8192`: served in 5 minutes |
+| 3 | The engine's `NetworkPolicy` enforced | Pass |
+| 4 | Gateway: 20 of 20 answered (5 streamed); unknown key 401 | Pass |
+| 5 | `infercrane delete` leaves nothing | Pass |
+| 6 | Agent Helm release with the executor | Pass |
+| 7 | Agent path: discovery, data plane 7 of 7, 401, hosted gateway 403; candidate run 96/96 in three passes, answer check PASS | Pass |
+| 8 | Migration: connect, 60 of 60 through the gateway, capture, eval set, campaign qualified, PASS verdict | Pass, with deviations |
+| 9 | Fresh-server confirmation | Not exercised: no setup showed a gain |
+| 10 | 5% canary: 10 of 200 reached the deployment | Pass |
+| 11 | Rollback: 60 of 60, none to the deployment | Pass |
+| 12 | Uninstall leaves nothing but the agent's hashing-key Secret (kept on purpose) | Pass |
+| 13 | Teardown: nothing billable left | Pass |
+
+Deviations beyond the rules' five (control plane in the cluster, memory limit on every shared-GPU
+server, one GPU time-sliced four ways, test prices, two models): the spec-file deploy above;
+`optimize propose --include-simulated`, because the catalog marks Kubernetes with vLLM as simulated;
+only `kubernetes`-adapter setups kept, because the planner also proposed a `kubernetes-dynamo` one;
+the approval cap scaled with the A10G's rate card ($6.25); and the eval set graded by answer line,
+because Qwen3-0.6B's "32 + 30 = 62." scored 0 of 40 under exact match on both sides.
+
+Failures of the test tool, fixed on the live cluster and recorded: a database password and a server
+token written with a trailing newline, and a control plane without the credential keys `connect`
+needs. The cluster lived 2.43 hours, at most $3.14 at list price.
+
 ## Complete Mistral matrix and bounded concurrency sweep on A10G
 
 Run `20260823T195259Z-07efd96-aws-mistral-a10g` exercised the pinned

@@ -1,0 +1,561 @@
+{
+  "schema": "infercrane.real-cluster-qualification/v1",
+  "date": "2026-11-27",
+  "what": "One end-to-end qualification of the customer install on a real GPU Kubernetes cluster: install, deploy, serve, agent path, migration campaign, 5% canary and rollback, uninstall, teardown. A path proof on one GPU; it measures no speed.",
+  "rules": {
+    "file": "tools/eks-agent-run/rules-2026-11-26.md",
+    "written_in": "eae81cff",
+    "changed_before_any_cluster": [
+      "38d7ecb9 (us-east-1 added)",
+      "a6d7c307 (g5.xlarge A10G fallback added)"
+    ],
+    "changed_during_the_run": [
+      "051dd7c2 (deviation 6: eval set graded by answer line)"
+    ]
+  },
+  "code": {
+    "infercrane_image": {
+      "built_from": "72f08b2900da",
+      "digest": "sha256:a322442f1d2d1c425d861efe53435c713c8c5e01f498e3c430af80b8026732d8",
+      "registry": "private ECR repository of the test, us-east-1, deleted in teardown"
+    },
+    "launch": "2ef495e0",
+    "phases_final": "051dd7c2",
+    "note": "The three commits differ only in tools/eks-agent-run (and docs); the product code is the same in all of them."
+  },
+  "tuple": {
+    "kubernetes": "Amazon EKS 1.36 (server v1.36.5-eks-91f89a9, platform eks.19)",
+    "region": "us-east-1",
+    "gpu_zone": "us-east-1f",
+    "gpu_node": {
+      "instance_type": "g5.xlarge",
+      "gpu": "NVIDIA A10G 24 GB (23028 MiB visible)",
+      "architecture": "amd64",
+      "ami": "AL2023_x86_64_NVIDIA 1.36.5-20261119",
+      "os_image": "Amazon Linux 2023.12.20261118",
+      "kernel": "6.18.62-127.179.amzn2023.x86_64",
+      "kubelet": "v1.36.5-eks-9adbfea",
+      "container_runtime": "containerd://2.3.7+unknown",
+      "nvidia_driver": "580.178.04",
+      "cuda": "13.0",
+      "capacity": "on demand, through an on-demand capacity reservation made first (cr-0e5759ebc638b2aa1, open match)"
+    },
+    "system_node": {
+      "instance_type": "m7g.xlarge",
+      "architecture": "arm64",
+      "ami": "AL2023_ARM_64_STANDARD 1.36.5-20261119"
+    },
+    "network": "VPC CNI with enableNetworkPolicy=true (NetworkPolicy enforced); no NAT gateway; nodes in public subnets",
+    "gpu_software": "NVIDIA device plugin chart 0.20.2 with GPU feature discovery; unshared first (label NVIDIA-A10G), then time-slicing in 4 (label NVIDIA-A10G-SHARED)",
+    "control_plane": "infercrane serve + PostgreSQL 17 in infercrane-system, bootstrapped with deploy/kubernetes/base/*.yaml unchanged; engine ingress pods:app=infercrane",
+    "agent": "deploy/helm/infercrane-agent with the executor, namespace models",
+    "engine": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1 (vLLM 0.34.0, CUDA 13.0.2, TORCH_CUDA_ARCH_LIST 7.5 8.0 8.6 8.9 9.0 10.0 12.0)",
+    "models": {
+      "whole_gpu": "Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218",
+      "shared_gpu": "Qwen/Qwen3-0.6B@c1899de289a04d12100db370d81485cdf75e47ca, every server at --gpu-memory-utilization 0.22 --max-model-len 4096"
+    },
+    "not_the_l4": "The qualified tuple named the NVIDIA L4 (g6.xlarge). AWS refused it in every zone of eu-central-1 and us-east-1 on 26 and 27 Nov; this run qualifies the A10G tuple and says nothing about the L4."
+  },
+  "capacity": [
+    "26 Nov 13:28-18:59 CET eu-central-1 a/b/c: g6.xlarge refused 192 times (InsufficientInstanceCapacity), $0",
+    "26 Nov 19:14-19:36 CET us-east-1 a/b/c/d/f: g6.xlarge refused 25 times; 19:41 attempt refused by the tool as too late for the sign-in (exit 8), $0",
+    "26 Nov 19:47 CET us-east-1 a/b/c/d/f: g5.xlarge probe refused 5 times, $0",
+    "27 Nov 13:25:48 CET round 1: g6.xlarge and g5.xlarge refused in all us-east-1 zones",
+    "27 Nov 13:31:39 CET round 2: g6.xlarge refused; g5.xlarge granted in us-east-1f at 13:32:14"
+  ],
+  "timeline_cet": [
+    "13:25:48 launch (EKS_PROOF_GPU_ORDER=g6.xlarge g5.xlarge, us-east-1, sign-in until 2026-11-28 01:05)",
+    "13:32:14 A10G reserved in us-east-1f; deadline 18:32:01, deleting begins 17:57:01; watchdog started",
+    "13:46:41 cluster ready; 13:47:28 launch exit 0",
+    "13:48:01 30-install: control plane crash loop (tool: database password with a trailing newline); fixed live 13:58",
+    "13:59:15 30-install passed",
+    "14:29:26 35-deploy: the docs' deploy never served (vLLM: 40960-token context does not fit a 24 GB GPU); 14:38 delete refused while the deploy's operation was open, cancelled",
+    "14:46:51 35-deploy passed with a spec-file deploy (--max-model-len 8192)",
+    "14:53:18 40-run: discovery failed (tool: server token with a trailing newline); fixed live 14:57",
+    "15:01:02 40-run checks all passed (exit 6 from the earlier attempt's line)",
+    "15:01:55 45-migrate: connect refused (no credential encryption key in the tool's control plane); keys added 15:03-15:10 (control plane down 15:03-15:10, a by-hand render without the AWS account)",
+    "15:11:47 45-migrate: no setups proposed (Kubernetes+vLLM is simulated in the catalog); --include-simulated, Dynamo setups dropped",
+    "15:14:04 45-migrate: approval refused at $5 (worst case $6.04 at the A10G rate card); approved at $6.25",
+    "15:22:20 45-migrate: campaign inconclusive (eval set exact_match scored 0 of 40 on both sides)",
+    "15:24:31-15:36:54 45-migrate passed: campaign qualified in 6 minutes, PASS verdict, 5% canary, rollback",
+    "15:37:49 60-uninstall passed; 15:39:50 50-collect done",
+    "15:39:50-15:57:41 90-delete; clean check: nothing billable of this test is left in us-east-1",
+    "15:58:24 watchdog ended (no cluster recorded)"
+  ],
+  "criteria": [
+    {
+      "n": 1,
+      "name": "Operator install",
+      "result": "pass",
+      "after": "tool fix 5838870a (database password newline)",
+      "evidence": "doctor --kubernetes PASS; node labelled NVIDIA-A10G, 1 nvidia.com/gpu"
+    },
+    {
+      "n": 2,
+      "name": "Deploy with the docs' command",
+      "result": "fail",
+      "evidence": "deploy_ready fail: vLLM 0.34.0 takes Qwen3-8B's 40960 tokens, needs 5.62 GiB of KV cache, 3.72 GiB free; the pod restarted for 30 minutes. infercrane deploy has no flag for runtime arguments.",
+      "with_deviation": "pass: the same model from a spec file with --max-model-len 8192 served in 5 minutes with a Deployment, a Service and a NetworkPolicy"
+    },
+    {
+      "n": 3,
+      "name": "Policy enforced",
+      "result": "pass",
+      "evidence": "control-plane-labelled pod HTTP 200 from /health; app=np-outsider pod cannot connect"
+    },
+    {
+      "n": 4,
+      "name": "Gateway",
+      "result": "pass",
+      "evidence": "20 of 20 answered 200 with a complete answer (5 streamed); unknown key 401"
+    },
+    {
+      "n": 5,
+      "name": "Delete",
+      "result": "pass",
+      "evidence": "infercrane delete finished; no Deployment, Service, NetworkPolicy or pod left"
+    },
+    {
+      "n": 6,
+      "name": "Agent install",
+      "result": "pass",
+      "evidence": "Helm release with the executor ready"
+    },
+    {
+      "n": 7,
+      "name": "Agent path",
+      "result": "pass",
+      "after": "tool fix 621ea5c0 (server token newline)",
+      "evidence": "discovery, agent-managed data plane 7 of 7 requests, 401, hosted gateway 403 residency_error; candidate run succeeded, three passes of 96/96, answer check PASS, nothing left"
+    },
+    {
+      "n": 8,
+      "name": "Migration",
+      "result": "pass",
+      "after": "deviations 7-10 and tool fix 4d6d09ae",
+      "evidence": "support-bot connected, 60/60 through the gateway, capture and eval set accepted, campaign 1cdc9b5dd864bd83475d980040966662 qualified, PASS verdict d11f060e2e9c0b73980f4296d4abd707"
+    },
+    {
+      "n": 9,
+      "name": "Fresh-server confirmation",
+      "result": "not exercised",
+      "evidence": "no setup showed a gain, so none was re-measured; not counted as passed"
+    },
+    {
+      "n": 10,
+      "name": "Canary",
+      "result": "pass",
+      "evidence": "migrate canary --percent 5 admitted; 10 of 200 reached the deployment, 190 the customer's server, all 200"
+    },
+    {
+      "n": 11,
+      "name": "Rollback",
+      "result": "pass",
+      "evidence": "after migrate rollback 60 of 60 answered 200, none reached the deployment"
+    },
+    {
+      "n": 12,
+      "name": "Uninstall",
+      "result": "pass",
+      "evidence": "nothing of InferCrane left, namespaced or cluster-wide, except the agent's hashing-key Secret (kept on purpose)"
+    },
+    {
+      "n": 13,
+      "name": "Teardown",
+      "result": "pass",
+      "evidence": "90-delete.sh: nothing billable of this test is left in us-east-1; region counts at baseline"
+    }
+  ],
+  "deviations": [
+    "1-5 (rules, decided before the run): control plane in the cluster; every shared-GPU server at --gpu-memory-utilization 0.22 --max-model-len 4096; one GPU time-sliced four ways (servers share it, no measurement is comparable); test prices (rate card = list price of the whole instance; source contract $1.00/$8.00 per million tokens); two models",
+    "6 (during the run): eval set v2 graded answer_line instead of exact_match",
+    "7: Qwen3-8B deployed from a spec file with --max-model-len 8192 after the docs' command failed",
+    "8: optimize propose with --include-simulated (the catalog marks Kubernetes+vLLM simulated)",
+    "9: only kubernetes-adapter setups kept (the planner also proposed a kubernetes-dynamo setup; no Dynamo in the cluster)",
+    "10: campaign approval cap scaled with the GPU's rate card: $6.25 on the A10G (rules: $5 at the L4 price)"
+  ],
+  "tool_fixes_during_the_run": {
+    "5838870a": "database password written without a newline",
+    "4428b909": "deploy from a spec file when the docs' command cannot serve; wait stops at 3 restarts",
+    "66e18b09": "cancel the never-served deploy's open operation before delete",
+    "621ea5c0": "customer server token written without a newline",
+    "4d6d09ae": "control plane gets INFERCRANE_CREDENTIAL_ENCRYPTION_KEY and INFERCRANE_WORKER_CREDENTIAL_KEY",
+    "a56c46d9": "--include-simulated and kubernetes-adapter setups only",
+    "098c8466": "approval cap scales with the GPU's rate card",
+    "051dd7c2": "eval set graded by answer line; verdicts read as a list; campaign key names the eval set"
+  },
+  "findings_for_partners": [
+    "The docs' `infercrane deploy Qwen/Qwen3-8B --cloud kubernetes --gpu NVIDIA-L4|NVIDIA-A10G` cannot serve on a 24 GB GPU (no context bound; vLLM needs 5.62 GiB KV for 40960 tokens), and `infercrane deploy` has no flag for runtime arguments; a spec file with --max-model-len works.",
+    "A deploy that never becomes ready keeps its operation open; `infercrane delete` is refused until `infercrane operation cancel ID`.",
+    "A self-hosted control plane needs INFERCRANE_CREDENTIAL_ENCRYPTION_KEY and INFERCRANE_WORKER_CREDENTIAL_KEY for `infercrane connect --token-env`; docs/integrations/kubernetes.mdx and docs/features/migration.mdx do not say so.",
+    "`optimize propose --provider kubernetes` proposes nothing without --include-simulated: internal/integration/catalog.go marks Kubernetes+vLLM QualificationSimulated.",
+    "With --include-simulated the planner also proposes kubernetes-dynamo setups whether or not Dynamo is installed.",
+    "The agent does not say why it does not register a server it found but judged unhealthy; only 'server is not registered with this agent' rejections appear.",
+    "docs/integrations/kubernetes.mdx:44-50: the worker-key file must not end with a newline (engines compare the key exactly); the docs do not say how to write it."
+  ],
+  "cost": {
+    "cluster_lifetime_hours": 2.43,
+    "list_price_bound_usd": 3.14,
+    "counted_with_allowance_usd": 3.24,
+    "budget_usd": 10,
+    "aws_billed_usd": "unknown (not yet in the bill)",
+    "rates_usd_per_hour": "EKS 0.10, g5.xlarge 1.006, m7g.xlarge 0.1632, 2 public IPv4 0.01, 130 GB gp3 0.0142, ECR 0.0004"
+  },
+  "not_claimed": "No speed, throughput, latency, cost-per-token or quality claim. Nothing about the L4, other clouds, Kubernetes services, GPU types, models or engines than the tuple above. The campaign's servers shared one GPU, so its numbers are not comparable measurements.",
+  "checks": [
+    {
+      "at": "2026-11-27T12:59:19Z",
+      "check": "deploy_accepted",
+      "result": "pass",
+      "detail": "deploy accepted: endpoint qwen3-8b, runtime vllm, provider kubernetes"
+    },
+    {
+      "at": "2026-11-27T13:29:22Z",
+      "check": "deploy_ready",
+      "result": "fail",
+      "detail": "qwen3-8b is unavailable after 30 minutes"
+    },
+    {
+      "at": "2026-11-27T13:39:36Z",
+      "check": "deploy_spec_accepted",
+      "result": "pass",
+      "detail": "deploy from a spec file with --max-model-len 8192 accepted: endpoint qwen3-8b, runtime vllm, provider kubernetes"
+    },
+    {
+      "at": "2026-11-27T13:45:04Z",
+      "check": "deploy_spec_ready",
+      "result": "pass",
+      "detail": "qwen3-8b is serving after 5 minutes"
+    },
+    {
+      "at": "2026-11-27T13:45:11Z",
+      "check": "engine_policy_present",
+      "result": "pass",
+      "detail": "NetworkPolicy beside the Deployment: networkpolicy.networking.k8s.io/infercrane-be2c98c5468bc022713cc772"
+    },
+    {
+      "at": "2026-11-27T13:45:17Z",
+      "check": "engine_reachable_from_control",
+      "result": "pass",
+      "detail": "a pod labelled app=infercrane gets HTTP 200 from http://infercrane-be2c98c5468bc022713cc772.infercrane-system.svc:8000/health"
+    },
+    {
+      "at": "2026-11-27T13:45:30Z",
+      "check": "engine_policy_enforced",
+      "result": "pass",
+      "detail": "a pod labelled app=np-outsider cannot connect to http://infercrane-be2c98c5468bc022713cc772.infercrane-system.svc:8000/health"
+    },
+    {
+      "at": "2026-11-27T13:46:26Z",
+      "check": "gateway_serves",
+      "result": "pass",
+      "detail": "20 of 20 answered 200 with a complete answer (5 streamed)"
+    },
+    {
+      "at": "2026-11-27T13:46:26Z",
+      "check": "gateway_refuses_unknown_key",
+      "result": "pass",
+      "detail": "an unknown key gets HTTP 401"
+    },
+    {
+      "at": "2026-11-27T13:46:38Z",
+      "check": "deploy_deleted",
+      "result": "pass",
+      "detail": "infercrane delete finished"
+    },
+    {
+      "at": "2026-11-27T13:46:50Z",
+      "check": "deploy_objects_gone",
+      "result": "pass",
+      "detail": "no Deployment, Service, NetworkPolicy or pod of it is left"
+    },
+    {
+      "at": "2026-11-27T13:47:09Z",
+      "check": "gpu_shared",
+      "result": "pass",
+      "detail": "node ip-192-168-13-199.ec2.internal: 4 nvidia.com/gpu, product label NVIDIA-A10G-SHARED"
+    },
+    {
+      "at": "2026-11-27T13:49:11Z",
+      "check": "helm_install",
+      "result": "pass",
+      "detail": "release agent installed in models; agent ready"
+    },
+    {
+      "at": "2026-11-27T13:53:15Z",
+      "check": "discovery",
+      "result": "fail",
+      "detail": "endpoint qwen3-eks was not registered within 4 minutes (HTTP 404)"
+    },
+    {
+      "at": "2026-11-27T13:57:29Z",
+      "check": "gpu_shared",
+      "result": "pass",
+      "detail": "node ip-192-168-13-199.ec2.internal: 4 nvidia.com/gpu, product label NVIDIA-A10G-SHARED"
+    },
+    {
+      "at": "2026-11-27T13:57:46Z",
+      "check": "helm_install",
+      "result": "pass",
+      "detail": "release agent installed in models; agent ready"
+    },
+    {
+      "at": "2026-11-27T13:57:48Z",
+      "check": "discovery",
+      "result": "pass",
+      "detail": "endpoint qwen3-eks registered by the agent"
+    },
+    {
+      "at": "2026-11-27T13:57:48Z",
+      "check": "agent_detail",
+      "result": "pass",
+      "detail": "agent detail read"
+    },
+    {
+      "at": "2026-11-27T13:57:50Z",
+      "check": "agent_managed",
+      "result": "pass",
+      "detail": "endpoint made agent-managed"
+    },
+    {
+      "at": "2026-11-27T13:57:50Z",
+      "check": "residency",
+      "result": "pass",
+      "detail": "endpoint residency is customer-cloud"
+    },
+    {
+      "at": "2026-11-27T13:58:10Z",
+      "check": "data_plane_first",
+      "result": "pass",
+      "detail": "first request served by the agent: 16 prompt and 48 completion tokens, 193 characters"
+    },
+    {
+      "at": "2026-11-27T13:58:13Z",
+      "check": "data_plane_requests",
+      "result": "pass",
+      "detail": "6 of 6 requests served (3 streamed)"
+    },
+    {
+      "at": "2026-11-27T13:58:14Z",
+      "check": "data_plane_unknown_key",
+      "result": "pass",
+      "detail": "an unknown key gets HTTP 401"
+    },
+    {
+      "at": "2026-11-27T13:58:14Z",
+      "check": "hosted_gateway_refuses",
+      "result": "pass",
+      "detail": "the control plane's own gateway refuses the endpoint (HTTP 403 residency_error)"
+    },
+    {
+      "at": "2026-11-27T13:58:15Z",
+      "check": "candidate_queued",
+      "result": "pass",
+      "detail": "candidate run 2f5379746986a88e2c44c6b4efb73e7d queued (96 requests, 4 at once, 512 in, 128 out)"
+    },
+    {
+      "at": "2026-11-27T14:00:58Z",
+      "check": "candidate_finished",
+      "result": "pass",
+      "detail": "candidate run succeeded in 2 minutes"
+    },
+    {
+      "at": "",
+      "check": "measured_control",
+      "result": "pass",
+      "detail": "96 of 96 requests succeeded with aiperf 0.12.0"
+    },
+    {
+      "at": "",
+      "check": "measured_candidate",
+      "result": "pass",
+      "detail": "96 of 96 requests succeeded with aiperf 0.12.0"
+    },
+    {
+      "at": "",
+      "check": "measured_control_after",
+      "result": "pass",
+      "detail": "96 of 96 requests succeeded with aiperf 0.12.0"
+    },
+    {
+      "at": "",
+      "check": "answer_check",
+      "result": "pass",
+      "detail": "verdict PASS, score 1 over 24 prompts"
+    },
+    {
+      "at": "",
+      "check": "candidate_cleaned_up",
+      "result": "pass",
+      "detail": "cleaned_up=True, ready after 82.397 s"
+    },
+    {
+      "at": "2026-11-27T14:00:59Z",
+      "check": "candidate_objects_gone",
+      "result": "pass",
+      "detail": "no candidate Deployment or Service is left in models"
+    },
+    {
+      "at": "2026-11-27T14:01:50Z",
+      "check": "source_connected",
+      "result": "fail",
+      "detail": "ode\":\"client_error\",\"message\":\"https://infercrane.infercrane-system.svc:8443 cannot store server credentials. Keep the key on the server's machine instead:\\n SOURCE_TOKEN=... infercrane agent run --server http://qwen3.models.svc:8000/v1 --token-env SOURCE_TOKEN\",\"remediation\":\"Correct the command or check the current state before retrying.\",\"retryable\":false}}"
+    },
+    {
+      "at": "",
+      "check": "command terminated with exit code 2",
+      "result": "",
+      "detail": ""
+    },
+    {
+      "at": "2026-11-27T14:10:43Z",
+      "check": "source_connected",
+      "result": "pass",
+      "detail": "support-bot connected: { \"adoption\": { \"binding_id\": \"3b8c74fd709730b3d17d64d0c9ffe497\", \"id\": \"d81afbddf0885b613dcf50d8ea4ffe6e\", \"immutable_identity\": \"sha256:46ab95d3527ca4d3c08bb2005c6577b3f766665d8fbfb5e0bff9bc576f289c53\", \"ownership_mode\": \"traffic-managed\", \"source\": \"openai-compatible\", \""
+    },
+    {
+      "at": "2026-11-27T14:11:37Z",
+      "check": "source_gateway_traffic",
+      "result": "pass",
+      "detail": "60 of 60 requests for support-bot answered 200 through the gateway"
+    },
+    {
+      "at": "2026-11-27T14:11:38Z",
+      "check": "source_captured",
+      "result": "pass",
+      "detail": "workload fingerprint sha256:1cd686aecdd7cfe6df586b344baf3489cef9bcd4d3a64e7d08b8c87926709eb2"
+    },
+    {
+      "at": "2026-11-27T14:11:43Z",
+      "check": "eval_set_uploaded",
+      "result": "pass",
+      "detail": "graded eval set sha256:c64906d8ce5c88bbdb181d8702359a9fc12850b4d67f62238b517a772281b9d0 (40 prompts, exact_match)"
+    },
+    {
+      "at": "2026-11-27T14:13:54Z",
+      "check": "source_gateway_traffic",
+      "result": "pass",
+      "detail": "60 of 60 requests for support-bot answered 200 through the gateway"
+    },
+    {
+      "at": "2026-11-27T14:13:55Z",
+      "check": "source_captured",
+      "result": "pass",
+      "detail": "workload fingerprint sha256:1cd686aecdd7cfe6df586b344baf3489cef9bcd4d3a64e7d08b8c87926709eb2"
+    },
+    {
+      "at": "2026-11-27T14:13:56Z",
+      "check": "eval_set_uploaded",
+      "result": "pass",
+      "detail": "graded eval set sha256:c64906d8ce5c88bbdb181d8702359a9fc12850b4d67f62238b517a772281b9d0 (40 prompts, exact_match)"
+    },
+    {
+      "at": "2026-11-27T14:15:55Z",
+      "check": "source_gateway_traffic",
+      "result": "pass",
+      "detail": "60 of 60 requests for support-bot answered 200 through the gateway"
+    },
+    {
+      "at": "2026-11-27T14:15:55Z",
+      "check": "source_captured",
+      "result": "pass",
+      "detail": "workload fingerprint sha256:1cd686aecdd7cfe6df586b344baf3489cef9bcd4d3a64e7d08b8c87926709eb2"
+    },
+    {
+      "at": "2026-11-27T14:15:57Z",
+      "check": "eval_set_uploaded",
+      "result": "pass",
+      "detail": "graded eval set sha256:c64906d8ce5c88bbdb181d8702359a9fc12850b4d67f62238b517a772281b9d0 (40 prompts, exact_match)"
+    },
+    {
+      "at": "2026-11-27T14:15:57Z",
+      "check": "campaign_started",
+      "result": "pass",
+      "detail": "campaign b0287567890c58bd6abb4fd799b5d076 approved"
+    },
+    {
+      "at": "2026-11-27T14:22:16Z",
+      "check": "campaign_decided",
+      "result": "pass",
+      "detail": "campaign state inconclusive after 7 minutes"
+    },
+    {
+      "at": "2026-11-27T14:25:28Z",
+      "check": "source_gateway_traffic",
+      "result": "pass",
+      "detail": "60 of 60 requests for support-bot answered 200 through the gateway"
+    },
+    {
+      "at": "2026-11-27T14:25:28Z",
+      "check": "source_captured",
+      "result": "pass",
+      "detail": "workload fingerprint sha256:1cd686aecdd7cfe6df586b344baf3489cef9bcd4d3a64e7d08b8c87926709eb2"
+    },
+    {
+      "at": "2026-11-27T14:25:32Z",
+      "check": "eval_set_uploaded",
+      "result": "pass",
+      "detail": "graded eval set sha256:4685274d42eda2d5e914abcf504889fe628cfc1611fc615022a23fe42788cadf (40 prompts, exact_match)"
+    },
+    {
+      "at": "2026-11-27T14:25:36Z",
+      "check": "campaign_started",
+      "result": "pass",
+      "detail": "campaign 1cdc9b5dd864bd83475d980040966662 approved"
+    },
+    {
+      "at": "2026-11-27T14:31:55Z",
+      "check": "campaign_decided",
+      "result": "pass",
+      "detail": "campaign state qualified after 6 minutes"
+    },
+    {
+      "at": "2026-11-27T14:31:56Z",
+      "check": "migration_verdict",
+      "result": "pass",
+      "detail": "PASS verdict d11f060e2e9c0b73980f4296d4abd707"
+    },
+    {
+      "at": "2026-11-27T14:31:56Z",
+      "check": "fresh_server_confirmation",
+      "result": "unknown",
+      "detail": "no confirmation in the record: no setup showed a gain, so none was re-measured (not exercised)"
+    },
+    {
+      "at": "2026-11-27T14:31:58Z",
+      "check": "canary_admitted",
+      "result": "pass",
+      "detail": "migrate canary admitted: { \"step\": \"canary\", \"activated\": true, \"routing\": \"converged\", \"evaluation\": { \"active_serving_plan_id\": \"1e0d8efd2a6a3632597908396e2cf110\", \"candidate_serving_plan_id\": \"95e286423206046f594f3c8f15433058\", \"created_at\": \"2026-11-27T14:31:58.04296181Z\", \"decision\": \"PASS\","
+    },
+    {
+      "at": "2026-11-27T14:35:28Z",
+      "check": "canary_share",
+      "result": "pass",
+      "detail": "10 of 200 (expected about 10 at 5%) reached the deployment; 190 the customer's server"
+    },
+    {
+      "at": "2026-11-27T14:36:52Z",
+      "check": "rollback_all_to_source",
+      "result": "pass",
+      "detail": "after rollback 60 of 60 answered 200 and none reached the deployment (60 the customer's server)"
+    },
+    {
+      "at": "2026-11-27T14:37:12Z",
+      "check": "provider_objects_gone",
+      "result": "pass",
+      "detail": "no Deployment, Service, NetworkPolicy or pod made by the provider or the executor is left"
+    },
+    {
+      "at": "2026-11-27T14:37:22Z",
+      "check": "helm_uninstall_clean",
+      "result": "pass",
+      "detail": "only the hashing key Secret is left, kept on purpose so request hashes stay comparable (docs/architecture/agent.mdx); delete it by hand to remove everything"
+    },
+    {
+      "at": "2026-11-27T14:37:43Z",
+      "check": "uninstall_clean",
+      "result": "pass",
+      "detail": "no namespace, workload, policy, role, binding, account, Secret, ConfigMap, CRD or webhook of InferCrane is left"
+    }
+  ]
+}
