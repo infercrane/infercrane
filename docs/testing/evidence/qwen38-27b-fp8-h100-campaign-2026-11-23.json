@@ -31,6 +31,7 @@
   "removed": [
    "every price and cost: the rate, budgets and caps, estimated and billed spend, cost per million output tokens, the report's cost metric and monthly section, the campaign's approved spend",
    "absolute latency, time to first token and time per output token in milliseconds (turns, setups, the judge's means, the report, the planner's input signals): the rules publish no absolute latency from these campaigns because it was measured from a laptop through a tunnel; changes, noise floors and the judge's decisions are kept",
+   "the report's output tokens per second per user (the inverse of time per output token), for the same reason; its change and decision are kept",
    "Modal function-call ids, lease ids, pod names, server URLs and hostnames: replaced by server labels S0 to S5",
    "the cluster's proxy image reference (a local registry hostname) and the local control plane's deployment and revision identifiers",
    "the planner's candidate digests"
@@ -1701,12 +1702,11 @@
     "label": "Output tokens/s per user",
     "unit": "tokens_per_second",
     "higher_is_better": true,
-    "baseline": 5.926630942917171,
-    "winner": 7.376197413273552,
     "change_percent": 24.45852431706981,
     "noise_floor_percent": 33.701680531926485,
     "decision": "no_measurable_difference",
-    "basis": "interleaved_control"
+    "basis": "interleaved_control",
+    "absolute_values": "not published (measured from a laptop through a tunnel)"
    },
    {
     "key": "output_tokens_per_second_per_accelerator",
