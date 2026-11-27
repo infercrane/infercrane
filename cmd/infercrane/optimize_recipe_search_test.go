@@ -67,6 +67,25 @@ func TestApplyRecipeSearchUsesNetworkOnlyWhenAllowed(t *testing.T) {
 	if requests != 1 || len(request.ModelFeatures) != 1 {
 		t.Fatalf("metadata was not applied: requests=%d request=%+v", requests, request)
 	}
+
+	// A plan from an endpoint's diagnosis reads the pinned config the same
+	// way, so a rule that needs a declared model feature can apply; without
+	// the opt-in it stays offline. Without a diagnosis, the opt-in alone is
+	// the customer's request for setups to try (setups turns on).
+	diagnosed := optimizer.Request{ModelIdentity: "acme/model", ModelRevision: revision}
+	if err := applyRecipeSearch(context.Background(), &diagnosed, recipeSearchCatalog(t), "", "", false, true); err != nil || requests != 1 || len(diagnosed.ModelFeatures) != 0 {
+		t.Fatalf("a diagnosed plan used the network without opt-in: requests=%d request=%+v err=%v", requests, diagnosed, err)
+	}
+	opted := optimizer.Request{ModelIdentity: "acme/model", ModelRevision: revision}
+	if err := applyRecipeSearch(context.Background(), &opted, recipeSearchCatalog(t), "", "", true, false); err != nil || requests != 2 || opted.Search != optimizer.SearchSetups || len(opted.ModelFeatures) != 1 {
+		t.Fatalf("the opt-in without a diagnosis did not turn on setups: requests=%d request=%+v err=%v", requests, opted, err)
+	}
+	if err := applyRecipeSearch(context.Background(), &diagnosed, recipeSearchCatalog(t), "", "", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 || len(diagnosed.ModelFeatures) != 1 || diagnosed.ModelFeatures[0] != optimizer.FeatureNativeMTP || diagnosed.ModelConfigDigest == "" || diagnosed.Search != "" {
+		t.Fatalf("a diagnosed plan did not read the pinned config: requests=%d request=%+v", requests, diagnosed)
+	}
 }
 
 func TestFetchPublicModelConfigRejectsUnsafeIdentity(t *testing.T) {
@@ -86,7 +105,7 @@ func TestModelConfigTurnsOnSetupSearchAndEstimatorIsRejected(t *testing.T) {
 	// they never name the search.
 	request := optimizer.Request{ModelIdentity: "acme/model"}
 	err := applyRecipeSearch(context.Background(), &request, recipeSearchCatalog(t), "", filepath.Join(t.TempDir(), "config.json"), false, false)
-	if request.Search != optimizer.SearchRecipes || err == nil || !strings.Contains(err.Error(), "read model config") {
+	if request.Search != optimizer.SearchSetups || err == nil || !strings.Contains(err.Error(), "read model config") {
 		t.Fatalf("--model-config without --search: search=%q err=%v", request.Search, err)
 	}
 	request = optimizer.Request{ModelIdentity: "acme/model"}
@@ -98,7 +117,7 @@ func TestModelConfigTurnsOnSetupSearchAndEstimatorIsRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("recipe search was combined with the estimator source")
 	}
-	if !strings.Contains(err.Error(), "--search recipes") || internalMethodWording.MatchString(err.Error()) {
+	if !strings.Contains(err.Error(), "--model-config") || internalMethodWording.MatchString(err.Error()) || strings.Contains(err.Error(), "recipes") {
 		t.Fatalf("error must name the flags in customer wording: %v", err)
 	}
 }

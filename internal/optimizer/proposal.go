@@ -25,12 +25,14 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/lab"
 	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/speculator"
 	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
@@ -64,6 +66,9 @@ var objectives = map[string]string{
 	"latency":         "interactive",
 	"throughput":      "throughput",
 	"cost-efficiency": "throughput",
+	// A useful-output goal counts only requests within the first-token limit,
+	// so it plans like an interactive one.
+	lab.ObjectiveUsefulOutput: "interactive",
 }
 
 // Request is the provider-neutral optimization intent. SLO and cost fields are
@@ -94,7 +99,18 @@ type Request struct {
 	MaxCandidates         int      `json:"max_candidates"`
 	Search                string   `json:"search,omitempty"`
 	ModelFeatures         []string `json:"model_features,omitempty"`
-	ModelConfigDigest     string   `json:"model_config_digest,omitempty"`
+	// Prior, when set, lets the results store's measured cells order the
+	// diagnosis's choices and add up to two it missed (diagnosis_prior.go).
+	// It is bound by the server per call and is not part of the input.
+	Prior             PriorFunc `json:"-"`
+	ModelConfigDigest string    `json:"model_config_digest,omitempty"`
+	// ModelTokenizers is the tokenizer digest (modelcheck's TokenizerDigest)
+	// of each model a setup serves, keyed "ID@REVISION", recorded by the
+	// control plane when the proposal names more than one model. A divergence
+	// between two models is read only when both digests are recorded and
+	// equal (qualitycheck.ErrDifferentTokenizers); the planner never reads
+	// the network.
+	ModelTokenizers map[string]string `json:"model_tokenizers,omitempty"`
 	// MaxModelLen bounds the context of untuned baselines for models outside
 	// the reviewed catalog, so the runtime does not reserve KV cache for a
 	// longer context than the GPU was sized for. Reviewed profiles keep their
@@ -106,6 +122,13 @@ type Request struct {
 	// ModelAdapters is the LoRA adapter every candidate serves on the model,
 	// pinned by commit or manifest digest.
 	ModelAdapters []domain.ModelAdapter `json:"model_adapters,omitempty"`
+	// SpeculativeDrafts names drafts for exactly this model and commit: at
+	// most one trained on the customer's own traffic in their own account and
+	// one published. With a diagnosis, each becomes a setup measured against
+	// the starting setup, beside the model's own prediction head and no
+	// speculation. The records are content-free; the files stay where the
+	// customer put them.
+	SpeculativeDrafts []speculator.Draft `json:"speculative_drafts,omitempty"`
 	// QualityCheck chooses who decides whether a candidate's answers are still
 	// good enough. QualityCheckBuiltin (the default) runs InferCrane's
 	// built-in answer check against the campaign control; QualityCheckCustomer
@@ -120,6 +143,14 @@ type Request struct {
 	// by what the diagnosis says is most likely to help. The control API
 	// reads it server-side; it is bound by the input digest.
 	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
+	// StartingSetup is what the diagnosed endpoint runs now. The control API
+	// reads it with the diagnosis; it is bound by the input digest, and the
+	// plan starts from it when it can.
+	StartingSetup *StartingSetup `json:"starting_setup,omitempty"`
+	// KernelConfigs is a tuned kernel set for this GPU and engine
+	// (internal/kerneltuning). The proposal adds the starting setup with it
+	// as one candidate (TechniqueTunedKernels).
+	KernelConfigs *domain.KernelConfigSet `json:"kernel_configs,omitempty"`
 	// Migration makes the campaign a migration Proof: the closed API behind
 	// an external binding of an existing endpoint is the baseline the
 	// candidates are compared with on cost, speed, and quality. The closed
@@ -217,6 +248,10 @@ type DeploymentDraft struct {
 		// omitted when empty so existing candidate identities do not change.
 		Env      map[string]string        `json:"env,omitempty" yaml:"env,omitempty"`
 		Workload runtimecontract.Workload `json:"workload,omitzero" yaml:"workload,omitempty"`
+		// KernelConfigs is the engine's own kernels tuned for this GPU and
+		// workload (internal/kerneltuning). It is omitted when empty so
+		// existing candidate identities do not change.
+		KernelConfigs *domain.KernelConfigSet `json:"kernel_configs,omitempty" yaml:"kernel_configs,omitempty"`
 	} `json:"runtime" yaml:"runtime"`
 	Compute struct {
 		Mode string `json:"mode" yaml:"mode"`
@@ -264,14 +299,17 @@ type ModeledEvidence struct {
 // checkpoint considered by the planner. It is not measured evidence and does
 // not become qualified merely because the publisher marks it ready to deploy.
 type ArtifactSeed struct {
-	CatalogID                string   `json:"catalog_id"`
-	Publisher                string   `json:"publisher"`
-	Tool                     string   `json:"tool"`
-	ToolVersion              string   `json:"tool_version"`
-	Algorithm                string   `json:"algorithm"`
-	Format                   string   `json:"format"`
-	BaseRepository           string   `json:"base_repository"`
-	BaseRevision             string   `json:"base_revision,omitempty"`
+	CatalogID      string `json:"catalog_id"`
+	Publisher      string `json:"publisher"`
+	Tool           string `json:"tool"`
+	ToolVersion    string `json:"tool_version"`
+	Algorithm      string `json:"algorithm"`
+	Format         string `json:"format"`
+	BaseRepository string `json:"base_repository"`
+	BaseRevision   string `json:"base_revision,omitempty"`
+	// BaseScreeningRevision is the base revision the catalog screened a
+	// publisher-declared build against (the base head when it was reviewed).
+	BaseScreeningRevision    string   `json:"base_screening_revision,omitempty"`
 	LineageState             string   `json:"lineage_state"`
 	OutputRepository         string   `json:"output_repository"`
 	OutputRevision           string   `json:"output_revision"`
@@ -299,6 +337,9 @@ type Candidate struct {
 	Limitations           []string         `json:"limitations"`
 	ModeledEvidence       *ModeledEvidence `json:"modeled_evidence,omitempty"`
 	ArtifactSeed          *ArtifactSeed    `json:"artifact_seed,omitempty"`
+	// Technique names the technique-contract technique that made this
+	// setup, its version, and the artifact it serves (technique_path.go).
+	Technique *CandidateTechnique `json:"technique,omitempty"`
 	// Reason is set on every candidate of a diagnosis-ordered proposal.
 	Reason     *CandidateReason `json:"reason,omitempty"`
 	Deployment DeploymentDraft  `json:"deployment"`
@@ -378,6 +419,11 @@ func ValidateProposal(proposal Proposal) error {
 		if candidate.EvidenceState == EvidenceModeled && candidate.ModeledEvidence == nil {
 			return errors.New("modeled candidate requires modeled evidence provenance")
 		}
+		if candidate.Technique != nil {
+			if err := validateCandidateTechnique(*candidate.Technique); err != nil {
+				return err
+			}
+		}
 		if candidate.ArtifactSeed != nil {
 			if err := validateArtifactSeed(*candidate.ArtifactSeed); err != nil {
 				return err
@@ -388,6 +434,9 @@ func ValidateProposal(proposal Proposal) error {
 		}
 		if err := support.ValidateRuntimeEnv(candidate.Deployment.Runtime.Engine, candidate.Deployment.Runtime.Version, candidate.Deployment.Resources.GPU, candidate.Deployment.Runtime.Workload, candidate.Deployment.Runtime.Env); err != nil {
 			return fmt.Errorf("proposal candidate runtime env: %w", err)
+		}
+		if err := kerneltuning.ValidateForDeployment(candidate.Deployment.Runtime.KernelConfigs, candidate.Deployment.Runtime.Engine, candidate.Deployment.Runtime.Version, candidate.Deployment.Resources.GPU, candidate.Deployment.Runtime.Workload.Empty()); err != nil {
+			return fmt.Errorf("proposal candidate kernel configs: %w", err)
 		}
 		if candidate.Reason != nil {
 			if err := validateCandidateReason(*candidate.Reason); err != nil {
@@ -449,14 +498,19 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 		proposal.Input.MaxCandidates = maxProposalCandidates
 	}
 	proposal, err = s.proposeReviewed(proposal)
-	if err == nil && request.Search == SearchRecipes {
+	if err == nil && searchesSetups(request) {
 		proposal, err = s.expandRecipeSearch(proposal)
 	}
-	if err != nil || request.Diagnosis == nil {
+	if err != nil {
 		return proposal, err
 	}
-	proposal.Input = request
-	return applyDiagnosis(proposal)
+	if request.Diagnosis != nil {
+		proposal.Input = request
+		if proposal, err = applyDiagnosis(proposal); err != nil {
+			return proposal, err
+		}
+	}
+	return applyUnruledTechniques(proposal)
 }
 
 const (
@@ -587,6 +641,7 @@ func normalizeRequest(request Request) Request {
 	request.WorkloadFingerprint = strings.TrimSpace(request.WorkloadFingerprint)
 	request.QualityCheck = strings.ToLower(strings.TrimSpace(request.QualityCheck))
 	request.QualityEvalSet = strings.ToLower(strings.TrimSpace(request.QualityEvalSet))
+	request.SpeculativeDrafts = normalizeDrafts(request.SpeculativeDrafts)
 	if request.Diagnosis != nil {
 		diagnosis := normalizeDiagnosis(*request.Diagnosis)
 		request.Diagnosis = &diagnosis
@@ -655,14 +710,23 @@ func validateRequest(request Request) error {
 	if len(request.ModelSecretReferenceID) > 255 {
 		return errors.New("model_secret_reference_id must not exceed 255 characters")
 	}
+	if err := validateKernelConfigs(request); err != nil {
+		return err
+	}
 	if err := modelimport.ValidateDeployment(request.ModelIdentity, request.ModelRevision, "", "elastic", request.ModelAdapters, nil); err != nil {
 		return err
 	}
 	if err := validateSearch(request); err != nil {
 		return err
 	}
+	if err := validateModelTokenizers(request.ModelTokenizers); err != nil {
+		return err
+	}
+	if err := validateDrafts(request); err != nil {
+		return err
+	}
 	if _, ok := objectives[request.Objective]; !ok {
-		return errors.New("objective must be interactive, latency, throughput, or cost-efficiency")
+		return errors.New("objective must be interactive, latency, throughput, cost-efficiency, or useful-output")
 	}
 	if _, err := performanceprofile.Get(request.WorkloadProfile); err != nil {
 		return err
@@ -741,6 +805,14 @@ func validateRequest(request Request) error {
 	}
 	if request.Diagnosis != nil {
 		if err := validateDiagnosis(*request.Diagnosis); err != nil {
+			return err
+		}
+	}
+	if request.StartingSetup != nil {
+		if request.Diagnosis == nil {
+			return errors.New("a starting setup comes with the endpoint's diagnosis")
+		}
+		if err := validateStartingSetup(*request.StartingSetup); err != nil {
 			return err
 		}
 	}
@@ -972,7 +1044,7 @@ func checkpointCandidate(baseline Candidate, entry checkpointcatalog.Entry, publ
 	artifact := ArtifactSeed{
 		CatalogID: entry.ID, Publisher: publisher, Tool: quantization.Tool,
 		ToolVersion: quantization.ToolVersion, Algorithm: quantization.Scheme, Format: entry.Artifact.Format,
-		BaseRepository: entry.Base.Repository, BaseRevision: entry.Base.DeclaredRevision,
+		BaseRepository: entry.Base.Repository, BaseRevision: entry.Base.DeclaredRevision, BaseScreeningRevision: entry.Base.ScreeningRevision,
 		LineageState: entry.Base.Lineage, OutputRepository: entry.Repository,
 		OutputRevision: entry.Revision, ManifestDigest: entry.Artifact.ManifestDigest,
 		ModelCardDigest: entry.Artifact.ModelCardDigest, LicenseSPDX: entry.License.SPDX,
@@ -1035,6 +1107,9 @@ func validateArtifactSeed(seed ArtifactSeed) error {
 	}
 	if seed.LineageState == LineageExact && !immutableModelRevision(seed.BaseRevision) {
 		return errors.New("publisher artifact exact lineage requires an immutable base revision")
+	}
+	if seed.BaseScreeningRevision != "" && !immutableModelRevision(seed.BaseScreeningRevision) {
+		return errors.New("publisher artifact screening revision must be immutable")
 	}
 	if !immutableModelRevision(seed.OutputRevision) || !sha256Digest(seed.ManifestDigest) || !sha256Digest(seed.ModelCardDigest) || seed.LicenseDigest != "" && !sha256Digest(seed.LicenseDigest) {
 		return errors.New("publisher artifact candidate requires immutable output and manifest identity")
@@ -1405,4 +1480,33 @@ func safeName(value string) string {
 		}
 	}
 	return strings.Trim(strings.TrimSpace(b.String()), "-")
+}
+
+// maxModelTokenizers bounds model_tokenizers: the starting setup's model and
+// the published checkpoints a proposal may add.
+const maxModelTokenizers = 16
+
+var tokenizerDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+
+// validateModelTokenizers checks each entry names one model at one revision
+// and carries a sha256 tokenizer digest.
+func validateModelTokenizers(tokenizers map[string]string) error {
+	if len(tokenizers) > maxModelTokenizers {
+		return fmt.Errorf("model_tokenizers names at most %d models", maxModelTokenizers)
+	}
+	for key, digest := range tokenizers {
+		model, revision, found := strings.Cut(key, "@")
+		if !found || model == "" || revision == "" || len(key) > 512 {
+			return fmt.Errorf("model_tokenizers key %q must be MODEL@REVISION", key)
+		}
+		if !tokenizerDigestPattern.MatchString(digest) {
+			return fmt.Errorf("model_tokenizers %q must be a sha256 digest", key)
+		}
+	}
+	return nil
+}
+
+// TokenizerKey is a model's key in model_tokenizers.
+func TokenizerKey(model, revision string) string {
+	return model + "@" + revision
 }

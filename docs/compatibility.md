@@ -30,7 +30,11 @@ There is no universal “supported model” flag. Qualification is the intersect
 runtime, compute mode, runtime version, immutable model artifact, accelerator, and real evidence.
 An accelerator's platform (`cuda`, or `rocm-gfx942` and `rocm-gfx950` for
 [AMD Instinct GPUs](/integrations/amd-instinct)) decides the runtime image and is qualified per
-provider and compute mode; `GET /api/v1/catalog/accelerators` lists both:
+provider and compute mode; `GET /api/v1/catalog/accelerators` lists both. Google Cloud TPUs and
+Intel Gaudi and Arc Pro accelerators are recognized but not qualified: every spec naming one is
+refused until a measured run qualifies its platform. Their designs are
+[Google Cloud TPU](/architecture/google-tpu) and
+[Intel Gaudi and Intel GPUs](/architecture/intel-gaudi-and-gpus). Check one combination with:
 
 ```bash
 infercrane integrations --output json

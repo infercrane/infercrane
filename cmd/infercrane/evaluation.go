@@ -22,7 +22,7 @@ import (
 
 func evaluationCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: infercrane evaluation keygen|ingest|sign|verify|attach|list|set [arguments]")
+		return errors.New("usage: infercrane evaluation keygen|ingest|sign|verify|attach|list|set|divergence [arguments]")
 	}
 	switch args[0] {
 	case "set":
@@ -35,6 +35,8 @@ func evaluationCommand(ctx context.Context, args []string) error {
 		return evaluationIngestCommand(ctx, args[1:])
 	case "verify":
 		return evaluationVerifyCommand(args[1:])
+	case "divergence":
+		return evaluationDivergenceCommand(ctx, args[1:])
 	case "attach", "list":
 		cfg, err := config.LoadClient()
 		if err != nil {

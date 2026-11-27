@@ -221,7 +221,7 @@ approved optimization-campaign workflow.
 
 ## Capacity loop for marketplace traffic
 
-Optimization and autoscaling solve different problems. Recipe search runs over
+Optimization and autoscaling solve different problems. Searching setups runs over
 hours or days. Admission reacts per request, and fleet scaling reacts over
 seconds or minutes. `internal/autoscale.EvaluateCapacityEnvelope` sizes the
 fleet against four exact-workload capacity dimensions independently:
@@ -441,7 +441,7 @@ complete. The current implementation boundary is:
 |---|---|---|
 | Workload identity, replay, SLO/goodput, cost caps, immutable evidence and guarded promotion | Implemented | Control-plane workflow and qualification policy |
 | vLLM and SGLang recipe candidates, cache/precision/scheduler/topology fields | Implemented for bounded candidates | Every exact tuple still needs compatibility and measured qualification |
-| Opt-in runtime recipe search for any pinned model | Implemented for SGLang 0.5.20 on H100, H200, and B200 through pinned-image RunPod Pods | `internal/optimizer/recipe_search.go` gates arms on the pinned `config.json` and workload shape, keeps an untuned control on the same image, and leaves every arm unmeasured; the capability registry's exact-model rule is unchanged |
+| Opt-in setups to try (`--search setups`) for any pinned model | Implemented for SGLang 0.5.20 on H100, H200, and B200 through pinned-image RunPod Pods | `internal/optimizer/recipe_search.go` gates arms on the pinned `config.json` and workload shape, keeps an untuned control on the same image, and leaves every arm unmeasured; the capability registry's exact-model rule is unchanged |
 | Vendor-published checkpoints and speculators (NVIDIA, Red Hat AI, AMD, Intel/OpenVINO, Google) | Implemented as a reviewed, committed catalog with an explicit, offline-by-default sync | `internal/checkpointcatalog` is compiled into the binary; `tools/checkpoint-catalog-sync` records Hugging Face snapshots and plans a deterministic, reviewable diff. Only approved, licensed quantized checkpoints for hardware InferCrane runs seed candidates: NVIDIA Hopper and Blackwell, and the compiler targets of reviewed AMD Instinct GPUs (`gfx942`, `gfx950`), and only when a pinned runtime image meets the model card's engine version. Every entry stays unmeasured, and Intel builds are marked `unsupported_hardware` |
 | AIPerf load generation and persisted benchmark evidence | Implemented | Requires an installed runner and a reachable exact serving tuple |
 | Campaign measurement: bound Replay replay, warmup, four candidate runs each paired with the campaign control runs around it, an interval widened for the number of candidates, and a gain measured again on fresh servers for both setups before it counts, with a 0.75% difference between two machines in every interval (`campaign-interleaved-control-v3`, ranking `campaign-paired-confirmed-v6`); false wins and detection rates measured by `TestJudgeCalibration` and `TestJudgeCalibrationWithConfirmation` at the run noise and machine difference measured on eight real H100s | Implemented and hermetically qualified; machine difference measured on H100 | Machine differences are measured only for H100 on Modal with one model, runtime, and workload (0.95%, 90% upper bound 1.5%); other GPUs and providers are unmeasured, and at a 2% difference false wins are near 7.5% for four candidates. Prompt content, arrival timing, and shared-prefix length are not replayed; no real-GPU campaign has run this method yet (the 2026-11-20 H100 run used v1) |
@@ -456,7 +456,7 @@ complete. The current implementation boundary is:
 | PyTorch profiler, rocprof, XProf and Neuron Explorer capture | Executable worker contract | The shipped NVIDIA adapter captures PyTorch profiler traces; the others are declared schemas only. Capabilities are loaded from the configured worker at startup; built-in schemas are never presented as deployed capacity |
 | Generated kernels with recent-research intake | Implemented; not yet run on a GPU or against a live model | `cmd/infercrane-kernel-adapter`, `internal/kernelgen`, and `internal/kernelliterature` write drafts for reviewed operator packs and keep them only through `kernelresearch`; the first pack is residual-RMSNorm in Triton |
 | Iterative authored-kernel research and KernelBench-style evaluation | Implemented model-neutral state machine and orchestration gates | Profile-bound AutoKernel-style keep/reject loop, five correctness stages, plateau/roofline/time/iteration/cost limits, isolated build, exact-target and serving replay; generator and hardware-worker implementations still need deployment qualification |
-| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented; AMD Instinct serving implemented | Pinned ROCm vLLM 0.22.1 and SGLang 0.5.12 images deploy on MI300X, MI325X, MI350X and MI355X through RunPod Pods and Kubernetes, and the diagnosis planner applies the same rules there ([AMD Instinct GPUs](/integrations/amd-instinct)); no AMD run is recorded yet. AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron kernel candidates exist. TPU rows name the vLLM TorchTPU and vLLM JAX plugins and the Trainium row names the vLLM Neuron plugin, which replaces NxD Inference; no real-hardware product claim until the corresponding worker passes |
+| AMD ROCm, TPU and Trainium compiler/runtime paths | Planner, registry and worker contracts implemented; AMD Instinct serving implemented | Pinned ROCm vLLM 0.34.0 (and legacy 0.22.1) and SGLang 0.5.12 images deploy on MI300X, MI325X, MI350X and MI355X through RunPod Pods and Kubernetes, and the diagnosis planner applies the same rules there ([AMD Instinct GPUs](/integrations/amd-instinct)); no AMD run is recorded yet. AITER/CK/Triton-ROCm/HIP, Pallas/XLA, and NKI/Neuron kernel candidates exist. TPU rows name the vLLM TorchTPU and vLLM JAX plugins and the Trainium row names the vLLM Neuron plugin, which replaces NxD Inference; no real-hardware product claim until the corresponding worker passes |
 | Image, video and voice optimization lanes | Typed workload and qualification contracts implemented | Each run requires media shapes, immutable replay, modality quality suite and a worker-declared lane; measured suites remain tuple-specific real-infrastructure work |
 
 For the MVP, the defensible product is the locally qualified control plane plus
@@ -614,9 +614,17 @@ A proposal that names `diagnosis_endpoint` closes the loop: the control plane
 reads that assessment and a recent GPU profile summary (kernel shares, plus the
 fired findings of a v2 capture's trace analysis with their measured values and
 thresholds), binds them into the proposal input digest, and the planner's typed
-rule set (`diagnosis-technique-rules-v4` in `internal/optimizer`) keeps only the
+rule set (`diagnosis-technique-rules-v12` in `internal/optimizer`) keeps only the
 starting point and the one-change setups its rules choose, ordered by expected
-benefit with the reason recorded on each. Flags equal to the engine's resolved
+benefit with the reason recorded on each. Speculation is ranked by the cache
+room the engine's own metrics show at the diagnosed load, not by a fixed number
+of running requests
+([cache room](/features/optimization#speculation-and-cache-room)). The plan is
+made for the load the server holds when it is diagnosed: a queue time or an
+eviction rate that is a total over the hour, contradicted by the engine's
+present waiting gauge and cache use, is read as a burst that is over
+([present load](/features/optimization#plan-for-the-present-load)), and a
+request limit never exceeds the cache blocks the engine reports. Flags equal to the engine's resolved
 default are dropped, and when no rule applies only the starting point is
 measured while the plan names the evidence to collect
 ([rules](/features/optimization#choose-setups-from-the-endpoint-diagnosis)).

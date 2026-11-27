@@ -1,0 +1,246 @@
+# The InferCrane control plane run by the customer in their own cluster:
+# `infercrane serve` and its PostgreSQL in the namespace the Kubernetes docs
+# bootstrap (deploy/kubernetes/base: namespace infercrane-system, service
+# accounts infercrane-control-plane and infercrane-runtime, the provider
+# Role). 30-install.sh applies those three files unchanged first, as
+# docs/integrations/kubernetes.mdx says. Production is never used.
+#
+# It runs inside the cluster because a Kubernetes replica's address is its
+# Service's DNS name (internal/provision/kubernetes.go:203): the gateway,
+# health checks and campaign measurements reach engines only from inside.
+# The agent in the customer's namespace reaches it over HTTPS by its Service
+# name, as it would reach a control plane outside the cluster.
+#
+# 30-install.sh creates the Secrets this file names before applying it:
+#   control-plane      api-key, postgres-password (random, made on this machine)
+#   control-plane-tls  a self-signed certificate for the Service name
+#   infercrane-worker  api-key: the key engine pods require, the value the
+#                      control plane presents to them (its API key, as in
+#                      internal/testtools/poc/manifests.yaml)
+# Nothing is stored on a disk that outlives the pod, and no Service is
+# reachable from outside the cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: infercrane-kubeconfig
+  namespace: @@NAMESPACE_HOSTED@@
+data:
+  # The provider always runs kubectl with an explicit context and namespace.
+  # This kubeconfig gives it the pod's own service account token, so the
+  # control plane has exactly the bootstrap Role's permissions.
+  config: |
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: in-cluster
+        cluster:
+          server: https://kubernetes.default.svc
+          certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    users:
+      - name: control-plane
+        user:
+          tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    contexts:
+      - name: in-cluster
+        context: {cluster: in-cluster, user: control-plane, namespace: @@NAMESPACE_HOSTED@@}
+    current-context: in-cluster
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: @@NAMESPACE_HOSTED@@
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        infercrane.dev/pool: system
+      containers:
+        - name: postgres
+          image: @@POSTGRES_IMAGE@@
+          env:
+            - name: POSTGRES_DB
+              value: infercrane
+            - name: POSTGRES_USER
+              value: infercrane
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane
+                  key: postgres-password
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "infercrane"]
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: @@NAMESPACE_HOSTED@@
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infercrane
+  namespace: @@NAMESPACE_HOSTED@@
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: infercrane
+  template:
+    metadata:
+      # INFERCRANE_KUBERNETES_ENGINE_INGRESS below names this label: only
+      # this pod may reach the engines the control plane starts.
+      labels:
+        app: infercrane
+    spec:
+      serviceAccountName: infercrane-control-plane
+      automountServiceAccountToken: true
+      # Service links would inject INFERCRANE_PORT=tcp://... from the Service
+      # named infercrane and collide with the control plane's own setting.
+      enableServiceLinks: false
+      nodeSelector:
+        infercrane.dev/pool: system
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: infercrane
+          image: @@IMAGE@@
+          imagePullPolicy: IfNotPresent
+          command: ["infercrane", "serve"]
+          ports:
+            - name: https
+              containerPort: 8443
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane
+                  key: postgres-password
+            - name: INFERCRANE_DATABASE_URL
+              value: "postgres://infercrane:$(POSTGRES_PASSWORD)@postgres:5432/infercrane?sslmode=disable"
+            - name: INFERCRANE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane
+                  key: api-key
+            - name: INFERCRANE_HOST
+              value: "0.0.0.0"
+            - name: INFERCRANE_PORT
+              value: "8443"
+            - name: INFERCRANE_TLS_CERT_FILE
+              value: /tls/tls.crt
+            - name: INFERCRANE_TLS_KEY_FILE
+              value: /tls/tls.key
+            # The Kubernetes provider, as docs/integrations/kubernetes.mdx
+            # "Configure the control plane" sets it, with the in-cluster context.
+            - name: KUBECONFIG
+              value: /etc/kube/config
+            - name: INFERCRANE_KUBERNETES_CONTEXT
+              value: in-cluster
+            - name: INFERCRANE_KUBERNETES_NAMESPACE
+              value: @@NAMESPACE_HOSTED@@
+            - name: INFERCRANE_KUBERNETES_WORKLOAD_API
+              value: deployment
+            - name: INFERCRANE_KUBERNETES_SERVICE_ACCOUNT
+              value: infercrane-runtime
+            - name: INFERCRANE_KUBERNETES_WORKER_SECRET_NAME
+              value: infercrane-worker
+            - name: INFERCRANE_KUBERNETES_WORKER_SECRET_KEY
+              value: api-key
+            - name: INFERCRANE_KUBERNETES_IMAGE_DIGEST
+              value: "@@VLLM_IMAGE@@"
+            - name: INFERCRANE_KUBERNETES_GPU_RESOURCE
+              value: nvidia.com/gpu
+            - name: INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL
+              value: nvidia.com/gpu.product
+            - name: INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY
+              value: prefer
+            - name: INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY
+              value: prefer
+            - name: INFERCRANE_KUBERNETES_ENGINE_INGRESS
+              value: "pods:app=infercrane"
+            # Qwen3-0.6B is not a reviewed model; the control plane reads its
+            # metadata from Hugging Face (docs: any Hugging Face model).
+            - name: INFERCRANE_HUGGING_FACE_METADATA_ENABLED
+              value: "true"
+            # The operator's rate card for the one L4, so a campaign can be
+            # approved (docs/features/optimization.mdx). AWS's list price for
+            # g6.xlarge in the run's region (env.sh); a test value, never a claim.
+            - name: INFERCRANE_OPTIMIZATION_PRICES_JSON
+              value: '@@PRICES_JSON@@'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: kubeconfig
+              mountPath: /etc/kube
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: control-plane-tls
+        - name: kubeconfig
+          configMap:
+            name: infercrane-kubeconfig
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infercrane
+  namespace: @@NAMESPACE_HOSTED@@
+spec:
+  selector:
+    app: infercrane
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https

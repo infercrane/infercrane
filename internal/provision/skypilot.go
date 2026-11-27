@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
@@ -26,16 +27,20 @@ var ErrProviderAuthorization = errors.New("provider authorization denied")
 var ErrProviderQuota = errors.New("provider quota exceeded")
 var ErrProviderCapacity = errors.New("provider capacity unavailable")
 
-// The default image is pinned by digest so a revision always boots the tested
-// runtime bits. Using vLLM's provider-neutral image keeps provisioning portable
-// across every SkyPilot cloud and avoids installing the CUDA dependency stack
-// on each new GPU replica.
-const defaultVLLMImage = "vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7"
+// A pinned vLLM release boots its image by digest, so a revision always runs
+// the tested runtime bits: vLLM's provider-neutral CUDA image keeps
+// provisioning portable across every SkyPilot cloud and avoids installing the
+// CUDA dependency stack on each new GPU replica (support.PinnedImage).
 
-// The RunPod variant adds only the SSH bootstrap contract required by
-// SkyPilot. Pin it independently so a release never depends on a mutable GHCR
-// tag after qualification.
-const defaultRunPodVLLMImage = "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7c36e3b25a160c892626be8b0dde8f5954b11095c33d2bca31a9711"
+// runPodVLLMImages are the RunPod variants of pinned vLLM releases: the same
+// runtime plus only the SSH bootstrap contract SkyPilot needs, built by the
+// runtime-image workflow and pinned by digest so a release never depends on a
+// mutable GHCR tag after qualification. A release without a pinned variant
+// (vLLM 0.34.0 until the workflow publishes it) boots its version tag, which
+// the workflow only ever attaches to an image whose vLLM is that version.
+var runPodVLLMImages = map[string]string{
+	support.LegacyVLLMRuntimeVersion: "ghcr.io/infercrane/vllm-runpod@sha256:c9d8303ad7c36e3b25a160c892626be8b0dde8f5954b11095c33d2bca31a9711",
+}
 
 type ReplicaSpec struct {
 	TenantID, DeploymentID, ComputeConnectionID, ExternalKey                string
@@ -46,9 +51,13 @@ type ReplicaSpec struct {
 	// RuntimeEnv holds reviewed engine switches (support.EngineEnvironment).
 	// It is omitted when empty so intent hashes of existing replicas hold.
 	RuntimeEnv map[string]string `json:",omitempty"`
-	Port       int
-	Workload   runtimecontract.Workload
-	Serving    servingcontract.Topology
+	// KernelConfigs is the engine's own kernels tuned for this GPU and
+	// workload, as files the engine reads (internal/kerneltuning). Omitted
+	// when empty so intent hashes of existing replicas hold.
+	KernelConfigs *domain.KernelConfigSet `json:",omitempty"`
+	Port          int
+	Workload      runtimecontract.Workload
+	Serving       servingcontract.Topology
 	// ModelCredential, ModelObjects, and Adapters are what a worker needs
 	// beyond a public Hugging Face model. They are omitted when empty so
 	// intent hashes of existing replicas hold.
@@ -158,6 +167,9 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 	if err := refuseEngineEnvironment("SkyPilot", spec); err != nil {
 		return ProviderHandle{}, err
 	}
+	if err := refuseKernelConfigs("SkyPilot", spec); err != nil {
+		return ProviderHandle{}, err
+	}
 	if err := refuseModelInputs("SkyPilot", spec, ModelInputs{}); err != nil {
 		return ProviderHandle{}, err
 	}
@@ -183,10 +195,11 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 		}
 		spec.Port = s.ServicePort
 	}
-	usesDefaultRuntime := spec.RuntimeVersion == ""
-	if usesDefaultRuntime {
+	if spec.RuntimeVersion = support.NormalizeRuntimeVersion(spec.RuntimeVersion); spec.RuntimeVersion == "" {
 		spec.RuntimeVersion = support.DefaultRuntimeVersion
 	}
+	pinned, pinnedRelease := support.PinnedImage(support.DefaultRuntime, spec.RuntimeVersion, provideridentity.PlatformCUDA)
+	runPodImage, runPodPinned := runPodVLLMImages[spec.RuntimeVersion]
 	resourceID := s.Handle(spec.ExternalKey).ResourceID
 	requestState, requestFound := "", false
 	if spec.RequestID != "" {
@@ -217,17 +230,19 @@ func (s SkyPilot) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provider
 			return ProviderHandle{RequestID: spec.RequestID, ResourceID: resourceID, ExternalKey: spec.ExternalKey}, nil
 		}
 	}
+	// An operator may still name a release InferCrane does not pin; it boots
+	// that release's tag.
 	runtimeImage := "vllm/vllm-openai:v" + spec.RuntimeVersion
-	if usesDefaultRuntime {
-		runtimeImage = defaultVLLMImage
+	if pinnedRelease {
+		runtimeImage = pinned.Image
 	}
 	if strings.EqualFold(spec.Cloud, "runpod") {
 		// RunPod Pods require their container to start the platform SSH service
 		// used by SkyPilot. The thin InferCrane image retains that contract while
 		// baking vLLM; other clouds remain on the provider-neutral official image.
 		runtimeImage = "ghcr.io/infercrane/vllm-runpod:v" + spec.RuntimeVersion
-		if usesDefaultRuntime {
-			runtimeImage = defaultRunPodVLLMImage
+		if runPodPinned {
+			runtimeImage = runPodImage
 		}
 	}
 	run := runCommand(spec.Model, spec.ModelRevision, spec.Port, spec.RuntimeArgs)

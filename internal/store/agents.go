@@ -169,12 +169,18 @@ func (s *Store) RecordAgentHeartbeat(ctx context.Context, tenant, agentID string
 	return nil
 }
 
-const agentServerColumns = `t.agent_id,t.agent_server_key,t.id,t.url,t.runtime,COALESCE(t.upstream_model_name,''),t.health,t.agent_reported_at,e.id,e.name,e.logical_model_id,e.environment_id,b.id,COALESCE(e.active_serving_plan_id,''),a.ownership_mode`
+const agentServerColumns = `t.agent_id,t.agent_server_key,t.id,t.url,t.runtime,COALESCE(t.upstream_model_name,''),t.health,t.agent_reported_at,e.id,e.name,e.logical_model_id,e.environment_id,b.id,COALESCE(e.active_serving_plan_id,''),a.ownership_mode,FALSE`
+
+// rolloutServerColumns reads a rollout server (r: agent_rollout_servers)
+// in the shape scanAgentServer reads.
+const rolloutServerColumns = `t.agent_id,t.agent_server_key,t.id,t.url,t.runtime,COALESCE(t.upstream_model_name,''),t.health,t.agent_reported_at,e.id,e.name,e.logical_model_id,e.environment_id,b.id,COALESCE(e.active_serving_plan_id,''),b.ownership_mode,TRUE`
+
+const rolloutServerJoins = ` FROM agent_rollout_servers r JOIN targets t ON t.id=r.target_id JOIN endpoints e ON e.id=r.endpoint_id AND e.desired_state<>'deleted' JOIN backend_bindings b ON b.id=r.binding_id`
 
 func scanAgentServer(row rowScanner) (domain.AgentServer, error) {
 	var out domain.AgentServer
 	var reported sql.NullString
-	if err := row.Scan(&out.AgentID, &out.Key, &out.TargetID, &out.Address, &out.Runtime, &out.UpstreamModel, &out.Health, &reported, &out.EndpointID, &out.EndpointName, &out.LogicalModelID, &out.EnvironmentID, &out.BindingID, &out.ServingPlanID, &out.OwnershipMode); err != nil {
+	if err := row.Scan(&out.AgentID, &out.Key, &out.TargetID, &out.Address, &out.Runtime, &out.UpstreamModel, &out.Health, &reported, &out.EndpointID, &out.EndpointName, &out.LogicalModelID, &out.EnvironmentID, &out.BindingID, &out.ServingPlanID, &out.OwnershipMode, &out.Rollout); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.AgentServer{}, ErrNotFound
 		}
@@ -190,7 +196,8 @@ func scanAgentServer(row rowScanner) (domain.AgentServer, error) {
 // AgentServers lists the local servers observed through one agent whose
 // endpoints still exist.
 func (s *Store) AgentServers(ctx context.Context, tenant, agentID string) ([]domain.AgentServer, error) {
-	rows, err := s.QueryContext(ctx, `SELECT `+agentServerColumns+` FROM targets t JOIN adopted_workloads a ON a.target_id=t.id AND a.tenant_id=t.tenant_id JOIN endpoints e ON e.id=a.endpoint_id AND e.desired_state<>'deleted' JOIN backend_bindings b ON b.id=a.binding_id WHERE t.tenant_id=? AND t.agent_id=? ORDER BY t.agent_server_key LIMIT 64`, tenant, agentID)
+	rows, err := s.QueryContext(ctx, `SELECT * FROM (SELECT `+agentServerColumns+` FROM targets t JOIN adopted_workloads a ON a.target_id=t.id AND a.tenant_id=t.tenant_id JOIN endpoints e ON e.id=a.endpoint_id AND e.desired_state<>'deleted' JOIN backend_bindings b ON b.id=a.binding_id WHERE t.tenant_id=? AND t.agent_id=?
+		UNION ALL SELECT `+rolloutServerColumns+rolloutServerJoins+` WHERE r.tenant_id=? AND r.agent_id=?) servers ORDER BY 2 LIMIT 64`, tenant, agentID, tenant, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -384,4 +391,113 @@ func (s *Store) AdoptedCredential(ctx context.Context, tenant, targetID string) 
 		return domain.AdoptedCredential{}, ErrNotFound
 	}
 	return out, err
+}
+
+// AgentForEndpoint finds the one active agent whose servers are every
+// binding of an endpoint, so a run on that endpoint can be measured there.
+// An endpoint with any binding no agent owns, or with servers of two agents,
+// has no such agent (ErrConflict).
+func (s *Store) AgentForEndpoint(ctx context.Context, tenant, endpoint string) (domain.Agent, error) {
+	var agents, bindings, owned int
+	var agentID sql.NullString
+	err := s.QueryRowContext(ctx, `SELECT COUNT(DISTINCT t.agent_id),COUNT(b.id),COUNT(t.agent_id),MIN(t.agent_id) FROM endpoints e JOIN backend_bindings b ON b.endpoint_id=e.id LEFT JOIN targets t ON t.id=b.target_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted'`, tenant, endpoint).Scan(&agents, &bindings, &owned, &agentID)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if bindings == 0 {
+		return domain.Agent{}, ErrNotFound
+	}
+	if agents != 1 || owned != bindings || !agentID.Valid {
+		return domain.Agent{}, fmt.Errorf("%w: endpoint %s is not served by exactly one InferCrane agent", ErrConflict, endpoint)
+	}
+	agent, err := s.AgentForTenant(ctx, tenant, agentID.String)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if agent.State != "active" {
+		return domain.Agent{}, fmt.Errorf("%w: the endpoint's agent is revoked", ErrConflict)
+	}
+	return agent, nil
+}
+
+// RegisterAgentRolloutServer binds a server a rollout started to the
+// endpoint it was started for, as a second agent-managed binding beside the
+// endpoint's own server. Only the agent whose server the endpoint already
+// serves (agent-managed, customer-cloud) can add one. The binding is not in
+// the active serving plan; a rollout's guarded switch puts it there.
+// Registering again returns the existing registration.
+func (s *Store) RegisterAgentRolloutServer(ctx context.Context, tenant, agentID string, registration domain.AgentServerRegistration) (domain.AgentServer, bool, error) {
+	if tenant == "" || agentID == "" || !validEndpointName(registration.EndpointName) || registration.Key == "" || registration.UpstreamModel == "" || registration.Runtime == "" || registration.Address == "" {
+		return domain.AgentServer{}, false, errors.New("tenant, agent, server key, endpoint name, model, runtime, and address are required")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	defer tx.Rollback()
+	var state string
+	if err = tx.QueryRowContext(ctx, `SELECT state FROM agents WHERE tenant_id=? AND id=? FOR SHARE`, tenant, agentID).Scan(&state); errors.Is(err, sql.ErrNoRows) {
+		return domain.AgentServer{}, false, ErrNotFound
+	} else if err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if state != "active" {
+		return domain.AgentServer{}, false, fmt.Errorf("%w: the agent is revoked", ErrConflict)
+	}
+	existing, err := scanAgentServer(tx.QueryRowContext(ctx, `SELECT `+rolloutServerColumns+rolloutServerJoins+` WHERE r.tenant_id=? AND r.agent_id=? AND t.agent_server_key=?`, tenant, agentID, registration.Key))
+	if err == nil {
+		if existing.EndpointName != registration.EndpointName {
+			return domain.AgentServer{}, false, fmt.Errorf("%w: rollout server %s already serves endpoint %s", ErrConflict, registration.Key, existing.EndpointName)
+		}
+		return existing, false, tx.Commit()
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return domain.AgentServer{}, false, err
+	}
+	// The endpoint must be this agent's: its own server's adoption is
+	// agent-managed, on a target this agent owns, and the endpoint keeps
+	// prompts in the customer's cloud.
+	var endpointID, residency, ownership string
+	err = tx.QueryRowContext(ctx, `SELECT e.id,e.residency,a.ownership_mode FROM endpoints e JOIN adopted_workloads a ON a.endpoint_id=e.id JOIN targets t ON t.id=a.target_id WHERE e.tenant_id=? AND e.name=? AND e.desired_state<>'deleted' AND t.agent_id=? FOR UPDATE OF e`, tenant, registration.EndpointName, agentID).Scan(&endpointID, &residency, &ownership)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.AgentServer{}, false, fmt.Errorf("%w: endpoint %s is not served by this agent", ErrConflict, registration.EndpointName)
+	}
+	if err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if ownership != "agent-managed" || residency != ResidencyCustomerCloud {
+		return domain.AgentServer{}, false, fmt.Errorf("%w: a rollout needs the agent to serve endpoint %s (agent-managed)", ErrConflict, registration.EndpointName)
+	}
+	var count int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM targets WHERE tenant_id=? AND agent_id=?`, tenant, agentID).Scan(&count); err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if count >= MaxServersPerAgent {
+		return domain.AgentServer{}, false, fmt.Errorf("%w: an agent observes at most %d servers", ErrConflict, MaxServersPerAgent)
+	}
+	stamp := now()
+	targetID, idErr := newID()
+	bindingID, bindingErr := newID()
+	rolloutID, rolloutErr := newID()
+	if err = errors.Join(idErr, bindingErr, rolloutErr); err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO targets(id,name,url,provider,runtime,upstream_model_name,health,provider_details_json,tenant_id,agent_id,agent_server_key,created_at,updated_at) VALUES(?,?,?,'external',?,?,'starting','{}'::jsonb,?,?,?,?,?)`,
+		targetID, "agent-"+targetID, registration.Address, registration.Runtime, registration.UpstreamModel, tenant, agentID, registration.Key, stamp, stamp); err != nil {
+		if isUniqueViolation(err) {
+			return domain.AgentServer{}, false, fmt.Errorf("%w: server %s is already registered", ErrConflict, registration.Key)
+		}
+		return domain.AgentServer{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO backend_bindings(id,tenant_id,endpoint_id,name,kind,ownership_mode,target_id,config_json,created_at,updated_at) VALUES(?,?,?,?,'external','agent-managed',?,'{}'::jsonb,?,?)`, bindingID, tenant, endpointID, "rollout-"+bindingID[:8], targetID, stamp, stamp); err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_rollout_servers(id,tenant_id,agent_id,endpoint_id,binding_id,target_id,created_at) VALUES(?,?,?,?,?,?,?)`, rolloutID, tenant, agentID, endpointID, bindingID, targetID, stamp); err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	created, err := scanAgentServer(tx.QueryRowContext(ctx, `SELECT `+rolloutServerColumns+rolloutServerJoins+` WHERE r.id=?`, rolloutID))
+	if err != nil {
+		return domain.AgentServer{}, false, err
+	}
+	return created, true, tx.Commit()
 }

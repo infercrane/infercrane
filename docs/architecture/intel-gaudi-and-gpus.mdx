@@ -1,0 +1,188 @@
+---
+title: Intel Gaudi and Intel GPUs (not qualified)
+description: How InferCrane recognizes Intel Gaudi 2, Gaudi 3, and Arc Pro B60 and B70 GPUs, refuses them until a measured run, and what serving, optimizing, and qualifying vLLM on them would take.
+---
+
+# Intel Gaudi and Intel GPUs
+
+InferCrane recognizes Intel Gaudi 2, Gaudi 3, and the Intel Arc Pro B60 and B70 GPUs by name and
+refuses every spec, plan, and setup that names one. Nothing can select them until a measured run on
+their platform qualifies it. This page is the design for that run: the images to pin, how a
+deployment is provisioned, which optimizations carry over from NVIDIA, and what a first run costs.
+
+<Warning>
+No model has been served or measured on an Intel accelerator through InferCrane. Speed, cost, and
+answer quality are unknown. Every fact below was read on 2026-11-26 from the source linked next to
+it; prices change, so read them again before a run.
+</Warning>
+
+## What InferCrane does today
+
+Each name resolves to its own platform and device resource, so it is never started on a CUDA image.
+Those platforms have no selectable image and no placement, so spec loading, revision storage,
+planning, the deployment workflow, and the Kubernetes adapter all refuse them with
+`… is on the hpu-gaudi3 platform, which is not qualified`. `GET /api/v1/catalog/accelerators` lists
+them under `not_qualified` with the candidate images below.
+
+## Platform identity
+
+| Name | Spellings recognized | Platform | Target | Memory | Device resource |
+|---|---|---|---|---|---|
+| Gaudi 2 | `Gaudi2`, `Intel Gaudi 2 AI Accelerator`, `Gaudi_2` | `hpu-gaudi2` | `gaudi2` | 96 GB HBM2E | `habana.ai/gaudi` |
+| Gaudi 3 | `Gaudi3`, `Intel Gaudi 3 AI Accelerator`, `Gaudi_3` | `hpu-gaudi3` | `gaudi3` | 128 GB HBM2e | `habana.ai/gaudi` |
+| Arc Pro B60 | `Intel Arc Pro B60 Graphics`, `Arc_Pro_B60` | `xpu-xe2` | `bmg` | 24 GB GDDR6 | `gpu.intel.com/xe` |
+| Arc Pro B70 | `Intel Arc Pro B70 Graphics`, `Arc_Pro_B70` | `xpu-xe2` | `bmg` | 32 GB GDDR6 | `gpu.intel.com/xe` |
+
+Gaudi memory and FP8 support come from Intel's
+[Gaudi architecture page](https://docs.habana.ai/en/latest/Gaudi_Overview/Gaudi_Architecture.html):
+Gaudi 2 runs FP8 (E4M3 and E5M2) in its matrix engines, and Gaudi 3 lists FP8 and BF16 compute. Arc
+Pro memory and the Xe2 (Battlemage) architecture come from Intel's
+[B60](https://www.intel.com/content/www/us/en/products/sku/243916/intel-arc-pro-b60-graphics/specifications.html)
+and [B70](https://www.intel.com/content/www/us/en/products/sku/245797/intel-arc-pro-b70-graphics/specifications.html)
+specifications. The platform names follow vLLM's device names: `hpu` for Gaudi, `xpu` for Intel
+GPUs.
+
+Not recognized, and so on the CUDA default like any unreviewed name: first-generation Gaudi (AWS
+DL1), which the vLLM Gaudi plugin does not support; Intel Data Center GPU Max and Flex, the Arc Pro
+B50 and B65, and client Arc GPUs, none of which vLLM 0.34.0 lists as validated.
+
+## Runtime images and how to pin them
+
+| Platform | Image (digest read 2026-11-26) | Built on | Source |
+|---|---|---|---|
+| `hpu-gaudi2`, `hpu-gaudi3` | `vault.habana.ai/gaudi-docker/1.24.2/ubuntu24.04/habanalabs/vllm-0.30.0-ptupstream-2.13.0:1.24.2-481@sha256:5d064465d751a73a729e7ecdc32c0ba5de0df1d305debb60a3d9a85b4fd3a967` | vLLM Gaudi plugin v0.30.0 on vLLM 0.30.0, Intel Gaudi software 1.24.2, PyTorch 2.13.0; amd64 | [vllm-gaudi v0.30.0](https://github.com/vllm-project/vllm-gaudi/releases/tag/v0.30.0), 2026-10-09 |
+| `xpu-xe2` | `vllm/vllm-openai-xpu:v0.34.0@sha256:cb55d8cffeb1851c552c4b002a5e8be21daa99a51a678d53c57f271e7c16b3f0` | vLLM 0.34.0, PyTorch 2.15.0 (XPU), vllm_xpu_kernels 0.1.17, Intel OMIX 0.4.1; amd64 | vLLM's own release build, `docker/Dockerfile.xpu` |
+
+Both are recorded as `not-qualified` images. Intel's registry gives anonymous pull tokens, so the
+Gaudi digest was read the same way as Docker Hub's. Pinning one when a run qualifies it follows the
+TPU steps: pin the digest, move the image into `runtimeImages` for the measured platforms only,
+record the engine's defaults from the image's own source, flip the accelerators to `serving`, and
+add the placement.
+
+Two things differ from the GPU images:
+
+- **The Gaudi image trails.** The plugin's newest release is built on vLLM 0.30.0, four releases
+  behind the vLLM InferCrane pins for GPUs. Each Gaudi software version works only with the plugin
+  versions in its
+  [compatibility matrix](https://github.com/vllm-project/vllm-gaudi/blob/main/docs/getting_started/compatibility_matrix.md),
+  so the host driver and the image move together. Its entrypoint is Intel's launcher; the
+  workload's `vllm serve` command replaces it.
+- **The Intel GPU image is vLLM's own** and runs the same engine release as the GPU images. Intel's
+  `intel/llm-scaler-vllm` images are a patched vLLM 0.26 build; they are not recorded.
+
+## How a deployment is provisioned
+
+### Kubernetes (both)
+
+Install Intel's [Gaudi base operator](https://docs.habana.ai/en/latest/Installation_Guide/Additional_Installation/Kubernetes_Installation/Kubernetes_Operator.html)
+(driver, device plugin, container runtime, metric exporter) or the
+[Intel GPU device plugin](https://github.com/intel/intel-device-plugins-for-kubernetes/blob/main/cmd/gpu_plugin/README.md),
+then point InferCrane at the resource:
+
+```bash
+export INFERCRANE_KUBERNETES_GPU_RESOURCE='habana.ai/gaudi'   # or gpu.intel.com/xe
+export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='LABEL_KEY'
+```
+
+Intel's Gaudi feature discovery labels nodes, but its label keys are not documented on the pages
+read, so the product label is unknown; an operator can label nodes with a value such as `Gaudi_3`,
+which InferCrane reads as Gaudi 3. Intel's GPU plugin labels `gpu.intel.com/product`; its values for
+the Arc Pro cards were not read. Battlemage GPUs run on the `xe` kernel driver and so are exposed as
+`gpu.intel.com/xe`; `gpu.intel.com/i915` serves older and Data Center GPUs and stays unchecked.
+
+What a Gaudi run on Kubernetes still needs:
+
+- **Warm-up.** The plugin compiles graphs for every bucket at start; its tuning guide says warm-up
+  "can even take a couple of hours, depending on the configuration", longer for FP8.
+  `VLLM_SKIP_WARMUP` shortens start-up at the cost of compiling during traffic, which would distort
+  any measurement. The control plane's wait for a ready replica must be set from measured warm-up
+  times.
+- **Engine variables.** Bucketing (`VLLM_BUCKETING_STRATEGY`, `VLLM_PROMPT_BS_BUCKET_*`,
+  `VLLM_DECODE_BLOCK_BUCKET_*`), `PT_HPU_LAZY_MODE`, and `VLLM_GRAPH_RESERVED_MEM` are not reviewed.
+  A run adds each one it needs to the reviewed engine environment for the Gaudi platforms.
+- **Container settings.** Intel's Docker instructions add `--cap-add=sys_nice` and `--ipc=host`.
+  Whether the operator's runtime covers these on Kubernetes was not read.
+
+### Clouds that rent Gaudi
+
+| Offer | Price, read 2026-11-26 | Notes |
+|---|---|---|
+| IBM Cloud VPC `gx3d-160x1792x8gaudi3` (8x Gaudi 3, 160 vCPU, 1,792 GiB) | $60.60/hour on-demand in us-east and us-south, $70.30 in eu-de; Spot $15.15 (US), $17.574 (eu-de). [IBM global catalog](https://globalcatalog.cloud.ibm.com/api/v1/b029541d-cd56-42c5-a922-7288ed9b465f/pricing/deployment), USD list prices for 2026-11 | "Select Availability" in dal12, wdc06/07, fra02 ([profiles](https://cloud.ibm.com/docs/vpc?topic=vpc-accelerated-profile-family)); likely needs a quota ticket. Eight cards only. |
+| Intel Cloud Services (formerly Tiber AI Cloud) | Unknown: behind Intel sign-in | Requests answered in 2 to 3 business days, reservations up to 30 days ([request docs](https://cloud.intel.com/docs/how_to_request.html)). |
+| Denvr Dataworks, 8x Gaudi 2 | Page shows "$2.00 / GPU" with no unit | Not confirmed as hourly. |
+| AWS DL1 (`dl1.24xlarge`) | $13.10904/hour (us-east-1) | First-generation Gaudi; the plugin does not support it. |
+
+None of InferCrane's cloud adapters starts IBM Cloud VPC instances. A first run on IBM would use a
+Kubernetes cluster on that instance or the [bare-metal path](/integrations/bare-metal); an IBM
+adapter is not designed here. No cloud was found renting Arc Pro B60 or B70 by the hour.
+
+## Engine options and techniques
+
+| Technique or option | Gaudi | Intel GPU (XPU) |
+|---|---|---|
+| Batch size, batched tokens | Applies, through the plugin's buckets | Applies |
+| Prefix caching | Applies; on by default | Applies |
+| Chunked prefill | Applies (full chunked-prefill attention since plugin v0.15.1) | Applies |
+| Tensor parallelism | Applies, over HCCL | Applies; pipeline parallelism is beta |
+| Speculative decoding | "Functional release": n-gram and EAGLE-style drafters (eagle, eagle3, mtp); not fully supported with `torch.compile` | Applies (vLLM's feature matrix) |
+| Trained drafts, load-adaptive speculation | Unknown | Unknown |
+| FP8 | Through Intel Neural Compressor: an offline calibration run, then `--quantization inc --kv-cache-dtype fp8_inc` with `QUANT_CONFIG`; on Gaudi 2 and Gaudi 3. The calibration output is an artifact a setup must pin. | Online FP8 and FP8 checkpoints (vLLM's feature matrix) |
+| LoRA | Applies | Applies |
+| CUDA graphs and capture sizes | Do not apply; HPU Graphs are bucketed per shape | Do not apply (vLLM lists CUDA graphs as unsupported on Intel GPUs) |
+| FlashInfer, FlashAttention, tuned Triton fused-MoE configs, Marlin, AITER | Do not apply: Gaudi has its own fused SDPA and MoE ops (`VLLM_MOE_CHUNK`) | Do not apply as tuned for CUDA; XPU kernels come from `vllm_xpu_kernels` |
+| GPU profiling | Does not apply; no Gaudi capture is built | Does not apply; no XPU capture is built |
+
+## Judge, quality checks, and KL check
+
+As on TPU, these use the OpenAI API, not the engine:
+
+- **Answer check.** Plain chat requests at `temperature 0` with a seed; nothing Intel-specific.
+- **KL check.** Needs `continue_final_message` and `prompt_logprobs: 16`. The Gaudi plugin's input
+  batch tracks prompt log probabilities, but whether its runner returns them was not confirmed. The
+  Intel GPU image is vLLM's own front end and runner. Where a server returns none, divergence is
+  absent and a precision change, including INC FP8, cannot be judged.
+- **Engine metrics.** The Gaudi plugin's metrics page says only "WIP" and the plugin defines no
+  metrics of its own, so which of vLLM 0.30.0's `vllm:` families it fills is unknown. A first run
+  lists every family the control plane reads before any measurement counts.
+
+## What a first qualification run costs
+
+**Gaudi 3, proposed:** `Qwen/Qwen3-0.6B` on one card (validated on Gaudi 3 in BF16) to prove
+serving, metrics, and the checks, then `Qwen/Qwen3-30B-A3B-Instruct-2507` at tensor parallelism 4
+(validated in BF16 and FP8 on Gaudi 2 and 3) for the measurement, on one IBM Cloud
+`gx3d-160x1792x8gaudi3` instance. Two hours cost $121.20 on-demand or $30.30 on Spot in the US at
+the prices above, before storage and network, which were not priced. Warm-up is part of those
+hours and is the largest unknown.
+
+**Gaudi 2:** no hourly price was confirmed.
+
+**Arc Pro B60 or B70:** no hourly offer was found, so a first run needs a card on a machine we
+control. `Qwen/Qwen3-14B` (validated in BF16 and online FP8) fits a B70's 32 GB in FP8.
+
+**Accounts it needs** (none created): an IBM Cloud account with a VPC quota for the Gaudi 3
+profile, or an approved Intel Cloud Services request. Each is the user's decision.
+
+## Licences
+
+| Component | Licence |
+|---|---|
+| vLLM, vLLM Gaudi plugin, vllm-xpu-kernels, llm-scaler | Apache-2.0 |
+| Intel Gaudi software (inside the Gaudi image) | Proprietary: the [Intel Gaudi End User Software License Agreement](https://www.redhat.com/en/about/third-party-end-user-agreements/intel-gaudi-end-user-software-license-agreement) (binary-only use with Intel Gaudi hardware, no redistribution) |
+| Gaudi kernel driver | GPL-2.0 (upstream Linux) |
+| oneAPI runtime libraries (inside the XPU image) | Intel End User License Agreement for Developer Tools; oneCCL and oneMKL under the Intel Simplified Software License |
+| Intel Extension for PyTorch | Apache-2.0, but archived and retired; the pinned images do not use it |
+
+The Gaudi image is Intel's and carries proprietary software. InferCrane runs it by digest from
+Intel's registry and never rebuilds or re-hosts it, so the core takes no dependency on it; it stays
+named here and optional, as the open-licence rule asks.
+
+## Unknown until the first run
+
+- Warm-up time per model and bucket set on Gaudi.
+- Which `vllm:` metric families the Gaudi plugin fills, and whether it returns prompt log
+  probabilities.
+- Gaudi feature discovery's label keys, and whether Kubernetes needs extra container settings.
+- Prices for Gaudi 2 and on Intel Cloud Services; any hourly offer for Arc Pro GPUs.
+
+Next: [Google Cloud TPU](/architecture/google-tpu) is the same design for TPUs.
+[Compatibility and qualification](/compatibility) explains how a platform becomes qualified.

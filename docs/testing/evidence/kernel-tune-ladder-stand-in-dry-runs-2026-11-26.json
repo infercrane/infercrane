@@ -1,0 +1,155 @@
+{
+ "schema": "infercrane.kernel-tune-dry-run/v1",
+ "stand_in": true,
+ "date": "2026-11-26",
+ "cost_usd": 0,
+ "what": "Stand-in dry runs of the kernel-tuning ladder's rungs 2 and 3: the tuner's fixed made-up timing surface and stand_in_server.py. Nothing here is a measurement.",
+ "rung2": {
+  "commit": "6ff48fef (working tree identical when it ran)",
+  "plan": "moe-shapes-l40s",
+  "rules": "tools/kernel-tune/rules-moe-shapes-l40s-2026-11-26.md",
+  "shipped": {
+   "E=128,N=768,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json": false,
+   "E=256,N=512,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json": false
+  },
+  "verdict": {
+   "rows": [
+    {
+     "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+     "running": 128,
+     "step_size": 128,
+     "kernel_gain": 0.1024,
+     "kept": "tuned",
+     "share_estimate": 0.874,
+     "projected_end_to_end": 1.0883,
+     "planner_gate_1_05": true
+    },
+    {
+     "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+     "running": 32,
+     "step_size": 32,
+     "kernel_gain": 0.0,
+     "kept": "engine",
+     "share_estimate": 0.92,
+     "projected_end_to_end": 1.0,
+     "planner_gate_1_05": false
+    },
+    {
+     "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+     "running": 128,
+     "step_size": 128,
+     "kernel_gain": 0.1024,
+     "kept": "tuned",
+     "share_estimate": 0.614,
+     "projected_end_to_end": 1.0605,
+     "planner_gate_1_05": true
+    },
+    {
+     "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+     "running": 32,
+     "step_size": 32,
+     "kernel_gain": 0.0,
+     "kept": "engine",
+     "share_estimate": 0.733,
+     "projected_end_to_end": 1.0,
+     "planner_gate_1_05": false
+    }
+   ],
+   "projected_gate": 1.02,
+   "ask_for_rung3": true
+  }
+ },
+ "rung3": {
+  "commit": "2cc8b3ca",
+  "ran_from": "a clean worktree at 2cc8b3ca",
+  "plan": "qwen3-30b-a3b-l40s",
+  "rules": "tools/kernel-tune/rules-qwen3-30b-a3b-l40s-2026-11-26.md",
+  "set": "rung 2's stand-in set for E=128,N=768 on NVIDIA_L40S, given with --set (no tuning on the first machine)",
+  "gap_check": {
+   "startup_seconds": 1.0,
+   "engine": {
+    "backend": "TRITON",
+    "default_for": [
+     "E=128,N=768,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json"
+    ]
+   }
+  },
+  "first_seconds": 331.4,
+  "fresh_seconds": 203.6,
+  "first_window_only": {
+   "decision": "unknown",
+   "cells": [
+    {
+     "cell": "short/128",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "delta": 0.044,
+      "noise_floor": 0.0805
+     },
+     "fresh": null
+    },
+    {
+     "cell": "short/32",
+     "decision": "unknown",
+     "first": {
+      "valid": true,
+      "delta": 0.0642,
+      "noise_floor": 0.0283
+     },
+     "fresh": null
+    }
+   ]
+  },
+  "both_windows": {
+   "decision": "no_measurable_gain",
+   "cells": [
+    {
+     "cell": "short/128",
+     "decision": "no_measurable_difference",
+     "first": {
+      "valid": true,
+      "delta": 0.044,
+      "noise_floor": 0.0805
+     },
+     "fresh": {
+      "valid": true,
+      "delta": 0.0456,
+      "noise_floor": 0.0281
+     }
+    },
+    {
+     "cell": "short/32",
+     "decision": "not_confirmed",
+     "first": {
+      "valid": true,
+      "delta": 0.0642,
+      "noise_floor": 0.0283
+     },
+     "fresh": {
+      "valid": true,
+      "delta": 0.0558,
+      "noise_floor": 0.0567
+     }
+    }
+   ],
+   "changes_answers": "no",
+   "sequential_identical": {
+    "control-1/candidate-1": 1,
+    "control-1/control-2": 1
+   },
+   "results": [
+    {
+     "load": 128,
+     "decision": "no_measurable_difference"
+    },
+    {
+     "load": 32,
+     "decision": "no_measurable_difference"
+    }
+   ]
+  },
+  "reproduction_block_written": true
+ },
+ "laptop": "shared with other sessions, load average about 19-21; the stand-in's noise is the laptop's"
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -16,8 +17,12 @@ import (
 )
 
 func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResult) (domain.BenchmarkResult, error) {
-	if result.TenantID == "" || result.DeploymentID == "" || result.RevisionID == "" || result.RequestCount < 1 {
-		return domain.BenchmarkResult{}, errors.New("benchmark tenant, deployment, revision, and request count are required")
+	agentScoped := result.AgentID != ""
+	if result.TenantID == "" || (result.DeploymentID == "") != agentScoped || result.RevisionID == "" || result.RequestCount < 1 {
+		return domain.BenchmarkResult{}, errors.New("benchmark tenant, deployment or agent, revision, and request count are required")
+	}
+	if agentScoped && !agentSetupIdentity.MatchString(result.RevisionID) {
+		return domain.BenchmarkResult{}, errors.New("an agent-measured benchmark names its setup as agentsetup-<digest> or agentserver-<digest>")
 	}
 	if result.Succeeded < 0 || result.Failed < 0 || result.Succeeded+result.Failed != result.RequestCount || !finiteNonnegative(result.DurationSeconds) {
 		return domain.BenchmarkResult{}, errors.New("benchmark counts and duration must be complete, finite, and nonnegative")
@@ -38,12 +43,32 @@ func (s *Store) RecordBenchmark(ctx context.Context, result domain.BenchmarkResu
 		}
 	}
 	stamp := now()
-	_, err := s.ExecContext(ctx, `INSERT INTO benchmark_results(id,tenant_id,deployment_id,deployment_name,revision_id,model_artifact_id,model_identity,runtime,runtime_version,runtime_config_json,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)`, result.ID, result.TenantID, result.DeploymentID, result.DeploymentName, result.RevisionID, null(result.ModelArtifactID), result.ModelIdentity, result.Runtime, result.RuntimeVersion, nullJSON(result.RuntimeConfigJSON), result.Provider, result.Region, result.GPU, result.GPUCount, result.ComputeMode, result.Tool, result.ToolVersion, nullJSON(result.WorkloadJSON), result.ReproductionCommand, result.RequestCount, result.Succeeded, result.Failed, result.DurationSeconds, result.RequestThroughput, result.OutputTokenThroughput, result.TTFTP50MS, result.TTFTP95MS, result.TPOTP50MS, result.TPOTP95MS, result.LatencyP50MS, result.LatencyP95MS, result.Goodput, result.GPUUtilization, nullJSON(result.CostMetadataJSON), stamp)
+	_, err := s.ExecContext(ctx, `INSERT INTO benchmark_results(id,tenant_id,deployment_id,deployment_name,revision_id,agent_id,agent_setup_id,model_artifact_id,model_identity,runtime,runtime_version,runtime_config_json,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?)`, result.ID, result.TenantID, null(result.DeploymentID), result.DeploymentName, revisionScope(result.RevisionID, agentScoped), null(result.AgentID), agentScope(result.RevisionID, agentScoped), null(result.ModelArtifactID), result.ModelIdentity, result.Runtime, result.RuntimeVersion, nullJSON(result.RuntimeConfigJSON), result.Provider, result.Region, result.GPU, result.GPUCount, result.ComputeMode, result.Tool, result.ToolVersion, nullJSON(result.WorkloadJSON), result.ReproductionCommand, result.RequestCount, result.Succeeded, result.Failed, result.DurationSeconds, result.RequestThroughput, result.OutputTokenThroughput, result.TTFTP50MS, result.TTFTP95MS, result.TPOTP50MS, result.TPOTP95MS, result.LatencyP50MS, result.LatencyP95MS, result.Goodput, result.GPUUtilization, nullJSON(result.CostMetadataJSON), stamp)
 	if err != nil {
 		return domain.BenchmarkResult{}, err
 	}
 	result.CreatedAt = parseTime(stamp)
 	return result, nil
+}
+
+// agentSetupIdentity is the identity of a setup an agent measured: one it
+// started (agentsetup) or the customer's own server (agentserver).
+var agentSetupIdentity = regexp.MustCompile(`^agent(setup|server)-[a-f0-9]{24}$`)
+
+// revisionScope and agentScope split one identity between the revision column
+// and the agent setup column, so each row has exactly one scope.
+func revisionScope(id string, agentScoped bool) any {
+	if agentScoped {
+		return nil
+	}
+	return id
+}
+
+func agentScope(id string, agentScoped bool) any {
+	if agentScoped {
+		return id
+	}
+	return nil
 }
 
 func finiteNonnegative(value float64) bool {
@@ -58,7 +83,7 @@ func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT b.id,b.tenant_id,b.deployment_id,b.deployment_name,b.revision_id,COALESCE(b.model_artifact_id,''),b.model_identity,b.runtime,b.runtime_version,b.runtime_config_json::text,b.provider,b.region,b.gpu,b.gpu_count,b.compute_mode,b.tool,b.tool_version,b.workload_json::text,b.reproduction_command,b.request_count,b.succeeded,b.failed,b.duration_seconds,b.request_throughput,b.output_token_throughput,b.ttft_p50_ms,b.ttft_p95_ms,b.tpot_p50_ms,b.tpot_p95_ms,b.latency_p50_ms,b.latency_p95_ms,b.goodput,b.gpu_utilization,b.cost_metadata_json::text,b.created_at FROM benchmark_results b JOIN deployments d ON d.id=b.deployment_id WHERE b.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY b.created_at DESC LIMIT ?`, tenant, name, limit)
+	rows, err := s.QueryContext(ctx, `SELECT b.id,b.tenant_id,b.deployment_id,b.deployment_name,b.revision_id,'',COALESCE(b.model_artifact_id,''),b.model_identity,b.runtime,b.runtime_version,b.runtime_config_json::text,b.provider,b.region,b.gpu,b.gpu_count,b.compute_mode,b.tool,b.tool_version,b.workload_json::text,b.reproduction_command,b.request_count,b.succeeded,b.failed,b.duration_seconds,b.request_throughput,b.output_token_throughput,b.ttft_p50_ms,b.ttft_p95_ms,b.tpot_p50_ms,b.tpot_p95_ms,b.latency_p50_ms,b.latency_p95_ms,b.goodput,b.gpu_utilization,b.cost_metadata_json::text,b.created_at FROM benchmark_results b JOIN deployments d ON d.id=b.deployment_id WHERE b.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY b.created_at DESC LIMIT ?`, tenant, name, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +101,12 @@ func (s *Store) BenchmarksForDeployment(ctx context.Context, tenant, name string
 
 // benchmarkResultColumns is the column list scanBenchmarkResult reads, for
 // queries that select from benchmark_results alone.
-const benchmarkResultColumns = `id,tenant_id,deployment_id,deployment_name,revision_id,COALESCE(model_artifact_id,''),model_identity,runtime,runtime_version,runtime_config_json::text,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json::text,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json::text,created_at`
+const benchmarkResultColumns = `id,tenant_id,COALESCE(deployment_id,''),deployment_name,COALESCE(revision_id,agent_setup_id),COALESCE(agent_id,''),COALESCE(model_artifact_id,''),model_identity,runtime,runtime_version,runtime_config_json::text,provider,region,gpu,gpu_count,compute_mode,tool,tool_version,workload_json::text,reproduction_command,request_count,succeeded,failed,duration_seconds,request_throughput,output_token_throughput,ttft_p50_ms,ttft_p95_ms,tpot_p50_ms,tpot_p95_ms,latency_p50_ms,latency_p95_ms,goodput,gpu_utilization,cost_metadata_json::text,created_at`
 
 func scanBenchmarkResult(row rowScanner) (domain.BenchmarkResult, error) {
 	var out domain.BenchmarkResult
 	var created string
-	err := row.Scan(&out.ID, &out.TenantID, &out.DeploymentID, &out.DeploymentName, &out.RevisionID, &out.ModelArtifactID, &out.ModelIdentity, &out.Runtime, &out.RuntimeVersion, &out.RuntimeConfigJSON, &out.Provider, &out.Region, &out.GPU, &out.GPUCount, &out.ComputeMode, &out.Tool, &out.ToolVersion, &out.WorkloadJSON, &out.ReproductionCommand, &out.RequestCount, &out.Succeeded, &out.Failed, &out.DurationSeconds, &out.RequestThroughput, &out.OutputTokenThroughput, &out.TTFTP50MS, &out.TTFTP95MS, &out.TPOTP50MS, &out.TPOTP95MS, &out.LatencyP50MS, &out.LatencyP95MS, &out.Goodput, &out.GPUUtilization, &out.CostMetadataJSON, &created)
+	err := row.Scan(&out.ID, &out.TenantID, &out.DeploymentID, &out.DeploymentName, &out.RevisionID, &out.AgentID, &out.ModelArtifactID, &out.ModelIdentity, &out.Runtime, &out.RuntimeVersion, &out.RuntimeConfigJSON, &out.Provider, &out.Region, &out.GPU, &out.GPUCount, &out.ComputeMode, &out.Tool, &out.ToolVersion, &out.WorkloadJSON, &out.ReproductionCommand, &out.RequestCount, &out.Succeeded, &out.Failed, &out.DurationSeconds, &out.RequestThroughput, &out.OutputTokenThroughput, &out.TTFTP50MS, &out.TTFTP95MS, &out.TPOTP50MS, &out.TPOTP95MS, &out.LatencyP50MS, &out.LatencyP95MS, &out.Goodput, &out.GPUUtilization, &out.CostMetadataJSON, &created)
 	out.CreatedAt = parseTime(created)
 	return out, err
 }

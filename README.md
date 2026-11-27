@@ -66,23 +66,21 @@ AWS · GCP · Kubernetes · RunPod · existing infrastructure
 Nothing billable starts from a recommendation. Deployment and optimization stop at a review
 boundary; provider mutation or benchmark spend requires explicit approval.
 
-### Measured optimization, not a preset
+### Proof before a claim
 
-For `Qwen/Qwen3.8-27B-FP8` on one H200, InferCrane selected this measured winner:
+In September 2026, a one-run screen on one H200 measured 1.72× from turning on the speculation
+option the model's publisher documents, using synthetic prompts that repeat one sentence. Repeated
+text is unusually easy for speculation to predict. On 23 November 2026 the comparison was re-run on
+real text with three fresh servers per setup: the same change gave 12% to 33% at 12 requests at
+once, and the publisher's documented setup on vLLM 0.34.0 was faster than September's setup in
+every case measured. The [re-run's receipt](docs/testing/qwen38-27b-fp8-h200-rerun-2026-11-23.md) has every
+number; September's receipts stay in the [benchmark index](BENCHMARKS.md) as a dated record.
 
-| Exact workload | Control | Winner | Change |
-|---|---:|---:|---:|
-| Aggregate output throughput, concurrency 12 | 810.4 tok/s | 1,393.6 tok/s | **1.72×** |
-| Median per-request output speed | 76.1 tok/s | 141.0 tok/s | **+85%** |
-| Median TTFT | 1,591 ms | 739 ms | **−54%** |
-
-InferCrane also retained candidates that failed quality, latency, cost, or reproducibility gates
-instead of turning an attractive microbenchmark into a release claim.
-
-Those are screening measurements from one run of 24 requests at concurrency 12. They belong only
-to the recorded 4K-input/512-output workload and exact pinned hardware and runtime tuple. See the
-[raw evidence](docs/testing/evidence/qwen38-public-decode-saturation-modal-2026-09-23T044530Z.json),
-or browse the compact [benchmark index](BENCHMARKS.md).
+That is the rule InferCrane applies to every change it reports: measured on your traffic against
+your current setup, a gain confirmed again on fresh servers, and answers checked on a scored task
+set before a setup that changes answers can win. See
+[how a run measures and confirms a gain](docs/features/optimization.mdx) and
+[how answers are checked](docs/features/semantic-quality.mdx).
 
 ## Install
 
@@ -150,6 +148,35 @@ The evidence and decision remain inspectable after the operation finishes. If th
 operational gap your team recognizes, [star InferCrane](https://github.com/infercrane/infercrane)
 and tell us which model, runtime, accelerator, and provider tuple should be qualified next.
 
+## The regression gate for model and setting changes
+
+Teams change models, engine settings, and serving setups through pull requests. The proof gate
+GitHub Action proves each such change before it merges: it measures the pull request's spec against
+the spec on the base branch, in turns on one kind of machine, against the noise measured in that same
+window, and checks the changed setup's answers against the current setup's. It comments one verdict
+on the pull request and fails the check on a regression. The bar is the noise measured in that same
+run, not a fixed latency threshold.
+
+```yaml
+- uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+  with:
+    mode: proof-gate
+    spec: deploy/qwen.yaml
+    max-cost-usd: "20"
+```
+
+| Verdict | Check |
+|---|---|
+| `PASS`: no worse beyond the measured noise, and the answers held | passes |
+| `WATCH`: no speed regression, answers in the watch band | neutral by default |
+| `BLOCK`: worse beyond the noise, more failures, shorter answers, or blocked answers | fails |
+| `UNKNOWN`: anything the signed report does not show | fails; unknown never passes |
+
+A gain is claimed only when it holds again on fresh servers. The verdict is computed from the run's
+signed report, so anyone can recompute it offline with `infercrane optimize gate --file REPORT`.
+See [GitHub Actions](docs/integrations/github-actions.mdx), or run
+`examples/proof-gate/dry-run.sh` to see every verdict without a GPU.
+
 ## Why not just…
 
 - **Raw vLLM and Kubernetes:** the serving engine and manifests do not by themselves provide an
@@ -200,6 +227,7 @@ AWS · GCP · Kubernetes · RunPod · existing infrastructure
 | Put a model into production | Initialize a workload, review the serving plan, deploy, then call its stable endpoint. |
 | Adopt existing inference | Connect vLLM, SGLang, LiteLLM, or another compatible endpoint without transferring lifecycle ownership. |
 | Ship a safer revision | Benchmark and replay an isolated candidate, attach quality evidence, then let Release Guard promote or reject it. |
+| Gate model and setting changes in CI | Let the proof gate measure a pull request's change against the current setup, check its answers, comment the verdict, and fail the check on a regression. |
 | Understand production failures | Trace queue wait, attempts, runtime, revision, latency, saturation, and durable operations without storing prompt content. |
 | Optimize performance and cost | Propose serving configurations, measure comparable candidates on real hardware, and persist only qualified evidence. |
 | Survive infrastructure delays | Submit idempotent durable operations that continue after the CLI or control plane process disconnects. |
@@ -320,6 +348,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 | Interface | Status and purpose |
 |---|---|
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
+| GitHub Action | The regression gate for model and setting changes (`proof-gate`), plus plan, protected apply, and exact release checks. |
 | OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
 | Python and TypeScript SDKs | Release artifacts: the Python wheel attached to `v2.0.2` and `@infercrane/sdk@2.0.2`. Generated from the checked OpenAPI contract. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |

@@ -308,9 +308,9 @@ func campaignArgument(args []string) string {
 	return ""
 }
 
-var optimizeActions = []string{"propose", "create", "list", "inspect", "results", "watch", "report", "approve", "activate", "cancel", "doctor", "workload-profile", "evidence", "kernel-run", "kernel-plan"}
+var optimizeActions = []string{"propose", "create", "compare", "list", "inspect", "results", "watch", "report", "gate", "approve", "activate", "cancel", "doctor", "workload-profile", "band-verdict", "bands", "evidence", "kernel-run", "kernel-plan", "draft"}
 
-var optimizeCampaignActions = map[string]bool{"inspect": true, "results": true, "watch": true, "report": true, "approve": true, "activate": true, "cancel": true}
+var optimizeCampaignActions = map[string]bool{"inspect": true, "results": true, "watch": true, "report": true, "gate": true, "approve": true, "activate": true, "cancel": true}
 
 // completePositional completes the next positional argument of command.
 func completePositional(s completionSource, command string, typed []string, prefix string) ([]string, cobra.ShellCompDirective) {
@@ -324,6 +324,19 @@ func completePositional(s completionSource, command string, typed []string, pref
 			return s.campaigns(prefix), none
 		case len(typed) == 1 && (typed[0] == "propose" || typed[0] == "create"):
 			return s.models(prefix), none
+		}
+		return nil, cobra.ShellCompDirectiveDefault
+	case "results":
+		if len(typed) == 0 {
+			return staticValues(prefix, "import", "list", "show", "export", "rank"), none
+		}
+		return nil, cobra.ShellCompDirectiveDefault
+	case "report":
+		switch {
+		case len(typed) == 0:
+			return staticValues(prefix, "proof"), none
+		case typed[0] == "proof" && (len(typed) == 1 || typed[1] != "verify"):
+			return append(staticValues(prefix, "verify"), s.campaigns(prefix)...), none
 		}
 		return nil, cobra.ShellCompDirectiveDefault
 	case "deploy", "plan", "apply":

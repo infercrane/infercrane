@@ -74,6 +74,7 @@ type DeploymentRevisionSpec struct {
 	RuntimeVersion         string                   `json:"runtime_version,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
 	RuntimeEnv             map[string]string        `json:"runtime_env,omitempty"`
+	KernelConfigs          *KernelConfigSet         `json:"kernel_configs,omitempty"`
 	RoutingStrategy        string                   `json:"routing_strategy"`
 	MinReplicas            int                      `json:"min_replicas"`
 	MaxReplicas            int                      `json:"max_replicas"`
@@ -112,6 +113,34 @@ type ModelAdapter struct {
 	Repository string `json:"repository" yaml:"repository"`
 	Revision   string `json:"revision" yaml:"revision"`
 	Rank       int    `json:"rank,omitempty" yaml:"rank,omitempty"`
+}
+
+// KernelConfigSet is the engine's own kernels tuned for one GPU and the
+// shapes of one workload, delivered as data the engine reads at start: for
+// vLLM, fused-MoE tile settings in the files its tuned-config folder holds.
+// It carries no code. The engine reads a file only when its name matches the
+// model's shape and the GPU, and keeps its own setting for every other shape,
+// so a set that does not apply changes nothing. internal/kerneltuning
+// validates it.
+type KernelConfigSet struct {
+	Operator       string `json:"operator" yaml:"operator"`
+	Runtime        string `json:"runtime" yaml:"runtime"`
+	RuntimeVersion string `json:"runtime_version" yaml:"runtime_version"`
+	// Device is the GPU name as the engine writes it in a file name, such as
+	// NVIDIA_H100_80GB_HBM3.
+	Device string             `json:"device" yaml:"device"`
+	Tuner  string             `json:"tuner" yaml:"tuner"`
+	Digest string             `json:"digest" yaml:"digest"`
+	Files  []KernelConfigFile `json:"files" yaml:"files"`
+}
+
+// KernelConfigFile is one file of a KernelConfigSet. Content holds the
+// file's exact bytes as a string, so storage that rewrites JSON objects (a
+// jsonb column) cannot change what the digest names.
+type KernelConfigFile struct {
+	Name    string `json:"name" yaml:"name"`
+	Content string `json:"content" yaml:"content"`
+	SHA256  string `json:"sha256" yaml:"sha256"`
 }
 
 // ModelImport is model weights or a LoRA adapter in a customer's own S3 or GCS
@@ -548,7 +577,12 @@ type ColdStartStats struct {
 // BenchmarkResult is the persisted, reproducible summary of one AIPerf run.
 // Raw prompts and generated content are intentionally not part of this schema.
 type BenchmarkResult struct {
-	ID, TenantID, DeploymentID, DeploymentName, RevisionID  string
+	ID, TenantID, DeploymentID, DeploymentName, RevisionID string
+	// AgentID is set for a setup an InferCrane agent measured in the
+	// customer's cluster. RevisionID then holds the setup's own identity
+	// (agentsetup-... or agentserver-...), DeploymentID is empty, and
+	// DeploymentName holds the endpoint's name.
+	AgentID                                                 string
 	ModelArtifactID, ModelIdentity, Runtime, RuntimeVersion string
 	RuntimeConfigJSON, Provider, Region, GPU, ComputeMode   string
 	GPUCount                                                *int
@@ -901,7 +935,10 @@ type QualityEvalSide struct {
 // attached, and QualityEvidenceSourceInferCrane for InferCrane's built-in
 // answer check, which also records the revision it compared against.
 type QualityEvidence struct {
-	ID, TenantID, DeploymentID, RevisionID                     string
+	ID, TenantID, DeploymentID, RevisionID string
+	// AgentID is set for evidence an InferCrane agent's answers produced;
+	// RevisionID then holds the setup's identity and DeploymentID is empty.
+	AgentID                                                    string
 	Suite, SuiteVersion, Evaluator, EvaluatorVersion           string
 	ArtifactDigest, PayloadDigest, Signature, PublicKey, KeyID string
 	Algorithm                                                  string
@@ -930,6 +967,18 @@ type EnvironmentPromotion struct {
 	ID, TenantID, SourceEndpointID, SourcePlanID             string
 	DestinationEndpointID, DestinationPlanID, IdempotencyKey string
 	CreatedAt                                                time.Time
+}
+
+// AgentReleaseGuardEvaluation is Release Guard's decision on a setup an
+// InferCrane agent measured, before any rollout: the setup's runs against
+// the endpoint's own server's runs in the same windows. Setups are named by
+// their agent identities (agentsetup-, agentserver-).
+type AgentReleaseGuardEvaluation struct {
+	ID, TenantID, AgentID, CampaignID, CandidateID string
+	ActiveSetupID, CandidateSetupID, BenchmarkID   string
+	Decision                                       string
+	ReasonCodesJSON, MetricsJSON, PolicyJSON       string
+	CreatedAt                                      time.Time
 }
 
 type ReleaseGuardEvaluation struct {
@@ -1023,6 +1072,10 @@ type OptimizationCampaign struct {
 	ID, TenantID, IdempotencyKey, InputDigest, ModelIdentity, Objective string
 	Source, Intent, TargetDeployment, State, ProposalJSON               string
 	ApprovedBy, FailureCode                                             string
+	// TargetEndpoint and AgentID name the endpoint an evolve_endpoint run
+	// improves when an InferCrane agent serves it; the agent measures every
+	// setup in the customer's cluster. TargetDeployment is then empty.
+	TargetEndpoint, AgentID string
 	// OriginJSON is continualoptimizer.Origin for a run a Stay optimized
 	// check proposed; empty for a run a person created.
 	OriginJSON                    string

@@ -14,8 +14,15 @@ import (
 func TestEngineEnvironmentAdmitsOnlyReviewedSwitchesForThePinnedImage(t *testing.T) {
 	aiter := map[string]string{"VLLM_ROCM_USE_AITER": "1"}
 	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "AMD_Instinct_MI300X_OAM", "MI325X", "MI350X", "MI355X"} {
-		if err := ValidateRuntimeEnv("vllm", DefaultRuntimeVersion, gpu, runtimecontract.Workload{}, aiter); err != nil {
-			t.Fatalf("%s: %v", gpu, err)
+		for _, version := range []string{DefaultRuntimeVersion, LegacyVLLMRuntimeVersion} {
+			if err := ValidateRuntimeEnv("vllm", version, gpu, runtimecontract.Workload{}, aiter); err != nil {
+				t.Fatalf("%s %s: %v", gpu, version, err)
+			}
+			// A legacy revision's served workload is its own release's image.
+			served := ServedWorkloadFor("vllm", version, gpu, runtimecontract.Workload{})
+			if err := ValidateRuntimeEnv("vllm", version, gpu, served, aiter); err != nil {
+				t.Fatalf("%s %s with its served workload: %v", gpu, version, err)
+			}
 		}
 		// The served workload filled in by provisioning is the same image.
 		served := ServedWorkload("vllm", gpu, runtimecontract.Workload{})
@@ -26,17 +33,28 @@ func TestEngineEnvironmentAdmitsOnlyReviewedSwitchesForThePinnedImage(t *testing
 	if err := ValidateRuntimeEnv("vllm", DefaultRuntimeVersion, "H100", runtimecontract.Workload{}, nil); err != nil {
 		t.Fatalf("an empty env is always valid: %v", err)
 	}
+	// vLLM 0.34.0's Rust front end on CUDA, the way the harness ran it.
+	for _, gpu := range []string{"H100", "L4", "B200"} {
+		if err := ValidateRuntimeEnv("vllm", "", gpu, ServedWorkload("vllm", gpu, runtimecontract.Workload{}), map[string]string{"VLLM_USE_RUST_FRONTEND": "1"}); err != nil {
+			t.Fatalf("Rust front end on %s: %v", gpu, err)
+		}
+	}
 	for name, test := range map[string]struct {
 		runtime, version, gpu string
 		workload              runtimecontract.Workload
 		env                   map[string]string
 		want                  string
 	}{
-		"CUDA GPU":                {"vllm", DefaultRuntimeVersion, "H100", runtimecontract.Workload{}, aiter, "not reviewed for vllm 0.22.1 on H100 (platform cuda); reviewed: none"},
+		"CUDA GPU":                {"vllm", DefaultRuntimeVersion, "H100", runtimecontract.Workload{}, aiter, "not reviewed for vllm 0.34.0 on H100 (platform cuda); reviewed: VLLM_USE_RUST_FRONTEND"},
+		"legacy CUDA GPU":         {"vllm", LegacyVLLMRuntimeVersion, "H100", runtimecontract.Workload{}, aiter, "not reviewed for vllm 0.22.1 on H100 (platform cuda); reviewed: none"},
+		"Rust on 0.22.1":          {"vllm", LegacyVLLMRuntimeVersion, "H100", runtimecontract.Workload{}, map[string]string{"VLLM_USE_RUST_FRONTEND": "1"}, "not reviewed for vllm 0.22.1"},
+		"Rust on AMD":             {"vllm", DefaultRuntimeVersion, "MI300X", runtimecontract.Workload{}, map[string]string{"VLLM_USE_RUST_FRONTEND": "1"}, "not reviewed for vllm 0.34.0 on MI300X"},
+		"Rust as a word":          {"vllm", DefaultRuntimeVersion, "H100", runtimecontract.Workload{}, map[string]string{"VLLM_USE_RUST_FRONTEND": "true"}, "must be one of 0, 1"},
+		"legacy image for 0.34.0": {"vllm", DefaultRuntimeVersion, "MI300X", runtimecontract.Workload{Image: "vllm/vllm-openai-rocm@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031", Command: []string{"vllm", "serve"}, Protocol: "openai"}, aiter, "only for the pinned vllm 0.34.0 image"},
 		"unreviewed GPU name":     {"vllm", DefaultRuntimeVersion, "MI250X", runtimecontract.Workload{}, aiter, "not reviewed"},
 		"SGLang sets its own":     {"sglang", SGLangRuntimeVersion, "MI300X", runtimecontract.Workload{}, aiter, "not reviewed for sglang"},
 		"another engine version":  {"vllm", "0.23.0", "MI300X", runtimecontract.Workload{}, aiter, "not reviewed for vllm 0.23.0"},
-		"custom image":            {"vllm", DefaultRuntimeVersion, "MI300X", runtimecontract.Workload{Image: "registry.internal:5000/team/vllm@sha256:" + strings.Repeat("b", 64), Command: []string{"vllm", "serve"}, Protocol: "openai"}, aiter, "only for the pinned vllm 0.22.1 image"},
+		"custom image":            {"vllm", DefaultRuntimeVersion, "MI300X", runtimecontract.Workload{Image: "registry.internal:5000/team/vllm@sha256:" + strings.Repeat("b", 64), Command: []string{"vllm", "serve"}, Protocol: "openai"}, aiter, "only for the pinned vllm 0.34.0 image"},
 		"custom-oci runtime":      {"custom-oci", "", "MI300X", runtimecontract.Workload{}, aiter, "not reviewed for custom-oci"},
 		"no GPU":                  {"vllm", DefaultRuntimeVersion, "", runtimecontract.Workload{}, aiter, "needs a GPU"},
 		"unreviewed value":        {"vllm", DefaultRuntimeVersion, "MI300X", runtimecontract.Workload{}, map[string]string{"VLLM_ROCM_USE_AITER": "true"}, "must be one of 0, 1"},
@@ -106,13 +124,28 @@ func TestEngineEnvironmentRecordsReviewedDefaultsAndNeverManagedNames(t *testing
 				t.Fatalf("%s is reviewed for %s on %s, which has no pinned image", variable.Name, variable.Runtime, platform)
 			}
 		}
-		if engine := defaultEngineVersion(variable.Runtime); engine != variable.EngineVersion {
-			t.Fatalf("%s is reviewed for %s %s, but the pinned engine is %s", variable.Name, variable.Runtime, variable.EngineVersion, engine)
+		// Every reviewed variable belongs to a release with a pinned image on
+		// each of its platforms.
+		for _, platform := range variable.Platforms {
+			if _, ok := RuntimeWorkloadFor(variable.Runtime, variable.EngineVersion, platform); !ok {
+				t.Fatalf("%s is reviewed for %s %s on %s, which has no pinned image", variable.Name, variable.Runtime, variable.EngineVersion, platform)
+			}
+		}
+		for _, source := range variable.Sources {
+			if strings.Contains(source, "/blob/v") && !strings.Contains(source, "/blob/v"+variable.EngineVersion+"/") {
+				t.Fatalf("%s for %s cites another release's source %s", variable.Name, variable.EngineVersion, source)
+			}
 		}
 	}
 	aiter, ok := LookupEngineEnvironment("vllm", "", provideridentity.PlatformROCmGFX942, "VLLM_ROCM_USE_AITER")
-	if !ok || aiter.Default != "0" {
-		t.Fatalf("vLLM 0.22.1 leaves AITER off by default: %#v", aiter)
+	if !ok || aiter.Default != "0" || aiter.EngineVersion != "0.34.0" {
+		t.Fatalf("vLLM 0.34.0 leaves AITER off by default: %#v", aiter)
+	}
+	if legacy, ok := LookupEngineEnvironment("vllm", "v0.22.1", provideridentity.PlatformROCmGFX950, "VLLM_ROCM_USE_AITER"); !ok || legacy.Default != "0" || legacy.EngineVersion != "0.22.1" {
+		t.Fatalf("vLLM 0.22.1 leaves AITER off by default: %#v", legacy)
+	}
+	if rust, ok := LookupEngineEnvironment("vllm", "", provideridentity.PlatformCUDA, "VLLM_USE_RUST_FRONTEND"); !ok || rust.Default != "0" {
+		t.Fatalf("vLLM 0.34.0 starts the Python front end by default: %#v", rust)
 	}
 	// Callers cannot change the reviewed table through a returned copy.
 	aiter.Values[0], variables[0].Platforms[0] = "x", "x"

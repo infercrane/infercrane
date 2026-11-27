@@ -104,6 +104,155 @@ func deviceKernels(events []traceEvent) (map[string]kernelTotals, float64) {
 	return kernels, total
 }
 
+// maxHotspotShapes bounds the input shapes a hotspot names, most device
+// time first.
+const maxHotspotShapes = 8
+
+// launchShapes reads which input shapes and dtypes each GPU kernel was
+// launched with: a kernel event's correlation id names the runtime call that
+// launched it, whose external id names the CPU operator, whose "Input Dims"
+// and "Input type" record_shapes filled in. A kernel replayed from a CUDA
+// graph has no operator of its own, so its shapes stay unknown. The result
+// is keyed by kernel name, each shape weighted by the kernel time it covers.
+func launchShapes(events []traceEvent) map[string]map[string]float64 {
+	operators := map[string]traceEvent{}
+	launches := map[string]string{}
+	for _, event := range events {
+		category := strings.ToLower(event.Category)
+		switch {
+		case category == "cpu_op" || category == "operator":
+			if id := argID(event.Args["External id"]); id != "" {
+				operators[id] = event
+			}
+		case strings.Contains(category, "runtime") || strings.Contains(category, "driver"):
+			if correlation, external := argID(event.Args["correlation"]), argID(event.Args["External id"]); correlation != "" && external != "" && !strings.Contains(event.Name, "Graph") {
+				launches[correlation] = external
+			}
+		}
+	}
+	shapes := map[string]map[string]float64{}
+	for _, event := range events {
+		if event.Phase != "X" || !strings.Contains(strings.ToLower(event.Category), "kernel") || event.Duration <= 0 {
+			continue
+		}
+		external, launched := launches[argID(event.Args["correlation"])]
+		if !launched {
+			continue
+		}
+		operator, known := operators[external]
+		if !known {
+			continue
+		}
+		shape := operatorShape(operator.Args)
+		if shape == "" {
+			continue
+		}
+		if shapes[event.Name] == nil {
+			shapes[event.Name] = map[string]float64{}
+		}
+		shapes[event.Name][shape] += event.Duration
+	}
+	return shapes
+}
+
+// operatorShape writes an operator's tensor inputs as "rows×cols dtype"
+// joined by "; ", skipping scalars and empty inputs, so a shape names what
+// a kernel computed without naming the model.
+func operatorShape(args map[string]any) string {
+	dims, _ := args["Input Dims"].([]any)
+	types, _ := args["Input type"].([]any)
+	var parts []string
+	for index, raw := range dims {
+		values, _ := raw.([]any)
+		if len(values) == 0 {
+			continue
+		}
+		sizes := make([]string, 0, len(values))
+		for _, value := range values {
+			number, ok := value.(float64)
+			if !ok || number < 0 || number != float64(int64(number)) {
+				return ""
+			}
+			sizes = append(sizes, fmt.Sprint(int64(number)))
+		}
+		part := strings.Join(sizes, "×")
+		if index < len(types) {
+			if dtype := shortDType(fmt.Sprint(types[index])); dtype != "" {
+				part += " " + dtype
+			}
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// shortDType names a profiler dtype the way the planner's prompts do.
+func shortDType(dtype string) string {
+	switch strings.ToLower(strings.TrimPrefix(dtype, "c10::")) {
+	case "bfloat16":
+		return "bf16"
+	case "half":
+		return "fp16"
+	case "float":
+		return "fp32"
+	case "float8_e4m3fn", "float8_e4m3fnuz":
+		return "fp8_e4m3"
+	case "float8_e5m2":
+		return "fp8_e5m2"
+	case "int", "int32":
+		return "int32"
+	case "long", "int64":
+		return "int64"
+	case "":
+		return ""
+	}
+	return ""
+}
+
+func argID(value any) string {
+	switch typed := value.(type) {
+	case float64:
+		if typed == float64(int64(typed)) {
+			return fmt.Sprint(int64(typed))
+		}
+	case string:
+		return typed
+	}
+	return ""
+}
+
+// topShapes lists a family's shapes by the device time they cover, at most
+// maxHotspotShapes, and the dtypes among them.
+func topShapes(weighted map[string]float64) ([]string, []string) {
+	shapes := make([]string, 0, len(weighted))
+	for shape := range weighted {
+		shapes = append(shapes, shape)
+	}
+	sort.Slice(shapes, func(i, j int) bool {
+		if weighted[shapes[i]] != weighted[shapes[j]] {
+			return weighted[shapes[i]] > weighted[shapes[j]]
+		}
+		return shapes[i] < shapes[j]
+	})
+	if len(shapes) > maxHotspotShapes {
+		shapes = shapes[:maxHotspotShapes]
+	}
+	dtypes := map[string]bool{}
+	for _, shape := range shapes {
+		for _, part := range strings.Split(shape, "; ") {
+			if fields := strings.Fields(part); len(fields) == 2 {
+				dtypes[fields[1]] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(dtypes))
+	for dtype := range dtypes {
+		names = append(names, dtype)
+	}
+	sort.Strings(names)
+	return shapes, names
+}
+
 func readTrace(path string) ([]traceEvent, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -190,6 +339,7 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 		return nil, "", err
 	}
 	var primary map[string]kernelTotals
+	var primaryShapes map[string]map[string]float64
 	var primaryTotal float64
 	for _, path := range paths {
 		events, readErr := readTrace(path)
@@ -197,7 +347,7 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 			return nil, "", fmt.Errorf("read profiler trace: %w", readErr)
 		}
 		if kernels, total := deviceKernels(events); total > primaryTotal {
-			primary, primaryTotal = kernels, total
+			primary, primaryTotal, primaryShapes = kernels, total, launchShapes(events)
 		}
 	}
 	if primaryTotal <= 0 {
@@ -207,6 +357,7 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 		kernelTotals
 		topName     string
 		topDuration float64
+		shapes      map[string]float64
 	}
 	families := map[kernelplanner.OperatorFamily]*familyTotals{}
 	for name, totals := range primary {
@@ -221,6 +372,12 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 		}
 		entry.durationUS += totals.durationUS
 		entry.count += totals.count
+		for shape, duration := range primaryShapes[name] {
+			if entry.shapes == nil {
+				entry.shapes = map[string]float64{}
+			}
+			entry.shapes[shape] += duration
+		}
 		if totals.durationUS > entry.topDuration || totals.durationUS == entry.topDuration && name < entry.topName {
 			entry.topName, entry.topDuration = name, totals.durationUS
 		}
@@ -230,9 +387,10 @@ func summarizeTraces(directory string, phase kernelplanner.Phase) ([]kernelplann
 	}
 	hotspots := make([]kernelplanner.Hotspot, 0, len(families))
 	for family, totals := range families {
+		shapes, dtypes := topShapes(totals.shapes)
 		hotspots = append(hotspots, kernelplanner.Hotspot{
 			ID: string(family), Name: totals.topName, Family: family, DeviceTimeFraction: totals.durationUS / primaryTotal,
-			MeanDurationUS: totals.durationUS / float64(totals.count), Invocations: totals.count,
+			MeanDurationUS: totals.durationUS / float64(totals.count), Invocations: totals.count, Shapes: shapes, DTypes: dtypes,
 		})
 	}
 	sort.Slice(hotspots, func(i, j int) bool {

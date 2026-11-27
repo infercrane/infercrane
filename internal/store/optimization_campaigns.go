@@ -32,7 +32,21 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 		}
 	}
 	stamp := now()
-	if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
+	if campaign.AgentID != "" {
+		// A run on an agent's endpoint is measured by that agent: it must be
+		// the tenant's own, and active.
+		var agentState string
+		lookupErr := tx.QueryRowContext(ctx, `SELECT state FROM agents WHERE tenant_id=? AND id=?`, campaign.TenantID, campaign.AgentID).Scan(&agentState)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return campaign, false, fmt.Errorf("%w: agent", domain.ErrNotFound)
+		}
+		if lookupErr != nil {
+			return campaign, false, lookupErr
+		}
+		if agentState != "active" {
+			return campaign, false, fmt.Errorf("%w: the endpoint's agent is revoked", domain.ErrConflict)
+		}
+	} else if campaign.Intent == optimizationcampaign.IntentEvolveEndpoint {
 		var deploymentModel string
 		lookupErr := tx.QueryRowContext(ctx, `SELECT model FROM deployments WHERE tenant_id=? AND name=? AND desired_state!='deleted'`, campaign.TenantID, campaign.TargetDeployment).Scan(&deploymentModel)
 		if errors.Is(lookupErr, sql.ErrNoRows) {
@@ -45,7 +59,7 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 			return campaign, false, errors.New("optimization campaign model must match the target deployment")
 		}
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,target_deployment_name,state,proposal_json,max_candidates,origin_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),?,?::jsonb,?,NULLIF(?,'')::jsonb,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, campaign.Intent, campaign.TargetDeployment, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), campaign.OriginJSON, stamp, stamp)
+	result, err := tx.ExecContext(ctx, `INSERT INTO optimization_campaigns(id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,target_deployment_name,target_endpoint_name,agent_id,state,proposal_json,max_candidates,origin_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),?,?::jsonb,?,NULLIF(?,'')::jsonb,?,?) ON CONFLICT(tenant_id,idempotency_key) DO NOTHING`, campaign.ID, campaign.TenantID, campaign.IdempotencyKey, campaign.InputDigest, campaign.ModelIdentity, campaign.Objective, campaign.Source, campaign.Intent, campaign.TargetDeployment, campaign.TargetEndpoint, campaign.AgentID, optimizationcampaign.CampaignAwaitingApproval, campaign.ProposalJSON, len(candidates), campaign.OriginJSON, stamp, stamp)
 	if err != nil {
 		return campaign, false, err
 	}
@@ -58,7 +72,7 @@ func (s *Store) CreateOptimizationCampaign(ctx context.Context, campaign domain.
 		if lookupErr != nil {
 			return campaign, false, lookupErr
 		}
-		if existing.InputDigest != requested.InputDigest || existing.ModelIdentity != requested.ModelIdentity || existing.Objective != requested.Objective || existing.Source != requested.Source || existing.Intent != requested.Intent || existing.TargetDeployment != requested.TargetDeployment || !semanticJSONEqual(existing.ProposalJSON, requested.ProposalJSON) || len(existing.Candidates) != len(candidates) {
+		if existing.InputDigest != requested.InputDigest || existing.ModelIdentity != requested.ModelIdentity || existing.Objective != requested.Objective || existing.Source != requested.Source || existing.Intent != requested.Intent || existing.TargetDeployment != requested.TargetDeployment || existing.TargetEndpoint != requested.TargetEndpoint || existing.AgentID != requested.AgentID || !semanticJSONEqual(existing.ProposalJSON, requested.ProposalJSON) || len(existing.Candidates) != len(candidates) {
 			return existing, false, domain.ErrConflict
 		}
 		return existing, false, nil
@@ -91,8 +105,13 @@ func validateOptimizationCampaign(campaign domain.OptimizationCampaign, candidat
 	if campaign.Intent != optimizationcampaign.IntentNewEndpoint && campaign.Intent != optimizationcampaign.IntentEvolveEndpoint {
 		return errors.New("optimization campaign intent must be new_endpoint or evolve_endpoint")
 	}
-	if campaign.Intent == optimizationcampaign.IntentNewEndpoint && campaign.TargetDeployment != "" || campaign.Intent == optimizationcampaign.IntentEvolveEndpoint && campaign.TargetDeployment == "" {
-		return errors.New("new_endpoint cannot name a target; evolve_endpoint requires one")
+	// The same boundary as optimization_campaign_target_boundary: a new
+	// endpoint names no target; an evolve_endpoint run names either the
+	// deployment it evolves or an agent's endpoint and that agent.
+	deployment, agentEndpoint := campaign.TargetDeployment != "", campaign.TargetEndpoint != "" && campaign.AgentID != ""
+	halfAgent := (campaign.TargetEndpoint != "") != (campaign.AgentID != "")
+	if halfAgent || campaign.Intent == optimizationcampaign.IntentNewEndpoint && (deployment || agentEndpoint) || campaign.Intent == optimizationcampaign.IntentEvolveEndpoint && deployment == agentEndpoint {
+		return errors.New("new_endpoint cannot name a target; evolve_endpoint names a deployment, or an agent's endpoint and its agent")
 	}
 	if len(candidates) < 1 || len(candidates) > 100 {
 		return errors.New("optimization campaign requires between 1 and 100 candidates")
@@ -133,8 +152,8 @@ func (s *Store) optimizationCampaign(ctx context.Context, predicate string, valu
 	var cost sql.NullFloat64
 	var expiry, approvedAt, approvedBy, failure, origin sql.NullString
 	var created, updated string
-	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,COALESCE(target_deployment_name,''),state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,origin_json::text,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
-	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.Intent, &row.TargetDeployment, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &origin, &created, &updated)
+	query := `SELECT id,tenant_id,idempotency_key,input_digest,model_identity,objective,source,intent,COALESCE(target_deployment_name,''),COALESCE(target_endpoint_name,''),COALESCE(agent_id,''),state,proposal_json::text,max_candidates,approved_max_cost_usd,approval_expires_at,approved_by,approved_at,cancel_requested,failure_code,origin_json::text,created_at,updated_at FROM optimization_campaigns WHERE ` + predicate
+	err := s.QueryRowContext(ctx, query, values...).Scan(&row.ID, &row.TenantID, &row.IdempotencyKey, &row.InputDigest, &row.ModelIdentity, &row.Objective, &row.Source, &row.Intent, &row.TargetDeployment, &row.TargetEndpoint, &row.AgentID, &row.State, &row.ProposalJSON, &row.MaxCandidates, &cost, &expiry, &approvedBy, &approvedAt, &row.CancelRequested, &failure, &origin, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return row, domain.ErrNotFound
 	}
@@ -350,8 +369,8 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 	if current.State != from {
 		return current, domain.ErrConflict
 	}
-	var campaignIntent string
-	if err = s.QueryRowContext(ctx, `SELECT intent FROM optimization_campaigns WHERE tenant_id=? AND id=?`, tenant, campaignID).Scan(&campaignIntent); err != nil {
+	var campaignIntent, campaignEndpoint, campaignAgent string
+	if err = s.QueryRowContext(ctx, `SELECT intent,COALESCE(target_endpoint_name,''),COALESCE(agent_id,'') FROM optimization_campaigns WHERE tenant_id=? AND id=?`, tenant, campaignID).Scan(&campaignIntent, &campaignEndpoint, &campaignAgent); err != nil {
 		return current, err
 	}
 	if to == optimizationcampaign.CandidateQualified && campaignIntent != optimizationcampaign.IntentNewEndpoint {
@@ -387,7 +406,13 @@ func (s *Store) TransitionOptimizationCandidate(ctx context.Context, tenant, cam
 		return current, errors.New("qualified new-endpoint candidate requires quality evidence")
 	}
 	var revisionArtifactID string
-	if to == optimizationcampaign.CandidateReady {
+	if to == optimizationcampaign.CandidateReady && campaignAgent != "" {
+		// A setup an agent measures has no deployment revision: its identity
+		// is the setup itself, on the run's endpoint.
+		if !agentSetupIdentity.MatchString(effectiveRevisionID) || effectiveDeploymentName != campaignEndpoint || effectiveArtifactID != "" {
+			return current, errors.New("a setup an agent measures is named by its agent identity on the run's endpoint")
+		}
+	} else if to == optimizationcampaign.CandidateReady {
 		var revisionDeploymentName string
 		lookupErr := s.QueryRowContext(ctx, `SELECT d.name,COALESCE(r.model_artifact_id,'') FROM deployment_revisions r JOIN deployments d ON d.id=r.deployment_id WHERE d.tenant_id=? AND r.id=?`, tenant, effectiveRevisionID).Scan(&revisionDeploymentName, &revisionArtifactID)
 		if errors.Is(lookupErr, sql.ErrNoRows) {

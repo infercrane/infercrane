@@ -152,7 +152,7 @@ func TestPlanAppliesReviewHardwareLicenseAndEngineGates(t *testing.T) {
 		t.Fatalf("AMD build that fits the pinned ROCm images did not become a candidate on gfx942 and gfx950: %+v", fits)
 	}
 	newer := entries["amd/Qwen3.8-27B-w4a16-llmcompressor@"+strings.Repeat("f6", 20)]
-	want := "no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned " + support.DefaultRuntimeVersion
+	want := "no reviewed runtime fits the pinned images: vllm needs 0.35.0 or newer, pinned " + support.DefaultRuntimeVersion
 	if newer.Hardware.ProductSupport != checkpointcatalog.SupportRunnable || !slices.Equal(newer.Eligibility.Blockers, []string{want}) {
 		t.Fatalf("AMD build that needs a newer vLLM than the pinned ROCm image was not blocked for that reason: %+v", newer.Eligibility)
 	}
@@ -211,7 +211,7 @@ func TestApprovingPublisherAndFormatPromotesEntryOnSameSnapshot(t *testing.T) {
 		if entry.Repository == "RedHatAI/Qwen3.8-27B-NVFP4" {
 			// Approval clears the review and hardware gates. The card needs a
 			// newer vLLM than the pinned image, so that gate alone remains.
-			want := "no reviewed runtime fits the pinned images: vllm needs 0.28.1 or newer, pinned " + support.DefaultRuntimeVersion
+			want := "no reviewed runtime fits the pinned images: vllm needs 0.35.1 or newer, pinned " + support.DefaultRuntimeVersion
 			if entry.Review.State != checkpointcatalog.ReviewApproved || entry.Hardware.ProductSupport != checkpointcatalog.SupportRunnable || !slices.Equal(entry.Eligibility.Blockers, []string{want}) {
 				t.Fatalf("approval left a gate other than the engine version: %+v", entry)
 			}

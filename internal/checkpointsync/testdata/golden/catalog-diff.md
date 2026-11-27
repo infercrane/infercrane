@@ -1,7 +1,7 @@
 # Checkpoint catalog diff
 
 - Snapshot fetched: 2026-11-11T12:00:00Z
-- Snapshot digest: `sha256:686b0d7608a1f5b7ba9d1a1cebdebbc26fab77516241f4f8852e350be89272f0`
+- Snapshot digest: `sha256:229ebb56948cb8f99bdf60e6afc67654ed813590cbb825e98e78dbbadecd6d21`
 - Policy digest: `sha256:23b2438987b3770c9422934e9ee1f8975574e2d68614e8d509ac6e1a3ba38b9f`
 - Entries: 14 (6 candidates, 2 pending review)
 - Changes: 11 added, 1 revised, 0 changed, 1 removed, 1 unchanged
@@ -36,7 +36,7 @@ Approved, licensed, runnable quantized checkpoints. Proposals still treat them a
 | Entry | Base | Format | Hardware | Selected by | Eligibility |
 | --- | --- | --- | --- | --- | --- |
 | [amd/GLM-5.3-Flash-Quark-MXFP4](https://huggingface.co/amd/GLM-5.3-Flash-Quark-MXFP4) @ `d4d4d4d4d4d4` | zai-org/GLM-5.3-Flash | quark mxfp4 | amd gfx950 (runnable) | created 2026-10-25 (on or after 2026-08-01) | catalog only: tool quark cannot seed product candidates yet |
-| [amd/Qwen3.8-27B-w4a16-llmcompressor](https://huggingface.co/amd/Qwen3.8-27B-w4a16-llmcompressor) @ `f6f6f6f6f6f6` | Qwen/Qwen3.8-27B | llm-compressor w4a16 | amd gfx942, gfx950 (runnable) | created 2026-10-29 (on or after 2026-08-01) | catalog only: no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer, pinned 0.22.1 |
+| [amd/Qwen3.8-27B-w4a16-llmcompressor](https://huggingface.co/amd/Qwen3.8-27B-w4a16-llmcompressor) @ `f6f6f6f6f6f6` | Qwen/Qwen3.8-27B | llm-compressor w4a16 | amd gfx942, gfx950 (runnable) | created 2026-10-29 (on or after 2026-08-01) | catalog only: no reviewed runtime fits the pinned images: vllm needs 0.35.0 or newer, pinned 0.34.0 |
 | [amd/Qwen3.8-27B-w8a8-llmcompressor](https://huggingface.co/amd/Qwen3.8-27B-w8a8-llmcompressor) @ `e5e5e5e5e5e5` | Qwen/Qwen3.8-27B | llm-compressor w8a8 | amd gfx942, gfx950 (runnable) | created 2026-10-28 (on or after 2026-08-01) | candidate |
 | [nvidia/DeepSeek-V4.1-Flash-1017-NVFP4](https://huggingface.co/nvidia/DeepSeek-V4.1-Flash-1017-NVFP4) @ `3ae9c0d3fbbe` | deepseek-ai/DeepSeek-V4.1-Flash-1017 | modelopt nvfp4 | nvidia blackwell (runnable) | created 2026-10-30 (on or after 2026-08-01) | catalog only: every reviewed runtime needs an unreleased or blocked engine change |
 | [nvidia/GLM-5.3-Flash-FP4-Local](https://huggingface.co/nvidia/GLM-5.3-Flash-FP4-Local) @ `a1a1a1a1a1a1` | zai-org/GLM-5.3-Flash | modelopt mixed-nvfp4-fp8 | nvidia blackwell (runnable) | created 2026-10-08 (on or after 2026-08-01) | catalog only: license "other" is unresolved |

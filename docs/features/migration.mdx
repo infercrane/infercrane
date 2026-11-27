@@ -92,7 +92,9 @@ answers that count as right, and both the closed API and each setup are scored a
 ```
 
 `exact_match` scores 1 when the answer's words equal an expected answer's, ignoring case and
-punctuation; `token_f1` scores the best word overlap. A migration needs at least 30 graded
+punctuation; `token_f1` scores the best word overlap; `answer_line` scores a
+[task set](/features/semantic-quality#task-sets) by the answer's last `Answer:` line, with one
+expected number or letter from A to D per prompt. A migration needs at least 30 graded
 prompts. Upload the set with `infercrane evaluation set upload` and pass its digest as `--eval-set`.
 
 InferCrane asks the closed API and each setup every prompt with greedy decoding (`--dialect openai`

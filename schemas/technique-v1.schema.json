@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/technique-v1.schema.json",
+  "title": "InferCrane technique manifest v1",
+  "description": "The contract every optimization technique plugs into: what it requires, which limit it relieves and costs, how it predicts, the artifact it builds and where, whether it can change answers, its runtime policy, and its fallback. A static technique file adds fixed engine-flag changes. See docs/features/technique-contract.mdx.",
+  "oneOf": [
+    {"$ref": "#/$defs/manifest"},
+    {"$ref": "#/$defs/static"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,62}[a-z0-9]$"},
+    "token": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"},
+    "limit": {"enum": ["decode-steps", "kv-cache-room", "prefill-compute", "kernel-time", "host-overhead", "first-token", "gpu-memory", "host-memory", "build-time"]},
+    "flag": {"type": "string", "pattern": "^--[^ =\\x00\\n]{1,62}$"},
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "id", "version", "label", "license", "requires", "relieves", "costs", "prediction", "changes_answers", "runtime", "fallback"],
+      "properties": {
+        "schema_version": {"const": "infercrane.dev/technique/v1"},
+        "id": {"$ref": "#/$defs/id"},
+        "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 128},
+        "license": {"type": "string", "minLength": 1, "maxLength": 128, "description": "SPDX expression of the technique's code and every dependency it adds."},
+        "requires": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engines", "accelerators"],
+          "properties": {
+            "engines": {"type": "array", "minItems": 1, "items": {
+              "type": "object", "additionalProperties": false, "required": ["name", "versions"],
+              "properties": {
+                "name": {"$ref": "#/$defs/token"},
+                "versions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": "^[^*<>=~^ ]+$"}}
+              }}},
+            "accelerators": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            "model_features": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+            "signals_at_most": {
+              "type": "object", "maxProperties": 8,
+              "propertyNames": {"$ref": "#/$defs/token"},
+              "additionalProperties": {"type": "number", "minimum": 0},
+              "description": "Ceilings on the diagnosis's readings of the traffic. A setup whose reading is above its ceiling, or missing, is refused."
+            }
+          }
+        },
+        "relieves": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/limit"}},
+        "costs": {"type": "array", "items": {"$ref": "#/$defs/limit"}},
+        "prediction": {
+          "type": "object", "additionalProperties": false, "required": ["metric", "basis"],
+          "properties": {"metric": {"$ref": "#/$defs/token"}, "basis": {"$ref": "#/$defs/token"}}
+        },
+        "artifact": {
+          "type": "object", "additionalProperties": false, "required": ["kind", "runs_in", "uses_customer_content", "produces"],
+          "properties": {
+            "kind": {"$ref": "#/$defs/token", "description": "An optimizedartifact kind, for example speculator_checkpoint."},
+            "runs_in": {"enum": ["customer-account", "disposable-gpu-container"]},
+            "uses_customer_content": {"type": "boolean"},
+            "produces": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"uses_customer_content": {"const": true}}},
+          "then": {"properties": {"runs_in": {"const": "customer-account"}}}
+        },
+        "changes_answers": {"type": "boolean"},
+        "runtime": {
+          "type": "object", "additionalProperties": false, "required": ["policy"],
+          "properties": {"policy": {"enum": ["static", "adaptive"]}}
+        },
+        "fallback": {
+          "type": "object", "additionalProperties": false, "required": ["serves", "reason"],
+          "properties": {"serves": {"enum": ["starting-setup", "engine-default"]}, "reason": {"type": "string", "minLength": 1}}
+        },
+        "evidence": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/token"},
+          "description": "What every result of this technique must carry besides the five fields, for example kernel-invocation-proof, draft-acceptance, or swap-timings. A result without one is 'not shown'."},
+        "disclosures": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 400, "pattern": "\\S"},
+          "description": "Sentences every claim of this technique carries word for word, for example a view in which it lost or a cost it showed. A result that drops one is 'not shown'."}
+      },
+      "if": {"required": ["artifact"]},
+      "then": {"properties": {"costs": {"contains": {"const": "build-time"}}}}
+    },
+    "static": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest", "changes"],
+      "properties": {
+        "schema_version": {"const": "infercrane.dev/technique-static/v1"},
+        "manifest": {
+          "allOf": [{"$ref": "#/$defs/manifest"}],
+          "not": {"required": ["artifact"]},
+          "properties": {"runtime": {"properties": {"policy": {"const": "static"}}}}
+        },
+        "changes": {"type": "array", "minItems": 1, "maxItems": 16, "items": {
+          "type": "object", "additionalProperties": false, "required": ["label", "reason"],
+          "properties": {
+            "label": {"type": "string", "minLength": 1},
+            "reason": {"type": "string", "minLength": 1},
+            "set": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name"],
+              "properties": {"name": {"$ref": "#/$defs/flag"}, "value": {"type": "string"}}}},
+            "remove": {"type": "array", "items": {"$ref": "#/$defs/flag"}},
+            "prediction": {"type": "object"}
+          },
+          "anyOf": [{"required": ["set"], "properties": {"set": {"minItems": 1}}}, {"required": ["remove"], "properties": {"remove": {"minItems": 1}}}]
+        }}
+      }
+    }
+  }
+}

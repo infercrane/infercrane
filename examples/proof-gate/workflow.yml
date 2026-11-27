@@ -1,0 +1,45 @@
+# Copy to .github/workflows/proof-gate.yml. It runs only when a pull request
+# changes the serving spec, proves the change against the spec on the base
+# branch, comments the verdict, and fails the check on BLOCK or UNKNOWN.
+name: proof gate
+on:
+  pull_request:
+    paths:
+      - deploy/qwen.yaml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: proof-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Pin a release tag or full commit SHA that includes mode: proof-gate.
+      - id: gate
+        uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+        with:
+          mode: proof-gate
+          spec: deploy/qwen.yaml
+          objective: latency
+          max-cost-usd: "20"
+          proof-timeout: 3h
+          on-watch: neutral
+        env:
+          INFERCRANE_URL: ${{ secrets.INFERCRANE_URL }}
+          INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infercrane-proof
+          path: |
+            infercrane-delivery.json
+            infercrane-proof-report.json

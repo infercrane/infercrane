@@ -1,15 +1,206 @@
 ---
 title: GitHub Actions
-description: Deterministic pull-request plans and protected InferCrane release checks.
+description: The regression gate for model and setting changes, plus deterministic plans and protected releases.
 ---
 
-The repository action renders an InferCrane semantic plan into the job summary and writes the exact
-JSON plan as an artifact. Plan mode is read-only.
+The repository action has four modes. `proof-gate` is the regression gate for model and setting
+changes: when a pull request changes a model, an engine setting, or a serving setup, it runs
+InferCrane's proof against the setup that serves today, comments the verdict on the pull request,
+and fails the check on a regression. `plan`, `apply`, and `release-check` deliver the change.
 
 <Warning>
   Pin the action to a published release tag or full commit SHA. Do not use a floating branch for a
-  production delivery workflow.
+  production delivery workflow. `proof-gate` needs a release that includes it; on an older release
+  the action says so and stops.
 </Warning>
+
+## Gate a pull request on the proof
+
+<Warning>
+  A proof starts two GPU servers on your provider, measures both setups, and checks their answers.
+  It can spend up to `max-cost-usd`. Both setups run on fresh, isolated servers; the setup that
+  serves production is not touched. Run it on `pull_request`, never on `pull_request_target`: the
+  pull request's spec decides what runs on your GPUs, so it must not run with secrets on untrusted
+  code.
+</Warning>
+
+```yaml .github/workflows/proof-gate.yml
+name: proof gate
+on:
+  pull_request:
+    paths:
+      - deploy/qwen.yaml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+        with:
+          mode: proof-gate
+          spec: deploy/qwen.yaml
+          objective: latency
+          max-cost-usd: "20"
+        env:
+          INFERCRANE_URL: ${{ secrets.INFERCRANE_URL }}
+          INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infercrane-proof
+          path: |
+            infercrane-delivery.json
+            infercrane-proof-report.json
+```
+
+The action reads `deploy/qwen.yaml` as it is on the pull request's base commit (the current setup)
+and as it is in the pull request (the proposed setup), then:
+
+1. Creates a run of exactly those two setups (`infercrane optimize compare`). The current setup is
+   the run's control.
+2. Approves it with your spend cap and approval window (`infercrane optimize approve`).
+3. Waits for the signed report and decides the verdict from it (`infercrane optimize gate`).
+4. Cancels the run, so its servers stop (`release-servers`).
+5. Posts one comment on the pull request and updates it on every later run.
+
+The two setups must serve the same model artifact on the same accelerator, GPU count, provider, and
+region, so one run measures both in turns on one kind of machine and the change is the only
+difference it measures. A pull request that changes the GPU or provider, or swaps the model, is
+refused with the reason. Prove a model swap with a [migration Proof](/features/migration) or your
+own [signed eval](/features/semantic-quality). A spec that is unchanged spends nothing: the check
+passes as `skipped`.
+
+### What the verdict means
+
+| Verdict | When | Check |
+|---|---|---|
+| `PASS` | The proposed setup measured no worse than the current one beyond the noise measured in the same window, failed no more requests, did not answer shorter, and its answers passed the check. | passes |
+| `WATCH` | No speed regression, but its answers moved into the answer check's watch band (more than 5% different from the current setup's, up to 10%). | `on-watch`: `neutral` (default) passes with a warning; `fail` fails; `pass` passes |
+| `BLOCK` | It measured worse beyond the noise on the ranked metric or another headline outcome, failed more requests, answered shorter, missed a limit the run required, or its answers were blocked (more than 10% different, or a broken tool call). | fails |
+| `UNKNOWN` | Anything the report does not show: the run has not finished, the change was not measured alongside the current setup, the answer check did not run, the signature did not verify, or a better result on fresh servers contradicts the first one. | fails |
+
+`UNKNOWN` never passes. A measured regression is decisive: the verdict is `BLOCK` even when
+something else is unknown. A regression is decided from one measurement window, so the gate errs
+toward blocking: two servers of one kind can differ by about 1% in throughput (see
+[how much machines differ](/features/optimization#how-much-machines-differ)). Re-running the job
+measures both setups again on new servers; a retried step and a new push with the same specs reuse
+the run and its verdict. GitHub has no neutral outcome for a step, so a neutral `WATCH` passes the
+step, adds a warning annotation, and sets the `conclusion` output to `neutral`.
+
+A gain counts only when it held on fresh servers. When the proposed setup measures better, the run
+retires both servers and measures again on new ones; the comment shows the gain as `shown` only when
+the second measurement agrees. A gain measured once still passes the gate, which is about
+regressions, but the comment says `gain not shown`.
+
+### The comment
+
+One comment per gate, updated in place. It shows the verdict, the measured change against the
+noise measured in the same window, the fresh-server confirmation, the answer check, and a link to
+the evidence: the run in the dashboard (or the control API's report) and the signed report's digest
+and key.
+
+```text
+### ❌ BLOCK · InferCrane proof gate
+
+Regression: this change measured worse than the current setup.
+
+`vLLM defaults` → `Prefill chunks of 8,192 tokens`
+
+| | Result |
+|---|---|
+| p95 time to first token | +14.1% against a ±5.1% noise floor measured in the same window · worse |
+| Fresh servers | not needed: no gain to confirm |
+| Answer check | PASS · answers matched the reference 99% across 64 prompts (watch above 5% different, block above 10%) |
+
+Run `run-…` · report `sha256:…` · signed by key `sha256:…`
+```
+
+Values from the spec, such as engine arguments, are shown only as code, so they cannot mention
+people or render as markup. A pull request from a fork gets a read-only token: the comment is
+skipped with a warning and the verdict stays in the job summary.
+
+### Read a finished run instead
+
+Set `campaign` instead of `spec` to gate on a run that already exists, for example one started from
+the dashboard or by another job. Nothing is created, approved, or cancelled.
+
+```yaml
+- uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+  with:
+    mode: proof-gate
+    campaign: ${{ vars.PROOF_RUN_ID }}
+    on-watch: fail
+```
+
+When the run measured several setups, name the one the change introduced with `setup`.
+
+### Check the verdict yourself
+
+The verdict is a pure function of the run's signed report, saved byte for byte at `report-path`.
+Anyone can verify the report and recompute the verdict without the control plane:
+
+```bash
+infercrane optimize report verify infercrane-proof-report.json --public-key OPERATOR_PUBLIC_KEY
+infercrane optimize gate --file infercrane-proof-report.json --public-key OPERATOR_PUBLIC_KEY
+```
+
+Set `public-key` (or `require-signature: "true"`) on the action to make an unsigned report, or one
+signed by another key, `UNKNOWN`.
+
+### Inputs
+
+| Input | Default | Meaning |
+|---|---|---|
+| `spec` | | The pull request's DeploymentSpec. Runs a proof of its change. |
+| `campaign` | | A run ID to read the verdict of. Set `spec` or `campaign`, not both. |
+| `current-spec` | spec at `base-ref` | The current setup's spec, when it does not live at the same path on the base commit. |
+| `base-ref` | the pull request's base | Commit to read the current setup from. Check it out with `fetch-depth: 0`. |
+| `max-cost-usd` | | Required with `spec`. Hard cap on what both setups' servers may spend. |
+| `approval-window` | `3h` | How long the run may spend before its servers stop. |
+| `proof-timeout` | `3h` | How long the job waits for the verdict. An unfinished run is `UNKNOWN`. |
+| `objective` | `interactive` | `interactive`, `latency`, `throughput`, or `cost-efficiency`: the metric the run ranks on. |
+| `profile` | from objective | Benchmark workload profile. |
+| `workload-fingerprint` | | Captured traffic both setups replay instead of the reviewed profile. |
+| `quality-check` | `builtin` | `builtin` compares answers with the current setup's; `customer_evidence` waits for your signed eval. |
+| `eval-set` | | Uploaded eval set for the built-in answer check. |
+| `on-watch` | `neutral` | `neutral`, `fail`, or `pass`. Changes only `WATCH`. |
+| `setup` | the only other setup | Setup ID to judge when a read run measured several. |
+| `require-signature` | `false` | Treat an unsigned report as `UNKNOWN`. |
+| `public-key` | | Base64 Ed25519 key the report must be signed by. |
+| `release-servers` | `true` | Cancel a run this job started once its verdict is read. |
+| `comment` | `true` | Post or update the pull-request comment. |
+| `comment-key` | `spec` | Names the comment when one pull request has several gates. |
+| `github-token` | `github.token` | Writes the comment; needs `pull-requests: write`. |
+| `report-path` | `infercrane-proof-report.json` | Where the signed report is saved. |
+| `output-path` | `infercrane-delivery.json` | Where the gate result is saved as JSON. |
+
+Outputs: `verdict` (`PASS`, `WATCH`, `BLOCK`, `UNKNOWN`), `conclusion` (`success`, `neutral`,
+`failure`, `skipped`), `result` (`pass`, `neutral`, `fail`, `skipped`), `campaign-id`,
+`report-digest`, and `comment-url`. The API key needs deploy access to start a run and read access
+to read one.
+
+### Try it without a GPU
+
+`examples/proof-gate/dry-run.sh` builds the CLI and a fake control plane, reads one finished run per
+verdict, proves `examples/proof-gate/current.yaml` → `proposed.yaml` the way a pull request does,
+and verifies the saved report. It spends nothing and calls no GitHub API.
+
+```bash
+./examples/proof-gate/dry-run.sh
+```
+
+## Plan in pull requests
+
+`plan` renders an InferCrane semantic plan into the job summary and writes the exact JSON plan as an
+artifact. It is read-only.
 
 ```yaml
 name: inference delivery
@@ -25,7 +216,7 @@ jobs:
           mode: plan
           spec: deploy/qwen.yaml
         env:
-          INFERCRANE_CONTROL_URL: ${{ secrets.INFERCRANE_CONTROL_URL }}
+          INFERCRANE_URL: ${{ secrets.INFERCRANE_URL }}
           INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
       - uses: actions/upload-artifact@v4
         with:
@@ -53,7 +244,7 @@ jobs:
           spec: deploy/qwen.yaml
           wait-timeout: 30m
         env:
-          INFERCRANE_CONTROL_URL: ${{ secrets.INFERCRANE_CONTROL_URL }}
+          INFERCRANE_URL: ${{ secrets.INFERCRANE_URL }}
           INFERCRANE_API_KEY: ${{ secrets.INFERCRANE_API_KEY }}
 ```
 

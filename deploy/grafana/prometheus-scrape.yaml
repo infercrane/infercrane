@@ -1,0 +1,31 @@
+# Prometheus scrape jobs for the InferCrane dashboard (deploy/grafana/infercrane-dashboard.json).
+# Merge these into the scrape_configs of your prometheus.yml and load
+# deploy/prometheus-rules.yaml under rule_files.
+scrape_configs:
+  # Gateway request, latency, admission, and accounting series. The gateway's
+  # /metrics needs no credential and names no workspace; protect it at the
+  # network layer.
+  - job_name: infercrane
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["infercrane.internal:8080"]
+
+  # Release Guard verdicts, rollbacks, canary shares, and optimization results
+  # of one workspace. Use an API key with read permission; each key reads its
+  # own workspace only. Keep the interval at 15s or longer.
+  - job_name: infercrane-results
+    metrics_path: /api/v1/metrics
+    scrape_interval: 30s
+    scheme: https
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/infercrane-api-key
+    static_configs:
+      - targets: ["control.infercrane.example"]
+
+  # vLLM's own engine metrics. Keep the model_name label: the dashboard's
+  # engine panels filter on it.
+  - job_name: vllm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["vllm-0.internal:8000", "vllm-1.internal:8000"]

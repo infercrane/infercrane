@@ -1,0 +1,195 @@
+{
+  "cells": [
+    {
+      "load": 32,
+      "policy": "throughput",
+      "awake": "drafts-3",
+      "want": "drafts-3",
+      "adaptive_output_tokens_per_second": 2784.0320986566953,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 1738.2271052661818,
+        "drafts-1": 2491.4585999022297,
+        "drafts-3": 2789.3612117691837
+      },
+      "best_fixed": "drafts-3",
+      "share_of_best": 0.9980894861913175,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 0,
+      "warm_up_seconds_real": 30,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    },
+    {
+      "load": 64,
+      "policy": "throughput",
+      "awake": "drafts-1",
+      "want": "drafts-1",
+      "adaptive_output_tokens_per_second": 3571.796978546105,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 2697.9939937271242,
+        "drafts-1": 3545.604243400916,
+        "drafts-3": 3436.9422318745737
+      },
+      "best_fixed": "drafts-1",
+      "share_of_best": 1.0073873826143849,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 1,
+      "warm_up_seconds_real": 30,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    },
+    {
+      "load": 96,
+      "policy": "throughput",
+      "awake": "drafts-1",
+      "want": "drafts-1",
+      "adaptive_output_tokens_per_second": 4040.5075985350168,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 3382.894204780386,
+        "drafts-1": 4033.3705922721947,
+        "drafts-3": 3344.3886213152027
+      },
+      "best_fixed": "drafts-1",
+      "share_of_best": 1.001769489338891,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 0,
+      "warm_up_seconds_real": 30,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    },
+    {
+      "load": 128,
+      "policy": "throughput",
+      "awake": "drafts-1",
+      "want": "drafts-1",
+      "adaptive_output_tokens_per_second": 4195.051000236522,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 3619.788743971969,
+        "drafts-1": 4194.262943136433,
+        "drafts-3": 3244.393435063323
+      },
+      "best_fixed": "drafts-1",
+      "share_of_best": 1.0001878892932496,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 0,
+      "warm_up_seconds_real": 30,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    },
+    {
+      "load": 128,
+      "policy": "useful-output",
+      "awake": "drafts-0",
+      "want": "drafts-0",
+      "adaptive_output_tokens_per_second": 3730.045548655942,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 3619.788743971969,
+        "drafts-1": 4194.262943136433,
+        "drafts-3": 3244.393435063323
+      },
+      "best_fixed": "drafts-1",
+      "share_of_best": 0.8893208650067721,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 1,
+      "warm_up_seconds_real": 30,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    },
+    {
+      "load": 32,
+      "policy": "useful-output",
+      "awake": "drafts-3",
+      "want": "drafts-3",
+      "adaptive_output_tokens_per_second": 2776.8526598814183,
+      "fixed_output_tokens_per_second": {
+        "drafts-0": 1738.2271052661818,
+        "drafts-1": 2491.4585999022297,
+        "drafts-3": 2789.3612117691837
+      },
+      "best_fixed": "drafts-3",
+      "share_of_best": 0.9955156213419087,
+      "failed": 0,
+      "swaps_in_window": 0,
+      "swaps_in_warm_up": 1,
+      "warm_up_seconds_real": 45,
+      "window_seconds_real": 50,
+      "requests_to_sleeping_engines": 0
+    }
+  ],
+  "policies": {
+    "throughput": [
+      {
+        "up_to": 58,
+        "engine": "drafts-3"
+      },
+      {
+        "engine": "drafts-1"
+      }
+    ],
+    "useful-output": [
+      {
+        "up_to": 58,
+        "engine": "drafts-3"
+      },
+      {
+        "up_to": 111,
+        "engine": "drafts-1"
+      },
+      {
+        "engine": "drafts-0"
+      }
+    ]
+  },
+  "rooms": {
+    "drafts-1": 111,
+    "drafts-3": 58
+  },
+  "schema": "infercrane.specswitch-stand-in-replay/v1",
+  "swaps": [
+    {
+      "from": "drafts-3",
+      "to": "drafts-1",
+      "load": 64,
+      "policy": "throughput",
+      "result": "swapped",
+      "start": "2026-11-26T04:38:21.15594+01:00",
+      "drain_seconds": 0.093781458,
+      "swap_seconds": 0.219004583
+    },
+    {
+      "from": "drafts-1",
+      "to": "drafts-0",
+      "load": 128,
+      "policy": "useful-output",
+      "result": "swapped",
+      "start": "2026-11-26T04:38:25.94644+01:00",
+      "drain_seconds": 0.140047,
+      "swap_seconds": 0.267903583
+    },
+    {
+      "from": "drafts-0",
+      "to": "drafts-3",
+      "load": 32,
+      "policy": "useful-output",
+      "result": "swapped",
+      "start": "2026-11-26T04:38:27.931931+01:00",
+      "drain_seconds": 0.052711542,
+      "swap_seconds": 0.179463042
+    }
+  ],
+  "timing_real": {
+    "sample": "250ms",
+    "smooth": "2s",
+    "raise_after": "3s",
+    "lower_after": "20s",
+    "min_dwell": "10s",
+    "drain_timeout": "1m0s",
+    "wake_timeout": "2m0s"
+  },
+  "what": "Stand-in engines with the H100 map's short-chat speeds and cache rooms (Qwen3.8-27B-FP8, vLLM 0.34.0 medians), time-compressed 50x; the switch against each engine alone. Not a measurement of any GPU."
+}

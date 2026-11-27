@@ -24,8 +24,10 @@ const (
 // serverMetricKeywords select the runtime signals that explain a serving
 // result: cache occupancy and reuse, preemption, queueing, and speculative
 // acceptance. They are generic name fragments, so no runtime is special-cased
-// and an unknown runtime simply contributes fewer metrics.
-var serverMetricKeywords = []string{"cache", "preempt", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap"}
+// and an unknown runtime simply contributes fewer metrics. "infercrane" keeps
+// the gauges InferCrane's patched engine images add, which a technique's
+// evidence reads (optimizationreport).
+var serverMetricKeywords = []string{"cache", "preempt", "spec", "accept", "running", "waiting", "queue", "token_usage", "swap", "infercrane"}
 
 var serverMetricStats = map[string]struct{}{
 	"avg": {}, "min": {}, "max": {}, "p50": {}, "p95": {}, "p99": {},

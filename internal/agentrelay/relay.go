@@ -172,13 +172,31 @@ func (s *Service) Upgrade(agentVersion string) agentprotocol.Upgrade {
 }
 
 // Register observes one agent-local server as an observe-only endpoint.
+// rolloutServerStore binds a rollout's server to its endpoint.
+type rolloutServerStore interface {
+	RegisterAgentRolloutServer(context.Context, string, string, domain.AgentServerRegistration) (domain.AgentServer, bool, error)
+}
+
 func (s *Service) Register(ctx context.Context, agent domain.Agent, request agentprotocol.RegisterServerRequest) (agentprotocol.RegisterServerResponse, error) {
 	if err := request.Validate(); err != nil {
 		return agentprotocol.RegisterServerResponse{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	server, created, err := s.Store.RegisterAgentServer(ctx, agent.TenantID, agent.ID, domain.AgentServerRegistration{
-		Key: request.ServerKey, EndpointName: request.Endpoint, UpstreamModel: request.Model, Runtime: request.Engine, Address: request.Address,
-	})
+	registration := domain.AgentServerRegistration{Key: request.ServerKey, EndpointName: request.Endpoint, UpstreamModel: request.Model, Runtime: request.Engine, Address: request.Address}
+	var (
+		server  domain.AgentServer
+		created bool
+		err     error
+	)
+	if request.Rollout {
+		// A server a rollout started joins the endpoint it was started for.
+		rollouts, ok := s.Store.(rolloutServerStore)
+		if !ok {
+			return agentprotocol.RegisterServerResponse{}, ErrUnavailable
+		}
+		server, created, err = rollouts.RegisterAgentRolloutServer(ctx, agent.TenantID, agent.ID, registration)
+	} else {
+		server, created, err = s.Store.RegisterAgentServer(ctx, agent.TenantID, agent.ID, registration)
+	}
 	if err != nil {
 		return agentprotocol.RegisterServerResponse{}, err
 	}
@@ -395,6 +413,11 @@ func requestRecord(agent domain.Agent, server domain.AgentServer, shape agentpro
 		record.ComputeMode = agentprotocol.ComputeModeDataPlane
 		record.ResponseModel, record.QueueMS, record.RetryCount = shape.ResponseModel, shape.QueueMS, shape.RetryCount
 		record.ParentSessionIDHash, record.ToolPauseMS = shape.ParentSessionIDHash, shape.ToolPauseMS
+		if shape.FallbackFromBindingID != "" {
+			// The request failed over away from that binding before any
+			// byte reached the caller; Release Guard counts it against it.
+			record.FallbackFromBindingID, record.FallbackReason = shape.FallbackFromBindingID, "agent_data_plane_failover"
+		}
 	}
 	return record, nil
 }

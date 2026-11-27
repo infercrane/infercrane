@@ -1,0 +1,22 @@
+{
+ "schema": "infercrane.dev/benchmark-run/v1",
+ "run_id": "synthetic-rung",
+ "spec": {
+  "id": "example-rung",
+  "models": [
+   {
+    "name": "example-8b",
+    "id": "example/dense-8b",
+    "revision": "2222222222222222222222222222222222222222",
+    "kind": "dense, small",
+    "precision": {
+     "weights": "bf16",
+     "kv_cache": "bf16 (engine auto)"
+    },
+    "weights": {
+     "bytes": 16400000000.0
+    }
+   }
+  ]
+ }
+}

@@ -30,8 +30,11 @@ func (s *Service) commandStore() (CommandStore, bool) {
 // commandSpec is what a queued command stores: the candidate spec and the
 // current setup it is measured against, resolved when it was queued.
 type commandSpec struct {
-	RunCandidate *agentprotocol.CandidateRunSpec   `json:"run_candidate"`
-	Control      *agentprotocol.CandidateRunServer `json:"control"`
+	RunCandidate  *agentprotocol.CandidateRunSpec   `json:"run_candidate,omitempty"`
+	MeasureWindow *agentprotocol.WindowSpec         `json:"measure_window,omitempty"`
+	StartServer   *agentprotocol.StartServerSpec    `json:"start_server,omitempty"`
+	StopServer    *agentprotocol.StopServerSpec     `json:"stop_server,omitempty"`
+	Control       *agentprotocol.CandidateRunServer `json:"control,omitempty"`
 }
 
 // CreateCandidateRun queues one candidate run on an agent. The endpoint must
@@ -58,18 +61,9 @@ func (s *Service) CreateCandidateRun(ctx context.Context, tenant, agentIDOrName,
 	if agent.State != "active" {
 		return domain.Agent{}, domain.AgentCommand{}, fmt.Errorf("%w: the agent is revoked", domain.ErrConflict)
 	}
-	servers, err := s.Store.AgentServers(ctx, tenant, agent.ID)
+	control, err := s.controlFor(ctx, tenant, agent, spec.Endpoint)
 	if err != nil {
 		return domain.Agent{}, domain.AgentCommand{}, err
-	}
-	var control *agentprotocol.CandidateRunServer
-	for _, server := range servers {
-		if server.EndpointName == spec.Endpoint {
-			control = &agentprotocol.CandidateRunServer{Endpoint: server.EndpointName, ServerKey: server.Key, Model: server.UpstreamModel}
-		}
-	}
-	if control == nil {
-		return domain.Agent{}, domain.AgentCommand{}, fmt.Errorf("%w: endpoint %s is not served by agent %s", ErrInvalid, spec.Endpoint, agent.Name)
 	}
 	encoded, err := json.Marshal(commandSpec{RunCandidate: &spec, Control: control})
 	if err != nil {
@@ -85,6 +79,152 @@ func (s *Service) CreateCandidateRun(ctx context.Context, tenant, agentIDOrName,
 	}
 	s.wakeAgent(agent.ID)
 	return agent, command, nil
+}
+
+// controlFor resolves the server of endpoint on agent: the current setup a
+// candidate is measured against, named by the agent's own server key.
+func (s *Service) controlFor(ctx context.Context, tenant string, agent domain.Agent, endpoint string) (*agentprotocol.CandidateRunServer, error) {
+	servers, err := s.Store.AgentServers(ctx, tenant, agent.ID)
+	if err != nil {
+		return nil, err
+	}
+	var control *agentprotocol.CandidateRunServer
+	for _, server := range servers {
+		// The current setup is the endpoint's own server, never a server
+		// a rollout started beside it.
+		if server.EndpointName == endpoint && !server.Rollout {
+			control = &agentprotocol.CandidateRunServer{Endpoint: server.EndpointName, ServerKey: server.Key, Model: server.UpstreamModel}
+		}
+	}
+	if control == nil {
+		return nil, fmt.Errorf("%w: endpoint %s is not served by agent %s", ErrInvalid, endpoint, agent.Name)
+	}
+	return control, nil
+}
+
+// QueueWindow queues one measured window of an optimization run on an agent.
+// key makes it idempotent: queuing again with the same key returns the
+// window queued first, in whatever state it is, so a retried step never
+// measures twice. Only the control plane's campaign worker calls it.
+func (s *Service) QueueWindow(ctx context.Context, tenant, agentID, actor, key string, spec agentprotocol.WindowSpec) (domain.AgentCommand, error) {
+	store, ok := s.commandStore()
+	if !ok {
+		return domain.AgentCommand{}, ErrUnavailable
+	}
+	if strings.TrimSpace(key) == "" {
+		return domain.AgentCommand{}, fmt.Errorf("%w: a measured window needs an idempotency key", ErrInvalid)
+	}
+	if err := spec.Validate(); err != nil {
+		return domain.AgentCommand{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	agent, err := s.Store.AgentForTenant(ctx, tenant, agentID)
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	control, err := s.controlFor(ctx, tenant, agent, spec.Endpoint)
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	encoded, err := json.Marshal(commandSpec{MeasureWindow: &spec, Control: control})
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	command, err := store.EnqueueAgentCommand(ctx, domain.AgentCommand{
+		TenantID: tenant, AgentID: agent.ID, Kind: agentprotocol.CommandMeasureWindow, SpecJSON: string(encoded), CreatedBy: actor, IdempotencyKey: key,
+		// The deadline includes time for the window to wait in the queue
+		// behind the agent's other work, which runs one at a time.
+		DeadlineAt: s.now().Add(time.Duration(spec.TimeoutSecs)*time.Second + 2*time.Hour),
+	})
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	s.wakeAgent(agent.ID)
+	return command, nil
+}
+
+// QueueServerCommand queues a rollout's start_server or stop_server on an
+// agent, idempotent per key like a measured window. Only the control plane's
+// rollout operation calls it.
+func (s *Service) QueueServerCommand(ctx context.Context, tenant, agentID, actor, key string, start *agentprotocol.StartServerSpec, stop *agentprotocol.StopServerSpec) (domain.AgentCommand, error) {
+	store, ok := s.commandStore()
+	if !ok {
+		return domain.AgentCommand{}, ErrUnavailable
+	}
+	if strings.TrimSpace(key) == "" || (start == nil) == (stop == nil) {
+		return domain.AgentCommand{}, fmt.Errorf("%w: a server command needs a key and exactly one of start or stop", ErrInvalid)
+	}
+	kind, timeout, err := agentprotocol.CommandStopServer, 10*time.Minute, error(nil)
+	if start != nil {
+		kind, timeout, err = agentprotocol.CommandStartServer, time.Duration(start.TimeoutSecs)*time.Second, start.Validate()
+	} else {
+		err = stop.Validate()
+	}
+	if err != nil {
+		return domain.AgentCommand{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	agent, err := s.Store.AgentForTenant(ctx, tenant, agentID)
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	encoded, err := json.Marshal(commandSpec{StartServer: start, StopServer: stop})
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	command, err := store.EnqueueAgentCommand(ctx, domain.AgentCommand{TenantID: tenant, AgentID: agent.ID, Kind: kind, SpecJSON: string(encoded), CreatedBy: actor, IdempotencyKey: key,
+		DeadlineAt: s.now().Add(timeout + 2*time.Hour)})
+	if err != nil {
+		return domain.AgentCommand{}, err
+	}
+	s.wakeAgent(agent.ID)
+	return command, nil
+}
+
+// DecodeServerResult reads a start_server or stop_server command's result.
+func DecodeServerResult(command domain.AgentCommand) (*agentprotocol.ServerResult, error) {
+	if strings.TrimSpace(command.ResultJSON) == "" {
+		return nil, nil
+	}
+	var result agentprotocol.ServerResult
+	if err := json.Unmarshal([]byte(command.ResultJSON), &result); err != nil {
+		return nil, fmt.Errorf("the server result could not be read: %w", err)
+	}
+	return &result, nil
+}
+
+// Window reads one measured window of an agent.
+func (s *Service) Window(ctx context.Context, tenant, agentID, id string) (domain.AgentCommand, error) {
+	store, ok := s.commandStore()
+	if !ok {
+		return domain.AgentCommand{}, ErrUnavailable
+	}
+	return store.AgentCommand(ctx, tenant, agentID, id)
+}
+
+// CancelWindow cancels a queued or running measured window; the agent removes
+// its candidate on its next report.
+func (s *Service) CancelWindow(ctx context.Context, tenant, agentID, id string) (domain.AgentCommand, error) {
+	store, ok := s.commandStore()
+	if !ok {
+		return domain.AgentCommand{}, ErrUnavailable
+	}
+	return store.CancelAgentCommand(ctx, tenant, agentID, id)
+}
+
+// DecodeWindow reads a window command's spec and, once it has one, its
+// result.
+func DecodeWindow(command domain.AgentCommand) (agentprotocol.WindowSpec, *agentprotocol.WindowResult, error) {
+	var spec commandSpec
+	if command.Kind != agentprotocol.CommandMeasureWindow || json.Unmarshal([]byte(command.SpecJSON), &spec) != nil || spec.MeasureWindow == nil {
+		return agentprotocol.WindowSpec{}, nil, errors.New("the command is not a measured window")
+	}
+	if strings.TrimSpace(command.ResultJSON) == "" {
+		return *spec.MeasureWindow, nil, nil
+	}
+	var result agentprotocol.WindowResult
+	if err := json.Unmarshal([]byte(command.ResultJSON), &result); err != nil {
+		return *spec.MeasureWindow, nil, fmt.Errorf("the window result could not be read: %w", err)
+	}
+	return *spec.MeasureWindow, &result, nil
 }
 
 // CandidateRuns lists an agent's candidate runs, newest first.
@@ -205,13 +345,28 @@ func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Du
 
 func wireCommand(command domain.AgentCommand) (agentprotocol.Command, error) {
 	var spec commandSpec
-	if err := json.Unmarshal([]byte(command.SpecJSON), &spec); err != nil || spec.RunCandidate == nil || spec.Control == nil {
+	if err := json.Unmarshal([]byte(command.SpecJSON), &spec); err != nil {
 		return agentprotocol.Command{}, errors.New("the command spec could not be read")
 	}
-	if err := spec.RunCandidate.Validate(); err != nil {
-		return agentprotocol.Command{}, err
+	wire := agentprotocol.Command{ID: command.ID, Kind: command.Kind, DeadlineAt: command.DeadlineAt, Control: spec.Control, Attempt: command.Attempts}
+	switch {
+	case command.Kind == agentprotocol.CommandStartServer && spec.StartServer != nil:
+		wire.StartServer = spec.StartServer
+		return wire, spec.StartServer.Validate()
+	case command.Kind == agentprotocol.CommandStopServer && spec.StopServer != nil:
+		wire.StopServer = spec.StopServer
+		return wire, spec.StopServer.Validate()
+	case spec.Control == nil:
+		return agentprotocol.Command{}, errors.New("the command spec could not be read")
+	case command.Kind == agentprotocol.CommandRunCandidate && spec.RunCandidate != nil:
+		wire.RunCandidate = spec.RunCandidate
+		return wire, spec.RunCandidate.Validate()
+	case command.Kind == agentprotocol.CommandMeasureWindow && spec.MeasureWindow != nil:
+		wire.MeasureWindow = spec.MeasureWindow
+		return wire, spec.MeasureWindow.Validate()
+	default:
+		return agentprotocol.Command{}, errors.New("the command spec could not be read")
 	}
-	return agentprotocol.Command{ID: command.ID, Kind: command.Kind, DeadlineAt: command.DeadlineAt, RunCandidate: spec.RunCandidate, Control: spec.Control, Attempt: command.Attempts}, nil
 }
 
 // UpdateCommand applies an agent's report on a command it leased.
@@ -227,8 +382,17 @@ func (s *Service) UpdateCommand(ctx context.Context, agent domain.Agent, id stri
 		return agentprotocol.CommandUpdateResponse{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	result := ""
-	if update.Result != nil {
-		encoded, err := json.Marshal(update.Result)
+	var report any
+	switch {
+	case update.Result != nil:
+		report = update.Result
+	case update.Window != nil:
+		report = update.Window
+	case update.Server != nil:
+		report = update.Server
+	}
+	if report != nil {
+		encoded, err := json.Marshal(report)
 		if err != nil {
 			return agentprotocol.CommandUpdateResponse{}, err
 		}
@@ -257,12 +421,17 @@ func CandidateRunView(agent domain.Agent, command domain.AgentCommand) map[strin
 		_ = json.Unmarshal([]byte(command.ResultJSON), &result)
 	}
 	view := map[string]any{
-		"id": command.ID, "agent": agent.Name, "agent_id": agent.ID, "state": command.State, "phase": nullable(command.Phase),
+		"id": command.ID, "kind": command.Kind, "agent": agent.Name, "agent_id": agent.ID, "state": command.State, "phase": nullable(command.Phase),
 		"spec": spec.RunCandidate, "control": spec.Control, "result": result, "attempts": command.Attempts,
 		"failure_code": nullable(command.FailureCode), "failure_detail": nullable(command.FailureDetail),
 		"deadline_at": command.DeadlineAt, "created_by": command.CreatedBy, "created_at": command.CreatedAt, "updated_at": command.UpdatedAt,
 		"started_at": command.StartedAt, "finished_at": command.FinishedAt,
 		"runs_in": "the agent's own cluster; prompts, answers, and engine logs stay there and only the numbers in result are sent",
+	}
+	if spec.MeasureWindow != nil {
+		// A measured window belongs to an optimization run; the run's own
+		// pages judge it. Its spec and numbers are shown as they are.
+		view["spec"] = spec.MeasureWindow
 	}
 	if strings.TrimSpace(command.ResultJSON) == "" {
 		view["result"] = nil

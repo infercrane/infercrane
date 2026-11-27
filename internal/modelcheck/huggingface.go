@@ -76,9 +76,13 @@ type Model struct {
 	Weights           *Weights
 	Config            *Config
 	ConfigState       string
-	TokenUsed         bool
-	ReadAt            time.Time
-	Cached            bool
+	// TokenizerDigest is the sha256 of the files a server reads text with
+	// (tokenizerDigest), or empty when Hugging Face listed none or did not
+	// report a hash for one of them.
+	TokenizerDigest string
+	TokenUsed       bool
+	ReadAt          time.Time
+	Cached          bool
 }
 
 // Files says which weight formats the repository holds at the commit.
@@ -319,9 +323,60 @@ type infoResponse struct {
 		Parameters map[string]int64 `json:"parameters"`
 		Total      int64            `json:"total"`
 	} `json:"safetensors"`
-	Siblings []struct {
-		Name string `json:"rfilename"`
-	} `json:"siblings"`
+	Siblings []sibling `json:"siblings"`
+}
+
+// sibling is one repository file; with blobs=true Hugging Face adds the git
+// blob ID and, for a file in LFS, its content sha256.
+type sibling struct {
+	Name   string `json:"rfilename"`
+	BlobID string `json:"blobId"`
+	LFS    *struct {
+		SHA256 string `json:"sha256"`
+	} `json:"lfs"`
+}
+
+// tokenizerDigestFile reports whether a file changes how a server reads
+// text: the tokenizer files the runtimes load, the BPE merges, the chat
+// template, and the special and added tokens.
+func tokenizerDigestFile(name string) bool {
+	switch strings.ToLower(name) {
+	case "merges.txt", "chat_template.jinja", "chat_template.json", "special_tokens_map.json", "added_tokens.json":
+		return true
+	}
+	return TokenizerFile(name)
+}
+
+// tokenizerDigest is "sha256:" and the sha256 of sorted "path  hash" lines,
+// one for each file that changes how a server reads text, where the hash is
+// the file's LFS sha256, or "git:" and its git blob ID. Two repositories
+// whose digests are equal list the same such files with the same content,
+// so their servers read text alike; a git blob and a content sha256 never
+// compare equal, so unlike hashes read as different, never as the same.
+// It is empty when no such file is listed or one has no hash.
+func tokenizerDigest(siblings []sibling) string {
+	var lines []string
+	for _, file := range siblings {
+		if !tokenizerDigestFile(file.Name) {
+			continue
+		}
+		hash := ""
+		switch {
+		case file.LFS != nil && file.LFS.SHA256 != "":
+			hash = file.LFS.SHA256
+		case file.BlobID != "":
+			hash = "git:" + file.BlobID
+		default:
+			return ""
+		}
+		lines = append(lines, file.Name+"  "+hash)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n") + "\n"))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func (r *Resolver) read(ctx context.Context, repository, revision, token string) (Model, error) {
@@ -329,6 +384,8 @@ func (r *Resolver) read(ctx context.Context, repository, revision, token string)
 	for _, field := range infoFields {
 		query.Add("expand[]", field)
 	}
+	// Each sibling's blob ID and LFS sha256, for the tokenizer digest.
+	query.Set("blobs", "true")
 	address := r.endpoint + "/api/models/" + repositoryPath(repository) + "/revision/" + url.PathEscape(revision) + "?" + query.Encode()
 	status, header, body, err := r.get(ctx, address, token, maxInfoBytes)
 	if err != nil {
@@ -380,6 +437,7 @@ func (r *Resolver) read(ctx context.Context, repository, revision, token string)
 		}
 	}
 	model.Files.Listed = info.Siblings != nil
+	model.TokenizerDigest = tokenizerDigest(info.Siblings)
 	for _, sibling := range info.Siblings {
 		name := strings.ToLower(sibling.Name)
 		switch {

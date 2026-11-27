@@ -1,0 +1,721 @@
+{
+ "schema": "infercrane.planner-gym/v1",
+ "title": "Synthetic: a dense model on one L4, every setup in turn on one machine, every number made up",
+ "model": {
+  "id": "example/dense-8b",
+  "revision": "2222222222222222222222222222222222222222",
+  "features": []
+ },
+ "model_memory": {
+  "weights_bytes": 16400000000.0,
+  "kv_cache_bytes_per_token": 147456.0
+ },
+ "gpu": "L4",
+ "engine": "vllm",
+ "engine_version": "0.34.0",
+ "max_num_seqs": 256,
+ "first_token_limit_ms": 1000.0,
+ "useful_output": "output tokens per second within the limit",
+ "setups": {
+  "defaults": {
+   "label": "Engine defaults",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "blocks": 400,
+   "block_tokens": 64
+  },
+  "fp8-weights": {
+   "label": "FP8 weights",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "quantization": "fp8",
+   "blocks": 1100,
+   "block_tokens": 64
+  },
+  "fp8-kv": {
+   "label": "FP8 KV cache",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8",
+   "blocks": 640,
+   "block_tokens": 64
+  },
+  "fp8-both": {
+   "label": "FP8 weights and an FP8 KV cache",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8",
+   "quantization": "fp8",
+   "blocks": 2030,
+   "block_tokens": 64
+  },
+  "ngram": {
+   "label": "Prompt-lookup speculation",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "ngram": true,
+   "blocks": 390,
+   "block_tokens": 64
+  }
+ },
+ "cells": [
+  {
+   "key": "short/16",
+   "kind": "short",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "run": "synthetic screen",
+   "rules_built_from": "synthetic rules written after this screen",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 239.7,
+      "min": 239.7,
+      "max": 248.86
+     },
+     "useful_output": {
+      "median": 239.7,
+      "min": 239.7,
+      "max": 248.86
+     },
+     "ttft_p95_ms": 360.0,
+     "window": {
+      "requests": 82.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 390.68,
+      "min": 390.68,
+      "max": 405.61
+     },
+     "useful_output": {
+      "median": 390.68,
+      "min": 390.68,
+      "max": 405.61
+     },
+     "ttft_p95_ms": 360.0,
+     "window": {
+      "requests": 83.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-kv": {
+     "output": {
+      "median": 243.79,
+      "min": 243.79,
+      "max": 253.1
+     },
+     "useful_output": {
+      "median": 243.79,
+      "min": 243.79,
+      "max": 253.1
+     },
+     "ttft_p95_ms": 360.0,
+     "window": {
+      "requests": 84.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 400.48,
+      "min": 400.48,
+      "max": 415.78
+     },
+     "useful_output": {
+      "median": 400.48,
+      "min": 400.48,
+      "max": 415.78
+     },
+     "ttft_p95_ms": 360.0,
+     "window": {
+      "requests": 88.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "ngram": {
+     "output": {
+      "median": 236.27,
+      "min": 236.27,
+      "max": 245.3
+     },
+     "useful_output": {
+      "median": 236.27,
+      "min": 236.27,
+      "max": 245.3
+     },
+     "ttft_p95_ms": 360.0,
+     "window": {
+      "requests": 84.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/64",
+   "kind": "short",
+   "requests_at_once": 64,
+   "reasoning": "off",
+   "run": "synthetic screen",
+   "rules_built_from": "synthetic rules written after this screen",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 789.49,
+      "min": 789.49,
+      "max": 790.92
+     },
+     "useful_output": {
+      "median": 789.49,
+      "min": 789.49,
+      "max": 790.92
+     },
+     "ttft_p95_ms": 840.0,
+     "window": {
+      "requests": 321.0,
+      "running": 62.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7611,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 1163.33,
+      "min": 1163.33,
+      "max": 1165.44
+     },
+     "useful_output": {
+      "median": 1163.33,
+      "min": 1163.33,
+      "max": 1165.44
+     },
+     "ttft_p95_ms": 840.0,
+     "window": {
+      "requests": 320.0,
+      "running": 62.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7611,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-kv": {
+     "output": {
+      "median": 847.74,
+      "min": 847.74,
+      "max": 849.28
+     },
+     "useful_output": {
+      "median": 847.74,
+      "min": 847.74,
+      "max": 849.28
+     },
+     "ttft_p95_ms": 840.0,
+     "window": {
+      "requests": 321.0,
+      "running": 62.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7611,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 1300.54,
+      "min": 1300.54,
+      "max": 1302.9
+     },
+     "useful_output": {
+      "median": 1300.54,
+      "min": 1300.54,
+      "max": 1302.9
+     },
+     "ttft_p95_ms": 840.0,
+     "window": {
+      "requests": 328.0,
+      "running": 62.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7611,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "ngram": {
+     "output": {
+      "median": 513.36,
+      "min": 513.36,
+      "max": 514.29
+     },
+     "useful_output": {
+      "median": 513.36,
+      "min": 513.36,
+      "max": 514.29
+     },
+     "ttft_p95_ms": 840.0,
+     "window": {
+      "requests": 329.0,
+      "running": 62.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7611,
+      "prompt_tokens_mean": 42.0,
+      "completion_tokens_mean": 268.0,
+      "latency_p95_ms": 8040.0,
+      "generation_p95_ms": 7772.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/4",
+   "kind": "long",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "synthetic screen",
+   "rules_built_from": "synthetic rules written after this screen",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 45.06,
+      "min": 45.06,
+      "max": 48.81
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1140.0,
+     "window": {
+      "requests": 26.0,
+      "running": 3.88,
+      "waiting": 0.0,
+      "cache_use_max": 0.0944,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 67.46,
+      "min": 67.46,
+      "max": 73.08
+     },
+     "useful_output": {
+      "median": 67.46,
+      "min": 67.46,
+      "max": 73.08
+     },
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 21.0,
+      "running": 3.88,
+      "waiting": 0.0,
+      "cache_use_max": 0.0944,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-kv": {
+     "output": {
+      "median": 47.83,
+      "min": 47.83,
+      "max": 51.81
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1140.0,
+     "window": {
+      "requests": 26.0,
+      "running": 3.88,
+      "waiting": 0.0,
+      "cache_use_max": 0.0944,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 74.47,
+      "min": 74.47,
+      "max": 80.67
+     },
+     "useful_output": {
+      "median": 74.47,
+      "min": 74.47,
+      "max": 80.67
+     },
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 28.0,
+      "running": 3.88,
+      "waiting": 0.0,
+      "cache_use_max": 0.0944,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "ngram": {
+     "output": {
+      "median": 49.64,
+      "min": 49.64,
+      "max": 53.77
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1140.0,
+     "window": {
+      "requests": 27.0,
+      "running": 3.88,
+      "waiting": 0.0,
+      "cache_use_max": 0.0944,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/16",
+   "kind": "long",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "run": "synthetic screen",
+   "rules_built_from": "synthetic rules written after this screen",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 61.95,
+      "min": 61.95,
+      "max": 66.87
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1260.0,
+     "window": {
+      "requests": 80.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 126.59,
+      "min": 126.59,
+      "max": 136.63
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1260.0,
+     "window": {
+      "requests": 80.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-kv": {
+     "output": {
+      "median": 86.78,
+      "min": 86.78,
+      "max": 93.67
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1260.0,
+     "window": {
+      "requests": 82.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 157.34,
+      "min": 157.34,
+      "max": 169.82
+     },
+     "useful_output": {
+      "median": 95.98,
+      "min": 95.98,
+      "max": 103.6
+     },
+     "ttft_p95_ms": 711.0,
+     "window": {
+      "requests": 87.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "ngram": {
+     "output": {
+      "median": 62.01,
+      "min": 62.01,
+      "max": 66.93
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0
+     },
+     "ttft_p95_ms": 1260.0,
+     "window": {
+      "requests": 81.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 8850.0,
+      "generation_p95_ms": 8555.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/16",
+   "kind": "output",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "run": "synthetic screen",
+   "rules_built_from": "synthetic rules written after this screen",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 200.01,
+      "min": 200.01,
+      "max": 214.38
+     },
+     "useful_output": {
+      "median": 138.01,
+      "min": 138.01,
+      "max": 147.92
+     },
+     "ttft_p95_ms": 639.0,
+     "window": {
+      "requests": 83.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 760.0,
+      "completion_tokens_mean": 1390.0,
+      "latency_p95_ms": 41700.0,
+      "generation_p95_ms": 40310.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 296.33,
+      "min": 296.33,
+      "max": 317.62
+     },
+     "useful_output": {
+      "median": 260.77,
+      "min": 260.77,
+      "max": 279.5
+     },
+     "ttft_p95_ms": 468.0,
+     "window": {
+      "requests": 80.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 760.0,
+      "completion_tokens_mean": 1390.0,
+      "latency_p95_ms": 41700.0,
+      "generation_p95_ms": 40310.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-kv": {
+     "output": {
+      "median": 215.87,
+      "min": 215.87,
+      "max": 231.38
+     },
+     "useful_output": {
+      "median": 157.59,
+      "min": 157.59,
+      "max": 168.91
+     },
+     "ttft_p95_ms": 603.0,
+     "window": {
+      "requests": 85.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 760.0,
+      "completion_tokens_mean": 1390.0,
+      "latency_p95_ms": 41700.0,
+      "generation_p95_ms": 40310.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 333.16,
+      "min": 333.16,
+      "max": 357.09
+     },
+     "useful_output": {
+      "median": 313.17,
+      "min": 313.17,
+      "max": 335.67
+     },
+     "ttft_p95_ms": 414.0,
+     "window": {
+      "requests": 80.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 760.0,
+      "completion_tokens_mean": 1390.0,
+      "latency_p95_ms": 41700.0,
+      "generation_p95_ms": 40310.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "ngram": {
+     "output": {
+      "median": 198.27,
+      "min": 198.27,
+      "max": 212.51
+     },
+     "useful_output": {
+      "median": 136.81,
+      "min": 136.81,
+      "max": 146.64
+     },
+     "ttft_p95_ms": 639.0,
+     "window": {
+      "requests": 85.0,
+      "running": 15.52,
+      "waiting": 0.0,
+      "cache_use_max": 0.2278,
+      "prompt_tokens_mean": 760.0,
+      "completion_tokens_mean": 1390.0,
+      "latency_p95_ms": 41700.0,
+      "generation_p95_ms": 40310.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  }
+ ],
+ "product_cases": [],
+ "current_setups": [
+  "defaults"
+ ],
+ "built_from": [
+  {
+   "file": "generate.py",
+   "sha256": "synthetic"
+  }
+ ]
+}

@@ -5,6 +5,10 @@ model:
   id: Qwen/Qwen3-8B
 runtime:
   engine: vllm
+  # A 24 GB L4 can't hold the model's full context.
+  args:
+    - --max-model-len
+    - "8192"
 compute:
   mode: elastic
 provider:

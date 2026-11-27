@@ -83,6 +83,8 @@ var publicCommandSpecs = []commandSpec{
 
 	{use: "evaluation ACTION [arguments]", short: "Sign, verify, and attach answer-quality results", section: "evidence", suggestFor: []string{"eval", "evals"}},
 	{use: "passport ACTION [arguments]", short: "Issue and verify signed release records", section: "evidence"},
+	{use: "results ACTION [arguments]", short: "Keep measured results and rank setups from them", section: "evidence", suggestFor: []string{"result", "measurements"}},
+	{use: "report proof RUN [RUN...] [flags]", short: "Print the signed before-and-after Proof Report of your runs", section: "evidence", suggestFor: []string{"reports", "proof"}},
 	{use: "lab MODEL_IDENTITY [flags]", short: "Compare measured results for a model", section: "legacy"},
 	{use: "recipe create DEPLOYMENT [flags]", short: "Save a deployment's proven setup", section: "legacy"},
 	{use: "recipes [QUERY] [flags]", short: "Find saved setups", section: "legacy"},
@@ -608,6 +610,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("runtime-service-account", "infercrane-runtime", "service account of test setup pods")
 		stringFlag("worker-secret", "", "Secret NAME/KEY mounted into test setup pods as their API key")
 		stringFlag("worker-key-env", "INFERCRANE_WORKER_KEY", "environment variable holding that Secret's value")
+		stringFlag("engine-ingress", "", "the only sources that may reach test setup pods: pods:KEY=VALUE, namespace:KEY=VALUE, address ranges, or none (default: $INFERCRANE_KUBERNETES_ENGINE_INGRESS)")
 		stringFlag("gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
 		stringFlag("gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
 		stringFlag("allow-image", "", "image repository test setups may use (repeatable); nothing else runs")
@@ -697,10 +700,10 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("region", "", "exact provider region")
 		stringFlag("gpu", "", "exact accelerator identity")
 		stringFlag("runtimes", "", "comma-separated runtime allowlist")
-		stringFlag("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
+		stringFlag("objective", "interactive", "interactive, latency, throughput, cost-efficiency, or useful-output")
 		stringFlag("profile", "", "benchmark workload profile")
 		stringFlag("source", "auto", "auto, catalog, or aiconfigurator")
-		stringFlag("target-concurrency", "", "observed or expected concurrent requests")
+		stringFlag("target-concurrency", "", "observed or expected concurrent requests; a run measures at this load, rounded up (1 to 512)")
 		stringFlag("workload-fingerprint", "", "content-free observed workload fingerprint")
 		stringFlag("aiconfigurator-python", "python3", "Python executable containing the pinned estimator tuple")
 		stringFlag("max-ttft-p95-ms", "", "required measured p95 TTFT")

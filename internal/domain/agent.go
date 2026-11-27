@@ -35,6 +35,10 @@ type AgentServer struct {
 	ReportedAt                                              *time.Time
 	EndpointID, EndpointName, LogicalModelID, EnvironmentID string
 	BindingID, ServingPlanID, OwnershipMode                 string
+	// Rollout marks a server a rollout started on an endpoint the agent
+	// already serves: a second binding there, never the endpoint's own
+	// server and never the current setup a run measures against.
+	Rollout bool
 }
 
 // AgentServerRegistration asks to observe one local server.
@@ -64,23 +68,41 @@ type AgentDataPlaneBinding struct {
 	BindingID, TargetID, ServerKey, UpstreamModel, Runtime  string
 	Health                                                  string
 	Priority, Weight                                        int
+	// Rollout marks a server a rollout started beside the endpoint's own.
+	Rollout bool
 }
 
 // AgentCommand is work queued for one agent and its content-free outcome.
 type AgentCommand struct {
 	ID, TenantID, AgentID, Kind, State, Phase string
-	SpecJSON, ResultJSON                      string
-	FailureCode, FailureDetail                string
-	Attempts                                  int
-	LeaseExpiresAt                            *time.Time
-	DeadlineAt                                time.Time
-	CreatedBy                                 string
-	CreatedAt, UpdatedAt                      time.Time
-	StartedAt, FinishedAt                     *time.Time
+	// IdempotencyKey, when set, makes queuing the same work twice return
+	// the command queued first.
+	IdempotencyKey             string
+	SpecJSON, ResultJSON       string
+	FailureCode, FailureDetail string
+	Attempts                   int
+	LeaseExpiresAt             *time.Time
+	DeadlineAt                 time.Time
+	CreatedBy                  string
+	CreatedAt, UpdatedAt       time.Time
+	StartedAt, FinishedAt      *time.Time
 }
 
 // AgentCommandUpdate is an agent's report on one leased command.
 type AgentCommandUpdate struct {
 	State, Phase, FailureCode, FailureDetail, ResultJSON string
 	Lease                                                time.Duration
+}
+
+// AgentRolloutSwitch is where a guarded rollout on an agent's endpoint stands:
+// the plan that routes to the rollout's server first and the endpoint's own
+// server as its fallback, the plan it replaced, the guard decision that
+// allowed the switch, and when.
+type AgentRolloutSwitch struct {
+	PlanID, PreviousPlanID, EvaluationID string
+	// OwnBindingID is the endpoint's own server's binding, the fallback.
+	OwnBindingID string
+	// SwitchedAt is when the guard allowed the switch: the watch window
+	// counts from it.
+	SwitchedAt time.Time
 }

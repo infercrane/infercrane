@@ -21,6 +21,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 	"github.com/infercrane/infercrane/internal/replay"
 )
@@ -64,11 +65,14 @@ const (
 	AcceleratorSimulated = "simulated_cpu"
 	AcceleratorUnknown   = "unknown"
 
-	MetricCostPerMillion  = "cost_per_million_output_tokens"
-	MetricTTFTP95         = "ttft_p95_ms"
-	MetricTokensPerUser   = "output_tokens_per_second_per_user"
-	MetricTokensPerAccel  = "output_tokens_per_second_per_accelerator"
-	MetricRequestsPerSec  = "requests_per_second"
+	MetricCostPerMillion = "cost_per_million_output_tokens"
+	MetricTTFTP95        = "ttft_p95_ms"
+	MetricTokensPerUser  = "output_tokens_per_second_per_user"
+	MetricTokensPerAccel = "output_tokens_per_second_per_accelerator"
+	MetricRequestsPerSec = "requests_per_second"
+	// MetricUsefulOutput is output tokens per second of requests that met
+	// every limit the campaign set. It is shown only when one was set.
+	MetricUsefulOutput    = "useful_output_tokens_per_second"
 	sourceOutputTPS       = "output_token_throughput"
 	sourceRequestTPS      = "request_throughput"
 	sourceTTFTP95         = "ttft_p95_ms"
@@ -244,6 +248,14 @@ type CandidateResult struct {
 	ErrorRatePercent           *float64    `json:"error_rate_percent"`
 	OutputTokensPerRequest     *float64    `json:"output_tokens_per_request"`
 	VersusBaseline             *Comparison `json:"versus_baseline"`
+	// Confirmation is the same comparison measured again on fresh servers,
+	// which a gain in VersusBaseline needs before it counts. It is absent when
+	// no second window was measured.
+	Confirmation *Comparison `json:"confirmation,omitempty"`
+	// AnswerCheck is this setup's own answer check, so a setup the run did
+	// not choose still says whether its answers held. It is absent while the
+	// setup's check has not been reached.
+	AnswerCheck *AnswerCheck `json:"answer_check,omitempty"`
 	// Regressions are the headline outcomes on which the setup measured worse
 	// than the baseline in its own window, so a rejection can name them.
 	Regressions []Comparison `json:"regressions,omitempty"`
@@ -251,6 +263,31 @@ type CandidateResult struct {
 	// more requests than the baseline, or answered shorter.
 	Guards []Guard `json:"guards,omitempty"`
 	Reason string  `json:"reason,omitempty"`
+	// Technique is set for a setup a technique-contract technique made: the
+	// technique, its measured result, and the claim the result supports.
+	Technique *TechniqueView `json:"technique,omitempty"`
+}
+
+// AnswerCheck is one setup's answer check. Verdict is PASS, WATCH, BLOCK, or
+// UNKNOWN. For the built-in check (source infercrane) it applies the check's
+// own watch and block thresholds to how far the setup's answers moved from
+// the reference's, and one broken tool call blocks. For signed customer
+// evidence it is the eval's pass or fail. The reference setup's own answers
+// are what the others are compared with, so it passes as the reference.
+type AnswerCheck struct {
+	Verdict               string   `json:"verdict"`
+	Source                string   `json:"source,omitempty"`
+	Suite                 string   `json:"suite,omitempty"`
+	Reference             bool     `json:"reference,omitempty"`
+	Score                 *float64 `json:"score"`
+	RegressionPercent     *float64 `json:"regression_percent"`
+	WatchThresholdPercent *float64 `json:"watch_threshold_percent"`
+	BlockThresholdPercent *float64 `json:"block_threshold_percent"`
+	Prompts               int      `json:"prompts,omitempty"`
+	ToolCallCases         int      `json:"tool_call_cases,omitempty"`
+	ToolCallsBroken       int      `json:"tool_calls_broken,omitempty"`
+	EvidenceID            string   `json:"evidence_id,omitempty"`
+	Reason                string   `json:"reason"`
 }
 
 // Guard is one result that keeps a setup from being chosen (see
@@ -410,14 +447,41 @@ func Assemble(e Evidence) Report {
 
 	report.Outcome = outcome(campaign, baseline, winner, report.Finished)
 	kind := report.Outcome.Kind
-	report.Metrics = metrics(kind, baseline, winner, report.SimulatedAccelerator)
+	report.Metrics = metrics(kind, baseline, winner, report.SimulatedAccelerator, usefulMeasured(objectiveMetric.Name, baseline, winner))
 	report.Quality = quality(campaign, kind, baseline, winner, e)
 	report.Noise = noise(objectiveMetric.Name, kind, baseline, winner, arms)
 	report.Monthly = monthly(proposal, proposalOK, kind, report.Metrics, e)
 	report.CurrentAPI = currentAPI(e, report)
 	report.Workload = workload(baseline, winner)
-	report.Candidates = candidateResults(campaign, objectiveMetric.Name, baseline, winner, arms)
+	report.Candidates = candidateResults(campaign, objectiveMetric.Name, baseline, winner, arms, e.Quality)
+	// A setup a technique made carries the technique and its result, the
+	// same view the campaign's candidate shows (CandidateTechnique).
+	for index := range report.Candidates {
+		for _, run := range campaign.Candidates {
+			if run.ID != report.Candidates[index].ID {
+				continue
+			}
+			var quality *domain.QualityEvidence
+			if row, found := e.Quality[run.QualityEvidenceID]; found {
+				quality = &row
+			}
+			report.Candidates[index].Technique = CandidateTechnique(campaign, run, quality)
+		}
+	}
 	report.Warnings = warnings(report.Candidates)
+	if warning := firstTokenWarning(objectiveMetric.Name, winner); warning != "" {
+		report.Warnings = append(report.Warnings, warning)
+	}
+	if winner != nil {
+		report.Warnings = append(report.Warnings, optimizationcampaign.MachineWarnings(winner.measured)...)
+	}
+	// Every setup's own servers, not only the winner's: a slow server can
+	// as well be why a setup lost, or why its window was invalid.
+	for _, run := range campaign.Candidates {
+		if current := arms[run.ID]; current != nil && current.measured != nil {
+			report.Warnings = append(report.Warnings, optimizationcampaign.ServerSpeedWarnings(current.label, current.measured)...)
+		}
+	}
 	report.Bottleneck = bottleneck(kind, baseline, winner)
 	report.Appendix = appendix(campaign, proposal, proposalOK, baseline, winner, e)
 	report.Outcome.Headline = headline(report, released(campaign, winner))
@@ -675,9 +739,67 @@ func specs(simulated bool) []metricSpec {
 
 func rowOutputTPS(row domain.BenchmarkResult) *float64 { return row.OutputTokenThroughput }
 
-func metrics(kind string, baseline, winner *arm, simulated bool) []Metric {
-	out := make([]Metric, 0, 5)
-	for _, spec := range specs(simulated) {
+// usefulSpec is output within the campaign's limits. A benchmark row does not
+// store it, so it is known only from the interleaved comparison.
+var usefulSpec = metricSpec{key: MetricUsefulOutput, label: "Output tokens/s within the limits", unit: "tokens_per_second", higherBetter: true, source: lab.MetricUsefulOutput,
+	fromRow: func(domain.BenchmarkResult) *float64 { return nil },
+	value:   func(value float64, _ *arm) (*float64, string) { return ptr(value), "" }}
+
+// usefulMeasured reports whether the campaign ranked on useful output or
+// measured it for the winner or the baseline.
+func usefulMeasured(objectiveMetric string, arms ...*arm) bool {
+	if objectiveMetric == lab.MetricUsefulOutput {
+		return true
+	}
+	for _, current := range arms {
+		if current != nil && current.measured != nil {
+			if _, ok := current.measured.Comparison[lab.MetricUsefulOutput]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// firstTokenWarning says when the chosen setup got slower to its first token
+// in either measurement window, unless the campaign ranked on first-token
+// time itself. A gain in output can hide that, and a customer with a
+// first-token limit loses requests to it.
+func firstTokenWarning(objectiveMetric string, winner *arm) string {
+	if winner == nil || winner.measured == nil || objectiveMetric == lab.MetricTTFTP95 {
+		return ""
+	}
+	var parts []string
+	slower := false
+	add := func(window string, comparisons map[string]optimizationcampaign.MetricComparison) {
+		comparison, ok := comparisons[sourceTTFTP95]
+		if !ok {
+			return
+		}
+		words := map[string]string{optimizationcampaign.DecisionRegressed: "judged slower", optimizationcampaign.DecisionImproved: "judged faster"}[comparison.Decision]
+		if words == "" {
+			words = "inside the noise"
+		}
+		parts = append(parts, fmt.Sprintf("%+.0f%% %s (%s, noise ±%.0f%%)", comparison.Delta*100, window, words, comparison.NoiseFloor*100))
+		slower = slower || comparison.Decision == optimizationcampaign.DecisionRegressed
+	}
+	add("in the first window", winner.measured.Comparison)
+	if confirmation := winner.measured.Confirmation; confirmation != nil {
+		add("on fresh servers", confirmation.Comparison)
+	}
+	if !slower {
+		return ""
+	}
+	return "“" + winner.label + "”, the chosen setup, got slower to its first token at p95: " + strings.Join(parts, "; ") + ". It was chosen on " + optimizationcampaign.MetricWords(objectiveMetric) + "; check it against your first-token limit."
+}
+
+func metrics(kind string, baseline, winner *arm, simulated, useful bool) []Metric {
+	out := make([]Metric, 0, 6)
+	all := specs(simulated)
+	if useful {
+		all = append(all, usefulSpec)
+	}
+	for _, spec := range all {
 		metric := Metric{Key: spec.key, Label: spec.label, Unit: spec.unit, HigherIsBetter: spec.higherBetter, Decision: DecisionUnknown, Basis: BasisUnknown}
 		switch kind {
 		case OutcomeInProgress:
@@ -1078,7 +1200,7 @@ func workload(baseline, winner *arm) Workload {
 	return result
 }
 
-func candidateResults(campaign domain.OptimizationCampaign, metric string, baseline, winner *arm, arms map[string]*arm) []CandidateResult {
+func candidateResults(campaign domain.OptimizationCampaign, metric string, baseline, winner *arm, arms map[string]*arm, quality map[string]domain.QualityEvidence) []CandidateResult {
 	runs := append([]domain.OptimizationCandidateRun(nil), campaign.Candidates...)
 	sort.SliceStable(runs, func(i, j int) bool { return runs[i].Rank < runs[j].Rank })
 	out := make([]CandidateResult, 0, len(runs))
@@ -1095,6 +1217,7 @@ func candidateResults(campaign domain.OptimizationCampaign, metric string, basel
 				result.Role = "winner"
 			}
 		}
+		result.AnswerCheck = answerCheck(run, quality)
 		if current.bench == nil {
 			result.Reason = current.reason
 			out = append(out, result)
@@ -1128,15 +1251,46 @@ func candidateResults(campaign domain.OptimizationCampaign, metric string, basel
 		case interleavedWith(current, baseline):
 			if comparison, ok := current.measured.Comparison[metric]; ok {
 				result.VersusBaseline = &Comparison{Metric: metric, ChangePercent: comparison.Delta * 100, NoiseFloorPercent: comparison.NoiseFloor * 100, Decision: comparison.Decision}
+				result.Confirmation = confirmation(current.measured, metric)
 			} else {
 				result.Reason = metric + " was not comparable between the interleaved runs"
 			}
 		default:
 			result.Reason = "not measured alongside the baseline" + controlReason(current.measured)
 		}
+		if run.FailureCode == optimizationcampaign.FailureQualityAnswersNotShownHeld {
+			result.Reason = answersNotShownHeld(result.VersusBaseline, metric, quality[run.QualityEvidenceID])
+		}
 		out = append(out, result)
 	}
 	return out
+}
+
+// speedMetrics are objective metrics where better means faster.
+var speedMetrics = map[string]bool{sourceOutputTPS: true, sourceTTFTP95: true, lab.MetricLatencyP95: true, "useful_output_tokens_per_second": true}
+
+// answersNotShownHeld says why a setup that changes answers was held back:
+// what it gained, and that its answers were not shown to hold within a point
+// on how many servers. The gain alone never promotes it.
+func answersNotShownHeld(versus *Comparison, metric string, row domain.QualityEvidence) string {
+	servers := 1
+	var distribution qualityevidence.Distribution
+	if row.DistributionJSON != "" && json.Unmarshal([]byte(row.DistributionJSON), &distribution) == nil && distribution.TaskServers > 1 {
+		servers = distribution.TaskServers
+	}
+	where := "one server each"
+	if servers > 1 {
+		where = fmt.Sprintf("%d servers each", servers)
+	}
+	held := "its answers were not shown to hold within 1 point on " + where
+	if versus == nil || versus.Decision != DecisionImproved {
+		return held
+	}
+	verb := "better"
+	if speedMetrics[metric] {
+		verb = "faster"
+	}
+	return fmt.Sprintf("%s by %.0f%% (%s), but %s", verb, math.Abs(versus.ChangePercent), metricName(metric), held)
 }
 
 // reportGuard states a campaign guard in the report's units.
@@ -1154,6 +1308,9 @@ func reportGuard(guard optimizationcampaign.Guard, basis string) Guard {
 func warnings(candidates []CandidateResult) []string {
 	out := []string{}
 	for _, candidate := range candidates {
+		if candidate.FailureCode == optimizationcampaign.FailureQualityAnswersNotShownHeld {
+			out = append(out, "“"+candidate.Label+"” was held back: "+candidate.Reason+".")
+		}
 		if len(candidate.Guards) == 0 {
 			continue
 		}

@@ -28,8 +28,10 @@ import (
 const (
 	operatorKey  = "operator-test-key"
 	secretPrompt = "TOP-SECRET-PROMPT-7f3a"
-	secretLabel  = "TOP-SECRET-LABEL-91c2"
-	localAPIKey  = "local-vllm-key-5d1e"
+	// evalSecret marks the prompts of an eval set kept beside the agent.
+	evalSecret  = "PRIVATE-EVAL-ITEM-c41d"
+	secretLabel = "TOP-SECRET-LABEL-91c2"
+	localAPIKey = "local-vllm-key-5d1e"
 )
 
 // noAccelerators answers like a host without nvidia-smi or rocm-smi.

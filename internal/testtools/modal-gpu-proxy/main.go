@@ -67,18 +67,7 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// One connection pool for the whole measurement: a new TLS handshake per
-	// request would add round trips to every measured latency.
-	transport := &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		ForceAttemptHTTP2:   true,
-		MaxIdleConns:        512,
-		MaxIdleConnsPerHost: 512,
-		IdleConnTimeout:     120 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
-	proxy := &Proxy{WorkerKey: workerKey, Client: &http.Client{Transport: transport}}
+	proxy := &Proxy{WorkerKey: workerKey, Client: &http.Client{Transport: newTransport(upstreamIdleTimeout)}}
 	broker := Broker{BaseURL: parsed.broker, Token: workerKey}
 	server := &http.Server{Addr: fmt.Sprintf(":%d", parsed.port), Handler: proxy, ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
@@ -194,5 +183,30 @@ func wait(ctx context.Context, every time.Duration) error {
 		return ctx.Err()
 	case <-timer.C:
 		return nil
+	}
+}
+
+// serverKeepAlive is how long vLLM keeps an idle connection open
+// (VLLM_HTTP_TIMEOUT_KEEP_ALIVE, 5 s by default in vLLM 0.34.0).
+const serverKeepAlive = 5 * time.Second
+
+// upstreamIdleTimeout drops an idle connection before the server does. Go
+// does not send a POST again on a reused connection that the server closed
+// while the request was on its way, so a pool that keeps idle connections
+// longer than the server answers that race with a 502. Through the Modal
+// tunnel the server's close takes a round trip to arrive, which widens it.
+const upstreamIdleTimeout = 4 * time.Second
+
+// newTransport is one connection pool for the whole measurement: a new TLS
+// handshake per request would add round trips to every measured latency.
+func newTransport(idle time.Duration) *http.Transport {
+	return &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        512,
+		MaxIdleConnsPerHost: 512,
+		IdleConnTimeout:     idle,
+		TLSHandshakeTimeout: 10 * time.Second,
 	}
 }

@@ -1,0 +1,136 @@
+{
+ "schema": "infercrane.dev/quality-eval-set/v1",
+ "name": "infercrane-divergence",
+ "version": "1",
+ "max_tokens": 256,
+ "prompts": [
+  {
+   "id": "explain-tides",
+   "prompt": "In about 150 words, explain why the sea has two high tides a day."
+  },
+  {
+   "id": "explain-vaccines",
+   "prompt": "In about 150 words, explain how a vaccine teaches the immune system to recognise a virus."
+  },
+  {
+   "id": "explain-compound-interest",
+   "prompt": "In about 150 words, explain compound interest to someone opening their first savings account."
+  },
+  {
+   "id": "explain-hash-table",
+   "prompt": "In about 150 words, explain how a hash table finds a value quickly, and what happens when two keys collide."
+  },
+  {
+   "id": "explain-seasons",
+   "prompt": "In about 150 words, explain why summer is warmer than winter, and why the seasons are reversed in the two hemispheres."
+  },
+  {
+   "id": "explain-inflation",
+   "prompt": "In about 150 words, explain what inflation is and two ways a central bank tries to control it."
+  },
+  {
+   "id": "explain-photosynthesis",
+   "prompt": "In about 150 words, explain photosynthesis to a twelve-year-old."
+  },
+  {
+   "id": "explain-tcp",
+   "prompt": "In about 150 words, explain how TCP makes sure data arrives complete and in order."
+  },
+  {
+   "id": "howto-bread",
+   "prompt": "In about 150 words, describe how to bake a simple loaf of bread at home, step by step."
+  },
+  {
+   "id": "howto-interview",
+   "prompt": "In about 150 words, give advice to someone preparing for their first job interview."
+  },
+  {
+   "id": "howto-git-branch",
+   "prompt": "In about 150 words, explain how to create a branch in git, commit a change, and merge it back."
+  },
+  {
+   "id": "howto-garden",
+   "prompt": "In about 150 words, explain how to start a small vegetable garden on a balcony."
+  },
+  {
+   "id": "howto-budget",
+   "prompt": "In about 150 words, explain how to make a monthly household budget."
+  },
+  {
+   "id": "howto-bug-report",
+   "prompt": "In about 150 words, explain what makes a good bug report and why each part matters."
+  },
+  {
+   "id": "story-lighthouse",
+   "prompt": "Write a short story of about 150 words about a lighthouse keeper who finds an unexpected visitor."
+  },
+  {
+   "id": "story-robot",
+   "prompt": "Write a short story of about 150 words about a small robot learning to paint."
+  },
+  {
+   "id": "story-market",
+   "prompt": "Write a short story of about 150 words set in a busy morning market."
+  },
+  {
+   "id": "story-letter",
+   "prompt": "Write a short story of about 150 words in which a letter arrives forty years late."
+  },
+  {
+   "id": "compare-trains-planes",
+   "prompt": "In about 150 words, compare travelling between two cities 500 km apart by train and by plane."
+  },
+  {
+   "id": "compare-sql-nosql",
+   "prompt": "In about 150 words, compare relational databases and document databases, and say when each fits."
+  },
+  {
+   "id": "compare-renting-buying",
+   "prompt": "In about 150 words, compare renting a home with buying one."
+  },
+  {
+   "id": "compare-cats-dogs",
+   "prompt": "In about 150 words, compare keeping a cat and keeping a dog in a city flat."
+  },
+  {
+   "id": "history-printing",
+   "prompt": "In about 150 words, describe how the printing press changed the spread of ideas in Europe."
+  },
+  {
+   "id": "history-railways",
+   "prompt": "In about 150 words, describe how railways changed daily life in the nineteenth century."
+  },
+  {
+   "id": "science-black-holes",
+   "prompt": "In about 150 words, explain what a black hole is and how astronomers find one."
+  },
+  {
+   "id": "science-antibiotics",
+   "prompt": "In about 150 words, explain how antibiotics work and why resistance develops."
+  },
+  {
+   "id": "science-volcanoes",
+   "prompt": "In about 150 words, explain why volcanoes erupt and why some eruptions are more explosive than others."
+  },
+  {
+   "id": "letter-neighbour",
+   "prompt": "Write a friendly note of about 150 words to a new neighbour, inviting them to a street party."
+  },
+  {
+   "id": "letter-complaint",
+   "prompt": "Write a polite letter of about 150 words complaining about a delayed furniture delivery."
+  },
+  {
+   "id": "summary-meeting",
+   "prompt": "Write about 150 words summarising a team meeting that decided to move a product launch by two weeks, with the reasons and next steps."
+  },
+  {
+   "id": "opinion-remote-work",
+   "prompt": "In about 150 words, give the main arguments for and against working from home."
+  },
+  {
+   "id": "opinion-four-day-week",
+   "prompt": "In about 150 words, give the main arguments for and against a four-day working week."
+  }
+ ]
+}

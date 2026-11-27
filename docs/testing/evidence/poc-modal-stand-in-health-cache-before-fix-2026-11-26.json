@@ -1,0 +1,149 @@
+{
+  "schema": "infercrane.poc-modal.rehearsal-health-cache/v1",
+  "what": "Step 1 run A's command with --stand-in local --budget-usd 1 on overloaded stand-ins, attempt 4's harness before the runtime proxy stopped caching health checks its caller cut short",
+  "control_plane_commit": "32004faa (reconciler grace e9d4c3bf included)",
+  "started_cet": "2026-11-26 00:04:13",
+  "ended_cet": "2026-11-26 00:10:04",
+  "cell": "short/128",
+  "requests_at_once": 128,
+  "cell_load": {
+    "seconds": 144,
+    "requests": 16804,
+    "failed": 14376,
+    "failure_reasons": {
+      "404 Unknown model alias: gpu-baseline": 14376
+    },
+    "failures_by_hop": {
+      "network_to_the_remote_gpu": 0,
+      "remote_side_server_errors": {},
+      "before_the_runtime_proxy": 14376
+    }
+  },
+  "request_records": {
+    "recorded": 2428,
+    "status_200": 2428,
+    "note": "a 404 for want of a route is refused before admission and is not recorded"
+  },
+  "pod_readiness_probe": {
+    "path": "/health",
+    "period_seconds": 5,
+    "timeout_seconds": 2
+  },
+  "reading": "Every failed probe was recorded at its pass's own tick (a passing probe took about 60 ms), so none waited out a timeout: each got the proxy's cached 'unhealthy' from a kubelet readiness check cut short at 2 s while the stand-in's /health was slow. Two failed in a row four times; each time the route was withdrawn.",
+  "deployment_events": [
+    {
+      "at": "2026-11-25 23:06:52.217909+00",
+      "type": "deployment_submitted",
+      "summary": "Cloud deployment submitted"
+    },
+    {
+      "at": "2026-11-25 23:07:10.369374+00",
+      "type": "deployment_applied",
+      "summary": "Deployment gpu-baseline converged"
+    },
+    {
+      "at": "2026-11-25 23:07:18.060037+00",
+      "type": "replica_healthy",
+      "summary": "Target gpu-baseline-r0 became healthy"
+    },
+    {
+      "at": "2026-11-25 23:07:26.36235+00",
+      "type": "deployment_applied",
+      "summary": "Deployment gpu-baseline converged"
+    },
+    {
+      "at": "2026-11-25 23:07:32.054913+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:07:38.053535+00",
+      "type": "replica_unhealthy",
+      "summary": "Target gpu-baseline-r0 became unhealthy"
+    },
+    {
+      "at": "2026-11-25 23:07:48.110147+00",
+      "type": "replica_healthy",
+      "summary": "Target gpu-baseline-r0 became healthy"
+    },
+    {
+      "at": "2026-11-25 23:07:58.054324+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:08:22.052783+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:08:28.054991+00",
+      "type": "replica_unhealthy",
+      "summary": "Target gpu-baseline-r0 became unhealthy"
+    },
+    {
+      "at": "2026-11-25 23:08:38.125395+00",
+      "type": "replica_healthy",
+      "summary": "Target gpu-baseline-r0 became healthy"
+    },
+    {
+      "at": "2026-11-25 23:08:48.05643+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:09:12.05279+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:09:18.051413+00",
+      "type": "replica_unhealthy",
+      "summary": "Target gpu-baseline-r0 became unhealthy"
+    },
+    {
+      "at": "2026-11-25 23:09:28.110485+00",
+      "type": "replica_healthy",
+      "summary": "Target gpu-baseline-r0 became healthy"
+    },
+    {
+      "at": "2026-11-25 23:09:38.053911+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:09:58.06009+00",
+      "type": "replica_probe_missed",
+      "summary": "Target gpu-baseline-r0 missed a health check; it keeps its route unless 2 in a row fail"
+    },
+    {
+      "at": "2026-11-25 23:10:08.056801+00",
+      "type": "replica_unhealthy",
+      "summary": "Target gpu-baseline-r0 became unhealthy"
+    }
+  ],
+  "router_generations": [
+    {
+      "generation": 1,
+      "status": "retired",
+      "created_at": "2026-11-25 23:07:18.529305+00"
+    },
+    {
+      "generation": 2,
+      "status": "retired",
+      "created_at": "2026-11-25 23:07:48.574049+00"
+    },
+    {
+      "generation": 3,
+      "status": "retired",
+      "created_at": "2026-11-25 23:08:38.584738+00"
+    },
+    {
+      "generation": 4,
+      "status": "active",
+      "created_at": "2026-11-25 23:09:28.574759+00"
+    }
+  ],
+  "planner_asked": false,
+  "spent_usd": 0
+}

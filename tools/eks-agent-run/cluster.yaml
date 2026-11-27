@@ -1,0 +1,114 @@
+# eksctl config for the EKS qualification of the customer install: one NVIDIA
+# L4 node and one system node in AWS (EKS). See README.md.
+#
+# Used only by 20-create.sh, which passes --install-nvidia-plugin=false (the
+# install phase adds NVIDIA's device plugin itself, with GPU sharing) and its
+# own --kubeconfig, so the user's ~/.kube/config is never touched.
+#
+# Cost drivers, on purpose:
+#   - no NAT gateway: nodes sit in public subnets with a public IPv4 address;
+#   - no load balancer, no EBS CSI driver, no persistent volume;
+#   - no OIDC provider, no control-plane logging, no KMS key;
+#   - exactly one GPU node and one system node, both on demand.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: infercrane-eks-proof
+  region: "@@REGION@@"
+  # 1.36 is in standard support until 2027-08-02 (read 2026-11-23); extended
+  # support would cost $0.60 an hour instead of $0.10. It is also the minor
+  # version the agent's kind proof runs on (kindest/node v1.36.1).
+  version: "1.36"
+  tags:
+    project: infercrane-eks-proof
+
+# The region and its zones come from env.sh (EKS_PROOF_REGION); 20-create.sh
+# writes them, and the reserved GPU zone, into a copy of this file: the GPU's
+# zone and two more (lib.sh, cluster_zones). The system node group may start
+# its one node in any of those three, so that a zone without capacity does not
+# end the test. On 2026-11-23
+# zone a had neither instance type at 15:00, and zones b and c had no
+# g5.xlarge at 17:43. The load test and the model servers may therefore sit
+# in different zones, which costs a fraction of a cent here and does not
+# matter to a path proof. NODE_ZONES in env.sh names the same zones.
+availabilityZones: [@@NODE_ZONES@@]
+
+vpc:
+  nat:
+    gateway: Disable
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: false
+
+iam:
+  withOIDC: false
+
+# The default add-ons, with one setting: the VPC CNI enforces NetworkPolicy.
+# InferCrane gives every engine pod a NetworkPolicy that admits only the
+# control plane (or the agent, for candidates); without enforcement that
+# policy is stored and does nothing (docs/integrations/kubernetes.mdx). EKS
+# leaves it off by default, so a design partner's cluster may differ: the
+# support statement names this setting. Without OIDC the CNI keeps using the
+# node role's AmazonEKS_CNI_Policy, as on 23-24 Nov.
+addons:
+  - name: vpc-cni
+    configurationValues: '{"enableNetworkPolicy": "true"}'
+  - name: kube-proxy
+  - name: coredns
+
+managedNodeGroups:
+  # The customer's GPU node: one NVIDIA L4 (g6.xlarge, 24 GB, 4 vCPUs), or the
+  # A10G fallback (g5.xlarge), as env.sh's GPU_INSTANCES says. The account's
+  # quota for on-demand G instances is 4 vCPUs, so this is the only GPU node
+  # that can exist. minSize 0 lets the deadline action scale it to zero.
+  # 20-create.sh first reserves one instance in a zone that has one
+  # (an on-demand capacity reservation, "open", so the node uses it without
+  # naming it) and renders that zone into a copy of this file; eksctl never
+  # reads @@GPU_ZONE@@ itself.
+  - name: gpu
+    instanceType: "@@GPU_INSTANCE@@"
+    amiFamily: AmazonLinux2023
+    minSize: 0
+    desiredCapacity: 1
+    maxSize: 1
+    availabilityZones:
+      - "@@GPU_ZONE@@"
+    privateNetworking: false
+    # 100 GB: the vLLM 0.34.0 image (about 30 GB once unpacked), Qwen3-8B's
+    # 16.4 GB and the small model's servers, each with its own download; the
+    # kubelet evicts pods below 15% free.
+    volumeSize: 100
+    volumeType: gp3
+    labels:
+      infercrane.dev/pool: gpu
+    # No taint: the product's Kubernetes provider renders no tolerations yet
+    # (infercrane/infercrane#278 adds them), so a tainted GPU node would never
+    # run a candidate. The qualified tuple is an untainted GPU node.
+    tags:
+      project: infercrane-eks-proof
+    propagateASGTags: true
+    iam:
+      instanceRoleName: infercrane-eks-proof-gpu-node
+
+  # The system node: the stand-in control plane (which runs the campaign's
+  # load with AIPerf), its PostgreSQL, and the agent (which runs its own).
+  # Graviton, because the InferCrane image is built on this Apple Silicon
+  # laptop without emulation.
+  - name: system
+    instanceType: m7g.xlarge
+    amiFamily: AmazonLinux2023
+    minSize: 0
+    desiredCapacity: 1
+    maxSize: 1
+    availabilityZones: [@@NODE_ZONES@@]
+    privateNetworking: false
+    volumeSize: 30
+    volumeType: gp3
+    labels:
+      infercrane.dev/pool: system
+    tags:
+      project: infercrane-eks-proof
+    propagateASGTags: true
+    iam:
+      instanceRoleName: infercrane-eks-proof-system-node

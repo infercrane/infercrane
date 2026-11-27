@@ -4,7 +4,7 @@
 image:
   # The InferCrane release image (it carries the infercrane CLI, kubectl, and AIPerf).
   repository: ghcr.io/infercrane/infercrane
-  tag: ""          # defaults to the chart's appVersion
+  tag: ""          # defaults to the release tag: "v" + the chart's appVersion
   digest: ""       # sha256:... pins the image; preferred in production
   pullPolicy: IfNotPresent
 
@@ -37,6 +37,15 @@ agent:
   # Endpoint name and model when one server is observed.
   endpointName: ""
   model: ""
+  # How long the data plane keeps serving your endpoints' own servers past
+  # its snapshot's validity (15 minutes) while the control plane cannot be
+  # reached, at most 24h. Only your own servers are served meanwhile, never
+  # a server a rollout or a test started. A key revoked during an outage
+  # keeps working until the agent reconnects or the grace ends; each key's
+  # own expiry still applies. The last snapshot (key digests only, never a
+  # key) is kept at mode 0600 in the pod's own volume. Set 0s to refuse
+  # requests at the snapshot's validity instead.
+  offlineGrace: 24h
   extraArgs: []
 
 dataPlane:
@@ -64,6 +73,12 @@ executor:
   workerSecret:
     name: ""
     key: api-key
+  # The only sources that may reach candidate pods (a NetworkPolicy per
+  # candidate). Empty means this agent's own pods, which run the measurements.
+  # Otherwise: pods:KEY=VALUE, namespace:KEY=VALUE, address ranges, comma
+  # separated, or none to apply no policy. Needs a network plugin that
+  # enforces NetworkPolicy.
+  engineIngress: ""
   # Device-plugin resource and node label of your accelerators.
   gpuResource: nvidia.com/gpu
   gpuProductLabel: nvidia.com/gpu.product

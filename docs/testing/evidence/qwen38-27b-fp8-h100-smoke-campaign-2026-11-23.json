@@ -1,0 +1,571 @@
+{
+  "schema_version": "infercrane.poc-modal-smoke/v1",
+  "recorded": "2026-11-23",
+  "what": "The first optimization campaign on real GPUs with real text: a smoke run (40 requests, answers capped at 128 tokens) of the publisher's command against that command with its documented speculation option, Qwen/Qwen3.8-27B-FP8 on one H100 each, vLLM 0.34.0. It was stopped after the speculation setup's answer check, before the copy of the current setup was measured.",
+  "not_a_result": [
+    "40 requests a pass and 128-token answers: far too small to state a gain.",
+    "The judge made no comparison. Every run's output throughput was empty, because the product counted only non-reasoning tokens and these answers were all reasoning (fixed after this run: internal/benchmark counts every generated token). The control's window was therefore marked invalid.",
+    "No re-measurement on fresh servers happened and the copy of the current setup was not measured."
+  ],
+  "what_it_shows": [
+    "The whole path runs on real GPUs with real text: gateway replay, planner asked on the loaded endpoint, capture, a campaign whose requests the control plane composed from the corpus, engine counters in every run, the answer check.",
+    "The speculation setup drafted and accepted tokens on real prompts: 11390 of 17673 drafted tokens accepted over four passes (64.4%).",
+    "Its answers matched the current setup's on all 24 prompts of the built-in answer check.",
+    "About 27% of prompt tokens were served from the prefix cache in every pass of both setups, so the corpus rendering keeps the trace's shared prefixes on a real engine.",
+    "On this prefill-heavy traffic the planner diagnosed time to first token and proposed bigger prompt chunks; it did not propose speculation. The harness measured the publisher's documented speculation option anyway and recorded that."
+  ],
+  "run": {
+    "traffic": "real-text",
+    "shape": "decode-heavy",
+    "requests_at_once": 32,
+    "corpus": {
+      "digest": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+      "name": "Fast-track prompt set v1 as a prompt corpus (oasst1 prompts, CNN/DailyMail articles)",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/datasets/abisee/cnn_dailymail at 96df5e686bee (3.0.0/train-00000-of-00003.parquet); https://huggingface.co/datasets/OpenAssistant/oasst1 at fdf72ae0827c (data/train-00000-of-00001-b42a775f407cee45.parquet); selected by tools/fast-track-map, prompt set sha256 c3c912dfb64e963f",
+      "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+      "passages": 1500,
+      "prompts": 1000
+    },
+    "smoke": true,
+    "stand_in": false,
+    "current_setup": "publisher",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100"
+  },
+  "laptop_at_start": {
+    "at": "2026-11-23T05:27:04Z",
+    "load_average": [
+      5.66,
+      5.8,
+      5.93
+    ],
+    "cpus": 8
+  },
+  "planner": {
+    "diagnosis_state": "applied",
+    "primary_bottleneck": "prefill-and-first-token",
+    "summary": "The diagnosis points at time to first token. Trying, in order: bigger prompt chunks.",
+    "model_features": [
+      "native_mtp"
+    ],
+    "setups": [
+      {
+        "label": "Bigger prompt chunks",
+        "technique": "prefill-chunk-large",
+        "priority": 88,
+        "rules": [
+          "prefill.long_input",
+          "bottleneck.prefill"
+        ],
+        "summary": "Prompts average 4139 tokens (threshold 2048), so bigger prompt chunks finish each prompt in fewer engine steps.",
+        "planner_args": [
+          "--max-num-batched-tokens",
+          "16384"
+        ],
+        "skipped": "a smoke run measures one setup next to the current setup and its copy, and with real text that is the speculation setup"
+      }
+    ],
+    "documented_speculation": {
+      "args": [
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ],
+      "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.md?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-23)",
+      "proposed_by_planner": false,
+      "planner_rank": null
+    }
+  },
+  "traffic": {
+    "requests": 40,
+    "failed": 0,
+    "seconds": 151.9,
+    "output_tokens": 4312,
+    "input_words_sent": 127762,
+    "input_scale": 1.7402,
+    "output_scale": 0.1924,
+    "max_input_tokens": 6000,
+    "max_output_tokens": 128,
+    "spread_seconds": 150.0,
+    "text": {
+      "source": "operator_corpus",
+      "corpus": {
+        "digest": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+        "name": "Fast-track prompt set v1 as a prompt corpus (oasst1 prompts, CNN/DailyMail articles)",
+        "license": "Apache-2.0",
+        "source": "https://huggingface.co/datasets/abisee/cnn_dailymail at 96df5e686bee (3.0.0/train-00000-of-00003.parquet); https://huggingface.co/datasets/OpenAssistant/oasst1 at fdf72ae0827c (data/train-00000-of-00001-b42a775f407cee45.parquet); selected by tools/fast-track-map, prompt set sha256 c3c912dfb64e963f",
+        "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+        "passages": 1500,
+        "prompts": 1000
+      },
+      "planned_input_tokens": 163139,
+      "answers": "end where the model ends them, capped at the recorded length"
+    },
+    "shape": "decode-heavy"
+  },
+  "setups": [
+    {
+      "label": "Your current setup (the publisher's vLLM command)",
+      "state": "ranked",
+      "answer_check": {
+        "state": "passed",
+        "score": 1,
+        "source": "infercrane",
+        "reason": "This setup's answers to the 24 prompts are the reference the other setups are compared with."
+      },
+      "control": {
+        "role": "candidate_is_control",
+        "runs": 0,
+        "drift_limit": 0.15,
+        "revision_id": "1fade8157ca8309a7455393e7d6c7cdb-rev-1",
+        "candidate_id": "acd296106c89e6f78a4812fcece0f62f",
+        "server_metrics_requested": false
+      },
+      "comparison": {},
+      "benchmark": {
+        "request_count": 160,
+        "succeeded": 160,
+        "failed": 0,
+        "duration_seconds": 42.580130881,
+        "output_token_throughput": 0,
+        "request_throughput": 3.7579064880321247,
+        "ttft_p50_ms": 2200.37954275,
+        "ttft_p95_ms": 6153.545534,
+        "tpot_p95_ms": 229.20385983333333,
+        "latency_p50_ms": 9291.64712925,
+        "latency_p95_ms": 9477.1596815
+      },
+      "replay": {
+        "requests": 40,
+        "input_tokens_mean": 4127,
+        "output_tokens_mean": 107,
+        "shared_prefix_groups": 16,
+        "shared_prefix_requests": 21,
+        "session_turns_reusing_prompt": 19,
+        "preserved": [
+          "request_order",
+          "input_token_lengths_to_the_nearest_passage",
+          "output_token_lengths",
+          "shared_system_prefix_groups",
+          "session_prompt_history"
+        ],
+        "not_preserved": [
+          "prompt_content",
+          "arrival_timing",
+          "tool_pauses",
+          "parent_session_links",
+          "assistant_output_reuse",
+          "shared_prefix_length",
+          "exact_input_token_lengths"
+        ],
+        "prompt_text": {
+          "corpus": {
+            "name": "Fast-track prompt set v1 as a prompt corpus (oasst1 prompts, CNN/DailyMail articles)",
+            "digest": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+            "source": "https://huggingface.co/datasets/abisee/cnn_dailymail at 96df5e686bee (3.0.0/train-00000-of-00003.parquet); https://huggingface.co/datasets/OpenAssistant/oasst1 at fdf72ae0827c (data/train-00000-of-00001-b42a775f407cee45.parquet); selected by tools/fast-track-map, prompt set sha256 c3c912dfb64e963f",
+            "license": "Apache-2.0",
+            "prompts": 1000,
+            "passages": 1500,
+            "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81"
+          },
+          "source": "operator_corpus",
+          "passage_uses": 172,
+          "passages_used": 172,
+          "standalone_requests": 0,
+          "planned_input_tokens_mean": 4233
+        }
+      },
+      "runs": [
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.55,
+          "request_throughput": 3.7911852280708405,
+          "ttft_p95_ms": 6148.545252999999,
+          "latency_p95_ms": 9391.682671999999,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171420,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.58,
+          "request_throughput": 3.7791701180036186,
+          "ttft_p95_ms": 5873.032878,
+          "latency_p95_ms": 9404.671671,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171390,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.65,
+          "request_throughput": 3.7553026176755706,
+          "ttft_p95_ms": 6007.9602939999995,
+          "latency_p95_ms": 9476.714087,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171403,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.79,
+          "request_throughput": 3.7059679883784695,
+          "ttft_p95_ms": 6584.643711,
+          "latency_p95_ms": 9635.570296,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 41600,
+          "prefix_cache_query_tokens": 171402,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        }
+      ]
+    },
+    {
+      "label": "The publisher's documented speculation option",
+      "state": "ranked",
+      "answer_check": {
+        "state": "passed",
+        "score": 1,
+        "source": "infercrane",
+        "reason": "Answers matched the reference 100% across 24 prompts."
+      },
+      "control": {
+        "role": "invalid",
+        "runs": 5,
+        "reason": "control runs were not clean",
+        "drift_limit": 0.15,
+        "revision_id": "1fade8157ca8309a7455393e7d6c7cdb-rev-1",
+        "candidate_id": "acd296106c89e6f78a4812fcece0f62f",
+        "server_metrics_requested": true
+      },
+      "comparison": {},
+      "benchmark": {
+        "request_count": 160,
+        "succeeded": 160,
+        "failed": 0,
+        "duration_seconds": 37.420961895000005,
+        "output_token_throughput": 0,
+        "request_throughput": 4.2763957365783005,
+        "ttft_p50_ms": 2512.825532,
+        "ttft_p95_ms": 6763.9161595,
+        "tpot_p95_ms": 137.87432921666667,
+        "latency_p50_ms": 8524.92588925,
+        "latency_p95_ms": 8854.437285499998
+      },
+      "replay": {
+        "requests": 40,
+        "input_tokens_mean": 4127,
+        "output_tokens_mean": 107,
+        "shared_prefix_groups": 16,
+        "shared_prefix_requests": 21,
+        "session_turns_reusing_prompt": 19,
+        "preserved": [
+          "request_order",
+          "input_token_lengths_to_the_nearest_passage",
+          "output_token_lengths",
+          "shared_system_prefix_groups",
+          "session_prompt_history"
+        ],
+        "not_preserved": [
+          "prompt_content",
+          "arrival_timing",
+          "tool_pauses",
+          "parent_session_links",
+          "assistant_output_reuse",
+          "shared_prefix_length",
+          "exact_input_token_lengths"
+        ],
+        "prompt_text": {
+          "corpus": {
+            "name": "Fast-track prompt set v1 as a prompt corpus (oasst1 prompts, CNN/DailyMail articles)",
+            "digest": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+            "source": "https://huggingface.co/datasets/abisee/cnn_dailymail at 96df5e686bee (3.0.0/train-00000-of-00003.parquet); https://huggingface.co/datasets/OpenAssistant/oasst1 at fdf72ae0827c (data/train-00000-of-00001-b42a775f407cee45.parquet); selected by tools/fast-track-map, prompt set sha256 c3c912dfb64e963f",
+            "license": "Apache-2.0",
+            "prompts": 1000,
+            "passages": 1500,
+            "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81"
+          },
+          "source": "operator_corpus",
+          "passage_uses": 172,
+          "passages_used": 172,
+          "standalone_requests": 0,
+          "planned_input_tokens_mean": 4233
+        }
+      },
+      "runs": [
+        {
+          "arm": "control",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.93,
+          "request_throughput": 3.6590748610476176,
+          "ttft_p95_ms": 6698.23967,
+          "latency_p95_ms": 9790.436672,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 41600,
+          "prefix_cache_query_tokens": 171422,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 9.52,
+          "request_throughput": 4.202551695252199,
+          "ttft_p95_ms": 7308.770253,
+          "latency_p95_ms": 9041.737921,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 41600,
+          "prefix_cache_query_tokens": 171430,
+          "drafted_tokens": 4347,
+          "accepted_tokens": 2859
+        },
+        {
+          "arm": "control",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 11.18,
+          "request_throughput": 3.578585847605709,
+          "ttft_p95_ms": 6674.07542,
+          "latency_p95_ms": 10032.415254,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 36608,
+          "prefix_cache_query_tokens": 171398,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 9.39,
+          "request_throughput": 4.257858120604614,
+          "ttft_p95_ms": 6677.013462,
+          "latency_p95_ms": 8854.76313,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171407,
+          "drafted_tokens": 4431,
+          "accepted_tokens": 2851
+        },
+        {
+          "arm": "control",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.71,
+          "request_throughput": 3.7362123140756838,
+          "ttft_p95_ms": 6206.890377,
+          "latency_p95_ms": 9494.000504,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171450,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 9.33,
+          "request_throughput": 4.289218613626791,
+          "ttft_p95_ms": 6496.732003,
+          "latency_p95_ms": 8749.878837999999,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171395,
+          "drafted_tokens": 4506,
+          "accepted_tokens": 2822
+        },
+        {
+          "arm": "control",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.69,
+          "request_throughput": 3.7417458385888116,
+          "ttft_p95_ms": 6013.5186699999995,
+          "latency_p95_ms": 9514.633296,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171402,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        },
+        {
+          "arm": "candidate",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 9.18,
+          "request_throughput": 4.3559545168295974,
+          "ttft_p95_ms": 6573.14892,
+          "latency_p95_ms": 8771.369252999999,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 46592,
+          "prefix_cache_query_tokens": 171403,
+          "drafted_tokens": 4389,
+          "accepted_tokens": 2858
+        },
+        {
+          "arm": "control",
+          "requests": 40,
+          "failed": 0,
+          "duration_seconds": 10.9,
+          "request_throughput": 3.6705788523790854,
+          "ttft_p95_ms": 6413.511503,
+          "latency_p95_ms": 9733.011838,
+          "output_token_throughput": 0,
+          "prefix_cache_hit_tokens": 41600,
+          "prefix_cache_query_tokens": 171430,
+          "drafted_tokens": 0,
+          "accepted_tokens": 0
+        }
+      ]
+    },
+    {
+      "label": "A copy of your current setup (must not win)",
+      "state": "provisioning",
+      "answer_check": {
+        "state": "pending",
+        "score": null,
+        "source": null,
+        "reason": "Runs after this setup is measured."
+      },
+      "control": null,
+      "comparison": {},
+      "benchmark": {},
+      "replay": {
+        "requests": null,
+        "input_tokens_mean": null,
+        "output_tokens_mean": null,
+        "shared_prefix_groups": null,
+        "shared_prefix_requests": null,
+        "session_turns_reusing_prompt": null,
+        "preserved": null,
+        "not_preserved": null,
+        "prompt_text": null
+      },
+      "runs": []
+    }
+  ],
+  "servers": [
+    {
+      "state": "stopped",
+      "seconds": 611.4,
+      "startup_seconds": 322.9,
+      "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, driver 620.70.06, CUDA unknown",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ]
+    },
+    {
+      "state": "stopped",
+      "seconds": 1173.7,
+      "startup_seconds": 97.8,
+      "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, driver 620.70.06, CUDA unknown",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ]
+    },
+    {
+      "state": "failed",
+      "seconds": 841.0,
+      "startup_seconds": 400.1,
+      "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, driver 620.70.06, CUDA unknown",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ]
+    },
+    {
+      "state": "failed",
+      "seconds": 51.3,
+      "startup_seconds": null,
+      "gpu": "NVIDIA H100 80GB HBM3, 81559 MiB, driver 620.70.06, CUDA unknown",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--seed",
+        "1"
+      ]
+    }
+  ],
+  "cost": {
+    "billed_usd": 3.25,
+    "basis": "modal billing report --for today --show-resources, 2026-11-23",
+    "gpu_seconds": 2677
+  }
+}

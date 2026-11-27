@@ -1,0 +1,82 @@
+{
+ "benchmark": {
+  "cell": {
+   "id": "example-8b/long/16",
+   "kind": "long",
+   "load": 16,
+   "first_token_limit_ms": 3000
+  },
+  "model": {
+   "id": "example/dense-8b",
+   "revision": "2222222222222222222222222222222222222222",
+   "name": "example-8b",
+   "precision": {
+    "weights": "bf16"
+   }
+  },
+  "engine": {
+   "name": "vllm",
+   "version": "0.34.0",
+   "image": "vllm/vllm-openai@sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  },
+  "arms": [
+   {
+    "key": "engine-defaults",
+    "kind": "baseline",
+    "setup_id": "example-8b-engine-defaults",
+    "technique": "baseline-engine-defaults",
+    "label": "Engine defaults (the current setup)",
+    "args": [],
+    "technique_version": "1.0.0"
+   },
+   {
+    "key": "publisher",
+    "kind": "baseline",
+    "setup_id": "example-8b-publisher",
+    "technique": "baseline-publisher",
+    "label": "The publisher's documented command",
+    "args": [
+     "--reasoning-parser",
+     "example_parser"
+    ],
+    "technique_version": "1.0.0"
+   },
+   {
+    "key": "copy",
+    "kind": "baseline",
+    "setup_id": "example-8b-copy",
+    "technique": "baseline-copy",
+    "label": "A copy of the current setup",
+    "args": [
+     "--seed",
+     "1"
+    ],
+    "technique_version": "1.0.0"
+   },
+   {
+    "key": "fp8-weights",
+    "kind": "candidate",
+    "setup_id": "example-8b-fp8-weights",
+    "technique": "fp8-weights",
+    "label": "FP8 weights",
+    "args": [
+     "--quantization",
+     "fp8"
+    ],
+    "technique_version": "1.0.0"
+   },
+   {
+    "key": "fp8-kv-cache",
+    "kind": "candidate",
+    "setup_id": "example-8b-fp8-kv-cache",
+    "technique": "fp8-kv-cache",
+    "label": "FP8 KV cache",
+    "args": [
+     "--kv-cache-dtype",
+     "fp8"
+    ],
+    "technique_version": "1.0.0"
+   }
+  ]
+ }
+}

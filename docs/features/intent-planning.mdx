@@ -51,8 +51,8 @@ the automatic check first and plans from it. `plan.model.review` is `checked_aut
 models say `reviewed`), and `plan.model_check` holds the whole check: the pinned commit, the
 architecture and runtime it matched, size, license, access, and the GPU fit.
 
-A supported model gets the runtime's own defaults on the smallest priced layout: `vllm` 0.22.1 (or
-SGLang 0.5.12 when only SGLang registers the architecture), `--max-model-len` set to the checked
+A supported model gets the runtime's own defaults on the smallest priced layout: `vllm` 0.34.0 (or
+SGLang 0.5.23 when only SGLang registers the architecture), `--max-model-len` set to the checked
 context, `--tensor-parallel-size` across more than one GPU, elastic compute, and one replica. The
 deployment draft pins the commit the check read and carries `model_secret_reference_id` when one was
 given.

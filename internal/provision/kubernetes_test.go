@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/artifactcache"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/support"
@@ -88,7 +89,7 @@ func TestKubernetesAMDDevicePluginSchedulesAMDGPUsWithTheirROCmImage(t *testing.
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(fixture.Objects)
-	for _, expected := range []string{`"amd.com/gpu":"1"`, `"amd.com/gpu.product-name":"AMD_Instinct_MI300X_OAM"`, `"image":"vllm/vllm-openai-rocm@sha256:368b2992`, `"command":["vllm"]`} {
+	for _, expected := range []string{`"amd.com/gpu":"1"`, `"amd.com/gpu.product-name":"AMD_Instinct_MI300X_OAM"`, `"image":"vllm/vllm-openai-rocm@sha256:3cb773d2`, `"command":["vllm"]`} {
 		if !strings.Contains(string(encoded), expected) {
 			t.Fatalf("manifest missing %q: %s", expected, encoded)
 		}
@@ -104,6 +105,26 @@ func TestKubernetesAMDDevicePluginSchedulesAMDGPUsWithTheirROCmImage(t *testing.
 		spec := testKubernetesSpec()
 		spec.GPU = test.gpu
 		if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KUBERNETES_GPU_RESOURCE") || fixture.ApplyCalls != 0 {
+			t.Fatalf("%s on %s: err=%v apply=%d", test.gpu, test.resource, err, fixture.ApplyCalls)
+		}
+	}
+	// A cluster whose device plugin exposes TPUs, Gaudi, or Intel GPUs still
+	// refuses them: those platforms are not qualified. A GPU of another
+	// platform is refused by the device check as before.
+	for _, test := range []struct{ resource, gpu, want string }{
+		{"google.com/tpu", "tpu-v6e-slice", "not qualified"},
+		{"habana.ai/gaudi", "Gaudi 3", "not qualified"},
+		{"gpu.intel.com/xe", "Arc Pro B60", "not qualified"},
+		{"nvidia.com/gpu", "tpu7x", "not qualified"},
+		{"google.com/tpu", "H100", "INFERCRANE_KUBERNETES_GPU_RESOURCE"},
+		{"habana.ai/gaudi", "NVIDIA-L40S", "INFERCRANE_KUBERNETES_GPU_RESOURCE"},
+	} {
+		fixture := providerfixture.NewKubernetesCLI()
+		provider := testKubernetesProvider(fixture, "deployment")
+		provider.GPUResource = test.resource
+		spec := testKubernetesSpec()
+		spec.GPU = test.gpu
+		if _, err := provider.EnsureReplica(context.Background(), spec); err == nil || !strings.Contains(err.Error(), test.want) || fixture.ApplyCalls != 0 {
 			t.Fatalf("%s on %s: err=%v apply=%d", test.gpu, test.resource, err, fixture.ApplyCalls)
 		}
 	}
@@ -321,4 +342,159 @@ func jsonMarshalFixtureObjects(objects map[string]map[string]any) (string, error
 func resourceNameFromHandle(handle provision.ProviderHandle) string {
 	parts := strings.Split(handle.ResourceID, "/")
 	return parts[len(parts)-1]
+}
+
+// An SGLang server's key launcher reaches the container unchanged: the
+// script is one argument, Kubernetes leaves $(mktemp -d) alone because it is
+// not a variable name, and the key comes from the worker Secret, not argv.
+func TestKubernetesStartsSGLangThroughTheKeyLauncher(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	spec := testKubernetesSpec()
+	spec.Runtime = "sglang"
+	spec.Workload = support.WithEngineKey("sglang", support.SGLangWorkload())
+	if _, err := provider.EnsureReplica(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Command []string `json:"command"`
+						Args    []string `json:"args"`
+						Env     []struct {
+							Name      string         `json:"name"`
+							ValueFrom map[string]any `json:"valueFrom"`
+						} `json:"env"`
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	for _, object := range fixture.Objects {
+		body, _ := json.Marshal(object)
+		if strings.Contains(string(body), `"kind":"Deployment"`) {
+			if err := json.Unmarshal(body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(manifest.Spec.Template.Spec.Containers) == 0 {
+		t.Fatal("no runtime container")
+	}
+	container := manifest.Spec.Template.Spec.Containers[0]
+	argv := strings.Join(append(container.Command, container.Args...), "\x00")
+	if !strings.Contains(argv, "infercrane-engine-key") || !strings.Contains(argv, `dir=$(mktemp -d)`) || !strings.Contains(argv, "sglang.launch_server") {
+		t.Fatalf("container argv %q", argv)
+	}
+	if strings.Contains(argv, "--api-key") {
+		t.Fatalf("the key is passed in argv: %q", argv)
+	}
+	secret := false
+	for _, env := range container.Env {
+		secret = secret || env.Name == "INFERCRANE_WORKER_API_KEY" && env.ValueFrom != nil
+	}
+	if !secret {
+		t.Fatalf("worker key env %+v", container.Env)
+	}
+}
+
+// With engine ingress sources configured, each replica gets a NetworkPolicy
+// that admits only those sources, and only on the engine's port. The policy
+// is created, observed and deleted with the Deployment and Service, and a
+// replica created before the policy existed stays ready until the next
+// ensure applies it.
+func TestKubernetesEngineNetworkPolicyAdmitsOnlyConfiguredSources(t *testing.T) {
+	fixture := providerfixture.NewKubernetesCLI()
+	provider := testKubernetesProvider(fixture, "deployment")
+	provider.EngineIngress = []engineingress.Peer{
+		{PodLabels: map[string]string{"app.kubernetes.io/name": "infercrane"}},
+		{NamespaceLabels: map[string]string{"kubernetes.io/metadata.name": "gateway"}, PodLabels: map[string]string{"app": "router"}},
+		{CIDR: "10.8.0.0/16"},
+	}
+	// The preflight asks for the policy permission only when a policy is made.
+	fixture.DeniedResources = []string{"networkpolicies.networking.k8s.io"}
+	if err := provider.Check(context.Background()); err == nil || !strings.Contains(err.Error(), "denies get networkpolicies.networking.k8s.io") {
+		t.Fatalf("check without the policy permission: %v", err)
+	}
+	if err := testKubernetesProvider(fixture, "deployment").Check(context.Background()); err != nil {
+		t.Fatalf("check without sources: %v", err)
+	}
+	fixture.DeniedResources = nil
+	if err := provider.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	spec := testKubernetesSpec()
+	handle, err := provider.EnsureReplica(context.Background(), spec)
+	if err != nil || len(fixture.Objects) != 3 {
+		t.Fatalf("handle=%#v objects=%d err=%v", handle, len(fixture.Objects), err)
+	}
+	name := resourceNameFromHandle(handle)
+	policy := fixture.Objects["networkpolicy/"+name]
+	if policy == nil {
+		t.Fatalf("no NetworkPolicy among %v", fixture.Objects)
+	}
+	encoded, _ := json.Marshal(policy["spec"])
+	want := `{"ingress":[{"from":[{"podSelector":{"matchLabels":{"app.kubernetes.io/name":"infercrane"}}},` +
+		`{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"gateway"}},"podSelector":{"matchLabels":{"app":"router"}}},` +
+		`{"ipBlock":{"cidr":"10.8.0.0/16"}}],"ports":[{"port":8000,"protocol":"TCP"}]}],` +
+		`"podSelector":{"matchLabels":{"app.kubernetes.io/instance":"` + name + `"}},"policyTypes":["Ingress"]}`
+	if string(encoded) != want {
+		t.Fatalf("policy spec\n got %s\nwant %s", encoded, want)
+	}
+	observation, err := provider.ObserveReplica(context.Background(), handle, 8000)
+	if err != nil || observation.State != "ready" {
+		t.Fatalf("observation=%#v err=%v", observation, err)
+	}
+	// A replica from before the policy is still a complete owner set; the
+	// next ensure adds the policy.
+	delete(fixture.Objects, "networkpolicy/"+name)
+	if observation, err = provider.ObserveReplica(context.Background(), handle, 8000); err != nil || observation.State != "ready" {
+		t.Fatalf("without policy: observation=%#v err=%v", observation, err)
+	}
+	if _, err = provider.EnsureReplica(context.Background(), spec); err != nil || fixture.Objects["networkpolicy/"+name] == nil {
+		t.Fatalf("ensure did not restore the policy: objects=%v err=%v", fixture.Objects, err)
+	}
+	if err = provider.DeleteReplica(context.Background(), handle); err != nil || len(fixture.Objects) != 0 {
+		t.Fatalf("delete objects=%v err=%v", fixture.Objects, err)
+	}
+	// KServe owns its own pods, and without sources no policy is made.
+	for _, test := range []struct {
+		api   string
+		peers []engineingress.Peer
+	}{{"deployment", nil}, {"kserve", provider.EngineIngress}} {
+		fixture := providerfixture.NewKubernetesCLI()
+		other := testKubernetesProvider(fixture, test.api)
+		other.EngineIngress = test.peers
+		if _, err := other.EnsureReplica(context.Background(), spec); err != nil {
+			t.Fatalf("%s: %v", test.api, err)
+		}
+		for key := range fixture.Objects {
+			if strings.HasPrefix(key, "networkpolicy/") {
+				t.Fatalf("%s: unexpected policy %s", test.api, key)
+			}
+		}
+	}
+}
+
+// A replica's Service address is known before it is ready for a Deployment,
+// so a server that stopped serving can still be named; KServe assigns its
+// own address, so none is given.
+func TestServiceAddressIsFixedByTheExternalKey(t *testing.T) {
+	deployments := provision.Kubernetes{Namespace: "models"}
+	handle := provision.ProviderHandle{ExternalKey: "agent-serve:support-bot:0123456789abcdef:8000"}
+	address := deployments.ServiceAddress(handle, 0)
+	if !strings.HasPrefix(address, "http://infercrane-") || !strings.HasSuffix(address, ".models.svc:8000") || deployments.ServiceAddress(handle, 8000) != address || deployments.ServiceAddress(handle, 9000) == address {
+		t.Fatalf("address = %q", address)
+	}
+	if other := deployments.ServiceAddress(provision.ProviderHandle{ExternalKey: "agent-serve:support-bot:fedcba9876543210:8000"}, 8000); other == address {
+		t.Fatal("two external keys share an address")
+	}
+	if got := (provision.Kubernetes{Namespace: "models", WorkloadAPI: "kserve"}).ServiceAddress(handle, 8000); got != "" {
+		t.Fatalf("kserve address = %q", got)
+	}
+	if got := deployments.ServiceAddress(provision.ProviderHandle{}, 8000); got != "" {
+		t.Fatalf("empty key address = %q", got)
+	}
 }

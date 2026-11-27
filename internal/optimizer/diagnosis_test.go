@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +20,7 @@ import (
 	"github.com/infercrane/infercrane/internal/metrics"
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/spec"
+	"github.com/infercrane/infercrane/internal/support"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,13 +47,19 @@ func lowConcurrencyDiagnosis() *Diagnosis {
 }
 
 func genericRequest(gpu string, diagnosis *Diagnosis) Request {
-	return Request{ModelIdentity: "acme/novel-open-model", ModelRevision: strings.Repeat("a", 40), Provider: "runpod-pods", GPU: gpu, Runtimes: []string{"vllm"}, MaxCandidates: 4, Diagnosis: diagnosis}
+	// Two slots more than the diagnosed setups these tests expect: every list
+	// also carries a copy of the starting setup and, when it speculates, the
+	// setup without speculation (diagnosis_standing.go).
+	return Request{ModelIdentity: "acme/novel-open-model", ModelRevision: strings.Repeat("a", 40), Provider: "runpod-pods", GPU: gpu, Runtimes: []string{"vllm"}, MaxCandidates: 6, Diagnosis: diagnosis}
 }
 
+// reasonOrder is the diagnosis's order: the setups every list carries to test
+// the plan (references and the copy) are left out.
 func reasonOrder(proposal Proposal) []string {
 	var out []string
 	for _, candidate := range proposal.Candidates {
 		switch {
+		case candidate.Reason != nil && (candidate.Reason.Role == ReasonReference || candidate.Reason.Role == ReasonCopy):
 		case candidate.Reason == nil:
 			out = append(out, "none")
 		case candidate.Reason.Role == ReasonDiagnosis:
@@ -86,8 +95,12 @@ func TestDiagnosisDerivesRankedCandidatesWithReasonsAndKeepsGates(t *testing.T) 
 		t.Fatalf("the untuned starting setup must stay the control: %+v", proposal.StartingPoint)
 	}
 	wantArgs := map[string]string{TechniqueFP8KVCache: "--kv-cache-dtype fp8", TechniqueKVSequenceCap: "--max-num-seqs 32"}
+	previous := 0
 	for index, candidate := range proposal.Candidates[1:] {
 		reason := candidate.Reason
+		if reason.Role == ReasonReference || reason.Role == ReasonCopy {
+			continue
+		}
 		if candidate.Rank != index+2 || candidate.EvidenceState != EvidenceUnmeasured || candidate.Status != "proposed-unmeasured" || candidate.Source.Name != diagnosisPlannerSource || candidate.Source.Version != DiagnosisRulesVersion {
 			t.Fatalf("derived candidate crossed its proof boundary: %+v", candidate)
 		}
@@ -102,12 +115,17 @@ func TestDiagnosisDerivesRankedCandidatesWithReasonsAndKeepsGates(t *testing.T) 
 				t.Fatalf("derived candidate dropped required evidence %q", required)
 			}
 		}
-		if index > 0 && reason.Priority > proposal.Candidates[index].Reason.Priority {
+		if previous > 0 && reason.Priority > previous {
 			t.Fatalf("candidates are not ordered by expected benefit: %v", reasonOrder(proposal))
 		}
+		previous = reason.Priority
 	}
 	for _, candidate := range proposal.Candidates[1:] {
-		if hasFeature(candidate.Features, "runtime_baseline", "untuned") || contains(candidate.Limitations, genericBaselineLimitation) || !hasFeature(candidate.Features, "diagnosis_technique", candidate.Reason.Technique) {
+		technique, name := candidate.Reason.Technique, "diagnosis_technique"
+		if candidate.Reason.Role == ReasonCopy {
+			technique, name = standingCopy, planCheckFeature
+		}
+		if hasFeature(candidate.Features, "runtime_baseline", "untuned") || contains(candidate.Limitations, genericBaselineLimitation) || !hasFeature(candidate.Features, name, technique) {
 			t.Fatalf("a changed setup kept the untuned baseline's claims: %+v", candidate)
 		}
 	}
@@ -375,8 +393,15 @@ func TestDiagnosisPlansAMDInstinctGPUsFromTheirReviewedIdentity(t *testing.T) {
 	// Every spelling of an MI300X resolves to 192 GB, so vLLM 0.22.1's large
 	// batch defaults apply and restating them is a no-op, as on an H100.
 	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "AMD_Instinct_MI300X_OAM", "MI325X", "MI355X"} {
-		if class, known := acceleratorMemoryClass(gpu); !known || class != memoryLarge {
+		if class, known := acceleratorMemoryClass(gpu, "0.22.1"); !known || class != memoryLarge {
 			t.Fatalf("%s memory class=%q known=%t", gpu, class, known)
+		}
+		// vLLM 0.34.0 puts 160 GiB or more in its own tier, 16384 tokens.
+		if class, known := acceleratorMemoryClass(gpu, "0.34.0"); !known || class != memoryHuge {
+			t.Fatalf("%s 0.34.0 memory class=%q known=%t", gpu, class, known)
+		}
+		if _, why := withoutNoOps("vllm", "0.34.0", gpu, []runtimeArg{{"--max-num-seqs", "1024"}, {"--max-num-batched-tokens", "16384"}}); !strings.Contains(why, "already vLLM 0.34.0's defaults") {
+			t.Fatalf("%s kept a 0.34.0 default: %q", gpu, why)
 		}
 		if _, why := withoutNoOps("vllm", "0.22.1", gpu, []runtimeArg{{"--max-num-seqs", "1024"}, {"--max-num-batched-tokens", "8192"}}); !strings.Contains(why, "already vLLM 0.22.1's defaults") {
 			t.Fatalf("%s kept a default: %q", gpu, why)
@@ -389,7 +414,7 @@ func TestDiagnosisPlansAMDInstinctGPUsFromTheirReviewedIdentity(t *testing.T) {
 		if nativeFP8Accelerator(gpu) {
 			t.Fatalf("unreviewed %s was treated as running FP8", gpu)
 		}
-		if _, known := acceleratorMemoryClass(gpu); known {
+		if _, known := acceleratorMemoryClass(gpu, "0.34.0"); known {
 			t.Fatalf("unreviewed %s has a memory class", gpu)
 		}
 	}
@@ -705,7 +730,7 @@ func TestDeriveEnvSkipsNoOpsAgainstTheRecordedDefault(t *testing.T) {
 	}
 	// Setting the switch to the engine's recorded default (off) is a no-op.
 	off := technique{id: "aiter-off", env: map[string][]engineVariable{"vllm": {{"VLLM_ROCM_USE_AITER", "0"}}}}
-	if _, why = deriveEnv(control, off, request); !strings.Contains(why, "already vLLM 0.22.1's default on MI300X") {
+	if _, why = deriveEnv(control, off, request); !strings.Contains(why, "already vLLM "+support.DefaultRuntimeVersion+"'s default on MI300X") {
 		t.Fatalf("default: %q", why)
 	}
 	for name, test := range map[string]struct {
@@ -739,5 +764,201 @@ func TestProposalValidationRejectsUnreviewedEngineEnvironment(t *testing.T) {
 		if err := ValidateProposal(tampered); err == nil || !strings.Contains(err.Error(), "runtime env") {
 			t.Fatalf("env %v accepted: %v", env, err)
 		}
+	}
+}
+
+// A decode-bound window above the low-concurrency limit also chooses
+// speculation with the model's own prediction head: first while the engine's
+// cache has room for it at the load the server holds, behind an FP8 KV cache
+// on long contexts when it has none or room is not known, and never as a
+// setup when the model declares no head.
+func TestDecodeBoundWindowChoosesSpeculationWithTheModelsPredictionHead(t *testing.T) {
+	decode := func(running, meanInput float64, cache map[string]float64) *Diagnosis {
+		signals := map[string]float64{
+			optimizationreadiness.SignalRunningPerReplica: running, "p95_generation": 5200, "p95_latency": 6100, "mean_input_tokens": meanInput,
+		}
+		for name, value := range cache {
+			signals[name] = value
+		}
+		return testDiagnosis(optimizationreadiness.BottleneckDecode, signals)
+	}
+	// An attention-only model: the engine reports its blocks and their size
+	// and no recurrent-state page.
+	layout := func(usage, waiting float64) map[string]float64 {
+		return map[string]float64{
+			metrics.MeasurementKVCacheUsage: usage, optimizationreadiness.SignalWaitingPerReplica: waiting,
+			optimizationreadiness.SignalCacheBlocksPerReplica: 40000, metrics.MeasurementKVCacheBlockTokens: 16,
+		}
+	}
+	withHead := func(diagnosis *Diagnosis) Proposal {
+		t.Helper()
+		request := genericRequest("H100", diagnosis)
+		request.Objective, request.MaxCandidates = "throughput", 7
+		request.ModelFeatures, request.ModelConfigDigest = []string{FeatureNativeMTP}, recipeTestDigest
+		proposal, err := catalogSource(t).Propose(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = ValidateProposal(proposal); err != nil {
+			t.Fatal(err)
+		}
+		return proposal
+	}
+
+	// Nothing waits, so larger batches have nobody to admit and are not planned
+	// (rule set v7); with requests waiting they are (below).
+	loaded := withHead(decode(12, 3000, layout(10, 0)))
+	if order := strings.Join(reasonOrder(loaded), ","); order != "control,"+TechniqueSpeculativeMTP+","+TechniqueFP8Weights {
+		t.Fatalf("12 running requests: order=%s", order)
+	}
+	speculation := loaded.Candidates[1]
+	if args := strings.Join(speculation.Deployment.Runtime.Args, " "); args != `--speculative-config {"method":"mtp","num_speculative_tokens":3}` {
+		t.Fatalf("the speculation setup must carry three drafted tokens and nothing else: %s", args)
+	}
+	planned := plannedTechnique(t, loaded, TechniqueSpeculativeMTP)
+	if planned.Priority != 80 || !contains(planned.Rules, RuleBottleneckDecode) || !strings.Contains(planned.Reason, "12 requests running per server") || !strings.Contains(planned.Reason, "room for at most 120 requests per server, above the 12 sent at once") || !contains(speculation.RequiredEvidence, "output parity and speculative acceptance evidence") {
+		t.Fatalf("planned=%+v evidence=%v", planned, speculation.RequiredEvidence)
+	}
+	if !hasEvidence(planned.Evidence, signalRequestCapacity, 120) || !hasEvidence(planned.Evidence, signalBlocksPerRunning, 333.33) {
+		t.Fatalf("the capacity test must cite its numbers: %+v", planned.Evidence)
+	}
+
+	// While it fits, speculation leads an FP8 KV cache on long contexts; with
+	// the cache full and requests waiting, the FP8 KV cache comes first.
+	if roomy := withHead(decode(64, 9000, layout(40, 0))); reasonOrder(roomy)[1] != TechniqueSpeculativeMTP {
+		t.Fatalf("64 running requests with room for 160: order=%v", reasonOrder(roomy))
+	}
+	busy := withHead(decode(32, 9000, layout(97, 8)))
+	if order := strings.Join(reasonOrder(busy), ","); order != "control,"+TechniqueFP8KVCache+","+TechniqueSpeculativeMTP+","+TechniqueBatchBudget+","+TechniqueFP8Weights {
+		t.Fatalf("32 running and 8 waiting on long contexts: order=%s", order)
+	}
+	if planned = plannedTechnique(t, busy, TechniqueSpeculativeMTP); planned.Priority != 65 || planned.ExpectedBenefit != "medium" || !strings.Contains(planned.Reason, "not above the 40 sent at once") {
+		t.Fatalf("planned=%+v", planned)
+	}
+	// Draft tokens hold no state on this model, so one draft token makes no
+	// room and is not proposed.
+	if contains(reasonOrder(busy), TechniqueSpeculativeMTPOne) {
+		t.Fatalf("one draft token proposed for an attention-only model: %v", reasonOrder(busy))
+	}
+
+	// Room not known: without the cache use, or without the cache layout,
+	// speculation is still measured, not first.
+	for name, diagnosis := range map[string]*Diagnosis{
+		"no concurrency": testDiagnosis(optimizationreadiness.BottleneckDecode, map[string]float64{"p95_generation": 5200, "p95_latency": 6100}),
+		"no cache use":   decode(12, 3000, nil),
+		"no layout":      decode(12, 3000, map[string]float64{metrics.MeasurementKVCacheUsage: 10}),
+	} {
+		unknown := withHead(diagnosis)
+		if planned = plannedTechnique(t, unknown, TechniqueSpeculativeMTP); planned.Priority != 65 || len(planned.CandidateIDs) != 1 || !strings.Contains(planned.Reason, "not known") {
+			t.Fatalf("%s: planned=%+v", name, planned)
+		}
+	}
+
+	headless, err := catalogSource(t).Propose(context.Background(), genericRequest("H100", decode(12, 3000, layout(10, 0))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planned = plannedTechnique(t, headless, TechniqueSpeculativeMTP); !strings.Contains(planned.Skipped, "prediction head") || len(planned.CandidateIDs) != 0 || contains(reasonOrder(headless), TechniqueSpeculativeMTP) {
+		t.Fatalf("a model without a declared head got a speculation setup: %+v order=%v", planned, reasonOrder(headless))
+	}
+
+	// The low-concurrency rule keeps the choice to itself below its limit.
+	low := withHead(lowConcurrencyDiagnosis())
+	if planned = plannedTechnique(t, low, TechniqueSpeculativeMTP); planned.Priority != 90 || contains(planned.Rules, RuleBottleneckDecode) {
+		t.Fatalf("low concurrency planned=%+v", planned)
+	}
+}
+
+func hasEvidence(evidence []ReasonEvidence, signal string, observed float64) bool {
+	for _, item := range evidence {
+		if item.Signal == signal && math.Abs(item.Observed-observed) < 0.01 {
+			return true
+		}
+	}
+	return false
+}
+
+// vLLM 0.34.0 plans against its own defaults: a 192 GB GPU is in its
+// 160 GiB tier (16384 tokens), so bigger prompt chunks double that, while
+// the same GPU on 0.22.1 is large (8192) and gets 16384. Its Rust front end
+// ignores the API server count, so more API servers are not planned there.
+func TestVLLM034PlansAgainstItsOwnDefaults(t *testing.T) {
+	proposal, err := catalogSource(t).Propose(context.Background(), genericRequest("MI300X", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := proposal.Candidates[0]
+	control.Deployment.Runtime.Version = vllm034
+	request := Request{GPU: "MI300X"}
+	args, why := deriveArgs(control, techniques[TechniqueLargePrefill], Diagnosis{}, request)
+	if why != "" || !strings.Contains(strings.Join(args, " "), "--max-num-batched-tokens 32768") {
+		t.Fatalf("0.34.0 bigger chunks args=%v why=%q", args, why)
+	}
+	legacy := control
+	legacy.Deployment.Runtime.Version = vllm0221
+	if args, why = deriveArgs(legacy, techniques[TechniqueLargePrefill], Diagnosis{}, request); why != "" || !strings.Contains(strings.Join(args, " "), "--max-num-batched-tokens 16384") {
+		t.Fatalf("0.22.1 bigger chunks args=%v why=%q", args, why)
+	}
+	if args, why = deriveArgs(control, techniques[TechniqueAPIServers], Diagnosis{}, Request{GPU: "H100"}); why != "" || !strings.Contains(strings.Join(args, " "), "--api-server-count 2") {
+		t.Fatalf("API servers args=%v why=%q", args, why)
+	}
+	rust := control
+	rust.Deployment.Runtime.Env = map[string]string{"VLLM_USE_RUST_FRONTEND": "1"}
+	if _, why = deriveArgs(rust, techniques[TechniqueAPIServers], Diagnosis{}, Request{GPU: "H100"}); !strings.Contains(why, "Rust front end") {
+		t.Fatalf("Rust front end planned more API servers: %q", why)
+	}
+	// Restating 0.34.0's 160 GiB defaults changes nothing.
+	if _, why = withoutNoOps("vllm", vllm034, "B200", []runtimeArg{{"--max-num-seqs", "1024"}, {"--max-num-batched-tokens", "16384"}}); !strings.Contains(why, "already vLLM 0.34.0's defaults on B200") {
+		t.Fatalf("B200 defaults: %q", why)
+	}
+	if _, why = withoutNoOps("vllm", vllm034, "A100 80GB", []runtimeArg{{"--max-num-seqs", "256"}, {"--max-num-batched-tokens", "2048"}}); !strings.Contains(why, "already vLLM 0.34.0's defaults") {
+		t.Fatalf("A100 stays on the small tier: %q", why)
+	}
+}
+
+// The vLLM release InferCrane pins for new revisions has its defaults
+// recorded, so moving the pin without reading the new release's source fails
+// here rather than planning against unknown defaults.
+func TestPinnedVLLMReleaseHasRecordedDefaults(t *testing.T) {
+	if !slices.Contains(reviewedEngineVersions["vllm"], support.DefaultRuntimeVersion) {
+		t.Fatalf("vLLM %s is pinned but its defaults are not recorded (reviewed: %v)", support.DefaultRuntimeVersion, reviewedEngineVersions["vllm"])
+	}
+	for _, version := range reviewedEngineVersions["vllm"] {
+		if _, ok := engineDefaults["vllm@"+version]; !ok {
+			t.Fatalf("vLLM %s is reviewed without a defaults table", version)
+		}
+	}
+}
+
+// The SGLang release InferCrane pins has its defaults recorded, read from
+// source; 0.5.12's stay for revisions that record it.
+func TestPinnedSGLangReleaseHasRecordedDefaults(t *testing.T) {
+	if !slices.Contains(reviewedEngineVersions["sglang"], support.SGLangRuntimeVersion) {
+		t.Fatalf("SGLang %s is pinned but its defaults are not recorded (reviewed: %v)", support.SGLangRuntimeVersion, reviewedEngineVersions["sglang"])
+	}
+	for _, version := range []string{sglang0523, sglang0512} {
+		if _, ok := engineDefaults["sglang@"+version]; !ok {
+			t.Fatalf("SGLang %s is reviewed without a defaults table", version)
+		}
+		// First-come-first-served is the default; restating it changes nothing,
+		// and longest-prefix-match is a change.
+		if _, why := withoutNoOps("sglang", version, "H100", []runtimeArg{{"--schedule-policy", "fcfs"}}); !strings.Contains(why, "already SGLang "+version+"'s defaults") {
+			t.Fatalf("%s fcfs: %q", version, why)
+		}
+		if args, why := withoutNoOps("sglang", version, "H100", []runtimeArg{{"--schedule-policy", "lpm"}}); why != "" || len(args) != 1 {
+			t.Fatalf("%s lpm args=%v why=%q", version, args, why)
+		}
+		// SGLang sizes its decode graph from GPU memory; that rule is not
+		// recorded, so no capture size is planned on either release.
+		if _, why := cudaGraphArgs(nil, "sglang", version, "H100", Diagnosis{}); !strings.Contains(why, "sizes") {
+			t.Fatalf("%s CUDA graphs: %q", version, why)
+		}
+	}
+	// Turning graphs back on removes 0.5.23's decode-only switch as well.
+	if args, why := cudaGraphArgs([]string{"--disable-decode-cuda-graph"}, "sglang", sglang0523, "H100", Diagnosis{}); why != "" || len(args) != 0 {
+		t.Fatalf("decode graphs back on args=%v why=%q", args, why)
+	}
+	if _, why := withoutNoOps("sglang", "0.5.20", "H100", []runtimeArg{{"--schedule-policy", "lpm"}}); !strings.Contains(why, "has not recorded SGLang 0.5.20") {
+		t.Fatalf("unreviewed SGLang release: %q", why)
 	}
 }

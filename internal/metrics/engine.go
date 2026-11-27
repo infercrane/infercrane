@@ -63,6 +63,15 @@ type EngineSnapshot struct {
 	// PrefixCacheQueries and PrefixCacheHits are token counts.
 	PrefixCacheQueries, PrefixCacheHits *float64
 	SpecDraftTokens, SpecAcceptedTokens *float64
+	// SpecDrafts counts the steps that drafted tokens; draft tokens divided by
+	// it is the number of draft tokens the server speculates with.
+	SpecDrafts *float64
+	// KVCacheBlocks is the number of cache blocks the engine allocated,
+	// summed over its engine cores, and KVCacheBlockTokens the tokens one block
+	// holds. StateCachePageBytes is the page of a model's recurrent state
+	// (Mamba or linear-attention layers); it is reported only for models that
+	// have such layers. All three come from vLLM's cache_config_info labels.
+	KVCacheBlocks, KVCacheBlockTokens, StateCachePageBytes *float64
 	// DecodeSeconds and DecodeTokens give a token-weighted mean time per output
 	// token for engines that export totals instead of a TPOT histogram.
 	DecodeSeconds, DecodeTokens *float64
@@ -89,6 +98,10 @@ type engineField struct {
 	// be trusted. It keeps an engine's zero-valued "feature off" gauge from
 	// becoming a measured 0% ratio.
 	gate string
+	// label reads the field from this label of an info gauge (value 1)
+	// instead of the sample value. A label that is not a positive number,
+	// such as vLLM's "None", leaves the field absent.
+	label string
 }
 
 type engineSpec struct {
@@ -112,6 +125,12 @@ var engineSpecs = []engineSpec{
 		{key: "prefix_hits", kind: counter, names: []string{"vllm:prefix_cache_hits_total", "vllm:prefix_cache_hits"}},
 		{key: "spec_draft_tokens", kind: counter, names: []string{"vllm:spec_decode_num_draft_tokens_total"}},
 		{key: "spec_accepted_tokens", kind: counter, names: []string{"vllm:spec_decode_num_accepted_tokens_total"}},
+		{key: "spec_drafts", kind: counter, names: []string{"vllm:spec_decode_num_drafts_total"}},
+		// Each engine core reports its own blocks, so data-parallel cores add
+		// up like their running requests do.
+		{key: "cache_blocks", kind: gaugeSum, names: []string{"vllm:cache_config_info"}, label: "num_gpu_blocks"},
+		{key: "cache_block_tokens", kind: gaugeMax, names: []string{"vllm:cache_config_info"}, label: "block_size"},
+		{key: "state_page_bytes", kind: gaugeMax, names: []string{"vllm:cache_config_info"}, label: "mamba_page_size_padded"},
 		{key: "queue", kind: histogram, names: []string{"vllm:request_queue_time_seconds"}},
 		{key: "prefill", kind: histogram, names: []string{"vllm:request_prefill_time_seconds"}},
 		{key: "decode", kind: histogram, names: []string{"vllm:request_decode_time_seconds"}},
@@ -235,7 +254,11 @@ func ParseEngine(text string) (EngineSnapshot, error) {
 				}
 				continue
 			}
-			if value, ok := aggregateScalar(samples[name], field.kind, field.match); ok {
+			selected := samples[name]
+			if field.label != "" {
+				selected = infoLabelSamples(selected, field.label)
+			}
+			if value, ok := aggregateScalar(selected, field.kind, field.match); ok {
 				if field.gate != "" {
 					if gate, gated := gauges[field.gate]; !gated || gate <= 0 {
 						break
@@ -248,6 +271,24 @@ func ParseEngine(text string) (EngineSnapshot, error) {
 		}
 	}
 	return snapshot, nil
+}
+
+// infoLabelSamples turns an info gauge's series into samples whose value is
+// the named label, keeping only series that are set (value 1) and whose label
+// is a positive, finite number.
+func infoLabelSamples(samples []engineSample, label string) []engineSample {
+	out := make([]engineSample, 0, len(samples))
+	for _, sample := range samples {
+		if sample.value <= 0 {
+			continue
+		}
+		value, err := strconv.ParseFloat(sample.labels[label], 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+			continue
+		}
+		out = append(out, engineSample{labels: sample.labels, value: value})
+	}
+	return out
 }
 
 func detectEngine(text string) (engineSpec, error) {
@@ -557,6 +598,14 @@ func (s *EngineSnapshot) setScalar(key string, value float64) {
 		s.PrefixCacheHits = pointer
 	case "spec_draft_tokens":
 		s.SpecDraftTokens = pointer
+	case "spec_drafts":
+		s.SpecDrafts = pointer
+	case "cache_blocks":
+		s.KVCacheBlocks = pointer
+	case "cache_block_tokens":
+		s.KVCacheBlockTokens = pointer
+	case "state_page_bytes":
+		s.StateCachePageBytes = pointer
 	case "spec_accepted_tokens":
 		s.SpecAcceptedTokens = pointer
 	case "decode_seconds":

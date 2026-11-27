@@ -30,6 +30,12 @@ const (
 type Target struct {
 	Endpoint, APIKey, Model, SubjectID string
 	Dialect                            Dialect
+	// Tokenizer names what the server reads text with: "model:ID@REVISION"
+	// when it serves that exact model, or the sha256 of the model's
+	// tokenizer files (modelcheck.TokenizerDigest). Empty is unknown. A
+	// divergence compares token IDs, so it is read only between two targets
+	// whose Tokenizer is set and equal.
+	Tokenizer string
 }
 
 // Dialect is how a target reads a chat completion request.

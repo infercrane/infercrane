@@ -240,7 +240,11 @@ func scorePlanningTask(task PlanningGoldenTask, proposal Proposal) PlanningGolde
 				entry = GoldenOrderControl
 			}
 		}
-		result.Order = append(result.Order, entry)
+		// The order is the diagnosis's: the setups every list carries to test
+		// the plan are not part of it, but their flags are still checked.
+		if reason := candidate.Reason; reason == nil || reason.Role != ReasonReference && reason.Role != ReasonCopy {
+			result.Order = append(result.Order, entry)
+		}
 		for _, id := range classifyCandidate(candidate) {
 			applied[id] = true
 		}

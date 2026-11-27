@@ -90,6 +90,39 @@ type Reconciler struct {
 	UpstreamCredentials UpstreamCredentials
 	// Now overrides the clock in tests.
 	Now func() time.Time
+
+	// missed counts the failed health probes in a row of each target that was
+	// healthy, in this process (healthyTargetMisses).
+	missedMu sync.Mutex
+	missed   map[string]int
+}
+
+// healthyTargetMisses is how many failed health probes in a row a healthy
+// target survives before its route is withdrawn. A probe can time out while
+// the server admits a burst of requests and keeps serving every request
+// already running; withdrawing the route then turns away every new request
+// until the next pass, at the peak load the endpoint exists for. A target
+// that answers without its model, or that is new or unhealthy, gets no grace.
+const healthyTargetMisses = 1
+
+// probeMissed records one probe of a target and returns its failed probes in
+// a row; a passing probe clears the count.
+func (r *Reconciler) probeMissed(targetID string, passed bool) int {
+	r.missedMu.Lock()
+	defer r.missedMu.Unlock()
+	if passed {
+		delete(r.missed, targetID)
+		return 0
+	}
+	if r.missed == nil {
+		r.missed = map[string]int{}
+	}
+	r.missed[targetID]++
+	misses := r.missed[targetID]
+	if misses > healthyTargetMisses {
+		delete(r.missed, targetID)
+	}
+	return misses
 }
 
 // UpstreamCredentials resolves a directly connected server's credential.
@@ -169,6 +202,9 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			models     map[string]struct{}
 			workers    *int
 			observedAt time.Time
+			// probed is true when the runtime's own probe ran: only its
+			// failure can be a slow answer rather than a wrong setup.
+			probed bool
 		}
 		inspections := make([]inspection, len(resolved.Targets))
 		primaryCount := 0
@@ -218,14 +254,14 @@ func (r *Reconciler) Once(ctx context.Context) error {
 				case <-ctx.Done():
 					return
 				}
-				ok, models := inspectRuntimeTarget(ctx, runtimeBackend.Inspector, d, target, r.RouterAPIKey, r.WorkerCredential)
-				inspections[i] = inspection{target: target, ok: ok, models: models}
+				ok, models, probed := probeRuntimeTarget(ctx, runtimeBackend.Inspector, d, target, r.RouterAPIKey, r.WorkerCredential)
+				inspections[i] = inspection{target: target, ok: ok, models: models, probed: probed}
 			}()
 		}
 		wg.Wait()
 		healthy := make([]domain.Target, 0, len(resolved.Targets))
 		for _, result := range inspections {
-			target, ok, models := result.target, result.ok, result.models
+			target, ok, models, probed := result.target, result.ok, result.models, result.probed
 			if r.ExternalFallback != nil && r.ExternalFallback.Owns(target.Provider) {
 				continue
 			}
@@ -237,6 +273,13 @@ func (r *Reconciler) Once(ctx context.Context) error {
 			if _, found := models[expected]; ok && found {
 				health = "healthy"
 				healthy = append(healthy, target)
+				r.probeMissed(target.ID, true)
+			} else if !ok && probed && target.Health == "healthy" {
+				if misses := r.probeMissed(target.ID, false); misses <= healthyTargetMisses {
+					health = "healthy"
+					healthy = append(healthy, target)
+					_ = r.Store.Event(ctx, d.ID, target.ID, "replica_probe_missed", fmt.Sprintf("Target %s missed a health check; it keeps its route unless %d in a row fail", target.Name, healthyTargetMisses+1), "")
+				}
 			}
 			if target.Health != health {
 				_ = r.Store.SetTargetHealth(ctx, target.ID, health)
@@ -834,10 +877,18 @@ type credentialRuntimeInspector interface {
 }
 
 func inspectRuntimeTarget(ctx context.Context, inspector integration.RuntimeInspector, deployment domain.Deployment, target domain.Target, fallback string, derive func(string, string, string) string) (bool, map[string]struct{}) {
+	ok, models, _ := probeRuntimeTarget(ctx, inspector, deployment, target, fallback, derive)
+	return ok, models
+}
+
+// probeRuntimeTarget is inspectRuntimeTarget that also reports whether the
+// runtime's probe ran; it does not when the target fails closed first.
+func probeRuntimeTarget(ctx context.Context, inspector integration.RuntimeInspector, deployment domain.Deployment, target domain.Target, fallback string, derive func(string, string, string) string) (bool, map[string]struct{}, bool) {
 	credential := routeWorkerAPIKey(deployment, []domain.Target{target}, fallback, derive)
 	if credential != "" {
 		if credentialed, ok := inspector.(credentialRuntimeInspector); ok {
-			return credentialed.InspectWithCredential(ctx, target.URL, credential)
+			passed, models := credentialed.InspectWithCredential(ctx, target.URL, credential)
+			return passed, models, true
 		}
 	}
 	// A tenant compute target is always protected by its deployment-scoped
@@ -846,9 +897,10 @@ func inspectRuntimeTarget(ctx context.Context, inspector integration.RuntimeInsp
 	// unauthenticated request when credential evidence or inspector support is
 	// missing.
 	if deployment.ComputeConnectionID != "" || workercredential.VersionOf(target.ProviderDetails) != "" {
-		return false, nil
+		return false, nil, false
 	}
-	return inspector.Inspect(ctx, target.URL)
+	passed, models := inspector.Inspect(ctx, target.URL)
+	return passed, models, true
 }
 
 func (r *Reconciler) protocolCapabilities(runtime string) runtimecontract.ProtocolCapabilities {

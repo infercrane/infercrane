@@ -136,8 +136,8 @@ adapter --base-model OWNER/NAME`.
 
 A Hugging Face adapter is downloaded at its pinned commit before the server starts; a bucket adapter
 is fetched and checked like weights. InferCrane renders the reviewed flags of the pinned runtimes:
-vLLM 0.22.1 gets `--enable-lora --max-loras 1 --max-lora-rank R --lora-modules NAME=PATH`, with the
-rank rounded up to a rank vLLM accepts; SGLang 0.5.12 gets `--enable-lora --max-loras-per-batch 1
+vLLM 0.34.0 and 0.22.1 get `--enable-lora --max-loras 1 --max-lora-rank R --lora-modules NAME=PATH`, with the
+rank rounded up to a rank vLLM accepts; SGLang 0.5.23 and 0.5.12 get `--enable-lora --max-loras-per-batch 1
 --max-lora-rank R --lora-paths NAME=PATH`. `runtime_args` may not carry LoRA flags.
 
 ## Optimization runs

@@ -49,7 +49,7 @@ func (a API) migrationProof(w http.ResponseWriter) (migrationProofStore, bool) {
 
 func reservedEvaluator(name string) bool {
 	name = strings.TrimSpace(name)
-	return strings.EqualFold(name, qualitycheck.Evaluator) || strings.EqualFold(name, qualitycheck.GradedEvaluator)
+	return strings.EqualFold(name, qualitycheck.Evaluator) || strings.EqualFold(name, qualitycheck.GradedEvaluator) || strings.EqualFold(name, qualitycheck.TaskEvaluator)
 }
 
 func (a API) captureEndpointReplay(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +270,7 @@ func (a API) recordBindingQualityEvidence(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if reservedEvaluator(payload.Evaluator) {
-		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator names "+qualitycheck.Evaluator+" and "+qualitycheck.GradedEvaluator+" are reserved for InferCrane's own checks")
+		writeError(w, http.StatusUnprocessableEntity, "reserved_quality_evaluator", "the evaluator names "+qualitycheck.Evaluator+", "+qualitycheck.GradedEvaluator+" and "+qualitycheck.TaskEvaluator+" are reserved for InferCrane's own checks")
 		return
 	}
 	actor := r.Context().Value(identityKey{}).(domain.Principal)
@@ -459,7 +459,7 @@ func (a API) validMigrationCampaign(w http.ResponseWriter, r *http.Request, tena
 		}
 		set, decodeErr := qualitycheck.DecodeEvalSet([]byte(stored.Body))
 		if decodeErr != nil || !set.Graded() {
-			writeError(w, http.StatusUnprocessableEntity, "quality_eval_set_not_graded", "a migration needs a graded eval set: grading exact_match or token_f1 with expected answers")
+			writeError(w, http.StatusUnprocessableEntity, "quality_eval_set_not_graded", "a migration needs a graded eval set: grading exact_match, token_f1, or answer_line with expected answers")
 			return false
 		}
 		if len(set.Prompts) < qualitycheck.MigrationBootstrapMinSamples {

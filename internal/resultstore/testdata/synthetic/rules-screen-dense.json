@@ -1,0 +1,111 @@
+{
+ "schema": "infercrane.planner-predictions/v1",
+ "rules_version": "synthetic-rules",
+ "model": {
+  "id": "example/dense-8b",
+  "revision": "2222222222222222222222222222222222222222",
+  "features": []
+ },
+ "gpu": "L4",
+ "note": "Synthetic rules' answers; made up to exercise every path, not asked of the planner.",
+ "cells": [
+  {
+   "key": "short/16",
+   "current": "defaults",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "FP8 weights",
+       "setup": "fp8-weights"
+      },
+      {
+       "label": "FP8 KV cache",
+       "setup": "fp8-kv"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "FP8 weights",
+       "setup": "fp8-weights"
+      },
+      {
+       "label": "FP8 KV cache",
+       "setup": "fp8-kv"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "short/64",
+   "current": "defaults",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": [
+      {
+       "label": "FP8 weights and an FP8 KV cache",
+       "setup": "fp8-both"
+      }
+     ]
+    },
+    {
+     "objective": "useful-output",
+     "proposals": [
+      {
+       "label": "FP8 weights and an FP8 KV cache",
+       "setup": "fp8-both"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "key": "long/4",
+   "current": "defaults",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "long/16",
+   "current": "defaults",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  },
+  {
+   "key": "output/16",
+   "current": "defaults",
+   "answers": [
+    {
+     "objective": "throughput",
+     "proposals": []
+    },
+    {
+     "objective": "useful-output",
+     "proposals": []
+    }
+   ]
+  }
+ ]
+}

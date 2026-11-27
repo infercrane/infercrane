@@ -21,7 +21,30 @@ const (
 	ObjectiveInteractive    = "interactive"
 	ObjectiveThroughput     = "throughput"
 	ObjectiveCostEfficiency = "cost-efficiency"
+	// ObjectiveUsefulOutput ranks on the output of requests that met the
+	// customer's limits: a request whose first token came too late counts
+	// for nothing, however fast the server writes.
+	ObjectiveUsefulOutput = "useful-output"
 )
+
+// DefaultFirstTokenLimitMS is the first-token limit a useful-output objective
+// holds each request to when the customer states none: one second, the limit
+// chat users notice.
+const DefaultFirstTokenLimitMS = 1000.0
+
+// FirstTokenLimitMS is the first-token limit a campaign holds each request
+// to: the customer's own, else the default for a useful-output objective,
+// else none (zero).
+func FirstTokenLimitMS(objective string, limit *float64) float64 {
+	switch {
+	case limit != nil && *limit > 0:
+		return *limit
+	case objective == ObjectiveUsefulOutput:
+		return DefaultFirstTokenLimitMS
+	default:
+		return 0
+	}
+}
 
 // Metric keys an objective can rank on. They are the benchmark metric names
 // that campaign measurements compare between interleaved runs.
@@ -29,6 +52,9 @@ const (
 	MetricTTFTP95          = "ttft_p95_ms"
 	MetricLatencyP95       = "latency_p95_ms"
 	MetricOutputThroughput = "output_token_throughput"
+	// MetricUsefulOutput is the output tokens per second of requests that met
+	// every limit set.
+	MetricUsefulOutput = "useful_output_throughput"
 )
 
 // BufferedLatencyNote explains why a latency objective on a non-streaming
@@ -63,6 +89,8 @@ func ObjectiveMetric(objective, workloadProfile string) (Metric, bool) {
 		return Metric{Name: MetricOutputThroughput, Label: "output tokens per second", HigherIsBetter: true}, true
 	case ObjectiveCostEfficiency:
 		return Metric{Name: MetricOutputThroughput, Label: "output tokens per second per sourced hourly cost", HigherIsBetter: true, CostScaled: true}, true
+	case ObjectiveUsefulOutput:
+		return Metric{Name: MetricUsefulOutput, Label: "output tokens per second of requests within the limits", HigherIsBetter: true}, true
 	}
 	return Metric{}, false
 }
@@ -331,8 +359,11 @@ func profileJSON(value string) string {
 // that was sent. "confidence_95" holds per-run Student-t intervals and
 // "measured" holds campaign control, noise-floor, and server-metric results.
 // Keeping either in the digest gave every repeated benchmark a unique identity,
-// which excluded the most rigorous evidence from ranking.
-var nonWorkloadKeys = []string{"revision_selector", "direct_revision_validation", "confidence_95", "measured"}
+// which excluded the most rigorous evidence from ranking. A setup an InferCrane
+// agent measured also names its windows' agent commands and nodes
+// ("agent_windows") and whether it ran on another node ("fresh_machine"):
+// execution provenance that differs for every setup of one run.
+var nonWorkloadKeys = []string{"revision_selector", "direct_revision_validation", "confidence_95", "measured", "agent_windows", "fresh_machine"}
 
 // WorkloadDigest returns the comparability identity Lab uses for one stored
 // workload document. Callers that pre-check comparability must use it rather

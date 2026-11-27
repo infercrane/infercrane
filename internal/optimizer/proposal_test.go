@@ -12,6 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/servingcontract"
+	"github.com/infercrane/infercrane/internal/support"
 	"github.com/infercrane/infercrane/internal/workloadprofile"
 )
 
@@ -339,7 +340,7 @@ func TestCatalogProposalLinksRuntimeArgumentsToExactCapabilityEvidence(t *testin
 	for _, candidate := range proposal.Candidates {
 		foundArguments = foundArguments || len(candidate.Deployment.Runtime.Args) > 0
 		for _, feature := range candidate.Features {
-			if feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-0.22.1-") {
+			if feature.Name != "continuous_batching" && !strings.Contains(feature.Source, "vllm-"+support.DefaultRuntimeVersion+"-") {
 				t.Fatalf("runtime feature lacks exact capability descriptor: %+v", feature)
 			}
 		}

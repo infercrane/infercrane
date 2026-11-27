@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: infercrane-kernel-plugin
+Version: 1.0.0
+Summary: Serves a qualified generated kernel for the shapes it was qualified on (vLLM general plugin)
+License: Apache-2.0

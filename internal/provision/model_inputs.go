@@ -73,7 +73,8 @@ var (
 	hubRepository      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
 )
 
-// vLLM 0.22.1 accepts only these LoRA ranks (vllm/config/lora.py MaxLoRARanks).
+// vLLM 0.34.0 and 0.22.1 accept only these LoRA ranks (vllm/config/lora.py
+// MaxLoRARanks, the same list in both releases).
 var vllmLoRARanks = []int{1, 8, 16, 32, 64, 128, 256, 320, 512}
 
 // SplitObjectURI returns the scheme, bucket, and prefix of an object store
@@ -241,7 +242,10 @@ func loraFlag(arg string) (bool, string) {
 	return false, ""
 }
 
-// adapterArgs renders the reviewed LoRA flags of vLLM 0.22.1 and SGLang 0.5.12
+// adapterArgs renders the reviewed LoRA flags of vLLM 0.34.0 and 0.22.1 (the
+// same flags and name=path module form in both) and SGLang 0.5.23 and 0.5.12
+// (--enable-lora, --max-loras-per-batch, --max-lora-rank, --lora-paths
+// NAME=PATH in both; 0.5.23 arg_groups/fields/lora.py)
 // for adapters already fetched under fetchedAdaptersDir.
 func adapterArgs(runtime string, adapters []Adapter) []string {
 	if len(adapters) == 0 {

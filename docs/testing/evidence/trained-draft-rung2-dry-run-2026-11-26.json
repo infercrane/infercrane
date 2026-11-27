@@ -1,0 +1,96 @@
+{
+ "date": "2026-11-26",
+ "measure": {
+  "windows": [
+   {
+    "candidates": [
+     "ngram",
+     "suffix"
+    ],
+    "control": "none",
+    "loads": [
+     {
+      "concurrency": 1,
+      "runs": 17
+     },
+     {
+      "concurrency": 8,
+      "runs": 17
+     }
+    ],
+    "skipped": []
+   },
+   {
+    "candidates": [
+     "published",
+     "trained"
+    ],
+    "control": "none",
+    "loads": [
+     {
+      "concurrency": 1,
+      "runs": 17
+     },
+     {
+      "concurrency": 8,
+      "runs": 17
+     }
+    ],
+    "skipped": []
+   }
+  ]
+ },
+ "rules": "tools/trained-draft/rules-rung2-l4-qwen3-1.7b-2026-11-26.md",
+ "smoke": {
+  "convert_seconds": 11.6,
+  "passed": true,
+  "served": {
+   "ngram": [
+    8,
+    8
+   ],
+   "published": [
+    8,
+    8
+   ],
+   "suffix": [
+    8,
+    8
+   ],
+   "trained": [
+    8,
+    8
+   ]
+  }
+ },
+ "stand_in_speeds_tokens_per_second": {
+  "ngram": 430,
+  "none": 400,
+  "published": 560,
+  "suffix": 450,
+  "trained": 620
+ },
+ "train": {
+  "mode": "speculators --dry-run (no training step on CPU)",
+  "of_prompts": 200,
+  "passed": true,
+  "rows": 200
+ },
+ "verdict": {
+  "pass_bar": {
+   "headline_trained_vs_none_at_1": "pass: the trained draft is faster than none and quality held",
+   "headline_trained_vs_none_at_8": "pass: the trained draft is faster than none and quality held",
+   "ngram_vs_none_at_1": "faster (+7.2%, noise floor 1.9%)",
+   "ngram_vs_none_at_8": "faster (+7.9%, noise floor 4.8%)",
+   "published_vs_none_at_1": "faster (+40.0%, noise floor 4.2%)",
+   "published_vs_none_at_8": "faster (+35.9%, noise floor 18.2%)",
+   "suffix_vs_none_at_1": "faster (+11.1%, noise floor 2.1%)",
+   "suffix_vs_none_at_8": "faster (+11.3%, noise floor 8.8%)",
+   "trained_vs_none_at_1": "faster (+52.1%, noise floor 4.9%)",
+   "trained_vs_none_at_8": "faster (+55.3%, noise floor 5.3%)",
+   "training_report": "valid"
+  },
+  "report_valid": true
+ },
+ "what": "Rung 2 dry run ($0, laptop) of plan l4-qwen3-1.7b: stand-in servers in place of vLLM (speeds and acceptance configured, so no number is a measurement); real oasst1 prompts (run td-1's files); real speculators 0.9.0 `convert --algorithm eagle3` of AngelSlim/Qwen3-1.7B_eagle3, `prepare-data`, and `train --dry-run --from-pretrained` on the real Qwen3-1.7B; the real judge."
+}

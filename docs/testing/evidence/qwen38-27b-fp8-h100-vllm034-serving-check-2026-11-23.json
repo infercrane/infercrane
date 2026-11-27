@@ -1,0 +1,219 @@
+{
+  "schema_version": "infercrane.poc-modal-serving-check/v2",
+  "recorded": "2026-11-23",
+  "what": "Do the publisher's vLLM command for Qwen/Qwen3.8-27B-FP8 and that command with its documented speculation option start and serve on one H100 with vLLM 0.34.0. One server per check (tools/poc-modal/modal_gpu.py --action check). No speed is measured.",
+  "model": {
+    "id": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81"
+  },
+  "engine": {
+    "key": "vllm-0.34.0",
+    "image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1"
+  },
+  "gpu": "1 x NVIDIA H100 80GB on Modal (gpu=\"H100!\")",
+  "publisher_command_source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.json?hardware=h100&variant=fp8&strategy=single_node_tp",
+  "findings": [
+    "The command as published does not start: vLLM 0.34.0 refuses its default of 1,024 requests at once against 904 recurrent-state (Mamba) cache blocks on one H100. vLLM 0.22.1 had 818.",
+    "With --max-num-seqs 512 added it starts in 264 s, refuses a request without its key, answers, calls a tool, and exports every engine metric family the control plane reads.",
+    "The publisher's Rust frontend (VLLM_USE_RUST_FRONTEND=1) serves on this image; on 0.22.1 it exited at startup. It logs that --enable-auto-tool-choice has no effect in the Rust frontend and that it cannot run the model's response template (a regex with look-ahead), and uses the named reasoning and tool parsers; the tool call in the check succeeded.",
+    "With the publisher's documented speculation option (--speculative-config {\"method\":\"mtp\",\"num_speculative_tokens\":3}) added, it starts in 339 s as architecture Qwen3_5MTP, passes the same checks, and exports the speculation counters: over the check's three answers 246 of 408 drafted tokens were accepted. Three requests show that the drafter works and is counted; they are not an acceptance rate for any traffic. vLLM warns that more than one speculative token runs the same prediction layer several times and may lower acceptance."
+  ],
+  "checks": [
+    {
+      "setup": "current",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data"
+      ],
+      "env": {
+        "VLLM_USE_RUST_FRONTEND": "1"
+      },
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "620.70.06",
+        "cuda": "unknown"
+      },
+      "container_seconds": 153.3,
+      "error": "RuntimeError: server exited with 1 while starting",
+      "log_lines": [
+        "error: look-around, including look-ahead and look-behind, is not supported",
+        "(EngineCore pid=66) INFO 11-23 03:06:56 [__init__.py:779] Selected FlashInferFp8DeepGEMMDynamicBlockScaledKernel for Fp8LinearMethod",
+        "(EngineCore pid=66) INFO 11-23 03:07:11 [default_loader.py:543] Loading weights took 13.91 seconds",
+        "(EngineCore pid=66) INFO 11-23 03:07:20 [model_runner.py:441] Model loading took 28.42 GiB memory and 25.136712 seconds",
+        "(EngineCore pid=66) INFO 11-23 03:08:17 [gpu_worker.py:795] Available KV cache memory: 45.94 GiB",
+        "(EngineCore pid=66) INFO 11-23 03:08:17 [kv_cache_utils.py:861] kv cache group sizes (832, 832, 832, 832)"
+      ],
+      "vllm_error": "ValueError: max_num_seqs (1024) exceeds available Mamba cache blocks (904). Each decode sequence requires one Mamba cache block, so CUDA graph capture cannot proceed. Please lower max_num_seqs to at most 904 or increase gpu_memory_utilization.",
+      "name": "publisher's command as published"
+    },
+    {
+      "setup": "current",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512"
+      ],
+      "env": {
+        "VLLM_USE_RUST_FRONTEND": "1"
+      },
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "620.70.06",
+        "cuda": "unknown"
+      },
+      "startup_seconds": 264.3,
+      "models_without_key": 401,
+      "models_with_key": 200,
+      "container_seconds": 268.5,
+      "metrics": {
+        "vllm:num_requests_running": true,
+        "vllm:num_requests_waiting": true,
+        "vllm:kv_cache_usage_perc": true,
+        "vllm:request_queue_time_seconds": true,
+        "vllm:request_prefill_time_seconds": true,
+        "vllm:request_decode_time_seconds": true,
+        "vllm:time_to_first_token_seconds": true,
+        "vllm:e2e_request_latency_seconds": true,
+        "vllm:num_preemptions": true,
+        "vllm:prefix_cache_queries": true
+      },
+      "chat": {
+        "status": 200,
+        "body": "{\"id\":\"chatcmpl-902795d6\",\"object\":\"chat.completion\",\"created\":1795403612,\"model\":\"Qwen/Qwen3.8-27B-FP8\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The answer depends on the color model being used, as there are two primary systems:\\n\\n### 1. **Additive Color Model (Light)**\\nUsed in digital screens (TVs, monitors, phones). The three primary colors are:\\n- **Red**\\n- **Green**\\n- **Blue**\",\"refusal\":null,\"audio\":null,\"function_call\":null,\"reasoning\":null},\"logprobs\":null,\"fini"
+      },
+      "tool_call": {
+        "status": 200,
+        "body": "{\"id\":\"chatcmpl-261e0388\",\"object\":\"chat.completion\",\"created\":1795403612,\"model\":\"Qwen/Qwen3.8-27B-FP8\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null,\"refusal\":null,\"audio\":null,\"function_call\":null,\"tool_calls\":[{\"id\":\"call_f088160436324648a980f5b7\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Paris\\\"}\"}}],\"reasoning\":null},\"logprobs\":null,\"finish_reason\":\"tool_calls\",\"stop_reason\":null,\"token_ids\":null,\"routed_experts\":null,\"weight_versions\""
+      },
+      "log_lines": [
+        "(RustFrontend pid=67) WARNING 11-23 03:09:38 [unsupported.rs:67] argument 'enable_auto_tool_choice' currently has no effect in Rust frontend, ignoring",
+        "0m WARNING 11-23 03:09:39 [hf.rs:152] the `hf` parser cannot execute the model's response_template error=unsupported response_template: Field 'reasoning_content': regex \"</think>|(?=<tool_call>)\" is not supported by the Rust regex engine: regex parse error:",
+        "error: look-around, including look-ahead and look-behind, is not supported",
+        "(EngineCore pid=66) INFO 11-23 03:09:50 [__init__.py:779] Selected FlashInferFp8DeepGEMMDynamicBlockScaledKernel for Fp8LinearMethod",
+        "(EngineCore pid=66) INFO 11-23 03:10:02 [default_loader.py:543] Loading weights took 11.70 seconds",
+        "(EngineCore pid=66) INFO 11-23 03:10:09 [model_runner.py:441] Model loading took 28.42 GiB memory and 20.332565 seconds",
+        "(EngineCore pid=66) INFO 11-23 03:10:51 [gpu_worker.py:795] Available KV cache memory: 47.99 GiB",
+        "(EngineCore pid=66) INFO 11-23 03:10:51 [kv_cache_utils.py:861] kv cache group sizes (832, 832, 832, 832)",
+        "(EngineCore pid=66) INFO 11-23 03:13:30 [kv_cache_utils.py:1168] GPU KV cache size: 696,899 tokens, Maximum concurrency for 262,144 tokens per request: 2.66x",
+        "(RustFrontend pid=67) INFO 11-23 03:13:31 [server/src/lib.rs:352] OpenAI server is ready to accept requests bind_address=\"0.0.0.0:8000\" scheme=\"http\" model=\"Qwen/Qwen3.8-27B-FP8\""
+      ],
+      "name": "publisher's command with --max-num-seqs 512"
+    },
+    {
+      "setup": "speculation",
+      "args": [
+        "--served-model-name",
+        "Qwen/Qwen3.8-27B-FP8",
+        "--tensor-parallel-size",
+        "1",
+        "--enable-auto-tool-choice",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--reasoning-parser",
+        "qwen3",
+        "--mm-encoder-tp-mode",
+        "data",
+        "--max-num-seqs",
+        "512",
+        "--speculative-config",
+        "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+      ],
+      "env": {
+        "VLLM_USE_RUST_FRONTEND": "1"
+      },
+      "gpu_facts": {
+        "name": "NVIDIA H100 80GB HBM3",
+        "memory": "81559 MiB",
+        "driver": "620.70.06",
+        "cuda": "unknown"
+      },
+      "startup_seconds": 339.3,
+      "models_without_key": 401,
+      "models_with_key": 200,
+      "container_seconds": 344.9,
+      "metrics": {
+        "vllm:num_requests_running": true,
+        "vllm:num_requests_waiting": true,
+        "vllm:kv_cache_usage_perc": true,
+        "vllm:request_queue_time_seconds": true,
+        "vllm:request_prefill_time_seconds": true,
+        "vllm:request_decode_time_seconds": true,
+        "vllm:time_to_first_token_seconds": true,
+        "vllm:e2e_request_latency_seconds": true,
+        "vllm:num_preemptions": true,
+        "vllm:prefix_cache_queries": true
+      },
+      "speculation": {
+        "counters": {
+          "vllm:spec_decode_num_drafts": 136.0,
+          "vllm:spec_decode_num_draft_tokens": 408.0,
+          "vllm:spec_decode_num_accepted_tokens": 246.0
+        },
+        "acceptance": 0.6029
+      },
+      "chat": {
+        "status": 200,
+        "body": "{\"id\":\"chatcmpl-9ec8f3a9\",\"object\":\"chat.completion\",\"created\":1795403984,\"model\":\"Qwen/Qwen3.8-27B-FP8\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The answer depends on the color model being used, as there are two primary systems:\\n\\n### 1. **Additive Color Model (Light)**\\nUsed in digital screens (TVs, monitors, phones). The three primary colors are:\\n- **Red**\\n- **Green**\\n- **Blue**\",\"refusal\":null,\"audio\":null,\"function_call\":null,\"reasoning\":null},\"logprobs\":null,\"fini"
+      },
+      "tool_call": {
+        "status": 200,
+        "body": "{\"id\":\"chatcmpl-45309c61\",\"object\":\"chat.completion\",\"created\":1795403985,\"model\":\"Qwen/Qwen3.8-27B-FP8\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null,\"refusal\":null,\"audio\":null,\"function_call\":null,\"tool_calls\":[{\"id\":\"call_ce6b3dcadf3645f0a552b7ff\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Paris\\\"}\"}}],\"reasoning\":null},\"logprobs\":null,\"finish_reason\":\"tool_calls\",\"stop_reason\":null,\"token_ids\":null,\"routed_experts\":null,\"weight_versions\""
+      },
+      "long_answer": {
+        "status": 200,
+        "body": "{\"id\":\"chatcmpl-a34de4ff\",\"object\":\"chat.completion\",\"created\":1795403985,\"model\":\"Qwen/Qwen3.8-27B-FP8\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Tides are primarily caused by the gravitational pull of the Moon on Earth’s oceans. Because gravity weakens with distance, the side of Earth facing the Moon experiences a stronger pull than the center of the planet. This creates a b"
+      },
+      "log_lines": [
+        "(MainProcess pid=8) INFO 11-23 03:14:57 [model.py:761] Resolved architecture: Qwen3_5MTP",
+        "(MainProcess pid=8) WARNING 11-23 03:14:57 [config.py:94] Enabling num_speculative_tokens > 1 will run multiple times of forward on same MTP layer,which may result in lower acceptance rate",
+        "(RustFrontend pid=85) WARNING 11-23 03:14:59 [unsupported.rs:67] argument 'enable_auto_tool_choice' currently has no effect in Rust frontend, ignoring",
+        "0m WARNING 11-23 03:15:00 [hf.rs:152] the `hf` parser cannot execute the model's response_template error=unsupported response_template: Field 'reasoning_content': regex \"</think>|(?=<tool_call>)\" is not supported by the Rust regex engine: regex parse error:",
+        "error: look-around, including look-ahead and look-behind, is not supported",
+        "(EngineCore pid=80) INFO 11-23 03:15:12 [__init__.py:779] Selected FlashInferFp8DeepGEMMDynamicBlockScaledKernel for Fp8LinearMethod",
+        "(EngineCore pid=80) INFO 11-23 03:15:25 [default_loader.py:543] Loading weights took 12.45 seconds",
+        "(EngineCore pid=80) INFO 11-23 03:15:33 [default_loader.py:543] Loading weights took 1.00 seconds",
+        "(EngineCore pid=80) INFO 11-23 03:15:36 [model_runner.py:441] Model loading took 28.94 GiB memory and 24.988572 seconds",
+        "(EngineCore pid=80) INFO 11-23 03:16:40 [gpu_worker.py:795] Available KV cache memory: 47.35 GiB",
+        "(EngineCore pid=80) INFO 11-23 03:16:40 [kv_cache_utils.py:861] kv cache group sizes (832, 832, 832, 832)",
+        "(EngineCore pid=80) INFO 11-23 03:19:33 [speculator.py:119] Capturing autoregressive speculator...",
+        "(EngineCore pid=80) INFO 11-23 03:19:41 [kv_cache_utils.py:1168] GPU KV cache size: 611,407 tokens, Maximum concurrency for 262,144 tokens per request: 2.33x",
+        "(RustFrontend pid=85) INFO 11-23 03:19:42 [server/src/lib.rs:352] OpenAI server is ready to accept requests bind_address=\"0.0.0.0:8000\" scheme=\"http\" model=\"Qwen/Qwen3.8-27B-FP8\""
+      ],
+      "name": "publisher's command with --max-num-seqs 512 and its documented speculation option"
+    }
+  ],
+  "cost": {
+    "container_seconds": [
+      153.3,
+      268.5,
+      344.9
+    ],
+    "billed_usd": {
+      "check_1": 0.2,
+      "check_2": 0.33,
+      "check_3": "about 0.41, not in Modal's billing report when this was written"
+    },
+    "basis": "modal billing report --for today --show-resources, 2026-11-23"
+  }
+}

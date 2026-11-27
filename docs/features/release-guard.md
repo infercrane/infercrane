@@ -130,6 +130,10 @@ and per-model verdicts under `metrics.quality`. See
 [PASS, WATCH, and BLOCK per eval](/features/semantic-quality#pass-watch-and-block-per-eval) for the
 policy field, the API view, and the follow-up.
 
+Decisions, quality verdicts, post-promotion observation, and rollbacks are also Prometheus series.
+[Grafana and Prometheus](/integrations/grafana) has a dashboard for them and alerts that page on a
+BLOCK verdict or a rollback.
+
 Because a candidate is deliberately absent from the logical route, operators gather bounded
 candidate evidence explicitly with AIPerf rather than duplicating production requests:
 

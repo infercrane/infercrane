@@ -37,13 +37,16 @@ kubectl apply -f deploy/kubernetes/base/provider-rbac.yaml
 ```
 
 The included Role is namespace-scoped and contains no wildcard, Secret, Pod, cluster-wide, or RBAC
-mutation permission. It has read-only `get`/`list` access to PVC metadata for cache verification. If the control plane runs outside the cluster, bind the same Role to the user or
+mutation permission. It manages one `NetworkPolicy` per engine replica (see
+[who can reach engine pods](#who-can-reach-engine-pods)). It has read-only `get`/`list` access to PVC metadata for cache verification. If the control plane runs outside the cluster, bind the same Role to the user or
 identity in its kubeconfig instead of the included service account subject.
 
-Create the worker credential without putting it in Git or shell history. Its value must equal the
-control-plane worker credential used for health checks and routing:
+Create the worker credential without putting it in Git or shell history. On Kubernetes its value is
+the control plane's `INFERCRANE_API_KEY`, byte for byte, with no trailing newline: the engines
+compare it exactly.
 
 ```bash
+(umask 077 && mkdir -p "$HOME/.config/infercrane" && printf '%s' "$INFERCRANE_API_KEY" >"$HOME/.config/infercrane/worker-key")
 kubectl --namespace infercrane-system create secret generic infercrane-worker \
   --from-file=api-key="$HOME/.config/infercrane/worker-key"
 ```
@@ -62,10 +65,44 @@ export INFERCRANE_KUBERNETES_GPU_RESOURCE='nvidia.com/gpu'
 export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='nvidia.com/gpu.product'
 export INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY='prefer'
 export INFERCRANE_KUBERNETES_ARTIFACT_CACHE_POLICY='prefer'
+export INFERCRANE_KUBERNETES_ENGINE_INGRESS='pods:app.kubernetes.io/name=infercrane'
 ```
 
 Configuration is all-or-nothing. The image must be immutable. The adapter always passes an explicit
 context and namespace to `kubectl`; it never relies on or changes the current context.
+
+### Who can reach engine pods
+
+With the `deployment` workload API, `INFERCRANE_KUBERNETES_ENGINE_INGRESS` is required: it names the
+only sources that may reach an engine pod. Name the pods that run the InferCrane control plane,
+whose gateway and router send requests and health checks. Each replica then gets a `NetworkPolicy`
+beside its Deployment and Service. The policy admits those sources on the engine port only; the
+pod's other ports take no traffic. The control plane does not start without a value.
+
+The value is a comma-separated list of up to 16 sources:
+
+| Source | Example | Admits |
+| --- | --- | --- |
+| Address range | `10.8.0.0/16` | Traffic from that range, such as a control plane outside the cluster |
+| `pods:` | `pods:app.kubernetes.io/name=infercrane` | Pods with these labels in the engine namespace |
+| `namespace:` | `namespace:kubernetes.io/metadata.name=infercrane-gateway` | Every pod in namespaces with these labels |
+| `namespace:…;pods:…` | `namespace:kubernetes.io/metadata.name=gateway;pods:app=router` | Pods with these labels in those namespaces |
+
+Join several labels with `+`, as in `pods:app=infercrane+tier=gateway`. Use your control plane's
+own pod labels; the example above is a placeholder. `none` applies no policy. Set it only when
+another control already limits traffic to engine pods.
+
+- The cluster's network plugin must enforce `NetworkPolicy` (Calico and Cilium do). Without one the
+  policy is stored and has no effect, and `infercrane doctor` cannot tell.
+- Kubernetes always allows traffic from the pod's own node, so kubelet probes keep working.
+- A metrics scraper that reads engine pods directly, such as Prometheus, must be listed as a source.
+- The included Role grants the NetworkPolicy permissions, and `infercrane doctor` checks them when
+  sources are set.
+- Candidate pods that the [agent](/architecture/agent#candidate-runs) starts get the same policy,
+  from its `--engine-ingress` setting.
+- KServe mode applies no policy, because KServe owns its pods.
+- A replica created before the setting gets its policy the next time it is provisioned. Until then
+  it stays ready without one.
 
 ### AMD Instinct GPUs
 

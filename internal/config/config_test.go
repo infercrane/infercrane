@@ -638,9 +638,24 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 		t.Fatalf("expected mutable Kubernetes image failure, got %v", err)
 	}
 	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	// Engine pods take traffic only from named sources; the choice is required.
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KUBERNETES_ENGINE_INGRESS") {
+		t.Fatalf("expected a required engine ingress choice, got %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "gateway")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "not an address range") {
+		t.Fatalf("expected an invalid engine ingress failure, got %v", err)
+	}
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "pods:app.kubernetes.io/name=infercrane")
 	cfg, err := Load()
 	if err != nil || !cfg.KubernetesEnabled() || cfg.KubernetesNamespace != "infercrane-system" || cfg.KubernetesWorkloadAPI != "deployment" {
 		t.Fatalf("cfg=%#v err=%v", cfg, err)
+	}
+	// KServe owns its own pods, so the choice is not required there.
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "")
+	t.Setenv("INFERCRANE_KUBERNETES_WORKLOAD_API", "kserve")
+	if _, err = Load(); err != nil {
+		t.Fatalf("kserve without engine ingress: %v", err)
 	}
 	t.Setenv("INFERCRANE_KUBERNETES_WORKLOAD_API", "operator")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "deployment or kserve") {
@@ -650,6 +665,7 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 
 func TestKubernetesArtifactPVCConfigurationIsExactAndBounded(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "none")
 	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "production")
 	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	identity := "Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567"
@@ -676,6 +692,7 @@ func TestKubernetesArtifactPVCConfigurationIsExactAndBounded(t *testing.T) {
 
 func TestDynamoConfigurationIsOptionalCompleteAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "none")
 	t.Setenv("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "nvcr.io/nvidia/ai-dynamo/vllm-runtime:latest")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "Kubernetes") {
 		t.Fatalf("expected missing Kubernetes boundary, got %v", err)
@@ -867,5 +884,21 @@ func TestOptimizationPricesAcceptOwnedClusterRateCardOnlyForKubernetes(t *testin
 	prices, err = envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
 	if err != nil || prices[0].Authority != "unknown" || prices[0].CostScope != "unknown" {
 		t.Fatalf("plain manual price did not stay advisory: prices=%+v err=%v", prices, err)
+	}
+}
+
+func TestReplayPromptCorpusFileIsOptionalAndAbsolute(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	config, err := Load()
+	if err != nil || config.ReplayPromptCorpusFile != "" {
+		t.Fatalf("a prompt corpus was configured by default: %q err=%v", config.ReplayPromptCorpusFile, err)
+	}
+	t.Setenv("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", "corpus.json")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_REPLAY_PROMPT_CORPUS_FILE") {
+		t.Fatalf("a relative prompt corpus path was accepted: %v", err)
+	}
+	t.Setenv("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE", "/etc/infercrane/corpus.json")
+	if config, err = Load(); err != nil || config.ReplayPromptCorpusFile != "/etc/infercrane/corpus.json" {
+		t.Fatalf("config=%q err=%v", config.ReplayPromptCorpusFile, err)
 	}
 }

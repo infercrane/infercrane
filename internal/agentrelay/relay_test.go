@@ -248,3 +248,37 @@ func TestRegistrationRefreshesAreCoalesced(t *testing.T) {
 		t.Fatalf("20 registrations ran %d refreshes", count)
 	}
 }
+
+// A data-plane request routed to a rollout's server is recorded against
+// that server's own binding, as for the endpoint's own server, and a shape
+// naming another binding is still refused.
+func TestDataPlaneRecordsOfARolloutServerNameItsBinding(t *testing.T) {
+	agent := domain.Agent{ID: "agent-1", TenantID: "tenant-a"}
+	rollout := domain.AgentServer{AgentID: "agent-1", Key: "rollout-8000", TargetID: "target-r", EndpointID: "endpoint-1", BindingID: "binding-rollout", ServingPlanID: "plan-2", OwnershipMode: agentprotocol.OwnershipAgentManaged, Rollout: true}
+	now := time.Now().UTC()
+	shape := agentprotocol.TrafficShape{ID: "shape-0001-rollout", ServerKey: "rollout-8000", StartedAt: now, Operation: "chat", StatusCode: 200, LatencyMS: 40, Source: agentprotocol.ShapeSourceDataPlane, BindingID: "binding-rollout"}
+	record, err := requestRecord(agent, rollout, shape, 0, now)
+	if err != nil || record.BindingID != "binding-rollout" || record.EndpointID != "endpoint-1" || record.TargetID != "target-r" {
+		t.Fatalf("record: %+v %v", record, err)
+	}
+	shape.BindingID = "binding-own-server"
+	if _, err = requestRecord(agent, rollout, shape, 0, now); err == nil {
+		t.Fatal("a shape naming another binding was recorded against the rollout server")
+	}
+	// A request that failed over from the rollout's server to the own
+	// server is recorded against the own server and names the rollout's
+	// binding, so the rollout's failure counts against it.
+	own := domain.AgentServer{AgentID: "agent-1", Key: "own-8000", TargetID: "target-o", EndpointID: "endpoint-1", BindingID: "binding-own-server", OwnershipMode: agentprotocol.OwnershipAgentManaged}
+	shape.ServerKey, shape.FallbackFromBindingID = "own-8000", "binding-rollout"
+	if err = shape.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	record, err = requestRecord(agent, own, shape, 0, now)
+	if err != nil || record.FallbackFromBindingID != "binding-rollout" || record.BindingID != "binding-own-server" || record.FallbackReason == "" {
+		t.Fatalf("failover record: %+v %v", record, err)
+	}
+	shape.FallbackFromBindingID = shape.BindingID
+	if shape.Validate() == nil {
+		t.Fatal("a shape that failed over from its own binding was accepted")
+	}
+}

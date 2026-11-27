@@ -1,0 +1,32 @@
+{
+ "schema": "infercrane.kernel-tune-finding/v1",
+ "date": "2026-11-26",
+ "what": "Correction: rung 2's second L40S run recorded vLLM 0.34.0's own fused-MoE setting as failing (Triton OutOfResources) at every step size. A harness fault caused that, not the engine.",
+ "run": {
+  "id": "moe-shapes-l40s-2",
+  "commit": "22eb69e2",
+  "gpu": "Modal L40S (NVIDIA L40S, driver 620.70.06)",
+  "result_file": ".infercrane/kernel-tune/moe-shapes-l40s-2/shapes-result.json in the coordinator's worktree console-kernel-run-22eb"
+ },
+ "cause": "vLLM 0.34.0 vllm/model_executor/layers/fused_moe/__init__.py override_config (tag v0.34.0, 62d4bc3c, lines 53-59) sets a module global, yields, and restores it with no try/finally. A searched setting that raised OutOfResources inside it stayed in force; every later engine-default call (no override, so it reads the global) ran the failed setting.",
+ "evidence_in_the_run": [
+  "From 8 tokens up, the recorded engine choice for E=128,N=768 was {BLOCK_SIZE_M 64, BLOCK_SIZE_N 256, BLOCK_SIZE_K 256, GROUP_SIZE_M 1, 4 warps, 5 stages}, identical to the candidate that failed at that step size; vLLM's get_default_config at 8 tokens gives {16, 64, 128, 1, 4 warps, 3 stages}.",
+  "The engine failure needed the same 164,864 bytes at every step size from 8 to 2048, although the true default changes with the batch size.",
+  "At 1 token the failure needed 105,472 bytes, the same as the failed candidate {16, 256, 128, 1, 4 warps, 4 stages} at that step size."
+ ],
+ "source_check_sm89": "vLLM 0.34.0 on SM89 selects the TRITON FP8 MoE backend (FlashInfer CUTLASS needs SM90/100/120, DeepGEMM Hopper; swap-AB and TMA are Hopper/Blackwell only), which calls get_default_config: small tiles with 3-4 stages for block FP8. The untuned engine is expected to serve on an L40S; rung 3's gap check confirms it with one real start.",
+ "fix": {
+  "commit": "306b7700",
+  "what": "tune_moe.setting restores the global in every case; the engine's own choice refuses to run under an override (HarnessError); BLOCK_SIZE_K above the quantization block is not searched (the engine clamps it)",
+  "rules": "tools/kernel-tune/rules-moe-shapes-l40s-2026-11-26-v3.md",
+  "unit_test": "OverrideIsRestored in tools/kernel-tune/test_kernel_tune.py: a stub of vLLM's exact override_config reproduces the false finding with the old handling",
+  "modal_cpu_smoke_306b7700": {
+   "vllm_override_leaks": true,
+   "setting_restores": true,
+   "vllm": "0.34.0",
+   "triton": "3.8.0",
+   "torch": "2.14.0"
+  }
+ },
+ "what_still_holds": "Each searched setting's time in that run was taken under its own override and stands; 2-3 settings per step size do not fit the L40S. No gain against the engine default is known from that run."
+}

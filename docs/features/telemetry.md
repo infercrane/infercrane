@@ -94,6 +94,11 @@ streaming cancellations and upstream disconnects are persisted as `client_cancel
 `upstream_disconnect` error types. GPU metrics remain unavailable unless a qualified
 provider/runtime collector supplies a trustworthy fresh measurement.
 
+The gateway's `/metrics` names no deployment, endpoint, or workspace, because it needs no
+credential. Release Guard verdicts, rollbacks, canary traffic shares, and optimization results are
+on the authenticated `GET /api/v1/metrics`, one workspace per API key. See
+[Grafana and Prometheus](/integrations/grafana) for the scrape jobs, the dashboard, and the alerts.
+
 ## Serving-engine metrics
 
 Every 30 seconds the control plane reads the Prometheus endpoint (`{target}/metrics`) of each
@@ -109,7 +114,8 @@ skipped rather than scraped unauthenticated. A payload from an unsupported runti
 produces no evidence.
 
 A server observed through the [InferCrane agent](/architecture/agent) is scraped by the agent on
-its own machine every 30 seconds. The agent keeps only these families, then relays the current
+its own machine every 30 seconds. The agent keeps only these families (of vLLM's
+`cache_config_info`, only the engine core and the three labels read below), then relays the current
 scrape with the oldest scrape of the same engine process from the last five minutes. The control
 plane derives the same measurements from that pair as from its own scrapes and keys them by the
 server's target, so the endpoint's monitoring and readiness read them the same way. A server
@@ -131,14 +137,25 @@ connected directly with `infercrane connect` is not scraped in this release.
 | `runtime_preemptions` | count | `num_preemptions_total` | `num_retracted_requests_total` | not exported | sum |
 | `runtime_prefix_cache_hit_rate` | ratio | `prefix_cache_hits / prefix_cache_queries` | `cached_tokens_total / prompt_tokens_total` | not exported | weighted by tokens |
 | `runtime_spec_decode_acceptance` | ratio | `spec_decode_num_accepted_tokens / spec_decode_num_draft_tokens` | `spec_accept_rate` | `spec_decode_num_accepted_tokens / spec_decode_num_draft_tokens` | weighted by drafts |
+| `runtime_spec_decode_draft_length` | tokens | `spec_decode_num_draft_tokens_total / spec_decode_num_drafts_total` | not read | not exported | maximum |
+| `runtime_kv_cache_blocks` | count | `cache_config_info` label `num_gpu_blocks` | not read | not exported | sum |
+| `runtime_kv_cache_block_tokens` | tokens | `cache_config_info` label `block_size` | not read | not exported | maximum |
+| `runtime_state_cache_page_bytes` | bytes | `cache_config_info` label `mamba_page_size_padded` | not read | not exported | maximum |
 
 Engine metric names omit their namespace prefix in the table. The three names that existed before
 engine collection (`runtime_internal_itl`, `runtime_internal_tpot`, and
 `runtime_kv_cache_timeseries`) keep their API spelling; they now carry a p95 latency or the latest
 KV-cache occupancy.
 
-The running, waiting, and KV-cache values come from the current scrape. Every other value is a
-window: the difference between the current scrape and the oldest retained scrape of the same
+The running, waiting, and KV-cache values come from the current scrape, and so do the cache
+layout and the draft length, which are fixed for the life of the engine process. The layout is
+read from the labels of vLLM's `cache_config_info`: the cache blocks the engine allocated (added
+over data-parallel engine cores), the tokens one block holds, and, only for a model with
+recurrent-state layers such as Mamba or linear attention, the size of one page of that state. vLLM
+reports the page as `None` for other models, which leaves `runtime_state_cache_page_bytes`
+unavailable. The draft length is the draft tokens per drafting step since the engine started, so
+it is the number of draft tokens the server speculates with and is unavailable when it does not
+speculate. Every other value is a window: the difference between the current scrape and the oldest retained scrape of the same
 engine process, up to five minutes back. The first scrape after the control plane starts, after a
 rollout changes the active revision, after the replica URL changes, or after the engine restarts
 (any cumulative counter moving backwards) therefore records gauges only. A window with no
@@ -192,7 +209,7 @@ curl -fsS "$INFERCRANE_API_URL/api/v1/endpoints/coder-production/optimization-re
 |---|---|---|
 | `kv_cache.preemption` | preemptions per completed request ≥ 0.01 (at least one request in the denominator) | FP8 KV cache, KV cache offload, max-sequence budget |
 | `kv_cache.saturation` | KV-cache occupancy ≥ 90% while requests wait in the engine or the queue rule holds | FP8 KV cache, KV cache offload |
-| `queue.engine_wait` | engine queue p95 ≥ 20% of gateway p95 latency and ≥ 25 ms, with no gateway queue signal | batch-token budget, continuous batching, replica scaling |
+| `queue.engine_wait` | engine queue p95 ≥ 20% of gateway p95 latency and ≥ 25 ms, with no gateway queue signal, and requests waiting by the engine's waiting gauge when it is reported (the queue-time histogram covers the whole window, so it stays long after a burst at its start has drained) | batch-token budget, continuous batching, replica scaling |
 | `prefill.long_input` | first-token time is the bottleneck and mean reported input length ≥ 2,048 tokens | chunked prefill, batch-token budget |
 | `decode.low_concurrency` | generation is the bottleneck and running requests per replica ≤ 4 | speculative decoding, weight quantization (reversed when acceptance is already ≥ 0.5) |
 | `prefix.low_reuse` | ≥ 50% of known-shape chat requests share a system prefix and the prefix-cache hit rate is < 0.25 over ≥ 100 tokens | prefix cache, prefix-aware routing |
@@ -214,6 +231,14 @@ bottleneck first, then families from other findings, then the stage's general fa
 engine signal never satisfies a rule. When shared prefixes are common but the hit rate is unknown,
 the engine prefix-cache hit rate is listed in `required_evidence`, as is the running-requests
 gauge for a generation bottleneck without it.
+
+The assessment's `signals` also carry what the optimizer's
+[cache capacity test](/features/optimization#speculation-and-cache-room) reads: running and
+waiting requests and cache blocks, each divided by the replicas that reported them
+(`runtime_requests_running_per_replica`, `runtime_requests_waiting_per_replica`,
+`runtime_kv_cache_blocks_per_replica`); the tokens per block, the recurrent-state page and the draft
+length as reported; and the gateway's `mean_input_tokens` and `mean_output_tokens`. No readiness rule
+fires on them.
 
 These defaults are policy choices, not measured optimums:
 

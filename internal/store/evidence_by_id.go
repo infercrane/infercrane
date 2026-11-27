@@ -93,7 +93,26 @@ func (s *Store) ReleaseGuardEvaluationsByIDs(ctx context.Context, tenant string,
 		value.CreatedAt = parseTime(created)
 		out[value.ID] = value
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	// A setup an agent measured has its decision in its own table, with the
+	// setups' agent identities in place of revisions and no deployment.
+	agentRows, err := s.QueryContext(ctx, `SELECT id,active_setup_id,candidate_setup_id,decision,reason_codes_json::text,metrics_json::text,policy_json::text,created_at FROM agent_release_guard_evaluations WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
+	if err != nil {
+		return nil, err
+	}
+	defer agentRows.Close()
+	for agentRows.Next() {
+		var value domain.ReleaseGuardEvaluation
+		var created string
+		if err = agentRows.Scan(&value.ID, &value.ActiveRevisionID, &value.CandidateRevisionID, &value.Decision, &value.ReasonCodesJSON, &value.MetricsJSON, &value.PolicyJSON, &created); err != nil {
+			return nil, err
+		}
+		value.CreatedAt = parseTime(created)
+		out[value.ID] = value
+	}
+	return out, agentRows.Err()
 }
 
 // LabEvaluationsByIDs returns the tenant's Lab evaluations with the given

@@ -62,6 +62,10 @@ spec:
             {{- end }}
             {{- if .Values.dataPlane.enabled }}
             - --serve=0.0.0.0:{{ .Values.dataPlane.port }}
+            - --offline-grace={{ .Values.agent.offlineGrace }}
+            # The last snapshot (key digests only) survives a container
+            # restart in the pod's own volume.
+            - --state-dir=/var/lib/infercrane/data-plane
             {{- end }}
             {{- if .Values.executor.enabled }}
             - --executor=kubernetes
@@ -69,6 +73,7 @@ spec:
             - --runtime-service-account={{ .Values.executor.runtimeServiceAccount.name }}
             - --worker-secret={{ include "infercrane-agent.workerSecret" . }}/{{ .Values.executor.workerSecret.key }}
             - --worker-key-env=INFERCRANE_WORKER_KEY
+            - {{ printf "--engine-ingress=%s" (include "infercrane-agent.engineIngress" .) | quote }}
             - --gpu-resource={{ .Values.executor.gpuResource }}
             - --gpu-product-label={{ .Values.executor.gpuProductLabel }}
             {{- range .Values.executor.allowedImages }}

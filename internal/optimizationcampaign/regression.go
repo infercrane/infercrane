@@ -127,6 +127,8 @@ func MetricWords(metric string) string {
 		return "first-token time"
 	case "latency_p95_ms":
 		return "latency"
+	case "useful_output_throughput":
+		return "output within the limits"
 	}
 	return strings.ReplaceAll(metric, "_", " ")
 }

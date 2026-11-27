@@ -1,0 +1,1700 @@
+{
+ "schema": "infercrane.planner-gym/v1",
+ "title": "Synthetic: a hybrid model with its own draft head on one H100, every number made up",
+ "model": {
+  "id": "example/hybrid-27b-fp8",
+  "revision": "1111111111111111111111111111111111111111",
+  "features": [
+   "native_mtp"
+  ]
+ },
+ "gpu": "H100",
+ "engine": "vllm",
+ "engine_version": "0.34.0",
+ "max_num_seqs": 904,
+ "first_token_limit_ms": 1000.0,
+ "useful_output": "output tokens per second of requests whose first token came within the limit",
+ "setups": {
+  "plain": {
+   "label": "The model's plain command",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "blocks": 860,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "three-drafts": {
+   "label": "Plus speculation, 3 draft tokens",
+   "drafts": 3,
+   "kv_cache_dtype": "auto",
+   "blocks": 780,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "one-draft": {
+   "label": "The same speculation with 1 draft token",
+   "drafts": 1,
+   "kv_cache_dtype": "auto",
+   "blocks": 790,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "three-drafts-fp8-kv": {
+   "label": "3 draft tokens plus an FP8 KV cache",
+   "drafts": 3,
+   "kv_cache_dtype": "fp8",
+   "blocks": 810,
+   "block_tokens": 1600,
+   "state_page_bytes": 3276800
+  },
+  "plain-fp8-kv": {
+   "label": "The plain command plus an FP8 KV cache (never measured)",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8"
+  }
+ },
+ "cells": [
+  {
+   "key": "short/4",
+   "kind": "short",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 310.58,
+      "min": 309.3,
+      "max": 312.12,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 310.58,
+      "min": 307.03,
+      "max": 312.79,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 17.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 602.42,
+      "min": 594.14,
+      "max": 609.75,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 602.42,
+      "min": 597.69,
+      "max": 605.36,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 17.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 481.88,
+      "min": 475.06,
+      "max": 482.77,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 481.88,
+      "min": 479.72,
+      "max": 483.24,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 17.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 605.46,
+      "min": 597.28,
+      "max": 606.63,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 605.46,
+      "min": 598.13,
+      "max": 606.45,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 16.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/32",
+   "kind": "short",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "synthetic rule written from this cell",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2017.1,
+      "min": 2005.34,
+      "max": 2038.99,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2017.1,
+      "min": 2005.54,
+      "max": 2045.19,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 97.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2659.9,
+      "min": 2636.22,
+      "max": 2690.21,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2659.9,
+      "min": 2643.86,
+      "max": 2672.37,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 104.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 2649.61,
+      "min": 2610.15,
+      "max": 2676.74,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2649.61,
+      "min": 2639.19,
+      "max": 2677.79,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 96.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 2689.2,
+      "min": 2654.48,
+      "max": 2724.97,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2689.2,
+      "min": 2652.12,
+      "max": 2714.3,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 98.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/48",
+   "kind": "short",
+   "requests_at_once": 48,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2739.51,
+      "min": 2716.56,
+      "max": 2777.13,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2739.51,
+      "min": 2728.12,
+      "max": 2758.74,
+      "servers": 3
+     },
+     "ttft_p50_ms": 84.0,
+     "ttft_p95_ms": 140.0,
+     "window": {
+      "requests": 145.0,
+      "running": 47.04,
+      "waiting": 0.0,
+      "cache_use_max": 0.3629,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3291.8,
+      "min": 3261.41,
+      "max": 3335.84,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3291.8,
+      "min": 3259.05,
+      "max": 3326.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 84.0,
+     "ttft_p95_ms": 140.0,
+     "window": {
+      "requests": 148.0,
+      "running": 47.04,
+      "waiting": 0.0,
+      "cache_use_max": 0.3629,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 3460.14,
+      "min": 3440.91,
+      "max": 3491.87,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3460.14,
+      "min": 3430.69,
+      "max": 3503.01,
+      "servers": 3
+     },
+     "ttft_p50_ms": 84.0,
+     "ttft_p95_ms": 140.0,
+     "window": {
+      "requests": 152.0,
+      "running": 47.04,
+      "waiting": 0.0,
+      "cache_use_max": 0.3629,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/64",
+   "kind": "short",
+   "requests_at_once": 64,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 3336.35,
+      "min": 3320.64,
+      "max": 3340.68,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3336.35,
+      "min": 3288.74,
+      "max": 3347.06,
+      "servers": 3
+     },
+     "ttft_p50_ms": 96.0,
+     "ttft_p95_ms": 160.0,
+     "window": {
+      "requests": 199.0,
+      "running": 62.72,
+      "waiting": 0.0,
+      "cache_use_max": 0.4771,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3710.25,
+      "min": 3662.97,
+      "max": 3756.74,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3710.25,
+      "min": 3670.63,
+      "max": 3753.58,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3096.0,
+     "ttft_p95_ms": 5160.0,
+     "window": {
+      "requests": 193.0,
+      "running": 58.8,
+      "waiting": 4.0,
+      "cache_use_max": 0.4771,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 4101.0,
+      "min": 4053.45,
+      "max": 4134.04,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4101.0,
+      "min": 4068.26,
+      "max": 4136.87,
+      "servers": 3
+     },
+     "ttft_p50_ms": 96.0,
+     "ttft_p95_ms": 160.0,
+     "window": {
+      "requests": 192.0,
+      "running": 62.72,
+      "waiting": 0.0,
+      "cache_use_max": 0.4771,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/96",
+   "kind": "short",
+   "requests_at_once": 96,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 4251.92,
+      "min": 4193.36,
+      "max": 4312.1,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4251.92,
+      "min": 4239.22,
+      "max": 4269.23,
+      "servers": 3
+     },
+     "ttft_p50_ms": 120.0,
+     "ttft_p95_ms": 200.0,
+     "window": {
+      "requests": 291.0,
+      "running": 94.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7057,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 4224.47,
+      "min": 4167.97,
+      "max": 4255.32,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3120.0,
+     "ttft_p95_ms": 5200.0,
+     "window": {
+      "requests": 291.0,
+      "running": 58.8,
+      "waiting": 36.0,
+      "cache_use_max": 0.7057,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 5055.48,
+      "min": 4988.29,
+      "max": 5113.72,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 5055.48,
+      "min": 5010.88,
+      "max": 5121.94,
+      "servers": 3
+     },
+     "ttft_p50_ms": 120.0,
+     "ttft_p95_ms": 200.0,
+     "window": {
+      "requests": 292.0,
+      "running": 94.08,
+      "waiting": 0.0,
+      "cache_use_max": 0.7057,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/128",
+   "kind": "short",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "synthetic rule written from this cell",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 4947.86,
+      "min": 4898.48,
+      "max": 4958.82,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4947.86,
+      "min": 4881.21,
+      "max": 5016.4,
+      "servers": 3
+     },
+     "ttft_p50_ms": 144.0,
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 392.0,
+      "running": 125.44,
+      "waiting": 0.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 4475.0,
+      "min": 4412.57,
+      "max": 4500.9,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 388.0,
+      "running": 58.8,
+      "waiting": 68.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 5716.03,
+      "min": 5641.5,
+      "max": 5739.96,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2858.02,
+      "min": 2818.52,
+      "max": 2888.94,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 390.0,
+      "running": 110.6,
+      "waiting": 15.1429,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 4755.26,
+      "min": 4710.4,
+      "max": 4765.22,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 391.0,
+      "running": 61.0615,
+      "waiting": 65.6923,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/32/reasoning",
+   "kind": "short",
+   "requests_at_once": 32,
+   "reasoning": "on",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2028.58,
+      "min": 2021.4,
+      "max": 2046.87,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2028.58,
+      "min": 2021.14,
+      "max": 2055.49,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 97.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2468.09,
+      "min": 2464.71,
+      "max": 2497.48,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2468.09,
+      "min": 2448.52,
+      "max": 2491.47,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 99.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 40.0,
+      "completion_tokens_mean": 270.0,
+      "latency_p95_ms": 3645.0,
+      "generation_p95_ms": 3564.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/4",
+   "kind": "prefix",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 254.81,
+      "min": 252.92,
+      "max": 257.69,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 254.81,
+      "min": 251.8,
+      "max": 256.75,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 14.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 349.98,
+      "min": 346.94,
+      "max": 352.0,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 349.98,
+      "min": 349.23,
+      "max": 354.12,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 13.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 311.64,
+      "min": 307.14,
+      "max": 316.19,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 311.64,
+      "min": 309.8,
+      "max": 314.69,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 12.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 353.67,
+      "min": 352.95,
+      "max": 358.96,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 353.67,
+      "min": 353.2,
+      "max": 354.43,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 16.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/32",
+   "kind": "prefix",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1245.63,
+      "min": 1229.79,
+      "max": 1256.31,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1245.63,
+      "min": 1238.09,
+      "max": 1252.68,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 100.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 1406.11,
+      "min": 1385.89,
+      "max": 1407.93,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1406.11,
+      "min": 1391.42,
+      "max": 1413.1,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 97.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 1401.58,
+      "min": 1380.77,
+      "max": 1409.85,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1401.58,
+      "min": 1391.92,
+      "max": 1409.01,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 99.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 1420.67,
+      "min": 1399.93,
+      "max": 1428.92,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1420.67,
+      "min": 1399.47,
+      "max": 1434.4,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 100.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.75
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/128",
+   "kind": "prefix",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2138.76,
+      "min": 2111.68,
+      "max": 2159.59,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.86,
+      "min": 0.85,
+      "max": 0.87,
+      "servers": 3
+     },
+     "ttft_p50_ms": 144.0,
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 388.0,
+      "running": 125.44,
+      "waiting": 0.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2152.97,
+      "min": 2133.49,
+      "max": 2165.06,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 387.0,
+      "running": 58.8,
+      "waiting": 68.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 2144.14,
+      "min": 2141.36,
+      "max": 2168.08,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.21,
+      "min": 0.21,
+      "max": 0.21,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 384.0,
+      "running": 110.6,
+      "waiting": 15.1429,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 2200.47,
+      "min": 2192.63,
+      "max": 2221.17,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1.09,
+      "min": 1.07,
+      "max": 1.09,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 388.0,
+      "running": 61.0615,
+      "waiting": 65.6923,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3860.0,
+      "completion_tokens_mean": 240.0,
+      "latency_p95_ms": 3240.0,
+      "generation_p95_ms": 3168.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/32",
+   "kind": "long",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 433.14,
+      "min": 432.02,
+      "max": 436.58,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 433.14,
+      "min": 431.92,
+      "max": 435.44,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 105.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 487.21,
+      "min": 481.35,
+      "max": 490.09,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 475.03,
+      "min": 473.41,
+      "max": 479.49,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 102.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 486.38,
+      "min": 483.69,
+      "max": 492.67,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 474.22,
+      "min": 469.38,
+      "max": 474.96,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 99.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 494.53,
+      "min": 491.49,
+      "max": 501.63,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 482.17,
+      "min": 478.39,
+      "max": 483.44,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 100.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/128",
+   "kind": "long",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "synthetic rule written from this cell",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 682.77,
+      "min": 675.43,
+      "max": 690.55,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 144.0,
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 387.0,
+      "running": 125.44,
+      "waiting": 0.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 654.65,
+      "min": 651.99,
+      "max": 661.1,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 391.0,
+      "running": 58.8,
+      "waiting": 68.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 723.55,
+      "min": 715.23,
+      "max": 727.15,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 393.0,
+      "running": 110.6,
+      "waiting": 15.1429,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 695.28,
+      "min": 692.96,
+      "max": 697.15,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 389.0,
+      "running": 61.0615,
+      "waiting": 65.6923,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 3900.0,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 3982.5,
+      "generation_p95_ms": 3894.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/4",
+   "kind": "output",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 288.74,
+      "min": 287.0,
+      "max": 291.45,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 288.74,
+      "min": 287.07,
+      "max": 290.83,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 19.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 566.39,
+      "min": 560.89,
+      "max": 568.41,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 566.39,
+      "min": 561.59,
+      "max": 568.1,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 21.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 447.04,
+      "min": 443.3,
+      "max": 447.84,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 447.04,
+      "min": 444.14,
+      "max": 453.64,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 20.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 568.02,
+      "min": 559.58,
+      "max": 569.81,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 568.02,
+      "min": 566.47,
+      "max": 570.05,
+      "servers": 3
+     },
+     "ttft_p50_ms": 51.0,
+     "ttft_p95_ms": 85.0,
+     "window": {
+      "requests": 13.0,
+      "running": 3.92,
+      "waiting": 0.0,
+      "cache_use_max": 0.0486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/32",
+   "kind": "output",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1859.81,
+      "min": 1835.91,
+      "max": 1871.87,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1859.81,
+      "min": 1837.64,
+      "max": 1867.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 96.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2453.08,
+      "min": 2437.59,
+      "max": 2477.92,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2453.08,
+      "min": 2421.09,
+      "max": 2478.9,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 98.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 2426.22,
+      "min": 2415.59,
+      "max": 2445.75,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2426.22,
+      "min": 2402.71,
+      "max": 2452.04,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 105.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 2464.03,
+      "min": 2442.05,
+      "max": 2474.34,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2464.03,
+      "min": 2436.05,
+      "max": 2471.2,
+      "servers": 3
+     },
+     "ttft_p50_ms": 72.0,
+     "ttft_p95_ms": 120.0,
+     "window": {
+      "requests": 103.0,
+      "running": 31.36,
+      "waiting": 0.0,
+      "cache_use_max": 0.2486,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/128",
+   "kind": "output",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "synthetic map",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 4447.84,
+      "min": 4402.04,
+      "max": 4471.34,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4447.84,
+      "min": 4407.6,
+      "max": 4454.45,
+      "servers": 3
+     },
+     "ttft_p50_ms": 144.0,
+     "ttft_p95_ms": 240.0,
+     "window": {
+      "requests": 387.0,
+      "running": 125.44,
+      "waiting": 0.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3981.81,
+      "min": 3974.92,
+      "max": 4033.53,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 389.0,
+      "running": 58.8,
+      "waiting": 68.0,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 5118.34,
+      "min": 5088.59,
+      "max": 5146.89,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 6.67,
+      "min": 6.66,
+      "max": 6.76,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 386.0,
+      "running": 110.6,
+      "waiting": 15.1429,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 4263.19,
+      "min": 4240.62,
+      "max": 4311.08,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 3144.0,
+     "ttft_p95_ms": 5240.0,
+     "window": {
+      "requests": 390.0,
+      "running": 61.0615,
+      "waiting": 65.6923,
+      "cache_use_max": 0.9343,
+      "prompt_tokens_mean": 830.0,
+      "completion_tokens_mean": 1380.0,
+      "latency_p95_ms": 18630.0,
+      "generation_p95_ms": 18216.0,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  }
+ ],
+ "product_cases": [],
+ "built_from": [
+  {
+   "file": "generate.py",
+   "sha256": "synthetic"
+  }
+ ]
+}

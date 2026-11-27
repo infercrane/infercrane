@@ -61,6 +61,12 @@ type executionCheckpoint struct {
 // existing guarded rollout operation. Both publish the request-path generation
 // before persisting campaign promotion.
 func ActivationHandlers(store ActivationStore, refresh func(context.Context) error, now func() time.Time) map[string]operations.Handler {
+	return ActivationHandlersWith(store, refresh, now, nil)
+}
+
+// ActivationHandlersWith also rolls out the winner of a run on an agent's
+// endpoint, through agent (nil refuses such a run).
+func ActivationHandlersWith(store ActivationStore, refresh func(context.Context) error, now func() time.Time, agent *AgentRollout) map[string]operations.Handler {
 	return map[string]operations.Handler{ActivateKind: func(ctx context.Context, operation domain.Operation) (string, error) {
 		var request ActivateRequest
 		if err := json.Unmarshal([]byte(operation.RequestJSON), &request); err != nil {
@@ -79,6 +85,17 @@ func ActivationHandlers(store ActivationStore, refresh func(context.Context) err
 		}
 		if candidate.State == CandidatePromoted || candidate.State == CandidateObserved {
 			return activationResult(campaign, candidate, activationEndpoint(campaign, candidate)), nil
+		}
+		if AgentRun(campaign) {
+			// The rollout checks the approval itself: it stops a rollout
+			// before its switch, never during its watch window.
+			if agent == nil {
+				return "", operations.Permanent("optimization_agent_rollout_unavailable", errors.New("this control plane does not roll out setups an agent measured; apply the setup in your cluster from the run's report"))
+			}
+			if candidate.State != CandidateGuardPassed {
+				return "", operations.Permanent("optimization_candidate_not_qualified", fmt.Errorf("candidate state %s requires %s", candidate.State, CandidateGuardPassed))
+			}
+			return activateAgentRollout(ctx, store, *agent, campaign, candidate)
 		}
 		stamp := time.Now().UTC()
 		if now != nil {
@@ -487,4 +504,24 @@ func executionFailure(err error) error {
 		return operations.Permanent("optimization_authority_unavailable", err)
 	}
 	return operations.Retryable("optimization_step_failed", err)
+}
+
+// activateAgentRollout runs the guarded rollout of an agent run's winner and
+// records its outcome on the candidate: promoted when the watch window
+// passed, rejected when it rolled back.
+func activateAgentRollout(ctx context.Context, store ActivationStore, agent AgentRollout, campaign domain.OptimizationCampaign, candidate domain.OptimizationCandidateRun) (string, error) {
+	result, err := agent.Activate(ctx, campaign, candidate)
+	if err != nil {
+		return "", err
+	}
+	to, updates := CandidatePromoted, domain.OptimizationCandidateRun{}
+	if result.Outcome == AgentRolloutRolledBack {
+		to, updates.FailureCode = CandidateRejected, FailureAgentRolloutRolledBack
+	}
+	if _, err = store.TransitionOptimizationCandidate(ctx, campaign.TenantID, campaign.ID, candidate.ID, candidate.State, to, updates); err != nil && !errors.Is(err, domain.ErrConflict) {
+		return "", executionFailure(err)
+	}
+	encoded, _ := json.Marshal(map[string]any{"campaign_id": campaign.ID, "candidate_id": candidate.ID, "endpoint": campaign.TargetEndpoint, "outcome": result.Outcome, "state": to,
+		"plan_id": result.Switch.PlanID, "previous_plan_id": result.Switch.PreviousPlanID, "release_guard": result.Guard.Decision, "promotion": "agent_rollout"})
+	return string(encoded), nil
 }

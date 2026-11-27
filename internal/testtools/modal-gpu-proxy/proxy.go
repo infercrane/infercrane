@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -130,7 +131,23 @@ type Proxy struct {
 	checkedAt time.Time
 	healthy   bool
 	rtts      []time.Duration
+	// What went wrong between this pod and the remote server on /v1, kept so
+	// a run can say which hop a failed request failed on.
+	failed       int
+	cancelled    int
+	serverErrors map[string]int
+	failures     []Failure
 }
+
+// Failure is one /v1 request this pod answered 502 because the remote
+// server could not be reached or closed the connection without an answer.
+type Failure struct {
+	At    time.Time `json:"at"`
+	Path  string    `json:"path"`
+	Error string    `json:"error"`
+}
+
+const maxFailures = 64
 
 func (p *Proxy) now() time.Time {
 	if p.Now != nil {
@@ -170,8 +187,12 @@ func (p *Proxy) current() (Lease, *url.URL, error) {
 }
 
 // Stats is the proxy's own evidence: upstream health round trips measured
-// from this pod. It lets a report state how much of the measured latency is
-// the network path to the remote GPU.
+// from this pod, which let a report state how much of the measured latency is
+// the network path to the remote GPU, and the /v1 requests that failed
+// between this pod and the remote server. A request the gateway records as
+// failed is the network's when this pod counted it in FailedRequests, the
+// remote side's when it is in ServerErrors, and otherwise failed before it
+// reached this pod.
 type Stats struct {
 	LeaseID  string  `json:"lease_id,omitempty"`
 	Samples  int     `json:"health_rtt_samples"`
@@ -180,12 +201,24 @@ type Stats struct {
 	RTTMinMS float64 `json:"health_rtt_min_ms"`
 	Ended    string  `json:"ended,omitempty"`
 	Upstream string  `json:"upstream_host,omitempty"`
+	// FailedRequests are answered 502 here: the remote server was not reached
+	// or closed the connection before answering.
+	FailedRequests int `json:"failed_requests"`
+	// CancelledRequests ended because the caller went away first.
+	CancelledRequests int `json:"cancelled_requests"`
+	// ServerErrors counts the 5xx answers the remote side sent, by status.
+	ServerErrors map[string]int `json:"server_errors,omitempty"`
+	// Failures are the last failed requests, oldest first.
+	Failures []Failure `json:"failures,omitempty"`
 }
 
 func (p *Proxy) Stats() Stats {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	stats := Stats{LeaseID: p.lease.ID, Samples: len(p.rtts)}
+	stats := Stats{LeaseID: p.lease.ID, Samples: len(p.rtts), FailedRequests: p.failed, CancelledRequests: p.cancelled, Failures: slices.Clone(p.failures)}
+	if len(p.serverErrors) > 0 {
+		stats.ServerErrors = maps.Clone(p.serverErrors)
+	}
 	if p.upstream != nil {
 		stats.Upstream = p.upstream.Host
 	}
@@ -240,6 +273,12 @@ func (p *Proxy) health(ctx context.Context) bool {
 	if response != nil {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<16))
 		response.Body.Close()
+	}
+	if !ok && ctx.Err() != nil {
+		// The caller stopped waiting first: the kubelet's readiness probe allows
+		// 2 s, the control plane's 5 s. A check cut short says nothing about the
+		// server, and cached it would fail the control plane's probe at once.
+		return false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -299,12 +338,54 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		// time to first token would measure the proxy's buffering.
 		FlushInterval: -1,
 		Transport:     p.transport(),
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			slog.Warn("remote GPU request failed", "lease_id", lease.ID, "error", err)
+		ModifyResponse: func(response *http.Response) error {
+			if response.StatusCode >= http.StatusInternalServerError && strings.HasPrefix(request.URL.Path, "/v1/") {
+				p.noteServerError(response.StatusCode)
+			}
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, failed *http.Request, err error) {
+			if failed.Context().Err() != nil {
+				p.noteCancelled(failed.URL.Path)
+			} else {
+				slog.Warn("remote GPU request failed", "lease_id", lease.ID, "path", failed.URL.Path, "error", err)
+				p.noteFailure(failed.URL.Path, err)
+			}
 			http.Error(w, "remote GPU server unreachable", http.StatusBadGateway)
 		},
 	}
 	reverse.ServeHTTP(w, request)
+}
+
+func (p *Proxy) noteFailure(path string, err error) {
+	if !strings.HasPrefix(path, "/v1/") {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failed++
+	p.failures = append(p.failures, Failure{At: p.now().UTC(), Path: path, Error: err.Error()})
+	if len(p.failures) > maxFailures {
+		p.failures = slices.Delete(p.failures, 0, len(p.failures)-maxFailures)
+	}
+}
+
+func (p *Proxy) noteCancelled(path string) {
+	if !strings.HasPrefix(path, "/v1/") {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cancelled++
+}
+
+func (p *Proxy) noteServerError(status int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.serverErrors == nil {
+		p.serverErrors = map[string]int{}
+	}
+	p.serverErrors[fmt.Sprint(status)]++
 }
 
 func (p *Proxy) transport() http.RoundTripper {

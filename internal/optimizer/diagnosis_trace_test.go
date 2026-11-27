@@ -199,26 +199,41 @@ func TestTraceHostLaunchChoosesOnlyChangesTheDefaultsLeaveRoomFor(t *testing.T) 
 }
 
 func TestVLLMCaptureSizeFollowsTheResolvedDefaults(t *testing.T) {
+	legacy, current := vllm0221, vllm034
 	for name, test := range map[string]struct {
-		gpu         string
-		args        []string
-		size, seqs  int
-		unknownWhen bool
+		version, gpu string
+		args         []string
+		size, seqs   int
+		unknownWhen  bool
 	}{
-		"80 GB defaults":       {"H100", nil, 512, 1024, false},
-		"24 GB defaults":       {"RTX4090", nil, 512, 256, false},
-		"fewer sequences":      {"H100", []string{"--max-num-seqs", "60"}, 120, 60, false},
-		"small token budget":   {"RTX4090", []string{"--max-num-batched-tokens=300"}, 300, 256, false},
-		"explicit off grid":    {"H100", []string{"--max-cudagraph-capture-size", "1000"}, 992, 1024, false},
-		"explicit small":       {"H100", []string{"--max-cudagraph-capture-size", "3"}, 2, 1024, false},
-		"compilation config":   {"H100", []string{"--compilation-config", `{"cudagraph_mode":"NONE"}`}, 0, 0, true},
-		"speculation":          {"H100", []string{"--speculative-config", `{"method":"mtp"}`}, 0, 0, true},
-		"unreadable seqs":      {"H100", []string{"--max-num-seqs", "many"}, 0, 0, true},
-		"unknown accelerator":  {"Mystery-GPU", nil, 0, 0, true},
-		"explicit unreadable":  {"H100", []string{"--max-cudagraph-capture-size", "0"}, 0, 0, true},
-		"performance mode set": {"H100", []string{"--performance-mode", "throughput"}, 0, 0, true},
+		"80 GB defaults":       {legacy, "H100", nil, 512, 1024, false},
+		"24 GB defaults":       {legacy, "RTX4090", nil, 512, 256, false},
+		"fewer sequences":      {legacy, "H100", []string{"--max-num-seqs", "60"}, 120, 60, false},
+		"small token budget":   {legacy, "RTX4090", []string{"--max-num-batched-tokens=300"}, 300, 256, false},
+		"explicit off grid":    {legacy, "H100", []string{"--max-cudagraph-capture-size", "1000"}, 992, 1024, false},
+		"explicit small":       {legacy, "H100", []string{"--max-cudagraph-capture-size", "3"}, 2, 1024, false},
+		"compilation config":   {legacy, "H100", []string{"--compilation-config", `{"cudagraph_mode":"NONE"}`}, 0, 0, true},
+		"speculation":          {legacy, "H100", []string{"--speculative-config", `{"method":"mtp"}`}, 0, 0, true},
+		"unreadable seqs":      {legacy, "H100", []string{"--max-num-seqs", "many"}, 0, 0, true},
+		"unknown accelerator":  {legacy, "Mystery-GPU", nil, 0, 0, true},
+		"explicit unreadable":  {legacy, "H100", []string{"--max-cudagraph-capture-size", "0"}, 0, 0, true},
+		"performance mode set": {legacy, "H100", []string{"--performance-mode", "throughput"}, 0, 0, true},
+		// 0.22.1 has no 160 GiB tier and no Blackwell ceiling.
+		"0.22.1 on B200": {legacy, "B200", nil, 512, 1024, false},
+		// vLLM 0.34.0: the same grid below 160 GiB and off Blackwell.
+		"0.34.0 80 GB defaults":   {current, "H100", nil, 512, 1024, false},
+		"0.34.0 24 GB defaults":   {current, "L4", nil, 512, 256, false},
+		"0.34.0 A100 stays small": {current, "A100 80GB", nil, 512, 256, false},
+		"0.34.0 192 GB AMD":       {current, "MI300X", nil, 512, 1024, false},
+		// On data-center Blackwell decode graphs cover every admitted batch,
+		// unless the deprecated flag turns that off.
+		"0.34.0 B200 defaults":    {current, "B200", nil, 1024, 1024, false},
+		"0.34.0 B200 more seqs":   {current, "NVIDIA B200", []string{"--max-num-seqs", "4096"}, 4096, 4096, false},
+		"0.34.0 B200 deprecated":  {current, "B200", []string{"--max-cudagraph-capture-size", "600"}, 592, 1024, false},
+		"0.34.0 cc decode graphs": {current, "H100", []string{"-cc.max_decode_cudagraph_capture_requests=64"}, 0, 0, true},
+		"unreviewed release":      {"0.30.0", "H100", nil, 0, 0, true},
 	} {
-		size, seqs, _, why := vllmCaptureSize(test.args, test.gpu)
+		size, seqs, _, why := vllmCaptureSize(test.args, test.version, test.gpu)
 		if test.unknownWhen != (why != "") || !test.unknownWhen && (size != test.size || seqs != test.seqs) {
 			t.Errorf("%s: size=%d seqs=%d why=%q", name, size, seqs, why)
 		}

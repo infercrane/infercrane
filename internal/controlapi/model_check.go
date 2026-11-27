@@ -221,5 +221,23 @@ func (a API) checkUncatalogedProposal(ctx context.Context, tenant string, reques
 	if request.MaxModelLen == 0 && report.Task == modelcheck.TaskChat {
 		request.MaxModelLen = report.Memory.ContextTokens
 	}
+	addModelMemory(request.Diagnosis, *report)
 	return nil
+}
+
+// addModelMemory gives a diagnosis the model's memory as the check read it:
+// the bytes its served weights take and the KV cache bytes one token takes.
+// The planner predicts from them how much cache room FP8 weights would free
+// and how much of each step's reads the KV cache is. A fact the check could
+// not read is left out, and the planner then predicts without it.
+func addModelMemory(diagnosis *optimizer.Diagnosis, report modelcheck.Report) {
+	weights, perToken := report.Memory.WeightsBytes, report.Config.KVCacheBytesPerToken
+	if diagnosis == nil || weights == nil || perToken == nil || *weights <= 0 || *perToken <= 0 {
+		return
+	}
+	if diagnosis.Signals == nil {
+		diagnosis.Signals = map[string]float64{}
+	}
+	diagnosis.Signals[optimizer.SignalModelWeightsBytes] = float64(*weights)
+	diagnosis.Signals[optimizer.SignalKVCacheBytesPerToken] = float64(*perToken)
 }

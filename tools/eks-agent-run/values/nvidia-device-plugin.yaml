@@ -1,0 +1,36 @@
+# Helm values for NVIDIA's device plugin chart (nvidia-device-plugin 0.20.2).
+#
+# The EKS AL2023 NVIDIA AMI ships the driver and the container toolkit but not
+# the device plugin, and InferCrane installs neither (docs/integrations/
+# kubernetes.mdx). This is the cluster operator's part.
+#
+# gfd: GPU feature discovery writes the node label nvidia.com/gpu.product. The
+# product's Kubernetes provider selects nodes by that label.
+#
+# Two configurations, chosen per node with the label
+# nvidia.com/device-plugin.config:
+#   whole   the default: the L4 is one nvidia.com/gpu and GPU feature
+#           discovery labels it NVIDIA-L4, exactly what a customer's node
+#           shows. Qwen3-8B is deployed and served on it (35-deploy.sh).
+#   shared  time-slicing: the one L4 is advertised as four nvidia.com/gpu, so
+#           the customer's server, the agent's candidate and a campaign's
+#           servers schedule side by side. It gives no memory isolation; each
+#           server limits itself with --gpu-memory-utilization. GPU feature
+#           discovery then names the product NVIDIA-L4-SHARED, which keeps the
+#           sharing visible in every record. 40-run.sh switches the node to it
+#           once Qwen3-8B is gone. The account's quota allows one GPU node.
+gfd:
+  enabled: true
+
+config:
+  default: whole
+  map:
+    whole: |-
+      version: v1
+    shared: |-
+      version: v1
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 4

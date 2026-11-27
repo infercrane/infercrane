@@ -6,7 +6,7 @@ description: Deploy and optimize open models on AMD Instinct MI300X, MI325X, MI3
 # AMD Instinct GPUs
 
 InferCrane can deploy and optimize open models on AMD Instinct GPUs with the same engine versions it
-runs on NVIDIA: vLLM 0.22.1 and SGLang 0.5.12, built for ROCm and pinned by digest. The deployment
+runs on NVIDIA: vLLM 0.34.0 and SGLang 0.5.23, built for ROCm and pinned by digest. The deployment
 spec, rollout, routing, AIPerf measurement, engine metrics, and the optimizer's rules are the same on
 both vendors. What differs, the runtime image and where the GPU can be rented, is data, not code.
 
@@ -39,12 +39,18 @@ platform may run.
 
 | Runtime | GPUs | Image | Stack |
 |---|---|---|---|
-| vLLM 0.22.1 | all four | `vllm/vllm-openai-rocm:v0.22.1@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031` | ROCm 7.2.2, AITER v0.1.13, built for `gfx942` and `gfx950` |
-| SGLang 0.5.12 | MI300X, MI325X | `lmsysorg/sglang:v0.5.12-rocm720-mi30x@sha256:1f5c080be74269393bdc07d2cb30127dd2931c45b0b53e448235fb14d854da63` | ROCm 7.2, `gfx942` |
-| SGLang 0.5.12 | MI350X, MI355X | `lmsysorg/sglang:v0.5.12-rocm720-mi35x@sha256:3be1556105cdfdede103dc053f002d4d0307bdb229d0e15bfef130d5c53af208` | ROCm 7.2, `gfx950` |
+| vLLM 0.34.0 | all four | `vllm/vllm-openai-rocm:v0.34.0@sha256:3cb773d23f063afa86291ef75773cdd486154ddea94c213300f4ed7cc42b7af1` | ROCm 10.0.0, AITER v0.1.28.post1, built for `gfx942` and `gfx950` |
+| vLLM 0.22.1 (legacy) | all four | `vllm/vllm-openai-rocm:v0.22.1@sha256:368b2992c776ad653e40e9e00d38aa51cf1e9a16558b05d07c42818abd9ec031` | ROCm 7.2.2, AITER v0.1.13, built for `gfx942` and `gfx950` |
+| SGLang 0.5.23 | MI300X, MI325X | `lmsysorg/sglang:v0.5.23-rocm720-mi30x@sha256:a3a6eb293187b20012a5abc8f00423e6ab51d0169113a6e58a91da5614200170` | ROCm 7.2, AITER 285579b6, `gfx942` |
+| SGLang 0.5.23 | MI350X, MI355X | `lmsysorg/sglang:v0.5.23-rocm720-mi35x@sha256:1f45d56fa6708a62a74fdf4211616fb0d57c336131b45729d2646c6db309eff6` | ROCm 7.2, AITER 285579b6, `gfx950` |
+| SGLang 0.5.12 (legacy) | MI300X, MI325X | `lmsysorg/sglang:v0.5.12-rocm720-mi30x@sha256:1f5c080be74269393bdc07d2cb30127dd2931c45b0b53e448235fb14d854da63` | ROCm 7.2, `gfx942` |
+| SGLang 0.5.12 (legacy) | MI350X, MI355X | `lmsysorg/sglang:v0.5.12-rocm720-mi35x@sha256:3be1556105cdfdede103dc053f002d4d0307bdb229d0e15bfef130d5c53af208` | ROCm 7.2, `gfx950` |
 
-Each digest was read from the registry manifest of the named tag on 2026-11-17. The images are the
-engines' own release builds; InferCrane does not build or modify them. The command, port, `/health`,
+Each digest was read from the registry manifest of the named tag (vLLM 0.34.0 on 2026-11-26, the
+others on 2026-11-17). The vLLM 0.34.0 stack is the one its tag's `docker/Dockerfile.rocm_base`
+names; the image's own labels say `rocm100`. The 0.22.1 image serves only revisions that already
+record 0.22.1; see [Upgrade and compatibility](/upgrade#move-a-deployment-from-vllm-0-22-1-to-0-34-0).
+The images are the engines' own release builds; InferCrane does not build or modify them. The command, port, `/health`,
 `/v1/models`, and `/metrics` paths are the same as on NVIDIA.
 
 ### Where AMD GPUs can run
@@ -73,7 +79,7 @@ model:
   revision: b968826d9c46dd6066d109eabc6255188de91218
 runtime:
   engine: vllm
-  version: 0.22.1
+  version: 0.34.0
 compute: {mode: elastic}
 provider: {cloud: runpod, adapter: runpod-pods}
 resources: {gpu: MI300X}
@@ -110,23 +116,25 @@ The optimizer's rules read the endpoint's diagnosis, not the vendor, so the same
 the same changes on an MI300X as on an H100. Three things depend on the GPU:
 
 - **Engine defaults.** The ROCm images run the same engine versions as the CUDA ones, so the
-  recorded defaults hold. vLLM 0.22.1 sizes its batch defaults from device memory on every platform
-  ([`EngineArgs.get_batch_defaults`](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/engine/arg_utils.py));
-  every reviewed AMD GPU has at least 70 GB, so it starts with 1,024 sequences and 8,192 batched
-  tokens and a setup that restates those values is dropped as a no-op. vLLM's ROCm platform does not
-  change scheduler or cache defaults, and SGLang 0.5.12's recorded defaults (KV cache dtype,
+  recorded defaults hold. vLLM sizes its batch defaults from device memory on every platform
+  ([`EngineArgs.get_batch_defaults`](https://github.com/vllm-project/vllm/blob/v0.34.0/vllm/engine/arg_utils.py)).
+  Every reviewed AMD GPU has at least 160 GiB, so vLLM 0.34.0 starts with 1,024 sequences and 16,384
+  batched tokens (0.22.1, which has no 160 GiB tier: 1,024 and 8,192), and a setup that restates
+  those values is dropped as a no-op. vLLM 0.34.0's KV cache block is 64 tokens unless the chosen
+  attention backend prefers another size, on either vendor; InferCrane reads it from the engine's
+  metrics and never assumes it. SGLang 0.5.23's and 0.5.12's recorded defaults (KV cache dtype,
   quantization, schedule policy, speculation) are the same on ROCm.
 - **FP8.** CDNA 3 and CDNA 4 run FP8 matrix math in hardware (AMD's product pages list FP8
-  throughput for all four). vLLM 0.22.1 lists FP8 W8A8 as supported on AMD GPUs and an FP8 (e4m3)
-  KV cache on ROCm
-  ([quantization](https://github.com/vllm-project/vllm/blob/v0.22.1/docs/features/quantization/README.md#supported-hardware),
-  [cache config](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/config/cache.py)), and
-  SGLang 0.5.12 runs FP8 on AMD through AITER or Triton
-  ([AMD GPU guide](https://github.com/sgl-project/sglang/blob/v0.5.12/docs/platforms/amd_gpu.md#quantization-on-amd-gpus)).
+  throughput for all four). vLLM 0.34.0, like 0.22.1, lists FP8 W8A8 (llm-compressor) as supported
+  on AMD GPUs and an FP8 (e4m3) KV cache on ROCm
+  ([quantization](https://github.com/vllm-project/vllm/blob/v0.34.0/docs/features/quantization/README.md#supported-hardware),
+  [cache config](https://github.com/vllm-project/vllm/blob/v0.34.0/vllm/config/cache.py)), and
+  SGLang 0.5.23, like 0.5.12, runs FP8 on AMD through AITER or Triton
+  ([AMD GPU guide](https://github.com/sgl-project/sglang/blob/v0.5.23/docs/docs/hardware-platforms/amd_gpu.mdx#quantization-on-amd-gpus)).
   So FP8 weights and an FP8 KV cache can be chosen on all four GPUs.
 - **AITER kernels.** SGLang's ROCm images turn AMD's AITER kernels on by default
-  (`SGLANG_USE_AITER=1` in the image), so there is nothing to switch. vLLM 0.22.1 leaves them off
-  unless `VLLM_ROCM_USE_AITER=1` is set, and the pinned image does not set it. When the diagnosis
+  (`SGLANG_USE_AITER=1` in the image), so there is nothing to switch. vLLM 0.34.0 and 0.22.1 leave
+  them off unless `VLLM_ROCM_USE_AITER=1` is set, and neither pinned image sets it. When the diagnosis
   says the GPU's work is the bottleneck, the optimizer adds a setup that is the starting setup with
   only that switch on. See [Turn on AITER kernels for vLLM](#turn-on-aiter-kernels-for-vllm).
 
@@ -143,14 +151,16 @@ never proposed on an MI300X.
 
 A build can seed a setup when every catalog gate passes and the pinned ROCm image of one of its
 reviewed runtimes is at least the engine version its model card states. A build whose card needs a
-newer engine stays in the catalog with that reason, for example `vllm needs 0.28.0 or newer,
-pinned 0.22.1`.
+newer engine stays in the catalog with that reason, for example `vllm needs 0.35.0 or newer,
+pinned 0.34.0`. When the pin moves, `go run ./tools/checkpoint-catalog-sync regate --write` applies
+the gates again to the committed catalog.
 
 The catalog reviewed on 2026-11-17 lists 46 AMD builds, each recorded as runnable: 27 on `gfx942`
-and `gfx950`, and 19 on `gfx950` only. None seeds a setup yet:
+and `gfx950`, and 19 on `gfx950` only. Since the pin moved to vLLM 0.34.0, 14 can seed a setup:
 
-- LLM Compressor builds (W4A16, W8A8) run on vLLM and can seed a setup on a matching GPU. All 18
-  AMD LLM Compressor builds state vLLM 0.26.0 to 0.31.0, newer than the pinned 0.22.1.
+- LLM Compressor builds (W4A16, W8A8) run on vLLM and can seed a setup on a matching GPU. The 18
+  AMD LLM Compressor builds state vLLM 0.26.0 to 0.31.0, which 0.34.0 meets. 14 are candidates; four
+  wait for their license to be resolved (`gemma`, `other`).
 - Quark builds (MXFP4, PTPC-FP8, INT4) stay catalog-only: Quark is not yet a tool whose
   checkpoints can seed a setup. There are 27.
 - DFlash speculators stay catalog-only, as on NVIDIA. There is one.
@@ -163,8 +173,9 @@ on the same GPU before it can win.
 [AITER](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/inference-optimization/vllm-optimization.html)
 is AMD's library of fused attention, matrix-multiply, MoE, and RMSNorm kernels for MI300X, MI325X,
 and the MI350 Series. vLLM uses it only when `VLLM_ROCM_USE_AITER` is `1` or `true`; the default is
-off ([`vllm/envs.py` at v0.22.1](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/envs.py)),
-and the pinned image sets `AITER_ROCM_ARCH=gfx942;gfx950` but not the switch. Once it is on, vLLM's
+off ([`vllm/envs.py` at v0.34.0](https://github.com/vllm-project/vllm/blob/v0.34.0/vllm/envs.py), the
+same in [v0.22.1](https://github.com/vllm-project/vllm/blob/v0.22.1/vllm/envs.py)), and both pinned
+images set `AITER_ROCM_ARCH=gfx942;gfx950` but not the switch. Once it is on, vLLM's
 AITER sub-switches for linear layers, MoE, RMSNorm, MLA, and MHA default to on. AMD's vLLM
 optimization guide and the
 [vLLM recipes' AMD preset](https://github.com/vllm-project/recipes/blob/fa02ae800b4998a7985e3654116b602fb6c139df/SCHEMA.md)
@@ -175,7 +186,7 @@ Set it in the deployment spec's `runtime.env`:
 ```yaml
 runtime:
   engine: vllm
-  version: 0.22.1
+  version: 0.34.0
   env:
     VLLM_ROCM_USE_AITER: "1"
 resources: {gpu: MI300X}
@@ -183,7 +194,8 @@ resources: {gpu: MI300X}
 
 `runtime.env` accepts only reviewed engine switches with reviewed values; see
 [Engine environment switches](/deployment-spec#engine-environment-switches). This one is reviewed
-for vLLM 0.22.1's pinned ROCm image on `rocm-gfx942` and `rocm-gfx950`, with the values `0` and `1`.
+for the pinned vLLM 0.34.0 and 0.22.1 ROCm images on `rocm-gfx942` and `rocm-gfx950`, with the
+values `0` and `1`.
 On an NVIDIA GPU, on SGLang, or on another vLLM version or image it is refused. RunPod Pods,
 Kubernetes, AWS EC2, and GCP Compute pass it into the runtime container; SkyPilot, RunPod Serverless,
 and Kubernetes Dynamo cannot, so a deployment that sets it there is refused before anything is
@@ -192,7 +204,7 @@ provisioned.
 ### When the optimizer chooses it
 
 The rule `accelerator.kernels_off_by_default` fires only on a reviewed AMD Instinct GPU whose
-starting setup runs vLLM 0.22.1 with the switch off, and only when the diagnosis points at kernel
+starting setup runs vLLM 0.34.0 or 0.22.1 with the switch off, and only when the diagnosis points at kernel
 time:
 
 | Diagnosis | Priority |

@@ -3,13 +3,16 @@ package optimizer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/spec"
 	"gopkg.in/yaml.v3"
 )
@@ -184,6 +187,24 @@ func TestRecipeSearchFailsClosedOutsideItsReviewedBoundary(t *testing.T) {
 	unsupported, err := catalogSource(t).Propose(context.Background(), request)
 	if err != nil || len(armIDs(unsupported.Candidates)) != 0 || !strings.Contains(strings.Join(unsupported.Warnings, " "), "No reviewed") {
 		t.Fatalf("unsupported GPU: %+v err=%v", unsupported, err)
+	}
+	// AMD Instinct GPUs are listed but not qualified: the template pins only
+	// the CUDA image, so every spelling adds nothing and says why.
+	for _, gpu := range []string{"MI300X", "AMD Instinct MI300X OAM", "AMD_Instinct_MI355X"} {
+		request = recipeRequest()
+		request.GPU = gpu
+		amd, err := catalogSource(t).Propose(context.Background(), request)
+		warnings := strings.Join(amd.Warnings, " ")
+		if err != nil || len(armIDs(amd.Candidates)) != 0 || !strings.Contains(warnings, "not qualified on MI3") || !strings.Contains(warnings, "CUDA build") {
+			t.Fatalf("%s: %+v err=%v", gpu, amd, err)
+		}
+	}
+	for _, template := range recipeTemplates() {
+		for _, accelerator := range template.accelerators {
+			if (accelerator.status == recipeQualified) == (accelerator.reason != "") || accelerator.status != recipeQualified && accelerator.status != recipeNotQualified {
+				t.Fatalf("%s %+v: a qualified accelerator has no reason, any other has one", template.id, accelerator)
+			}
+		}
 	}
 	request = recipeRequest()
 	request.Provider, request.Region = "aws", "eu-central-1"
@@ -368,6 +389,8 @@ func TestEveryArmNamesAnExercisedReceiptCandidate(t *testing.T) {
 func TestRecipeSearchCustomerTextOmitsInternalMethodNames(t *testing.T) {
 	unsupported := recipeRequest()
 	unsupported.GPU = "L40S"
+	amd := recipeRequest()
+	amd.GPU = "MI300X"
 	unqualified := recipeRequest()
 	unqualified.Provider, unqualified.Region = "aws", "eu-central-1"
 	excluded := recipeRequest()
@@ -377,7 +400,7 @@ func TestRecipeSearchCustomerTextOmitsInternalMethodNames(t *testing.T) {
 	undeclared := recipeRequest()
 	undeclared.ModelFeatures, undeclared.ModelConfigDigest = nil, ""
 	internal := regexp.MustCompile(`(?i)recipe search|search control|\barms?\b`)
-	for name, request := range map[string]Request{"measured": recipeRequest(), "unsupported": unsupported, "unqualified": unqualified, "excluded": excluded, "unpinned": unpinned, "undeclared": undeclared} {
+	for name, request := range map[string]Request{"measured": recipeRequest(), "unsupported": unsupported, "amd": amd, "unqualified": unqualified, "excluded": excluded, "unpinned": unpinned, "undeclared": undeclared} {
 		proposal, err := catalogSource(t).Propose(context.Background(), request)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -392,5 +415,54 @@ func TestRecipeSearchCustomerTextOmitsInternalMethodNames(t *testing.T) {
 				t.Errorf("%s proposal shows internal method wording: %q", name, line)
 			}
 		}
+	}
+}
+
+// The value a customer sees is "setups"; "recipes" stays accepted for
+// existing scripts and proposes the same setups. A model feature a technique
+// package reads from the config passes validation too.
+func TestSearchSetupsIsTheSameSearchUnderItsCustomerName(t *testing.T) {
+	setups := recipeRequest()
+	setups.Search = SearchSetups
+	shown, err := catalogSource(t).Propose(context.Background(), setups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier, err := catalogSource(t).Propose(context.Background(), recipeRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(armIDs(shown.Candidates), armIDs(earlier.Candidates)) || len(armIDs(shown.Candidates)) == 0 {
+		t.Fatalf("setups %v, recipes %v", armIDs(shown.Candidates), armIDs(earlier.Candidates))
+	}
+	moe := recipeRequest()
+	moe.ModelFeatures = []string{FeatureNativeMTP, kerneltuning.ModelFeatureFusedMoEFP8Block}
+	if err = validateSearch(normalizeRequest(moe)); err != nil {
+		t.Fatalf("a kernel feature was refused: %v", err)
+	}
+	other := recipeRequest()
+	other.Search = "everything"
+	if err = validateSearch(other); err == nil || !strings.Contains(err.Error(), "setups") || strings.Contains(err.Error(), "recipe") {
+		t.Fatalf("unknown search err = %v", err)
+	}
+}
+
+// model_tokenizers names one model at one revision per entry, each with a
+// sha256 digest, and at most sixteen.
+func TestModelTokenizersAreValidated(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("c", 64)
+	many := map[string]string{}
+	for index := range 17 {
+		many[fmt.Sprintf("org/model-%d@%s", index, strings.Repeat("a", 40))] = digest
+	}
+	for name, tokenizers := range map[string]map[string]string{
+		"no revision": {"org/model": digest}, "not a digest": {"org/model@" + strings.Repeat("a", 40): "abc"}, "seventeen": many,
+	} {
+		if validateModelTokenizers(tokenizers) == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := validateModelTokenizers(map[string]string{"org/model@" + strings.Repeat("a", 40): digest}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -161,8 +161,10 @@ INFERCRANE_POSTGRES_PASSWORD=test-only-postgres-password \
 KUBECONFIG_FILE="$fixture_kubeconfig" \
 INFERCRANE_KUBERNETES_CONTEXT=test-cluster \
 INFERCRANE_KUBERNETES_IMAGE_DIGEST=example.invalid/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+INFERCRANE_KUBERNETES_ENGINE_INGRESS=10.8.0.0/16 \
   docker compose -f "$compose_file" -f "$kubernetes_compose_file" config >"$kubernetes_rendered"
 grep -q 'INFERCRANE_KUBERNETES_CONTEXT: test-cluster' "$kubernetes_rendered"
+grep -q 'INFERCRANE_KUBERNETES_ENGINE_INGRESS: 10.8.0.0/16' "$kubernetes_rendered"
 grep -q 'target: /run/secrets/kubeconfig' "$kubernetes_rendered"
 if grep -Eqi 'runpod|skypilot|INFERCRANE_AWS_' "$kubernetes_rendered"; then
   echo 'Kubernetes production overlay is coupled to another provider' >&2

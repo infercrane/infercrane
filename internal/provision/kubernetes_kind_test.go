@@ -3,6 +3,7 @@ package provision_test
 import (
 	"context"
 	"fmt"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,7 @@ func TestKubernetesKindLifecycle(t *testing.T) {
 	if contextName == "" {
 		t.Skip("INFERCRANE_KIND_CONTEXT is not set")
 	}
-	provider := provision.Kubernetes{Context: contextName, Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: testKubernetesImage, GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
+	provider := provision.Kubernetes{EngineIngress: []engineingress.Peer{{PodLabels: map[string]string{"app.kubernetes.io/name": "infercrane"}}}, Context: contextName, Namespace: "infercrane-system", WorkloadAPI: "deployment", ServiceAccount: "infercrane-runtime", WorkerSecretName: "infercrane-worker", WorkerSecretKey: "api-key", ImageDigest: testKubernetesImage, GPUResource: "nvidia.com/gpu", GPUProductLabel: "nvidia.com/gpu.product"}
 	if err := provider.Check(context.Background()); err != nil {
 		t.Fatalf("cluster capability check: %v", err)
 	}
@@ -33,6 +34,8 @@ func TestKubernetesKindLifecycle(t *testing.T) {
 	if err != nil || created != handle {
 		t.Fatalf("ensure handle=%#v err=%v", created, err)
 	}
+	// The engine's NetworkPolicy passed the API server's own validation.
+	runKubectl(t, contextName, "--namespace", provider.Namespace, "get", "networkpolicy.networking.k8s.io/"+resourceNameFromHandle(handle))
 	observation, err := provider.ObserveReplica(context.Background(), handle, 8000)
 	if err != nil || !observation.Exists || observation.State != "provisioning" || observation.Endpoint != "" {
 		t.Fatalf("unscheduled GPU observation=%#v err=%v", observation, err)

@@ -1,0 +1,162 @@
+---
+title: Grafana and Prometheus
+description: See Release Guard verdicts, canary traffic, rollbacks, and optimization results next to your vLLM and gateway metrics, and page on a blocked release or a rollback.
+---
+
+# Grafana and Prometheus
+
+InferCrane's results show up in the monitoring stack you already run. One dashboard puts gateway
+traffic and vLLM engine signals next to every Release Guard verdict, the share of traffic a canary
+gets, each rollback, and the latest optimization run with its cost per million output tokens.
+Prometheus alerts page through Alertmanager when a release is blocked on answer quality or a
+deployment rolls back.
+
+## Set it up
+
+<Steps>
+  <Step title="Scrape three sources">
+    Add these jobs to `prometheus.yml`
+    ([`deploy/grafana/prometheus-scrape.yaml`](https://github.com/infercrane/infercrane/blob/main/deploy/grafana/prometheus-scrape.yaml)):
+
+    ```yaml title="prometheus.yml"
+    scrape_configs:
+      - job_name: infercrane            # gateway: traffic, latency, admission
+        metrics_path: /metrics
+        static_configs: [{targets: ["infercrane.internal:8080"]}]
+      - job_name: infercrane-results    # your workspace's results
+        metrics_path: /api/v1/metrics
+        scrape_interval: 30s
+        scheme: https
+        authorization:
+          type: Bearer
+          credentials_file: /etc/prometheus/secrets/infercrane-api-key
+        static_configs: [{targets: ["control.infercrane.example"]}]
+      - job_name: vllm                  # vLLM's own engine metrics
+        static_configs: [{targets: ["vllm-0.internal:8000"]}]
+    ```
+
+    The results job needs an API key with read permission. A key reads its own workspace only, so
+    scrape once per workspace. Keep the interval at 15 seconds or longer.
+  </Step>
+  <Step title="Load the alert rules">
+    Add [`deploy/prometheus-rules.yaml`](https://github.com/infercrane/infercrane/blob/main/deploy/prometheus-rules.yaml)
+    under `rule_files`. The `infercrane-results` group holds the alerts below.
+  </Step>
+  <Step title="Import the dashboard">
+    In Grafana, open **Dashboards › New › Import** and upload
+    [`deploy/grafana/infercrane-dashboard.json`](https://github.com/infercrane/infercrane/blob/main/deploy/grafana/infercrane-dashboard.json),
+    or provision it from a file. Pick your Prometheus data source at the top. The job, model,
+    deployment, and endpoint selectors fill themselves from the scraped series.
+  </Step>
+  <Step title="Route pages">
+    Merge [`deploy/grafana/alertmanager.yaml`](https://github.com/infercrane/infercrane/blob/main/deploy/grafana/alertmanager.yaml)
+    into your Alertmanager configuration and keep the PagerDuty or Opsgenie receiver you use.
+  </Step>
+</Steps>
+
+## What the dashboard shows
+
+| Row | Panels | Source |
+|---|---|---|
+| Gateway traffic, latency, and errors | requests per second, error ratio, p50/p95/p99 request duration, active requests, admission and accounting | gateway `/metrics` |
+| Engine (vLLM) | running and waiting requests, KV cache usage, tokens per second, time to first token, inter-token and queue latency (p95), prefix cache hit rate, speculative acceptance, preemptions | vLLM `/metrics` |
+| Release Guard | quality verdict and decision by deployment over time, BLOCK and WATCH counts, time since the last evaluation, endpoint guard decisions | `/api/v1/metrics` |
+| Canary traffic and rollbacks | traffic share per binding, routing policy, staged candidate plans, post-promotion observation, rollbacks | `/api/v1/metrics` |
+| Optimization runs and cost | latest run outcome and state per endpoint, cost per 1M output tokens for the baseline and the chosen setup, runs by state | `/api/v1/metrics` |
+
+### Unknown is not zero
+
+A panel that says **unknown** has no evidence behind it. The deployment was never evaluated, the
+engine does not export the signal, no request finished in the window, or the run's report has no
+price. InferCrane leaves those series out instead of writing a zero, so Grafana shows *unknown*. A
+counter that shows **0** counted stored records and found none.
+
+- Error ratio and latency are unknown while no request arrives, not 0% and 0 ms.
+- Speculative acceptance is unknown when speculative decoding is off.
+- Cost is unknown when the run had no sourced GPU price or no measured throughput.
+
+## Alerts
+
+| Alert | Fires when | Severity |
+|---|---|---|
+| `InferCraneReleaseGuardBlocked` | an evaluation in the last 15 minutes gave a BLOCK quality verdict | critical |
+| `InferCraneRolledBack` | a deployment rolled back in the last 15 minutes, automatically or by an operator | critical |
+| `InferCraneReleaseGuardRejected` | an evaluation rejected a candidate (regression, readiness, or compatibility) | warning |
+| `InferCraneEndpointGuardRejected` | the endpoint guard rejected a candidate serving plan | warning |
+| `InferCraneQualityWatch` | a candidate was accepted with a WATCH quality verdict | info |
+| `InferCraneResultsScrapeFailing` | Prometheus could not read `/api/v1/metrics` for 10 minutes | warning |
+
+The rules use `increase()` on counters of stored records. Each new evaluation or rollback fires
+once. A control-plane restart does not fire them, because the counts come from PostgreSQL, not from
+process memory. A blocked release has not moved production traffic: Release Guard rejected the
+candidate before promotion. A rollback has: production is back on the retained revision.
+
+## Series reference
+
+`GET /api/v1/metrics` returns the Prometheus text format for a scrape and JSON
+(`infercrane.result-metrics/v1`) when `Accept` is `application/json`, which the Python and
+TypeScript SDKs send.
+
+| Series | Labels | Meaning |
+|---|---|---|
+| `infercrane_release_guard_quality_verdict` | `deployment`, `verdict` (`PASS`, `WATCH`, `BLOCK`, `UNKNOWN`) | 1 on the latest evaluation's [quality verdict](/features/semantic-quality#pass-watch-and-block-per-eval) |
+| `infercrane_release_guard_decision` | `deployment`, `decision` (`ACCEPT`, `REJECT`, `WAIT`) | 1 on the latest promotion decision |
+| `infercrane_release_guard_evaluation_timestamp_seconds` | `deployment` | when the latest evaluation was recorded |
+| `infercrane_release_guard_quality_verdicts_total` | `deployment`, `verdict` | stored evaluations by quality verdict |
+| `infercrane_release_guard_decisions_total` | `deployment`, `decision` | stored evaluations by decision |
+| `infercrane_release_observation_state` | `deployment`, `state` (`observing`, `accepted`, `rolled_back`, `failed`) | 1 on the state of the latest post-promotion observation |
+| `infercrane_rollbacks_total` | `deployment`, `trigger` (`automatic`, `operator`) | rollbacks to a retained revision |
+| `infercrane_rollback_timestamp_seconds` | `deployment` | when the deployment last rolled back |
+| `infercrane_endpoint_guard_decision` | `endpoint`, `decision` (`PASS`, `REJECT`, `INCONCLUSIVE`) | 1 on the latest endpoint guard decision |
+| `infercrane_endpoint_guard_evaluation_timestamp_seconds` | `endpoint` | when the latest endpoint evaluation was recorded |
+| `infercrane_endpoint_guard_decisions_total` | `endpoint`, `decision` | stored endpoint evaluations by decision |
+| `infercrane_endpoint_routing_policy` | `endpoint`, `policy` (`manual`, `primary-fallback`, `weighted`) | 1 on the active serving plan's policy; `weighted` is a canary |
+| `infercrane_endpoint_traffic_share` | `endpoint`, `binding`, `kind` (`deployment`, `external`) | configured share of new requests, 0 to 1 |
+| `infercrane_endpoint_candidate_staged` | `endpoint` | 1 while a candidate plan waits for the guard and a promotion |
+| `infercrane_campaign_outcome` | `endpoint`, `outcome` (`winner_selected`, `baseline_kept`, `no_winner`, `in_progress`, `cancelled`) | 1 on the outcome in the latest run's report |
+| `infercrane_campaign_state` | `endpoint`, `state` | 1 on the state of the latest run that targeted the endpoint |
+| `infercrane_campaign_updated_timestamp_seconds` | `endpoint` | when that run last changed |
+| `infercrane_campaign_cost_per_million_output_tokens_usd` | `endpoint`, `setup` (`baseline`, `chosen`) | cost per 1M output tokens the run measured |
+| `infercrane_campaigns` | `state` | runs in the workspace by state |
+| `infercrane_results_truncated` | | 1 when the workspace has more than 500 deployments, endpoints, or optimized endpoints |
+| `infercrane_results_generated_timestamp_seconds` | | when the control plane read these results |
+
+The traffic share is configuration, not measured traffic. A weighted plan splits new requests by
+weight. Manual and primary-fallback plans send them all to the first binding; requests a fallback
+answers after a failure are not counted. Measured traffic per binding is in the
+[endpoint monitoring API](/features/telemetry).
+
+The cost comes from the latest optimization run's report: the run's measured throughput priced with
+the sourced GPU price, for the starting setup and the setup it chose (the same setup when it kept
+the baseline). It is not live cost at your current utilization, which InferCrane does not publish
+as a series yet. The run's outcome and cost appear a scrape or two after the run changes, because
+each scrape assembles at most four reports.
+
+### Cardinality and scope
+
+Every label value is a name you chose (deployment, endpoint, binding) or comes from a fixed list. A
+value outside the list is dropped. One scrape exports at most 500 deployments, 500 endpoints, and 500
+optimized endpoints, in alphabetical order, and sets `infercrane_results_truncated` when it cuts
+any. That is at most 14 series per deployment, 7 per endpoint plus one per binding, and 5 per
+optimized endpoint.
+
+The route reads PostgreSQL on the control plane. The inference gateway never calls it. The gateway's
+own `/metrics` needs no credential, so it names no deployment, endpoint, or workspace.
+
+## Preview on sample data
+
+To see the dashboard before connecting a control plane, run the fixture. It needs Go and Docker, not
+a GPU. Every value it serves is invented, and its names start with `demo-`.
+
+```bash title="Preview the dashboard"
+go run ./internal/testtools/grafana-fixture &
+docker compose -f internal/testtools/grafana-fixture/compose.yaml up
+```
+
+Open `http://127.0.0.1:13000`. The fixture replays an eight-minute story: a candidate waits, passes,
+passes with WATCH, then is blocked; another deployment rolls back; an endpoint moves from a 5% canary
+to primary and back to the closed API; one run finds a cheaper setup and one keeps the current setup.
+
+<Card title="Release Guard" icon="shield-check" href="/features/release-guard">
+  How Release Guard decides, and what PASS, WATCH, and BLOCK mean for a candidate.
+</Card>

@@ -33,6 +33,9 @@ import (
 )
 
 func optimizeCommand(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "draft" {
+		return optimizeDraftCommand(ctx, args[1:], os.Stdout)
+	}
 	if len(args) > 0 && args[0] == "kernel-plan" {
 		return optimizeKernelPlanCommand(args[1:])
 	}
@@ -41,6 +44,12 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	}
 	if len(args) > 0 && args[0] == "workload-profile" {
 		return optimizeWorkloadProfileCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "band-verdict" {
+		return optimizeBandVerdictCommand(args[1:])
+	}
+	if len(args) > 0 && args[0] == "bands" {
+		return optimizeBandsCommand(ctx, args[1:])
 	}
 	if len(args) > 0 && args[0] == "evidence" {
 		return optimizeEvidenceCommand(args[1:])
@@ -54,11 +63,17 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "report" {
 		return optimizeReportCommand(ctx, args[1:])
 	}
+	if len(args) > 0 && args[0] == "gate" {
+		return optimizeGateCommand(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "compare" {
+		return optimizeCompareCommand(ctx, args[1:])
+	}
 	if len(args) > 0 && (args[0] == "list" || args[0] == "inspect" || args[0] == "results" || args[0] == "approve" || args[0] == "activate" || args[0] == "cancel") {
 		return optimizeCampaignCommand(ctx, args)
 	}
 	if len(args) < 2 || (args[0] != "propose" && args[0] != "create") {
-		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE | infercrane optimize list|inspect|results|watch|report|approve|activate|cancel | infercrane optimize doctor")
+		return errors.New("usage: infercrane optimize propose|create MODEL --provider CLOUD_OR_ADAPTER --gpu GPU [flags] | infercrane optimize compare CURRENT.yaml PROPOSED.yaml | infercrane optimize workload-profile --file PROFILE.json | infercrane optimize band-verdict --file SCREEN.json | infercrane optimize bands RUN_ID RUN_ID | infercrane optimize kernel-plan --file PROFILE.json | infercrane optimize evidence evaluate|inspect-fastpath|golden|kernel-tuning --file FILE | infercrane optimize list|inspect|results|watch|report|gate|approve|activate|cancel | infercrane optimize doctor | infercrane optimize draft job|record|args|candidates")
 	}
 	action := args[0]
 	model := args[1]
@@ -69,7 +84,7 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	gpu := fs.String("gpu", "", "exact accelerator identity")
 	gpuCount := fs.Int("gpu-count", 1, "GPUs per baseline replica")
 	runtimes := fs.String("runtimes", "", "optional comma-separated runtime allowlist")
-	objective := fs.String("objective", "interactive", "interactive, latency, throughput, or cost-efficiency")
+	objective := fs.String("objective", "interactive", "interactive, latency, throughput, cost-efficiency, or useful-output")
 	profile := fs.String("profile", "", "benchmark workload profile; defaults from objective. buffered (non-streaming) ranks interactive and latency on p95 request latency and rejects TTFT and TPOT limits")
 	maxTTFT := fs.String("max-ttft-p95-ms", "", "required measured p95 TTFT")
 	maxTPOT := fs.String("max-tpot-p95-ms", "", "required measured p95 TPOT")
@@ -79,14 +94,14 @@ func optimizeCommand(ctx context.Context, args []string) error {
 	maxHourlyCost := fs.String("max-hourly-cost", "", "required sourced hourly cost")
 	includeSimulated := fs.Bool("include-simulated", false, "include locally simulated compatibility setups")
 	maxCandidates := fs.Int("max-candidates", 10, "maximum setups")
-	targetConcurrency := fs.String("target-concurrency", "", "observed or expected concurrent requests; defaults to the workload profile")
+	targetConcurrency := fs.String("target-concurrency", "", "observed or expected concurrent requests; a run measures at this load, rounded up (1 to 512); defaults to the workload profile's")
 	workloadFingerprint := fs.String("workload-fingerprint", "", "content-free observed workload fingerprint")
 	sourceName := fs.String("source", "auto", "where setups come from: auto, catalog, or aiconfigurator")
 	python := fs.String("aiconfigurator-python", "python3", "Python executable containing aiconfigurator 0.11.0")
-	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading public model metadata from Hugging Face for estimates and --search recipes")
+	allowMetadataNetwork := fs.Bool("allow-model-metadata-network", false, "allow reading the model's public config from Hugging Face to plan setups, for estimates, and for --diagnosis-endpoint")
 	// --search stays accepted for scripts; giving the model config turns it on.
 	search := fs.String("search", "", "")
-	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, so --search recipes works offline")
+	modelConfig := fs.String("model-config", "", "local copy of the pinned config.json, to plan setups offline")
 	writeDir := fs.String("write-dir", "", "write each setup's DeploymentSpec into a new or empty directory")
 	idempotencyKey := fs.String("idempotency-key", "", "stable safe-retry key for run creation")
 	targetDeployment := fs.String("target-deployment", "", "existing deployment to evolve; omit when qualifying a new endpoint")
@@ -378,12 +393,15 @@ func optimizeKernelPlanCommand(args []string) error {
 }
 
 func optimizeEvidenceCommand(args []string) error {
-	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath" && args[0] != "golden") {
-		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath|golden --file FILE [--output human|json]")
+	if len(args) < 1 || (args[0] != "evaluate" && args[0] != "inspect-fastpath" && args[0] != "golden" && args[0] != "kernel-tuning") {
+		return errors.New("usage: infercrane optimize evidence evaluate|inspect-fastpath|golden|kernel-tuning --file FILE [--fresh FILE] [--set FILE] [--evidence-dir DIR] [--output human|json]")
 	}
 	action := args[0]
 	fs := newFlagSet("optimize evidence " + action)
-	filePath := fs.String("file", "", "immutable optimization evidence JSON, or a golden suite manifest for golden")
+	filePath := fs.String("file", "", "immutable optimization evidence JSON, a golden suite manifest for golden, or the first window of a kernel-tuning proof")
+	freshPath := fs.String("fresh", "", "kernel-tuning only: the window measured on a fresh machine")
+	setPath := fs.String("set", "", "kernel-tuning only: the tuned set (kernel-configs.json) the windows name")
+	evidenceDir := fs.String("evidence-dir", "", "kernel-tuning only: write the results' evidence files (kernel-invocation-proof.json, and fresh-machine-confirmation.json with --fresh) to this directory")
 	output := fs.String("output", "human", "human or json")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -393,6 +411,12 @@ func optimizeEvidenceCommand(args []string) error {
 	}
 	if err := validateOutput(*output); err != nil {
 		return err
+	}
+	if action == "kernel-tuning" {
+		return optimizeKernelTuningEvidence(*filePath, *freshPath, *setPath, *evidenceDir, *output)
+	}
+	if *freshPath != "" || *setPath != "" || *evidenceDir != "" {
+		return errors.New("--fresh, --set and --evidence-dir are only for optimize evidence kernel-tuning")
 	}
 	if action == "golden" {
 		if body, readErr := os.ReadFile(*filePath); readErr == nil && optimizer.IsPlanningGoldenManifest(body) {
@@ -870,6 +894,23 @@ func printDiagnosisPlan(proposal optimizer.Proposal) error {
 	for _, needed := range plan.NeededEvidence {
 		fmt.Printf("Collect: %s\n", needed)
 	}
+	if room := plan.CacheRoom; room != nil {
+		fmt.Printf("Cache room per server, at %s requests at once:\n", strconv.FormatFloat(room.Load, 'f', -1, 64))
+		for _, entry := range room.DraftLengths {
+			fits := "fits"
+			if !entry.Fits {
+				fits = "does not fit"
+			}
+			fmt.Printf("  %d draft tokens: room for %.0f (%s), %s\n", entry.Drafts, entry.Room, strings.ReplaceAll(entry.Basis, "_", " "), fits)
+		}
+		for _, entry := range room.Precision {
+			fits := "fits"
+			if !entry.Fits {
+				fits = "does not fit"
+			}
+			fmt.Printf("  %s: room for at most %.0f (%.0f blocks), %s\n", entry.Technique, entry.Room, entry.Blocks, fits)
+		}
+	}
 	fmt.Println("Expected benefit orders what to measure first; it is not a measured result.")
 	return nil
 }
@@ -892,7 +933,7 @@ func optimizationProposal(ctx context.Context, request optimizer.Request, catalo
 		return optimizer.Proposal{}, errors.New("source must be auto, catalog, or aiconfigurator")
 	}
 	if request.Search != "" && sourceName == "aiconfigurator" {
-		return optimizer.Proposal{}, errors.New("--search recipes cannot be combined with --source aiconfigurator; use --source auto or catalog")
+		return optimizer.Proposal{}, errors.New("planning setups from the model's config (--model-config or --allow-model-metadata-network) cannot be combined with --source aiconfigurator; use --source auto or catalog")
 	}
 	if sourceName == "catalog" || request.Search != "" {
 		return catalog.Propose(ctx, request)
@@ -921,8 +962,12 @@ var (
 
 const maxFetchedModelConfigBytes = 4 << 20
 
-// applyRecipeSearch records what the pinned model config declares. The network
-// is used only when the operator explicitly allowed metadata lookup.
+// applyRecipeSearch records what the pinned model config declares, for
+// --search setups and for a plan from an endpoint's diagnosis: a diagnosis
+// rule can choose a change, such as speculation with the model's own
+// prediction head, that applies only when the config declares the feature.
+// The network is used only when the operator explicitly allowed metadata
+// lookup.
 func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog optimizer.CatalogSource, search, configPath string, allowNetwork, diagnosed bool) error {
 	request.Search = strings.ToLower(strings.TrimSpace(search))
 	if request.Search == "" {
@@ -933,7 +978,7 @@ func applyRecipeSearch(ctx context.Context, request *optimizer.Request, catalog 
 			return nil
 		}
 		if !diagnosed {
-			request.Search = optimizer.SearchRecipes
+			request.Search = optimizer.SearchSetups
 		}
 	}
 	var raw []byte

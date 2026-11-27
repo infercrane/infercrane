@@ -150,6 +150,28 @@ func TestParseRecordsComputesSLOGoodputWithoutTreatingMissingMetricsAsPassing(t 
 	}
 }
 
+// Useful output counts only the tokens of requests that met every limit: here
+// the first request (30 tokens) meets the one-second first-token limit, the
+// second waited 1.4 s, and the third reported no token count. Over the two
+// seconds the run took, that is 15 useful tokens per second of 130 in all.
+func TestParseRecordsCountsUsefulOutputOfRequestsWithinTheLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "records.jsonl")
+	data := `{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":2000000000},"metrics":{"time_to_first_token":{"value":300},"request_latency":{"value":900},"output_sequence_length":{"value":30}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"time_to_first_token":{"value":1400},"request_latency":{"value":1900},"output_sequence_length":{"value":100}}}
+{"metadata":{"benchmark_phase":"profiling","request_start_ns":1000000000,"request_end_ns":3000000000},"metrics":{"time_to_first_token":{"value":200},"request_latency":{"value":700}}}
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := parseRecordsWithSLO(path, Config{TTFTSLOMS: 1000})
+	if err != nil || result.UsefulOutputThroughput == nil || *result.UsefulOutputThroughput != 15 || result.OutputTokenThroughput == nil || *result.OutputTokenThroughput != 65 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if result, err = parseRecordsWithSLO(path, Config{}); err != nil || result.UsefulOutputThroughput != nil {
+		t.Fatalf("useful output without a limit: %#v err=%v", result, err)
+	}
+}
+
 func TestPercentileUsesNearestRankWithoutHidingTail(t *testing.T) {
 	values := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 100}
 	if got := percentile(values, .95); got != 100 {

@@ -141,3 +141,17 @@ func TestConfidence95RefusesUnsupportedSampleCounts(t *testing.T) {
 		t.Fatalf("interval=%+v ok=%t", interval, ok)
 	}
 }
+
+// The gauges InferCrane's patched engine images add are kept, including one
+// whose name has no other keyword, so a technique's evidence can read them.
+func TestTheSummaryKeepsInferCranesEngineGauges(t *testing.T) {
+	summary := summarizeServerMetrics([]byte(`{"metrics":{
+		"vllm:infercrane_state_by_draft_receipt_verified":{"type":"gauge","series":[{"stats":{"avg":1,"min":1,"max":1}}]},
+		"vllm:infercrane_running_mixed_reservations":{"type":"gauge","series":[{"stats":{"avg":3.5,"min":0,"max":12}}]},
+		"vllm:request_success":{"type":"counter","series":[{"stats":{"total":100}}]}
+	}}`))
+	receipt, kept := summary.Metrics["vllm:infercrane_state_by_draft_receipt_verified"]
+	if !summary.Collected || !kept || receipt.Stats["min"] != 1 || summary.Metrics["vllm:infercrane_running_mixed_reservations"].Stats["max"] != 12 || len(summary.Metrics) != 2 {
+		t.Fatalf("summary %+v", summary)
+	}
+}

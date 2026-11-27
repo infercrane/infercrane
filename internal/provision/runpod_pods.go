@@ -105,6 +105,9 @@ func (r RunPodPods) EnsureReplica(ctx context.Context, spec ReplicaSpec) (Provid
 	if spec.ExternalKey == "" || spec.Model == "" || !strings.EqualFold(spec.Cloud, "runpod") || spec.GPU == "" {
 		return ProviderHandle{}, fmt.Errorf("%w: external key, model, runpod cloud, and GPU are required", ErrInvalidReplicaSpec)
 	}
+	if err := refuseKernelConfigs("runpod-pods", spec); err != nil {
+		return ProviderHandle{}, err
+	}
 	if spec.GPUCount == 0 {
 		spec.GPUCount = 1
 	}

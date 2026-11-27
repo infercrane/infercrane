@@ -63,9 +63,13 @@ type Result struct {
 	RequestThroughput           *float64
 	OutputTokenThroughput       *float64
 	Goodput                     *float64
-	TTFTP50MS, TTFTP95MS        *float64
-	TPOTP50MS, TPOTP95MS        *float64
-	LatencyP50MS, LatencyP95MS  *float64
+	// UsefulOutputThroughput is the output tokens per second of requests
+	// that met every limit set (first token, time per token, request time).
+	// It is measured only when a limit is set.
+	UsefulOutputThroughput     *float64
+	TTFTP50MS, TTFTP95MS       *float64
+	TPOTP50MS, TPOTP95MS       *float64
+	LatencyP50MS, LatencyP95MS *float64
 	// OutputTokensPerRequest is the mean server-reported count of tokens a
 	// successful request generated, reasoning tokens included. It is nil
 	// unless every successful request reported a count, so a partial count
@@ -347,6 +351,9 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 	var ttft, tpot, latency, outputTokens []float64
 	var result Result
 	goodRequests := 0
+	// goodTokens counts the output of requests that met every limit set; a
+	// request whose token count is missing adds nothing it cannot show.
+	goodTokens := 0.0
 	hasSLO := cfg.TTFTSLOMS > 0 || cfg.TPOTSLOMS > 0 || cfg.LatencySLOMS > 0
 	for _, path := range paths {
 		file, err := os.Open(path)
@@ -444,6 +451,7 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 			if _, ok := row.Metrics[generated]; !ok {
 				generated = "output_token_count"
 			}
+			counted := len(outputTokens)
 			if err := appendMetric(generated, &outputTokens); err != nil {
 				return Result{}, err
 			}
@@ -458,6 +466,9 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 			}
 			if requestGood {
 				goodRequests++
+				if len(outputTokens) > counted {
+					goodTokens += outputTokens[len(outputTokens)-1]
+				}
 			}
 		}
 		scanErr := scanner.Err()
@@ -494,6 +505,8 @@ func parseRecordFilesWithSLO(paths []string, cfg Config) (Result, error) {
 		if hasSLO {
 			goodput := float64(goodRequests) / result.DurationSeconds
 			result.Goodput = &goodput
+			useful := goodTokens / result.DurationSeconds
+			result.UsefulOutputThroughput = &useful
 		}
 	}
 	return result, nil
@@ -517,6 +530,7 @@ func profileConfidence(paths []string, cfg Config) map[string]ConfidenceInterval
 		appendValue("tpot_p95_ms", result.TPOTP95MS)
 		appendValue("latency_p95_ms", result.LatencyP95MS)
 		appendValue("goodput", result.Goodput)
+		appendValue("useful_output_throughput", result.UsefulOutputThroughput)
 	}
 	confidence := map[string]ConfidenceInterval{}
 	for name, samples := range values {

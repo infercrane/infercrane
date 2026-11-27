@@ -12,6 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 type benchmarkStoreFixture struct {
@@ -56,7 +57,7 @@ func TestBenchmarkExecutorMeasuresExactCandidateRevisionAndPersistsProvenance(t 
 	now := time.Now().UTC()
 	draft := optimizer.DeploymentDraft{APIVersion: "infercrane.dev/v1", Kind: "Deployment", Name: "coder"}
 	draft.Model.ID, draft.Model.Revision = "Qwen/Qwen3-32B", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	draft.Runtime.Engine, draft.Runtime.Version, draft.Runtime.Args = "vllm", "0.8.5.post1", []string{"--enable-prefix-caching"}
+	draft.Runtime.Engine, draft.Runtime.Version, draft.Runtime.Args = "vllm", support.DefaultRuntimeVersion, []string{"--enable-prefix-caching"}
 	draft.Compute.Mode, draft.Provider.Cloud, draft.Provider.Region, draft.Provider.Adapter = "elastic", "aws", "eu-central-1", "aws-ec2"
 	draft.Resources.GPU, draft.Scaling.MinReplicas, draft.Scaling.MaxReplicas = "L40S", 1, 1
 	draftJSON, _ := json.Marshal(draft)

@@ -116,6 +116,122 @@ qualification inventory establishes evidence for an exact runtime/provider/mode 
 infercrane integrations --output json
 ```
 
+## Move a deployment from vLLM 0.22.1 to 0.34.0
+
+The control plane now pins vLLM 0.34.0 as the current release. Upgrading the control plane changes
+no running deployment:
+
+- A revision that records `runtime_version: 0.22.1` keeps the 0.22.1 image when it scales, replaces
+  a lost replica, or rolls back. The accelerator catalog (`GET /api/v1/catalog/accelerators`) lists
+  those images with `status: legacy`.
+- A new revision that names no version gets 0.34.0, and new setups are planned on 0.34.0.
+- A built-in vLLM revision that names a release with no pinned image (anything other than 0.34.0 or
+  0.22.1) is refused with `runtime vllm X is not pinned`. Before this release it ran the pinned
+  0.22.1 image while recording X. Before upgrading, list such revisions and move them first.
+- RunPod serverless and Dynamo deployments run the image the operator configured (the serverless
+  template, `INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST`), not a pinned image. Move them by changing that
+  image and its recorded version.
+
+Move each 0.22.1 deployment with a candidate revision on 0.34.0, measured against the running one,
+the same way as any other runtime change:
+
+```bash
+infercrane plan deployment-vllm-034.yaml --output json
+infercrane apply deployment-vllm-034.yaml --idempotency-key vllm-034-REVISION --wait
+infercrane rollout inspect DEPLOYMENT
+```
+
+A deployment whose checkpoint vLLM 0.34.0 no longer loads stays on 0.22.1 until its model moves to
+another format. vLLM 0.34.0 moved GGUF and bitsandbytes to out-of-tree plugins (`vllm-gguf-plugin`,
+`vllm-bnb-plugin`) that the pinned image is not known to carry, and removed `fp_quant` and
+`cpu_awq`. The model check reads quantization methods from the 0.34.0 registry snapshot, so it
+reports such a checkpoint's quantization as unknown ("not a vLLM 0.34.0 quantization method"), never
+as a pass.
+
+With [Stay optimized](/features/optimization#stay-optimized) on, the endpoint's next check fires an
+engine-release trigger ("vllm 0.34.0 is the new pinned engine release; this endpoint runs 0.22.1")
+and proposes that run. Re-measure before promoting: 0.34.0 changes defaults under every setup.
+Upgrading the control plane fires this trigger on every 0.22.1 endpoint with Stay optimized on at
+once. A proposed run starts by itself only where the endpoint allows automatic runs, and only within
+its monthly cap; otherwise it waits for a person.
+
+| Default | vLLM 0.22.1 | vLLM 0.34.0 |
+|---|---|---|
+| Batch budget (`--max-num-batched-tokens` / `--max-num-seqs`) | 2048 / 256 below 70 GiB and on A100; 8192 / 1024 from 70 GiB | 2048 / 256 below 70 GiB and on A100; 8192 / 1024 from 70 GiB; 16384 / 1024 from 160 GiB (B200, B300, MI300X and newer) |
+| KV cache block | 16 tokens | 64 tokens, unless the attention backend prefers another |
+| KV cache sizing | `gpu_memory_utilization` 0.92 | Extensible KV cache on CUDA and ROCm, sized from memory free after CUDA-graph capture; `gpu_memory_utilization` defaults to 1.0 (0.92 with `--no-enable-extensible-kv-cache`) |
+| Async scheduling | On, except with CPU n-gram, draft-model, suffix, Medusa, or MLP speculation | On, also with those; off with ROCm DeepEP high-throughput and dual-batch overlap |
+| CUDA graphs | Batches up to `min(2 × max_num_seqs, 512)` | The same, with a ceiling of 1024 on B200 and B300, where decode graphs cover every batch up to `max_num_seqs` |
+| LoRA | Ranks 1, 8, 16, 32, 64, 128, 256, 320, 512 | Unchanged |
+
+The vLLM release notes report 6–18% higher per-token decode latency at concurrency 128 on some H200
+models from the new KV cache sizing; `--no-enable-extensible-kv-cache` or an explicit
+`--gpu-memory-utilization` restores the old sizing. A server that shares its GPU with another process
+needs an explicit `--gpu-memory-utilization`, because the default now takes the memory vLLM finds
+free. A 0.22.1 setup that sets `--max-cudagraph-capture-size` keeps working on 0.34.0 with a
+deprecation warning, and on B200 and B300 it turns off the wider decode graphs.
+
+Where the runtime image must already be on the machine (`INFERCRANE_KUBERNETES_IMAGE_CACHE_POLICY`
+or `INFERCRANE_AWS_IMAGE_CACHE_POLICY` set to `required`: Kubernetes then uses
+`imagePullPolicy: Never`, and EC2 refuses an image it has not pre-warmed), pre-pull the vLLM 0.34.0
+image digests before the first 0.34.0 revision starts, and keep the 0.22.1 images while any revision
+records 0.22.1. With `prefer`, a missing image is pulled at start and the first replica starts more
+slowly.
+
+Operators who run SkyPilot on RunPod also need a 0.34.0 build of `ghcr.io/infercrane/vllm-runpod`,
+published with the `Runtime image` workflow (`vllm_version: 0.34.0`, `vllm_base_image:
+vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1`). Until it
+is published and pinned, that path boots the `v0.34.0` tag.
+
+## Move a deployment from SGLang 0.5.12 to 0.5.23
+
+The control plane now pins SGLang 0.5.23. An SGLang revision stores its image, so every existing
+revision keeps the 0.5.12 image on every later operation; the accelerator catalog lists the 0.5.12
+images with `status: legacy`. A new revision that names no version gets 0.5.23, and one that names
+an unpinned release (anything other than 0.5.23 or 0.5.12) is refused. Move each deployment with a
+candidate revision on 0.5.23, measured against the running one; Stay optimized's engine-release
+trigger proposes that run.
+
+What changes for a setup moving to 0.5.23, from its v0.5.23 source:
+
+- `--cuda-graph-max-bs` no longer exists; use `--cuda-graph-max-bs-decode` (and `-prefill`). A
+  0.5.12 setup that sets it does not start on 0.5.23.
+- `--disable-cuda-graph` and `--enable-dp-attention` still work with a deprecation warning; their
+  replacements are `--cuda-graph-backend-decode=disabled` and `--cuda-graph-backend-prefill=disabled`,
+  and `--attn-dp-size`.
+- `--hicache-ratio` has no fixed default any more: unset, it is 2.0 in the default `cache` host
+  memory mode.
+- New revisions start with `--enable-metrics`, so InferCrane can read SGLang's engine metrics; the
+  0.5.12 revisions keep the command they stored, without it.
+
+The defaults the optimizer reads (KV cache dtype, quantization, schedule policy, speculation, batch
+limits sized from GPU memory) are the same in both releases. Where the runtime image must already be
+on the machine (`required` image cache policy), pre-pull the 0.5.23 digests first.
+
+## Engine arguments, keys, and pod ingress
+
+These engine checks apply from this release. Review each before upgrading the control plane and
+the agent.
+
+- **Engine arguments.** Extra vLLM and SGLang arguments must be in the reviewed set listed in
+  [engine arguments](/deployment-spec#engine-arguments). A stored revision with an argument outside
+  it is refused at its next rollout, scale, or replacement. Running replicas keep serving. List the
+  `runtime.args` of active revisions first, and move any that fail with a candidate revision.
+  `--trust-remote-code` and `--enable-custom-logit-processor` are refused on every runtime.
+- **Engine keys.** Every SGLang server now requires the worker key, like vLLM. A running SGLang
+  replica gets the key when it is next provisioned. Until then it serves without one, so roll out
+  or replace each SGLang deployment after the upgrade. Health and metrics paths stay open.
+- **Engine pod ingress on Kubernetes.** With the `deployment` workload API, the control plane does
+  not start until `INFERCRANE_KUBERNETES_ENGINE_INGRESS` is set. Apply the updated
+  `deploy/kubernetes/base/provider-rbac.yaml` first, then set the value
+  ([who can reach engine pods](/integrations/kubernetes#who-can-reach-engine-pods)). Existing
+  replicas get their policy when they are next provisioned.
+- **Agent candidate runs on Kubernetes.** `infercrane agent run --executor kubernetes` does not
+  start without `--engine-ingress` or `INFERCRANE_KUBERNETES_ENGINE_INGRESS`. Upgrade the Helm
+  chart with the agent: it sets the flag to the agent's own pods and adds NetworkPolicy permissions
+  to the agent's Role. Candidates started after the upgrade get the policy and, for SGLang, the
+  key.
+
 ## Current release support boundary
 
 <Warning>

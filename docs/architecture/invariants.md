@@ -22,7 +22,8 @@ plan, and an update to this document in the same pull request.
 - An InferCrane agent's data plane runs the same gateway code on a snapshot it pulls over its
   outbound channel. It has no database access, routes only to servers it detected itself (the
   snapshot names them by server key, never by address), and stops serving when the snapshot is
-  older than its validity window.
+  older than its validity window plus its operator's offline grace (24 hours by default, 0 to fail
+  closed). Inside the grace it routes only the endpoints' own servers.
 - The hosted gateway never forwards a request for a `customer-cloud` endpoint, not even to another
   supply; it refuses it.
 
@@ -61,6 +62,9 @@ plan, and an update to this document in the same pull request.
 - Production secrets have no built-in defaults and do not enter logs or provider metadata.
 - Credential secrets are never stored; only cryptographic hashes are persisted.
 - An agent key calls only the agent API, never other control-plane routes or the inference gateway.
+- The gateway's unauthenticated `/metrics` carries no deployment, endpoint, or workspace names.
+  Per-workspace result series (`GET /api/v1/metrics`) need a read credential and cover that
+  credential's workspace only.
 - Prompts, completions, and request content never leave an agent's machine or cluster; it sends
   hardware, server details, filtered engine metrics, content-free request shapes, quota lease
   counts, and candidate-run numbers only (the list is in the agent page, "What leaves your cloud").
