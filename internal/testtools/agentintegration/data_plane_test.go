@@ -242,6 +242,7 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 	if err := <-commandsDone; err != nil {
 		t.Fatalf("commands: %v", err)
 	}
+	sent.waitForHeldPolls(t)
 	finished := store.command(runID)
 	if finished.State != "succeeded" {
 		t.Fatalf("candidate run: %+v", finished)
@@ -279,6 +280,7 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 	}
 	stopCommands()
 	<-commandsDone
+	sent.waitForHeldPolls(t)
 	if refused := store.command(refusedID); refused.State != "failed" || refused.FailureCode != "image_not_allowed" || len(candidates.specs) != 1 {
 		t.Fatalf("disallowed image: %+v (launched %d)", refused, len(candidates.specs))
 	}

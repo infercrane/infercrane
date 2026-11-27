@@ -45,6 +45,10 @@ func (noAccelerators) Run(context.Context, string, ...string) ([]byte, error) {
 type recorder struct {
 	mu     sync.Mutex
 	bodies []string
+	// polls counts the agent's command long polls the server still holds. A
+	// poll whose agent has gone can lease a command queued after it left, and
+	// that command then waits out its lease.
+	polls int
 }
 
 func (r *recorder) wrap(next http.Handler) http.Handler {
@@ -60,8 +64,37 @@ func (r *recorder) wrap(next http.Handler) http.Handler {
 		r.bodies = append(r.bodies, request.URL.Path+" "+string(body))
 		r.mu.Unlock()
 		request.Body = io.NopCloser(bytes.NewReader(raw))
+		if request.Method == http.MethodGet && request.URL.Path == "/api/v1/agent/commands" {
+			r.mu.Lock()
+			r.polls++
+			r.mu.Unlock()
+			defer func() {
+				r.mu.Lock()
+				r.polls--
+				r.mu.Unlock()
+			}()
+		}
 		next.ServeHTTP(w, request)
 	})
+}
+
+// waitForHeldPolls waits until the server holds no command poll, so the next
+// queued command is leased only by the agent started to run it.
+func (r *recorder) waitForHeldPolls(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		r.mu.Lock()
+		held := r.polls
+		r.mu.Unlock()
+		if held == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the server still holds %d command polls after the agent stopped", held)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (r *recorder) all() string {
