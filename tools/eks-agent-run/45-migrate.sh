@@ -190,7 +190,7 @@ print("%d setups: %s" % (len(proposal.get("candidates", [])), "; ".join(
 json.dump({"proposal": proposal, "intent": "new_endpoint"}, open(out, "w"))
 PY
     status=$(curl -sS --max-time 60 --cacert "$STATE_DIR/tls.crt" --resolve "$CONTROL_HOST:$CONTROL_LOCAL_PORT:127.0.0.1" \
-      -X POST -H "Content-Type: application/json" -H "@$STATE_DIR/auth-header" -H "Idempotency-Key: eks-qual-migration-$(state_get CREATED_AT)" \
+      -X POST -H "Content-Type: application/json" -H "@$STATE_DIR/auth-header" -H "Idempotency-Key: eks-qual-migration-$(state_get CREATED_AT)-$(printf '%s' "$eval_digest" | cut -c8-19)" \
       -o "$RUN_DIR/campaign-created.json" -w '%{http_code}' --data-binary "@$RUN_DIR/campaign-request.json" \
       "https://$CONTROL_HOST:$CONTROL_LOCAL_PORT/api/v1/optimization/campaigns")
     case "$status" in 200 | 201) ;; *) die "posting the campaign answered HTTP $status: $(head -c 500 "$RUN_DIR/campaign-created.json")" ;; esac
@@ -234,7 +234,7 @@ try:
     d = json.load(open(sys.argv[1]))
 except ValueError:
     d = {}
-items = d.get("verdicts", d if isinstance(d, list) else [])
+items = d if isinstance(d, list) else d.get("verdicts", [])
 for item in items:
     if str(item.get("verdict", "")).upper() == "PASS":
         print(item.get("id", ""), item.get("candidate_id") or item.get("candidate_run_id") or "")
