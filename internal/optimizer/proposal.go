@@ -530,7 +530,7 @@ func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 	if !ok {
 		return s.proposeGeneric(proposal)
 	}
-	compatibility := matchingCompatibility(s.Integrations.Compatibility, request)
+	compatibility := matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request)
 	if len(compatibility) == 0 {
 		proposal.Missing = []string{"qualified_provider_runtime_compatibility"}
 		return proposal, nil
@@ -871,7 +871,7 @@ func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
 	if entry, found := findRecipe(s.Recipes, model); found {
 		model = entry.Model
 	}
-	compatibility := matchingCompatibility(s.Integrations.Compatibility, request)
+	compatibility := matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request)
 	if len(compatibility) == 0 {
 		proposal.Missing = []string{"qualified_provider_runtime_compatibility"}
 		return proposal, nil
@@ -995,7 +995,7 @@ func (s CatalogSource) expandCheckpointCandidates(baselines []Candidate, request
 			revision = entry.Revision
 		}
 	}
-	for _, compatible := range matchingCompatibility(s.Integrations.Compatibility, request) {
+	for _, compatible := range matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request) {
 		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
 			continue
 		}
@@ -1245,7 +1245,11 @@ func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Req
 	return args
 }
 
-func matchingCompatibility(entries []integration.RuntimeCompatibility, request Request) []integration.RuntimeCompatibility {
+// matchingCompatibility returns the entries a proposal may use: the request's
+// provider and runtimes, a qualified state (simulated only when asked), and,
+// for an entry narrowed to one qualified tuple, the request's GPU and the
+// runtime's pinned version. One entry per runtime, adapter, and mode remains.
+func matchingCompatibility(entries []integration.RuntimeCompatibility, runtimes []integration.RuntimeProfile, request Request) []integration.RuntimeCompatibility {
 	allowedRuntime := func(value string) bool {
 		if len(request.Runtimes) == 0 {
 			return true
@@ -1268,9 +1272,12 @@ func matchingCompatibility(entries []integration.RuntimeCompatibility, request R
 		if entry.State != integration.QualificationLocal && entry.State != integration.QualificationReal && !(request.IncludeSimulated && entry.State == integration.QualificationSimulated) {
 			continue
 		}
+		if !entry.Applies(request.GPU, runtimeVersion(runtimes, entry.Runtime)) {
+			continue
+		}
 		out = append(out, entry)
 	}
-	return out
+	return integration.Strongest(out)
 }
 
 func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) []curatedrecipe.ServingProfile {

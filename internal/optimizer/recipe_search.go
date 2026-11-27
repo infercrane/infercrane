@@ -265,7 +265,7 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 	}
 	var experiments []Candidate
 	for _, template := range recipeTemplates() {
-		built, warnings, err := buildRecipeExperiments(template, model, revision, s.Integrations.Compatibility, request)
+		built, warnings, err := buildRecipeExperiments(template, model, revision, s.Integrations.Compatibility, s.Integrations.Runtimes, request)
 		if err != nil {
 			return Proposal{}, err
 		}
@@ -291,7 +291,7 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 	return proposal, nil
 }
 
-func buildRecipeExperiments(template recipeTemplate, model, revision string, compatibility []integration.RuntimeCompatibility, request Request) ([]Candidate, []string, error) {
+func buildRecipeExperiments(template recipeTemplate, model, revision string, compatibility []integration.RuntimeCompatibility, runtimes []integration.RuntimeProfile, request Request) ([]Candidate, []string, error) {
 	accelerator, listed := recipeAcceleratorFor(template, request.GPU)
 	if !listed {
 		return nil, []string{fmt.Sprintf("No reviewed %s setups exist for accelerator %s; none were added.", template.id, request.GPU)}, nil
@@ -302,7 +302,7 @@ func buildRecipeExperiments(template recipeTemplate, model, revision string, com
 	if len(request.Runtimes) > 0 && !contains(request.Runtimes, template.engine) && !contains(request.Runtimes, recipeRuntime) {
 		return nil, []string{fmt.Sprintf("The runtime allowlist excludes the %s setups; none were added.", template.id)}, nil
 	}
-	compatible, found := bestRecipeCompatibility(compatibility, request)
+	compatible, found := bestRecipeCompatibility(compatibility, runtimes, request)
 	if !found {
 		return nil, []string{"Adding setups needs a qualified pinned-image runtime on this provider; none were added."}, nil
 	}
@@ -383,11 +383,11 @@ func recipeArmPriority(arm recipeArm, shape performanceprofile.Profile, concurre
 	return priority
 }
 
-func bestRecipeCompatibility(entries []integration.RuntimeCompatibility, request Request) (integration.RuntimeCompatibility, bool) {
+func bestRecipeCompatibility(entries []integration.RuntimeCompatibility, runtimes []integration.RuntimeProfile, request Request) (integration.RuntimeCompatibility, bool) {
 	unrestricted := request
 	unrestricted.Runtimes = nil
 	var matches []integration.RuntimeCompatibility
-	for _, entry := range matchingCompatibility(entries, unrestricted) {
+	for _, entry := range matchingCompatibility(entries, runtimes, unrestricted) {
 		if entry.Runtime == recipeRuntime {
 			matches = append(matches, entry)
 		}
