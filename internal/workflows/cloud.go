@@ -1742,7 +1742,7 @@ func collectProviderFields(value any, fields map[string]string) {
 func runtimeDigest(request CloudRequest) string {
 	env := request.RuntimeEnv
 	if request.KernelConfigs != nil {
-		env = make(map[string]string, len(request.RuntimeEnv)+1)
+		env = make(map[string]string, len(request.RuntimeEnv))
 		for name, value := range request.RuntimeEnv {
 			env[name] = value
 		}
