@@ -36,7 +36,7 @@ async function main() {
     throw new Error("mode must be plan, apply, release-check, or proof-gate");
   const cli = await resolveCLI(
     input("cli-path", "auto"),
-    input("version", "v2.0.2"),
+    input("version", "v2.1.0"),
     path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "infercrane-action"),
   );
   if (mode === "proof-gate") {

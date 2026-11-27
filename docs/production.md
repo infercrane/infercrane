@@ -166,7 +166,7 @@ credit, and the evidence boundary for capacity-derived pricing.
 For a single-host first installation, copy `.env.production.example` to a private path, replace
 every example secret and URL, then render and start the maintained production stack:
 
-The example pins the published `v2.0.2` image. Hosted documentation follows `main`, which may
+The example pins the published `v2.1.0` image. Hosted documentation follows `main`, which may
 describe work scheduled for the next release. Do not combine a release image with a newer schema
 or configuration contract without following [upgrade and compatibility](/upgrade).
 

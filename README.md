@@ -84,17 +84,17 @@ set before a setup that changes answers can win. See
 
 ## Install
 
-Install the `v2.0.2` CLI with Homebrew or use a matching release artifact:
+Install the `v2.1.0` CLI with Homebrew or use a matching release artifact:
 
 ```bash
 brew install infercrane/tap/infercrane
 python -m pip install \
-  'https://github.com/infercrane/infercrane/releases/download/v2.0.2/infercrane-2.0.2-py3-none-any.whl'
-npm install '@infercrane/sdk@2.0.2'
+  'https://github.com/infercrane/infercrane/releases/download/v2.1.0/infercrane-2.1.0-py3-none-any.whl'
+npm install '@infercrane/sdk@2.1.0'
 ```
 
 Release archives and Terraform provider binaries are available from the
-[`v2.0.2` release](https://github.com/infercrane/infercrane/releases/tag/v2.0.2).
+[`v2.1.0` release](https://github.com/infercrane/infercrane/releases/tag/v2.1.0).
 To run the complete GPU-free product proof without creating cloud resources:
 
 ```bash
@@ -350,7 +350,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 | CLI and control API | Primary deployment, operation, evidence, and administration interfaces. |
 | GitHub Action | The regression gate for model and setting changes (`proof-gate`), plus plan, protected apply, and exact release checks. |
 | OpenAI-compatible gateway | Capability-gated Chat, Completions, Embeddings, Responses, and online batch paths. The pinned vLLM profile currently qualifies Chat plus model-compatible Completions and Embeddings; unsupported capabilities fail before upstream transmission. |
-| Python and TypeScript SDKs | Release artifacts: the Python wheel attached to `v2.0.2` and `@infercrane/sdk@2.0.2`. Generated from the checked OpenAPI contract. |
+| Python and TypeScript SDKs | Release artifacts: the Python wheel attached to `v2.1.0` and `@infercrane/sdk@2.1.0`. Generated from the checked OpenAPI contract. |
 | Terraform provider | Logical deployment lifecycle with guarded updates and import. Release binaries and source are public; Registry publication is pending. |
 | Terminal workspace | Fleet attention, evidence inspection, and state-valid guarded actions. |
 | Browser console | Company-operated service for Model APIs, BYOC planning, optimization campaigns, usage, access, and workspace-scoped sandboxes. Its source is not part of the Apache-2.0 core. |
@@ -358,7 +358,7 @@ Read the [architecture](https://docs.infercrane.com/architecture/system),
 
 ## Qualification status
 
-InferCrane `v2.0.2` is the first stable release and the supported line. The `v1.0.0-rc.*` tags were
+InferCrane `v2.1.0` is the current stable release and the supported line. The `v1.0.0-rc.*` tags were
 public betas; no earlier development tag should be treated as a supported public release.
 
 - Local race, PostgreSQL, fault-injection, Docker, Kind, KWOK, package, migration, security, and
