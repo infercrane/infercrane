@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -49,19 +50,27 @@ const (
 var (
 	phasePattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 	commandIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$`)
-	evalSetPattern   = regexp.MustCompile(`^(default|local:[a-z0-9][a-z0-9._-]{0,62})$`)
-	labelPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._:/+-]{0,127}$`)
+	// An eval set is the built-in suite, one the agent's operator keeps
+	// beside it by name, or (for a measured window) one of those named by
+	// the digest of its bytes, which is all the control plane knows of it.
+	evalSetPattern = regexp.MustCompile(`^(default|local:[a-z0-9][a-z0-9._-]{0,62}|sha256:[a-f0-9]{64})$`)
+	labelPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._:/+-]{0,127}$`)
 )
 
 // Command is one unit of work for an agent.
 type Command struct {
-	ID           string              `json:"id"`
-	Kind         string              `json:"kind"`
-	DeadlineAt   time.Time           `json:"deadline_at,omitempty"`
-	RunCandidate *CandidateRunSpec   `json:"run_candidate,omitempty"`
-	Cancelled    bool                `json:"cancelled,omitempty"`
-	Attempt      int                 `json:"attempt,omitempty"`
-	Control      *CandidateRunServer `json:"control,omitempty"`
+	ID           string            `json:"id"`
+	Kind         string            `json:"kind"`
+	DeadlineAt   time.Time         `json:"deadline_at,omitempty"`
+	RunCandidate *CandidateRunSpec `json:"run_candidate,omitempty"`
+	// MeasureWindow is set for a measure_window command.
+	MeasureWindow *WindowSpec `json:"measure_window,omitempty"`
+	// StartServer and StopServer are set for a rollout's commands.
+	StartServer *StartServerSpec    `json:"start_server,omitempty"`
+	StopServer  *StopServerSpec     `json:"stop_server,omitempty"`
+	Cancelled   bool                `json:"cancelled,omitempty"`
+	Attempt     int                 `json:"attempt,omitempty"`
+	Control     *CandidateRunServer `json:"control,omitempty"`
 }
 
 // CandidateRunServer names the current setup a candidate is measured
@@ -125,6 +134,10 @@ type CommandUpdate struct {
 	FailureCode   string              `json:"failure_code,omitempty"`
 	FailureDetail string              `json:"failure_detail,omitempty"`
 	Result        *CandidateRunResult `json:"result,omitempty"`
+	// Window is a measure_window command's result.
+	Window *WindowResult `json:"window,omitempty"`
+	// Server is a start_server or stop_server command's result.
+	Server *ServerResult `json:"server,omitempty"`
 }
 
 // CommandUpdateResponse tells the agent whether to keep going.
@@ -203,38 +216,10 @@ func (s CandidateRunSpec) Validate() error {
 	if !labelPattern.MatchString(s.Label) {
 		return errors.New("label must be 1..128 letters, digits, spaces, or ._:/+-")
 	}
-	if err := boundedText("model", s.Model, true); err != nil {
+	if err := validateSetup(s.Model, s.ModelRevision, s.Workload, s.RuntimeArgs, s.Accelerator, s.GPUCount); err != nil {
 		return err
 	}
-	if err := boundedText("model_revision", s.ModelRevision, false); err != nil {
-		return err
-	}
-	if err := s.Workload.Validate(); err != nil {
-		return fmt.Errorf("workload: %w", err)
-	}
-	if isShell(s.Workload.Command[0]) {
-		return errors.New("workload.command must start the model server itself, not a shell")
-	}
-	if len(s.RuntimeArgs) > MaxRuntimeArgs {
-		return fmt.Errorf("at most %d runtime_args are allowed", MaxRuntimeArgs)
-	}
-	for _, arg := range s.RuntimeArgs {
-		if len(arg) > 512 || strings.ContainsAny(arg, "\x00\r\n") || strings.Contains(arg, "${") || strings.Contains(arg, "$(") {
-			return errors.New("runtime_args must be bounded single-line arguments without substitutions")
-		}
-	}
-	if err := boundedText("accelerator", s.Accelerator, true); err != nil {
-		return err
-	}
-	if s.GPUCount < 1 || s.GPUCount > 16 {
-		return errors.New("gpu_count must be between 1 and 16")
-	}
-	load := s.Load
-	if load.Requests < 1 || load.Requests > MaxCandidateRequests || load.Concurrency < 1 || load.Concurrency > MaxCandidateConcurrency ||
-		load.InputTokens < 1 || load.InputTokens > MaxCandidateTokens || load.OutputTokens < 1 || load.OutputTokens > MaxCandidateTokens {
-		return errors.New("load needs 1..5000 requests, 1..256 concurrency, and 1..32768 input and output tokens")
-	}
-	if err := boundedText("load.tokenizer", load.Tokenizer, false); err != nil {
+	if err := s.Load.validate(); err != nil {
 		return err
 	}
 	if !s.Quality.Skip && !evalSetPattern.MatchString(s.Quality.EvalSet) {
@@ -242,6 +227,46 @@ func (s CandidateRunSpec) Validate() error {
 	}
 	if s.TimeoutSecs < 60 || time.Duration(s.TimeoutSecs)*time.Second > MaxCandidateRunTimeout {
 		return errors.New("timeout_seconds must be between 60 and 21600")
+	}
+	return nil
+}
+
+// validateSetup bounds the setup an agent starts for a candidate run or a
+// measured window.
+func validateSetup(model, revision string, workload runtimecontract.Workload, args []string, accelerator string, gpus int) error {
+	if err := boundedText("model", model, true); err != nil {
+		return err
+	}
+	if err := boundedText("model_revision", revision, false); err != nil {
+		return err
+	}
+	if err := workload.Validate(); err != nil {
+		return fmt.Errorf("workload: %w", err)
+	}
+	if isShell(workload.Command[0]) {
+		return errors.New("workload.command must start the model server itself, not a shell")
+	}
+	if len(args) > MaxRuntimeArgs {
+		return fmt.Errorf("at most %d runtime_args are allowed", MaxRuntimeArgs)
+	}
+	for _, arg := range args {
+		if len(arg) > 512 || strings.ContainsAny(arg, "\x00\r\n") || strings.Contains(arg, "${") || strings.Contains(arg, "$(") {
+			return errors.New("runtime_args must be bounded single-line arguments without substitutions")
+		}
+	}
+	// A candidate's extra arguments to a vLLM or SGLang server are a reviewed
+	// set, and a few flags are refused in any image's command or arguments.
+	if err := optimizationcapability.RefuseUnsafeEngineArgs(workload.Command); err != nil {
+		return fmt.Errorf("workload: %w", err)
+	}
+	if err := optimizationcapability.ValidateEngineArgs(runtimecontract.CommandEngine(workload.Command), args); err != nil {
+		return err
+	}
+	if err := boundedText("accelerator", accelerator, true); err != nil {
+		return err
+	}
+	if gpus < 1 || gpus > 16 {
+		return errors.New("gpu_count must be between 1 and 16")
 	}
 	return nil
 }
@@ -274,8 +299,23 @@ func (u CommandUpdate) Validate() error {
 	if err := boundedText("failure_detail", u.FailureDetail, false); err != nil {
 		return err
 	}
-	if u.State == CommandSucceeded && u.Result == nil {
+	results := 0
+	for _, present := range []bool{u.Result != nil, u.Window != nil, u.Server != nil} {
+		if present {
+			results++
+		}
+	}
+	if u.State == CommandSucceeded && results == 0 {
 		return errors.New("a succeeded command needs a result")
+	}
+	if results > 1 {
+		return errors.New("a command reports one result")
+	}
+	if u.Server != nil {
+		return u.Server.Validate()
+	}
+	if u.Window != nil {
+		return u.Window.Validate()
 	}
 	if u.Result != nil {
 		return u.Result.Validate()

@@ -1,0 +1,746 @@
+{
+ "run": "r4-1",
+ "plan": "h100-qwen3-8b-fp8",
+ "rules": "rules-rung4-h100-qwen3-8b-2026-11-26.md",
+ "report": {
+  "artifact_digest": "sha256:dd24310bd5cc8fc886eda0511b4b0863370d3a7088228260c848ee74ba9e5348",
+  "dataset_fingerprint": "sha256:3faa8c8722b072ec1bde8df2c4569fedd37fe3995f975fba7bca8c6617056132",
+  "examples": 2000,
+  "expected_tokens_per_step": 1.8030400405147704,
+  "start_expected_tokens_per_step": 1.658814468155268,
+  "training_tokens": 851671,
+  "valid": true
+ },
+ "windows": [
+  {
+   "control": "none",
+   "candidates": [
+    "published",
+    "trained",
+    "none_b"
+   ],
+   "loads": [
+    {
+     "concurrency": 1,
+     "requests_per_run": 8,
+     "output_token_throughput": {
+      "none_b": {
+       "higher_is_better": true,
+       "control_mean": 228.37110053494322,
+       "control_spread": 0.010223613431737243,
+       "candidate_mean": 228.55032736335232,
+       "candidate_uncertainty": 0.006495294904841867,
+       "delta": 0.001433776153043853,
+       "noise_floor": 0.019011614585914494,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": true,
+       "control_mean": 228.37110053494322,
+       "control_spread": 0.010223613431737243,
+       "candidate_mean": 322.93018927252865,
+       "candidate_uncertainty": 0.006782326680653364,
+       "delta": 0.41315713520541664,
+       "noise_floor": 0.01906722936152261,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": true,
+       "control_mean": 228.37110053494322,
+       "control_spread": 0.010223613431737243,
+       "candidate_mean": 352.78409828874743,
+       "candidate_uncertainty": 0.0010707873921050161,
+       "delta": 0.543730963871526,
+       "noise_floor": 0.01835565598087663,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "none_b": {
+       "higher_is_better": false,
+       "control_mean": 4.346457099215706,
+       "control_spread": 0.01606454103600274,
+       "candidate_mean": 4.346222161960795,
+       "candidate_uncertainty": 0.010366459745670242,
+       "delta": -0.0011656976510853179,
+       "noise_floor": 0.02083560894179004,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 4.346457099215706,
+       "control_spread": 0.01606454103600274,
+       "candidate_mean": 4.297899925441216,
+       "candidate_uncertainty": 0.004590529859949615,
+       "delta": -0.01041146954830785,
+       "noise_floor": 0.01815589470396195,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 4.346457099215706,
+       "control_spread": 0.01606454103600274,
+       "candidate_mean": 4.097682868921553,
+       "candidate_uncertainty": 0.0010025028752384151,
+       "delta": -0.055750647913400786,
+       "noise_floor": 0.018185307394759986,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "none_b": {
+       "higher_is_better": false,
+       "control_mean": 16.84500976153913,
+       "control_spread": 0.32885659185983984,
+       "candidate_mean": 17.733516537482785,
+       "candidate_uncertainty": 0.36967962945116983,
+       "delta": 0.01975256234872602,
+       "noise_floor": 0.534470340839015,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 16.84500976153913,
+       "control_spread": 0.32885659185983984,
+       "candidate_mean": 19.776636824990135,
+       "candidate_uncertainty": 0.21114451462909634,
+       "delta": 0.1865264121523431,
+       "noise_floor": 0.19137150701414285,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 16.84500976153913,
+       "control_spread": 0.32885659185983984,
+       "candidate_mean": 17.668476500007557,
+       "candidate_uncertainty": 0.043898472141365955,
+       "delta": 0.07492684630082458,
+       "noise_floor": 0.2428357243409731,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "none_b": null,
+      "published": {
+       "drafts": 4232,
+       "mean_tokens_per_step": 1.785444,
+       "per_position": [
+        0.427221,
+        0.533186,
+        0.572614
+       ]
+      },
+      "trained": {
+       "drafts": 3880,
+       "mean_tokens_per_step": 1.949485,
+       "per_position": [
+        0.479381,
+        0.593548,
+        0.652174
+       ]
+      }
+     }
+    },
+    {
+     "concurrency": 32,
+     "requests_per_run": 96,
+     "output_token_throughput": {
+      "none_b": {
+       "higher_is_better": true,
+       "control_mean": 5625.431766221473,
+       "control_spread": 0.03603153709761998,
+       "candidate_mean": 5642.116479361457,
+       "candidate_uncertainty": 0.008683709802667985,
+       "delta": 0.004439389913601266,
+       "noise_floor": 0.020682415392953013,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": true,
+       "control_mean": 5625.431766221473,
+       "control_spread": 0.03603153709761998,
+       "candidate_mean": 5994.111777765397,
+       "candidate_uncertainty": 0.0064920095782191435,
+       "delta": 0.06298130514425027,
+       "noise_floor": 0.019734335489771437,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": true,
+       "control_mean": 5625.431766221473,
+       "control_spread": 0.03603153709761998,
+       "candidate_mean": 6362.809044316737,
+       "candidate_uncertainty": 0.0077322619107846255,
+       "delta": 0.13233097429083562,
+       "noise_floor": 0.023254503809427174,
+       "decision": "improved",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "tpot_p95_ms": {
+      "none_b": {
+       "higher_is_better": false,
+       "control_mean": 5.125991259276822,
+       "control_spread": 0.036137386268630146,
+       "candidate_mean": 5.108022814215698,
+       "candidate_uncertainty": 0.005093123170992606,
+       "delta": -0.005033637876785568,
+       "noise_floor": 0.027851729674718495,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 5.125991259276822,
+       "control_spread": 0.036137386268630146,
+       "candidate_mean": 5.794807433515285,
+       "candidate_uncertainty": 0.0023247561589548873,
+       "delta": 0.13278049622910038,
+       "noise_floor": 0.02110593149417661,
+       "decision": "regressed",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 5.125991259276822,
+       "control_spread": 0.036137386268630146,
+       "candidate_mean": 5.63078426892452,
+       "candidate_uncertainty": 0.01124262222180328,
+       "delta": 0.09752909559344536,
+       "noise_floor": 0.022704881632217955,
+       "decision": "regressed",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "ttft_p95_ms": {
+      "none_b": {
+       "higher_is_better": false,
+       "control_mean": 79.77441578846476,
+       "control_spread": 0.25004427864321466,
+       "candidate_mean": 81.4397205000219,
+       "candidate_uncertainty": 0.09879615639983645,
+       "delta": 0.02141740979285811,
+       "noise_floor": 0.09648833681448865,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "published": {
+       "higher_is_better": false,
+       "control_mean": 79.77441578846476,
+       "control_spread": 0.25004427864321466,
+       "candidate_mean": 85.76336787498917,
+       "candidate_uncertainty": 0.10548609187043607,
+       "delta": 0.09413087798539221,
+       "noise_floor": 0.08198355913588218,
+       "decision": "regressed",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      },
+      "trained": {
+       "higher_is_better": false,
+       "control_mean": 79.77441578846476,
+       "control_spread": 0.25004427864321466,
+       "candidate_mean": 89.66367818750598,
+       "candidate_uncertainty": 0.17922678949030513,
+       "delta": 0.11207698210936723,
+       "noise_floor": 0.3266805948236633,
+       "decision": "no_measurable_difference",
+       "method": "paired_bracketing_log_ratio",
+       "pairs": 4,
+       "comparisons": 3,
+       "confidence": 0.9833333333333333,
+       "machine_difference": 0.0075
+      }
+     },
+     "acceptance": {
+      "none_b": null,
+      "published": {
+       "drafts": 55721,
+       "mean_tokens_per_step": 1.643402,
+       "per_position": [
+        0.378726,
+        0.478558,
+        0.460343
+       ]
+      },
+      "trained": {
+       "drafts": 51215,
+       "mean_tokens_per_step": 1.789046,
+       "per_position": [
+        0.433877,
+        0.525989,
+        0.556297
+       ]
+      }
+     }
+    }
+   ],
+   "held_out_acceptance": {
+    "none_b": null,
+    "published": {
+     "drafts": 18298,
+     "mean_tokens_per_step": 1.658815,
+     "per_position": [
+      0.387091,
+      0.483129,
+      0.452951
+     ]
+    },
+    "trained": {
+     "drafts": 16841,
+     "mean_tokens_per_step": 1.80304,
+     "per_position": [
+      0.439285,
+      0.532306,
+      0.555612
+     ]
+    }
+   },
+   "same_answers": {
+    "none_again": {
+     "compared": 128,
+     "identical": 38,
+     "share": 0.296875
+    },
+    "none_b": {
+     "compared": 128,
+     "identical": 30,
+     "share": 0.234375
+    },
+    "prompts": 128,
+    "published": {
+     "compared": 128,
+     "identical": 8,
+     "share": 0.0625
+    },
+    "reference": "none",
+    "trained": {
+     "compared": 128,
+     "identical": 6,
+     "share": 0.046875
+    }
+   },
+   "tasks": {
+    "none_b": {
+     "reference_score": 0.858,
+     "candidate_score": 0.866,
+     "difference": 0.008,
+     "low": -0.0128,
+     "high": 0.0288,
+     "margin": 0.01,
+     "verdict": "not_shown_held",
+     "items": 500,
+     "only_reference_right": 12,
+     "only_candidate_right": 16,
+     "rule": "held_within_1_point",
+     "servers_per_side": 1
+    },
+    "published": {
+     "reference_score": 0.8547,
+     "candidate_score": 0.862,
+     "difference": 0.0073,
+     "low": -0.0044,
+     "high": 0.0191,
+     "margin": 0.01,
+     "verdict": "held",
+     "items": 500,
+     "only_reference_right": 35,
+     "only_candidate_right": 46,
+     "rule": "held_within_1_point",
+     "servers_per_side": 3
+    },
+    "trained": {
+     "reference_score": 0.8547,
+     "candidate_score": 0.864,
+     "difference": 0.0093,
+     "low": -0.0022,
+     "high": 0.0209,
+     "margin": 0.01,
+     "verdict": "held",
+     "items": 500,
+     "only_reference_right": 32,
+     "only_candidate_right": 46,
+     "rule": "held_within_1_point",
+     "servers_per_side": 3
+    }
+   }
+  }
+ ],
+ "pass_bar": {
+  "bar_acceptance_moved": "pass (+0.144 tokens a verify step: trained 1.803 against published 1.659 over 16841 and 18298 drafts, vLLM's counters; bar +0.05)",
+  "bar_answers_held": "pass (task-score: held within 1 point, 0.855 to 0.864, interval -0.2 to +2.1 points, 500 items on 3 server(s) each against none); identical greedy answers 6 of 128 for the trained draft, 38 of 128 for none's own second pass",
+  "bar_climb": "pass: every check of the rung's bar passed",
+  "bar_faster": "pass: the trained draft against none at 1 at once: faster (+54.4%, noise floor 1.8%)",
+  "bar_training_ran": "pass (the training report is valid and the trained draft served)",
+  "bar_validity": "pass (0 failed requests, no void or skipped measurement)",
+  "fresh_machine_at_1": "confirmed: a fresh machine measured the trained draft faster than none (+54.6%, noise floor 1.5%)",
+  "fresh_machine_at_32": "confirmed: a fresh machine measured the trained draft faster than none (+13.0%, noise floor 1.6%)",
+  "headline_trained_vs_none_at_1": "pass: the trained draft is faster than none and the task score held",
+  "headline_trained_vs_none_at_32": "pass: the trained draft is faster than none and the task score held",
+  "none_b_vs_none_at_1": "no measurable difference (+0.1%, noise floor 1.9%)",
+  "none_b_vs_none_at_32": "no measurable difference (+0.4%, noise floor 2.1%)",
+  "published_vs_none_at_1": "faster (+41.3%, noise floor 1.9%)",
+  "published_vs_none_at_32": "faster (+6.3%, noise floor 2.0%)",
+  "quality_none_b_vs_none": "unknown: not shown to hold within 1 point",
+  "quality_published_vs_none": "held",
+  "quality_trained_vs_none": "held",
+  "trained_beats_published_at_1": "yes (+54.4% against +41.3% over none; floors 1.8% and 1.9%)",
+  "trained_beats_published_at_32": "yes (+13.2% against +6.3% over none; floors 2.3% and 2.0%)",
+  "trained_vs_none_at_1": "faster (+54.4%, noise floor 1.8%)",
+  "trained_vs_none_at_32": "faster (+13.2%, noise floor 2.3%)",
+  "training_report": "valid"
+ },
+ "results": [
+  {
+   "schema_version": "infercrane.dev/technique-result/v1",
+   "technique": "trained-draft",
+   "technique_version": "0.1.0",
+   "candidate": "trained",
+   "hardware": {
+    "accelerator": "H100",
+    "count": 1
+   },
+   "software": {
+    "engine": "vllm",
+    "engine_version": "0.34.0",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1"
+   },
+   "workload": {
+    "shape_digest": "sha256:eeed8833069a7ba26e56679aeb1cdbe1999a132a0ed07b7122aaed002e3452a2",
+    "kind": "chat",
+    "load": 1,
+    "requests": 8
+   },
+   "precision": {
+    "weights": "fp8",
+    "kv_cache": "bf16"
+   },
+   "baseline": {
+    "setup": "none",
+    "basis": "same-machine+fresh-servers"
+   },
+   "correctness": {
+    "method": "task-score",
+    "verdict": "passed"
+   },
+   "measured": {
+    "metric": "output_token_throughput",
+    "change": 0.543730963871526,
+    "noise_floor": 0.01835565598087663,
+    "decision": "improved"
+   },
+   "reproduction": {
+    "command": "TRAINED_DRAFT_PLAN=h100-qwen3-8b-fp8 modal run tools/trained-draft/trained_draft.py::launch --stage measure --run-id r4-1 --budget-usd 4.71",
+    "commit": "fe516df22fbfdb646d959209110b0d1955cc5719",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "traffic_shape": "traffic-shape.json"
+   },
+   "required_evidence": [
+    "draft-acceptance"
+   ],
+   "evidence": [
+    {
+     "name": "draft-acceptance",
+     "digest": "sha256:e45cc226eb2b21b49adba41ccb861ffe44bf77cf6560fa575957543271b7a416",
+     "summary": "1.95 tokens a verify step over 3880 drafts at 1 at once, from vLLM's speculation counters"
+    },
+    {
+     "name": "fresh-machine-confirmation",
+     "digest": "sha256:4a29c9dfa5c0531be5f1cd9f4c1b629919b30c0dec39c98c927f63ac63bd9a3d",
+     "summary": "another GPU measured +54.6% against none at 1 at once (noise floor 1.5%)"
+    }
+   ],
+   "claim": "shown"
+  },
+  {
+   "schema_version": "infercrane.dev/technique-result/v1",
+   "technique": "trained-draft",
+   "technique_version": "0.1.0",
+   "candidate": "trained",
+   "hardware": {
+    "accelerator": "H100",
+    "count": 1
+   },
+   "software": {
+    "engine": "vllm",
+    "engine_version": "0.34.0",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1"
+   },
+   "workload": {
+    "shape_digest": "sha256:eeed8833069a7ba26e56679aeb1cdbe1999a132a0ed07b7122aaed002e3452a2",
+    "kind": "chat",
+    "load": 32,
+    "requests": 96
+   },
+   "precision": {
+    "weights": "fp8",
+    "kv_cache": "bf16"
+   },
+   "baseline": {
+    "setup": "none",
+    "basis": "same-machine+fresh-servers"
+   },
+   "correctness": {
+    "method": "task-score",
+    "verdict": "passed"
+   },
+   "measured": {
+    "metric": "output_token_throughput",
+    "change": 0.12954333005712093,
+    "noise_floor": 0.023254503809427174,
+    "decision": "improved"
+   },
+   "reproduction": {
+    "command": "TRAINED_DRAFT_PLAN=h100-qwen3-8b-fp8 modal run tools/trained-draft/trained_draft.py::launch --stage measure --run-id r4-1 --budget-usd 4.71",
+    "commit": "fe516df22fbfdb646d959209110b0d1955cc5719",
+    "image_digest": "sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "traffic_shape": "traffic-shape.json"
+   },
+   "required_evidence": [
+    "draft-acceptance"
+   ],
+   "evidence": [
+    {
+     "name": "draft-acceptance",
+     "digest": "sha256:e45cc226eb2b21b49adba41ccb861ffe44bf77cf6560fa575957543271b7a416",
+     "summary": "1.79 tokens a verify step over 51215 drafts at 32 at once, from vLLM's speculation counters"
+    },
+    {
+     "name": "fresh-machine-confirmation",
+     "digest": "sha256:4a29c9dfa5c0531be5f1cd9f4c1b629919b30c0dec39c98c927f63ac63bd9a3d",
+     "summary": "another GPU measured +13.0% against none at 32 at once (noise floor 1.6%)"
+    }
+   ],
+   "claim": "shown"
+  }
+ ],
+ "confirmation": {
+  "digest": "sha256:4a29c9dfa5c0531be5f1cd9f4c1b629919b30c0dec39c98c927f63ac63bd9a3d",
+  "confirms_this_measure": true,
+  "fresh_machine": true,
+  "windows": [
+   {
+    "control": "none",
+    "candidates": [
+     "trained"
+    ],
+    "loads": [
+     {
+      "concurrency": 1,
+      "requests_per_run": 8,
+      "output_token_throughput": {
+       "trained": {
+        "higher_is_better": true,
+        "control_mean": 231.1197166370327,
+        "control_spread": 0.004383853267703898,
+        "candidate_mean": 357.40581444030676,
+        "candidate_uncertainty": 0.000320602186563376,
+        "delta": 0.5459140253082571,
+        "noise_floor": 0.014934849151264196,
+        "decision": "improved",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "tpot_p95_ms": {
+       "trained": {
+        "higher_is_better": false,
+        "control_mean": 4.292612917647006,
+        "control_spread": 0.0005334279264658779,
+        "candidate_mean": 4.044472663676479,
+        "candidate_uncertainty": 0.00016724183929204422,
+        "delta": -0.057762171520909344,
+        "noise_floor": 0.014815271621834603,
+        "decision": "improved",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "ttft_p95_ms": {
+       "trained": {
+        "higher_is_better": false,
+        "control_mean": 19.110715859993658,
+        "control_spread": 1.086784702476264,
+        "candidate_mean": 17.213760924997246,
+        "candidate_uncertainty": 0.03575610933863281,
+        "delta": 0.006405660748018072,
+        "noise_floor": 0.5677991795924813,
+        "decision": "no_measurable_difference",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "acceptance": {
+       "trained": {
+        "drafts": 3880,
+        "mean_tokens_per_step": 1.949485,
+        "per_position": [
+         0.479381,
+         0.593548,
+         0.652174
+        ]
+       }
+      }
+     },
+     {
+      "concurrency": 32,
+      "requests_per_run": 96,
+      "output_token_throughput": {
+       "trained": {
+        "higher_is_better": true,
+        "control_mean": 5735.768340108074,
+        "control_spread": 0.011760745843082725,
+        "candidate_mean": 6471.807783162529,
+        "candidate_uncertainty": 0.0017157757827084195,
+        "delta": 0.12954333005712093,
+        "noise_floor": 0.01581222004676941,
+        "decision": "improved",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "tpot_p95_ms": {
+       "trained": {
+        "higher_is_better": false,
+        "control_mean": 5.00959397021559,
+        "control_spread": 0.005821263331814222,
+        "candidate_mean": 5.536002668304348,
+        "candidate_uncertainty": 0.005497395970042541,
+        "delta": 0.1046228782890457,
+        "noise_floor": 0.016813476073580302,
+        "decision": "regressed",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "ttft_p95_ms": {
+       "trained": {
+        "higher_is_better": false,
+        "control_mean": 73.43603149999183,
+        "control_spread": 0.08435899753104219,
+        "candidate_mean": 85.61543018752005,
+        "candidate_uncertainty": 0.08923182956319978,
+        "delta": 0.15518394439926508,
+        "noise_floor": 0.10865841642802598,
+        "decision": "regressed",
+        "method": "paired_bracketing_log_ratio",
+        "pairs": 4,
+        "comparisons": 1,
+        "confidence": 0.95,
+        "machine_difference": 0.0075
+       }
+      },
+      "acceptance": {
+       "trained": {
+        "drafts": 51259,
+        "mean_tokens_per_step": 1.787374,
+        "per_position": [
+         0.43247,
+         0.526886,
+         0.557534
+        ]
+       }
+      }
+     }
+    ],
+    "same_answers": {
+     "prompts": 0,
+     "reference": "none"
+    }
+   }
+  ]
+ }
+}

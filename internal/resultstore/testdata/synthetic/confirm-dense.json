@@ -1,0 +1,307 @@
+{
+ "schema": "infercrane.planner-gym/v1",
+ "title": "Synthetic: the screen's dense model confirmed on three fresh L4 servers each, every number made up",
+ "set": "synthetic-confirm",
+ "recorded_at": "2001-01-04T03:00:00Z",
+ "basis": "fresh-servers",
+ "model": {
+  "id": "example/dense-8b",
+  "revision": "2222222222222222222222222222222222222222",
+  "features": []
+ },
+ "model_facts": {
+  "id": "example/dense-8b",
+  "architecture": "dense",
+  "params_b": 8.2,
+  "checkpoint": "bf16"
+ },
+ "gpu": "L4",
+ "engine": "vllm",
+ "engine_version": "0.34.0",
+ "max_num_seqs": 0,
+ "first_token_limit_ms": 1000.0,
+ "baseline": "defaults",
+ "current_setups": [
+  "defaults"
+ ],
+ "setups": {
+  "defaults": {
+   "label": "Engine defaults",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  },
+  "fp8-weights": {
+   "label": "FP8 weights",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "quantization": "fp8",
+   "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  },
+  "fp8-both": {
+   "label": "FP8 weights and an FP8 KV cache",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8",
+   "quantization": "fp8",
+   "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56"
+  }
+ },
+ "cells": [
+  {
+   "key": "short/16",
+   "kind": "short",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 239.01,
+      "min": 238.12,
+      "max": 240.08,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 238.21,
+      "min": 234.73,
+      "max": 241.71,
+      "servers": 3
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 392.91,
+      "min": 388.52,
+      "max": 394.13,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 388.41,
+      "min": 386.35,
+      "max": 391.4,
+      "servers": 3
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 398.48,
+      "min": 396.84,
+      "max": 404.45,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 396.51,
+      "min": 392.93,
+      "max": 401.28,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "short/64",
+   "kind": "short",
+   "requests_at_once": 64,
+   "reasoning": "off",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 796.38,
+      "min": 786.57,
+      "max": 802.68,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 787.16,
+      "min": 782.5,
+      "max": 797.02,
+      "servers": 3
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 1156.45,
+      "min": 1151.87,
+      "max": 1170.43,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1174.75,
+      "min": 1161.8,
+      "max": 1176.82,
+      "servers": 3
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 1311.31,
+      "min": 1307.14,
+      "max": 1322.51,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1304.41,
+      "min": 1299.26,
+      "max": 1323.76,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "long/4",
+   "kind": "long",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 44.85,
+      "min": 44.69,
+      "max": 45.17,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 67.52,
+      "min": 67.44,
+      "max": 68.03,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 68.3,
+      "min": 8.2,
+      "max": 68.4,
+      "servers": 3
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 74.16,
+      "min": 73.33,
+      "max": 74.37,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 74.49,
+      "min": 73.51,
+      "max": 74.74,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "long/16",
+   "kind": "long",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 61.65,
+      "min": 61.19,
+      "max": 62.21,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 125.45,
+      "min": 123.8,
+      "max": 127.24,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 158.52,
+      "min": 156.19,
+      "max": 160.67,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.6,
+      "min": 0.0,
+      "max": 112.8,
+      "servers": 3
+     }
+    }
+   }
+  },
+  {
+   "key": "output/16",
+   "kind": "output",
+   "requests_at_once": 16,
+   "reasoning": "off",
+   "measured": {
+    "defaults": {
+     "output": {
+      "median": 198.39,
+      "min": 196.87,
+      "max": 200.47,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 137.8,
+      "min": 136.51,
+      "max": 139.38,
+      "servers": 3
+     }
+    },
+    "fp8-weights": {
+     "output": {
+      "median": 298.94,
+      "min": 298.6,
+      "max": 301.91,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 261.72,
+      "min": 260.89,
+      "max": 263.71,
+      "servers": 3
+     }
+    },
+    "fp8-both": {
+     "output": {
+      "median": 333.45,
+      "min": 331.62,
+      "max": 335.26,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 315.99,
+      "min": 312.8,
+      "max": 318.55,
+      "servers": 3
+     }
+    }
+   }
+  }
+ ],
+ "built_from": [
+  {
+   "file": "generate.py",
+   "sha256": "synthetic"
+  }
+ ]
+}

@@ -74,12 +74,13 @@ func (s *Store) EndpointResidency(ctx context.Context, tenant, name string) (str
 // AgentDataPlaneBindings lists the active-plan bindings an agent serves: the
 // agent-managed bindings of serving endpoints whose target this agent owns.
 func (s *Store) AgentDataPlaneBindings(ctx context.Context, tenant, agentID string) ([]domain.AgentDataPlaneBinding, error) {
-	rows, err := s.QueryContext(ctx, `SELECT e.id,e.name,e.logical_model_id,e.environment_id,p.id,p.routing_policy,b.id,t.id,t.agent_server_key,COALESCE(t.upstream_model_name,''),t.runtime,t.health,spb.priority,spb.weight
+	rows, err := s.QueryContext(ctx, `SELECT e.id,e.name,e.logical_model_id,e.environment_id,p.id,p.routing_policy,b.id,t.id,t.agent_server_key,COALESCE(t.upstream_model_name,''),t.runtime,t.health,spb.priority,spb.weight,(r.id IS NOT NULL)
 FROM endpoints e
 JOIN serving_plans p ON p.id=e.active_serving_plan_id AND p.tenant_id=e.tenant_id
 JOIN serving_plan_bindings spb ON spb.serving_plan_id=p.id
 JOIN backend_bindings b ON b.id=spb.binding_id AND b.tenant_id=e.tenant_id AND b.ownership_mode='agent-managed'
 JOIN targets t ON t.id=b.target_id AND t.tenant_id=e.tenant_id
+LEFT JOIN agent_rollout_servers r ON r.binding_id=b.id
 WHERE e.tenant_id=? AND e.desired_state='serving' AND e.residency='customer-cloud' AND t.agent_id=?
 ORDER BY e.name,spb.priority LIMIT 512`, tenant, agentID)
 	if err != nil {
@@ -89,7 +90,7 @@ ORDER BY e.name,spb.priority LIMIT 512`, tenant, agentID)
 	out := []domain.AgentDataPlaneBinding{}
 	for rows.Next() {
 		var item domain.AgentDataPlaneBinding
-		if err = rows.Scan(&item.EndpointID, &item.EndpointName, &item.LogicalModelID, &item.EnvironmentID, &item.ServingPlanID, &item.RoutingPolicy, &item.BindingID, &item.TargetID, &item.ServerKey, &item.UpstreamModel, &item.Runtime, &item.Health, &item.Priority, &item.Weight); err != nil {
+		if err = rows.Scan(&item.EndpointID, &item.EndpointName, &item.LogicalModelID, &item.EnvironmentID, &item.ServingPlanID, &item.RoutingPolicy, &item.BindingID, &item.TargetID, &item.ServerKey, &item.UpstreamModel, &item.Runtime, &item.Health, &item.Priority, &item.Weight, &item.Rollout); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -150,13 +151,13 @@ func (s *Store) RequestQuotaLimit(ctx context.Context, tenant string) (int, bool
 	return limit, err == nil, err
 }
 
-const agentCommandColumns = `id,tenant_id,agent_id,kind,state,COALESCE(phase,''),spec_json::text,COALESCE(result_json::text,''),COALESCE(failure_code,''),COALESCE(failure_detail,''),attempts,lease_expires_at,deadline_at,created_by,created_at,updated_at,started_at,finished_at`
+const agentCommandColumns = `id,tenant_id,agent_id,kind,COALESCE(idempotency_key,''),state,COALESCE(phase,''),spec_json::text,COALESCE(result_json::text,''),COALESCE(failure_code,''),COALESCE(failure_detail,''),attempts,lease_expires_at,deadline_at,created_by,created_at,updated_at,started_at,finished_at`
 
 func scanAgentCommand(row rowScanner) (domain.AgentCommand, error) {
 	var out domain.AgentCommand
 	var lease, started, finished sql.NullString
 	var deadline, created, updated string
-	if err := row.Scan(&out.ID, &out.TenantID, &out.AgentID, &out.Kind, &out.State, &out.Phase, &out.SpecJSON, &out.ResultJSON, &out.FailureCode, &out.FailureDetail, &out.Attempts, &lease, &deadline, &out.CreatedBy, &created, &updated, &started, &finished); err != nil {
+	if err := row.Scan(&out.ID, &out.TenantID, &out.AgentID, &out.Kind, &out.IdempotencyKey, &out.State, &out.Phase, &out.SpecJSON, &out.ResultJSON, &out.FailureCode, &out.FailureDetail, &out.Attempts, &lease, &deadline, &out.CreatedBy, &created, &updated, &started, &finished); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.AgentCommand{}, ErrNotFound
 		}
@@ -184,6 +185,9 @@ func (s *Store) EnqueueAgentCommand(ctx context.Context, command domain.AgentCom
 	if !validBoundedJSON(command.SpecJSON, 64<<10) {
 		return domain.AgentCommand{}, errors.New("command spec must be bounded JSON")
 	}
+	if len(command.IdempotencyKey) > 128 {
+		return domain.AgentCommand{}, errors.New("command idempotency key must be at most 128 bytes")
+	}
 	id, err := newID()
 	if err != nil {
 		return domain.AgentCommand{}, err
@@ -199,6 +203,21 @@ func (s *Store) EnqueueAgentCommand(ctx context.Context, command domain.AgentCom
 	} else if err != nil {
 		return domain.AgentCommand{}, err
 	}
+	// Work queued before under the same key is that command, whatever state
+	// it is in; the agent row lock serializes two callers with one key.
+	if command.IdempotencyKey != "" {
+		var existing, agentID, kind string
+		err = tx.QueryRowContext(ctx, `SELECT id,agent_id,kind FROM agent_commands WHERE tenant_id=? AND idempotency_key=?`, command.TenantID, command.IdempotencyKey).Scan(&existing, &agentID, &kind)
+		if err == nil {
+			if agentID != command.AgentID || kind != command.Kind {
+				return domain.AgentCommand{}, fmt.Errorf("%w: the idempotency key names another agent's or another kind's command", ErrConflict)
+			}
+			return s.AgentCommand(ctx, command.TenantID, command.AgentID, existing)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return domain.AgentCommand{}, err
+		}
+	}
 	if state != "active" {
 		return domain.AgentCommand{}, fmt.Errorf("%w: the agent is revoked", ErrConflict)
 	}
@@ -210,8 +229,8 @@ func (s *Store) EnqueueAgentCommand(ctx context.Context, command domain.AgentCom
 		return domain.AgentCommand{}, fmt.Errorf("%w: agent already has %d queued or running commands", ErrConflict, open)
 	}
 	stamp := now()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_commands(id,tenant_id,agent_id,kind,state,spec_json,deadline_at,created_by,created_at,updated_at) VALUES(?,?,?,?,'queued',?::jsonb,?,?,?,?)`,
-		id, command.TenantID, command.AgentID, command.Kind, command.SpecJSON, command.DeadlineAt.UTC(), command.CreatedBy, stamp, stamp); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO agent_commands(id,tenant_id,agent_id,kind,state,spec_json,deadline_at,created_by,created_at,updated_at,idempotency_key) VALUES(?,?,?,?,'queued',?::jsonb,?,?,?,?,NULLIF(?,''))`,
+		id, command.TenantID, command.AgentID, command.Kind, command.SpecJSON, command.DeadlineAt.UTC(), command.CreatedBy, stamp, stamp, command.IdempotencyKey); err != nil {
 		return domain.AgentCommand{}, err
 	}
 	if err = tx.Commit(); err != nil {

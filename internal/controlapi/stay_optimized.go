@@ -495,10 +495,12 @@ func (a API) planStayOptimized(ctx context.Context, tenant string, evidence stay
 	if diagnosis, err := a.endpointDiagnosis(ctx, tenant, evidence.endpoint); err == nil {
 		diagnosed := request
 		diagnosed.Diagnosis = diagnosis
+		diagnosed = a.withModelTokenizers(ctx, diagnosed, func(request optimizer.Request) (optimizer.Proposal, error) { return source.Propose(ctx, request) })
 		if proposal, proposeErr := source.Propose(ctx, diagnosed); proposeErr == nil && proposal.Diagnosis != nil && proposal.Diagnosis.State == "applied" && len(proposal.Candidates) > 1 {
 			return proposal, ""
 		}
 	}
+	request = a.withModelTokenizers(ctx, request, func(request optimizer.Request) (optimizer.Proposal, error) { return source.Propose(ctx, request) })
 	proposal, err := source.Propose(ctx, request)
 	if err != nil {
 		return optimizer.Proposal{}, err.Error()

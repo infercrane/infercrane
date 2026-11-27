@@ -1,0 +1,163 @@
+---
+title: "Measured results"
+description: "Every setup InferCrane measures is kept as a measured result, and the setups to measure next are ranked from similar results."
+---
+
+Every setup InferCrane measures leaves a number: this setup, on this GPU, at this load, served this
+much. InferCrane keeps each of those numbers as a **measured result**. When you optimize again, on
+another load, another GPU or another model, it ranks the setups worth measuring by what similar
+measured results showed. A ranking only orders what to measure. Measuring the setups on your traffic
+decides, as it always did.
+
+## What a measured result is
+
+A measured result is one setup's outcome for one kind of traffic at one load on one GPU, in one run.
+It is the [technique contract's](/features/technique-contract) result record, with what is needed to
+compare results:
+
+| Part | What it holds |
+|---|---|
+| `result` | The technique result: hardware and software, workload, precision, baseline, correctness method (the five fields), the measured change and the noise it had to clear, and how to reproduce it. `Claim()` decides whether it shows a gain. |
+| `model` | The model's ID and revision, and the facts models are compared by: architecture (`dense`, `moe`, `hybrid`, `unknown`), parameters, the checkpoint's precision, features such as `native_mtp`. |
+| `setup` | The run's name for the setup and how it serves: speculation method and draft tokens, weight quantization the engine applies, other engine flags. The engine and KV cache format are in `result`. |
+| `cell` | The run (`set`) and the traffic kind and load (`key`, for example `short/32`). Results of one cell were measured in one run against one baseline and compare with each other. |
+| `observed` | The number itself on the result's metric: the median over the servers or runs, their range, and how many there were. |
+| `source` | The file it was imported from (name and sha256, never a path) and the importer's version. |
+
+The schema is [`schemas/result-record-v1.schema.json`](https://github.com/infercrane/infercrane/blob/main/schemas/result-record-v1.schema.json)
+(`infercrane.dev/result-record/v1`), checked against the Go type `resultstore.Record`. A result's ID
+is derived from its content, so importing the same measurement twice keeps it once, and a result
+whose numbers were changed no longer matches its ID and is refused.
+
+Importing never invents a field. A file that does not carry an image digest, a traffic shape, the
+exact command or an answer check makes results with those fields empty, and such a result claims
+nothing. Its numbers can still order what to measure next; they are never shown as a gain.
+
+A measured result's claim (`Record.Claim`) is the technique contract's own rule, `Result.Claim`,
+with the manifest's evidence as `Manifest.ClaimOf` adds it; the store never keeps a copy of that
+rule, so a change to it reaches every stored result when it is read. On top of it, a result reads
+"shown" only when all of these hold:
+
+- it is not a baseline: the current setup, the publisher's documented setup and a copy of the
+  current setup are measured to compare with, need no manifest, and never make a claim;
+- the contract's rule shows it: every one of the five fields and the reproduction is there, the
+  gain is beyond the measured noise, the answers held, and a fresh machine measured the gain again
+  (evidence `fresh-machine-confirmation`; a run on one machine reads "not shown" until then);
+- it was judged against its technique's manifest, and carries every piece of evidence the manifest
+  requires (`judgement.manifest` names the manifest by ID, version and sha256);
+- every check of its run passed: not a dry run (`judgement.dry`), the cell finished, and every bar
+  of the cell passed. A check that failed is named in `judgement.failed` and reads "failed bar.X";
+  one the run could not decide is named in `judgement.unsettled` and reads "unknown bar.X". An
+  unknown is never reported as a failure, nor a failure as an unknown.
+
+Anything else is "not shown", and `infercrane results import` and `show` name every reason.
+
+## Whose results are whose
+
+Measured results are numbers, shapes and short names. Prompts, answers and request text never enter
+them; every text field is bounded (a setup label at most 200 characters, an engine flag at most 256)
+and anything longer is refused.
+
+1. **Every result belongs to one organization**, and every read is inside the caller's organization.
+   Listing or reading another organization's result is a 404, shared or not.
+2. **A result is private unless its organization chose otherwise.** `sharing` is `private` by
+   default. An organization may set `numbers` when it imports.
+3. **Shared means numbers only, and only for ranking.** When InferCrane ranks setups for you, it may
+   use another organization's `numbers` results, reduced to the model's facts without its name, the
+   GPU, the engine and version, the traffic kind and load, how the setup serves, the measured
+   numbers and the decision. Model and setup names, labels, commands, digests, sources, evidence,
+   and IDs are dropped before the result is read (`Record.NumbersOnly`). A ranking names such a
+   result only as "a shared cell (GPU, architecture and size, kind/load)" with its gain.
+4. **The choice can be taken back.** Importing the same results again states the current choice:
+   without `--share numbers` they are private again. A result's numbers cannot change; only its
+   sharing can (a database trigger enforces it). An organization may delete its results.
+
+What sharing does reveal: an organization that shares numbers lets others see, inside their
+rankings, how much a kind of setup gained in its results, without whose results they were.
+
+## Import and read
+
+With `--store FILE` the results live in a local JSON Lines file and nothing needs a control plane.
+Without it they are your organization's, on the control plane.
+
+```bash title="Import a run and read it back"
+infercrane results import cases.json --store results.jsonl \
+  --architecture dense --params-b 8 --checkpoint bf16 \
+  --recorded-at 2030-01-01T00:00:00Z --image-digest sha256:DIGEST --basis same-machine
+infercrane results list --store results.jsonl --gpu L4 --kind short
+infercrane results show rr_... --store results.jsonl
+infercrane results export --store results.jsonl > results.json
+infercrane results import results.json --share numbers   # to the control plane, shared as numbers
+```
+
+A benchmark run directory (the runner's `results.jsonl`, `rung.json`, `plan.json`, `run.json` and
+`cells/*/screen.json`) imports as a whole. Its results are kept as the runner wrote them, with each
+arm's number from the run, the current setup's own result added per cell, and each technique judged
+by the manifest given with `--technique`. A run from before the runner named the first-token limit
+in its metric gets each cell's limit from the run (`useful_output_tokens_per_second.ttft_3000ms`), so
+useful output under different limits is never compared as one:
+
+```bash title="Import a benchmark run"
+infercrane results import .infercrane/benchmark/RUN --store results.jsonl \
+  --technique fp8-kv-cache.json --technique fp8-weights.json
+```
+
+`import` also reads three file formats: a bundle of results (`infercrane.dev/result-records/v1`, what `export`
+writes), JSON Lines of results, and a cases file (`infercrane.planner-gym/v1`, the format of
+[the scoring page](/testing/measured-results-ranking)). A cases file gives one result per setup, traffic kind, load and metric (all output, and
+output within the file's first-token limit), against the file's baseline setup. Facts the file does
+not hold come from flags; a cases file may also carry them itself (`model_facts`, `recorded_at`,
+`basis`, and per setup `engine`, `engine_version`, `speculation`, `image_digest`).
+
+`infercrane optimize results RUN` is a different command: it shows one optimization run's measured
+setups. `infercrane results` keeps every measured result across runs.
+
+The control API, inside the caller's organization:
+
+| Route | Permission | What it does |
+|---|---|---|
+| `GET /api/v1/optimization/results` | read | List results, newest first. Filters: `model`, `accelerator`, `engine`, `kind`, `metric`, `technique`, `cell`, `min_load`, `max_load`, `limit` (200 by default, 2,000 at most). |
+| `GET /api/v1/optimization/results/{id}` | read | One result. |
+| `POST /api/v1/optimization/results` | deploy | Add up to 2,000 results. `sharing` in the request (`private` by default) applies to all of them; a result's own `sharing` field is ignored. |
+| `POST /api/v1/optimization/results/rank` | read | Rank setups to measure, from your results and other organizations' shared numbers. |
+
+None of these runs on the inference path, and the gateway never reads measured results.
+
+## Ranking setups from similar results
+
+For the traffic kind, load, GPU and model you ask about, a ranking:
+
+1. finds the most similar measured results, by a distance over the traffic kind, the load (each
+   doubling counts), the GPU's datasheet memory bandwidth and compute, the model's architecture,
+   size, checkpoint precision and features, and the engine version;
+2. in each of the six closest that measured both the setup and your current one, reads the setup's
+   gain, `(setup - current) / max(setup, current)`, which stays between -1 and 1;
+3. averages the gains with more weight on closer results, pulled toward "no change" when there are
+   few of them, so one distant result cannot carry a setup;
+4. ranks by the lower bound: the average less one standard error.
+
+A setup nothing similar measured is ranked last and named unknown. Each setup carries its evidence
+(where, gain, range, distance, weight) and one sentence:
+
+```text title="infercrane results rank --store results.jsonl --query query.json"
+1. fp8-weights-and-kv-cache (vllm, fp8 KV cache, fp8 weights): about +N% over the current setup from 6 similar cell(s), at least +M%; closest: …
+5. mtp-3 (vllm, mtp 3 drafts): unknown: no similar measured cell has this setup beside the current one
+```
+
+The query names what to rank for and the setups to rank (`resultprior.Query`):
+
+```json title="query.json"
+{"model": {"architecture": "dense", "params_b": 8, "checkpoint": "bf16"},
+ "accelerator": "L4", "engine_version": "0.34.0", "kind": "short", "load": 32,
+ "metric": "output_tokens_per_second", "current": {"engine": "vllm"},
+ "candidates": [{"name": "fp8-weights", "knobs": {"engine": "vllm", "quantization": "fp8"}}]}
+```
+
+The method is `nearest-cells-lower-bound-v1`; a change to any weight or setting is a new version. It
+is deterministic and uses no language model.
+
+What a ranking cannot do: it does not know whether a setup can start (InferCrane's own checks and the
+engine's limits decide that), it cannot rank a setup nothing has measured above one that was, and it
+does not see limits that move the best setup between two measured loads, such as KV cache room. How
+the ranking is meant to join InferCrane's own plan, and how it is scored, is in
+[Ranking from measured results](/testing/measured-results-ranking).

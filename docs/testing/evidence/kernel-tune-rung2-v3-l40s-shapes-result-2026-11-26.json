@@ -1,0 +1,1570 @@
+{
+ "plan": "moe-shapes-l40s",
+ "dry": false,
+ "started_epoch": 1795671522.4875994,
+ "shapes": [
+  {
+   "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+   "file": "E=128,N=768,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json",
+   "shipped_for_this_gpu": false,
+   "set": {
+    "operator": "fused-moe",
+    "runtime": "vllm",
+    "runtime_version": "0.34.0",
+    "device": "NVIDIA_L40S",
+    "tuner": "infercrane-fused-moe-tuner-v1",
+    "files": [
+     {
+      "name": "E=128,N=768,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json",
+      "content": "{\"1\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"num_warps\":4,\"num_stages\":3},\"2\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":4},\"4\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"num_warps\":4,\"num_stages\":5},\"5\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"8\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"num_warps\":4,\"num_stages\":5},\"9\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"16\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"17\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"24\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"32\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"48\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"64\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"65\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"96\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"128\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"2048\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5}}",
+      "sha256": "9bcf3704e7d8b193cc984e3d8fbe3192041db8f10862d21ac879e0ec7ddaf56a"
+     }
+    ],
+    "digest": "sha256:31cc0b1922e1dec08aaecbfca6aa0ef48fc1ccd750139c82b0b04faa334c958d"
+   },
+   "report": {
+    "plan": {
+     "tune": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      2048
+     ],
+     "default": [
+      5,
+      9,
+      17,
+      65
+     ]
+    },
+    "keys": {
+     "1": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 4
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 105472, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 76.237,
+      "engine_spread": 0.0013,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "best_us": 68.506,
+      "gain": 0.1129,
+      "settings_timed": 19,
+      "seconds": 14.4,
+      "memory_floor_us": 42.534,
+      "engine_floor_share": 0.558,
+      "best_floor_share": 0.621,
+      "check": {
+       "finite": true,
+       "error": 0.049348,
+       "engine_error": 0.049348,
+       "passed": true
+      }
+     },
+     "2": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "engine",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 124.664,
+      "engine_spread": 0.0533,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 117.862,
+      "gain": 0.0577,
+      "settings_timed": 23,
+      "seconds": 18.5,
+      "memory_floor_us": 82.482,
+      "engine_floor_share": 0.662,
+      "best_floor_share": 0.7,
+      "reason": "not faster than the engine's choice beyond the noise"
+     },
+     "4": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 218.778,
+      "engine_spread": 0.0005,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 209.818,
+      "gain": 0.0427,
+      "settings_timed": 23,
+      "seconds": 2.1,
+      "memory_floor_us": 155.239,
+      "engine_floor_share": 0.71,
+      "best_floor_share": 0.74,
+      "check": {
+       "finite": true,
+       "error": 0.030901,
+       "engine_error": 0.030901,
+       "passed": true
+      }
+     },
+     "8": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 381.491,
+      "engine_spread": 0.0158,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 356.659,
+      "gain": 0.0696,
+      "settings_timed": 15,
+      "seconds": 16.2,
+      "memory_floor_us": 276.03,
+      "engine_floor_share": 0.724,
+      "best_floor_share": 0.774,
+      "check": {
+       "finite": true,
+       "error": 0.049501,
+       "engine_error": 0.049501,
+       "passed": true
+      }
+     },
+     "16": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       },
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 590.438,
+      "engine_spread": 0.0114,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 570.88,
+      "gain": 0.0343,
+      "settings_timed": 26,
+      "seconds": 16.9,
+      "memory_floor_us": 443.152,
+      "engine_floor_share": 0.751,
+      "best_floor_share": 0.776,
+      "check": {
+       "finite": true,
+       "error": 0.048539,
+       "engine_error": 0.048539,
+       "passed": true
+      }
+     },
+     "24": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 731.648,
+      "engine_spread": 0.0006,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 698.778,
+      "gain": 0.047,
+      "settings_timed": 15,
+      "seconds": 5.1,
+      "memory_floor_us": 544.348,
+      "engine_floor_share": 0.744,
+      "best_floor_share": 0.779,
+      "check": {
+       "finite": true,
+       "error": 0.038752,
+       "engine_error": 0.038752,
+       "passed": true
+      }
+     },
+     "32": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 799.821,
+      "engine_spread": 0.0092,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 767.078,
+      "gain": 0.0427,
+      "settings_timed": 15,
+      "seconds": 4.7,
+      "memory_floor_us": 605.636,
+      "engine_floor_share": 0.757,
+      "best_floor_share": 0.79,
+      "check": {
+       "finite": true,
+       "error": 0.041194,
+       "engine_error": 0.041194,
+       "passed": true
+      }
+     },
+     "48": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 886.733,
+      "engine_spread": 0.008,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 850.944,
+      "gain": 0.0421,
+      "settings_timed": 15,
+      "seconds": 5.2,
+      "memory_floor_us": 665.272,
+      "engine_floor_share": 0.75,
+      "best_floor_share": 0.782,
+      "check": {
+       "finite": true,
+       "error": 0.044414,
+       "engine_error": 0.044414,
+       "passed": true
+      }
+     },
+     "64": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 916.93,
+      "engine_spread": 0.0003,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 875.213,
+      "gain": 0.0477,
+      "settings_timed": 15,
+      "seconds": 5.4,
+      "memory_floor_us": 687.221,
+      "engine_floor_share": 0.749,
+      "best_floor_share": 0.785,
+      "check": {
+       "finite": true,
+       "error": 0.033867,
+       "engine_error": 0.033867,
+       "passed": true
+      }
+     },
+     "96": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 940.442,
+      "engine_spread": 0.0022,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 896.512,
+      "gain": 0.049,
+      "settings_timed": 15,
+      "seconds": 6.7,
+      "memory_floor_us": 698.439,
+      "engine_floor_share": 0.743,
+      "best_floor_share": 0.779,
+      "check": {
+       "finite": true,
+       "error": 0.045812,
+       "engine_error": 0.045812,
+       "passed": true
+      }
+     },
+     "128": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 948.429,
+      "engine_spread": 0.0011,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 905.501,
+      "gain": 0.0474,
+      "settings_timed": 15,
+      "seconds": 5.5,
+      "memory_floor_us": 700.208,
+      "engine_floor_share": 0.738,
+      "best_floor_share": 0.773,
+      "check": {
+       "finite": true,
+       "error": 0.045466,
+       "engine_error": 0.045466,
+       "passed": true
+      }
+     },
+     "2048": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       },
+       {
+        "config": {
+         "BLOCK_SIZE_M": 128,
+         "BLOCK_SIZE_N": 128,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 131584, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 1388.134,
+      "engine_spread": 0.0018,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 1345.843,
+      "gain": 0.0314,
+      "settings_timed": 14,
+      "seconds": 16.3,
+      "memory_floor_us": 718.639,
+      "engine_floor_share": 0.518,
+      "best_floor_share": 0.534,
+      "check": {
+       "finite": true,
+       "error": 0.044269,
+       "engine_error": 0.044269,
+       "passed": true
+      }
+     }
+    },
+    "hidden": {
+     "3": {
+      "engine_us": 177.664,
+      "engine_error": null,
+      "file_us": 177.642,
+      "slower": false
+     },
+     "6": {
+      "engine_us": 309.043,
+      "engine_error": null,
+      "file_us": 309.35,
+      "slower": false
+     },
+     "12": {
+      "engine_us": 503.501,
+      "engine_error": null,
+      "file_us": 503.091,
+      "slower": false
+     },
+     "20": {
+      "engine_us": 674.198,
+      "engine_error": null,
+      "file_us": 675.018,
+      "slower": false
+     },
+     "28": {
+      "engine_us": 780.186,
+      "engine_error": null,
+      "file_us": 745.459,
+      "slower": false
+     },
+     "40": {
+      "engine_us": 855.04,
+      "engine_error": null,
+      "file_us": 815.613,
+      "slower": false
+     },
+     "56": {
+      "engine_us": 907.75,
+      "engine_error": null,
+      "file_us": 866.816,
+      "slower": false
+     },
+     "80": {
+      "engine_us": 936.038,
+      "engine_error": null,
+      "file_us": 936.141,
+      "slower": false
+     },
+     "112": {
+      "engine_us": 945.254,
+      "engine_error": null,
+      "file_us": 902.042,
+      "slower": false
+     },
+     "1088": {
+      "engine_us": 1151.888,
+      "engine_error": null,
+      "file_us": 1107.034,
+      "slower": false
+     }
+    },
+    "stand_in": false,
+    "device": "NVIDIA_L40S",
+    "shape": {
+     "experts": 128,
+     "intermediate": 768,
+     "dtype": "fp8_w8a8",
+     "block_n": 128,
+     "block_k": 128,
+     "hidden": 2048,
+     "topk": 8
+    },
+    "peak_bandwidth": 864000000000.0,
+    "budget_seconds": 420.0,
+    "kept_tuned": [
+     1,
+     4,
+     8,
+     16,
+     24,
+     32,
+     48,
+     64,
+     96,
+     128,
+     2048
+    ],
+    "engine_fails_at": [],
+    "replaces_failing_default": [],
+    "seconds": 132.6
+   },
+   "gpu": {
+    "samples": 136,
+    "sm_clock_mhz_mean": 2319.9,
+    "power_w_mean": 162.2,
+    "temperature_c_max": 60.48,
+    "utilization_pct_mean": 45.9,
+    "memory_used_mib_max": 8352.0
+   },
+   "seconds": 136.2
+  },
+  {
+   "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+   "file": "E=256,N=512,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json",
+   "shipped_for_this_gpu": false,
+   "set": {
+    "operator": "fused-moe",
+    "runtime": "vllm",
+    "runtime_version": "0.34.0",
+    "device": "NVIDIA_L40S",
+    "tuner": "infercrane-fused-moe-tuner-v1",
+    "files": [
+     {
+      "name": "E=256,N=512,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json",
+      "content": "{\"1\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"num_warps\":4,\"num_stages\":3},\"2\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":4},\"4\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"num_warps\":4,\"num_stages\":5},\"5\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"8\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":3},\"9\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"16\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":1,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"17\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"24\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"32\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"48\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":16,\"num_warps\":4,\"num_stages\":5},\"64\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5},\"65\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":128,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"SPLIT_K\":1,\"num_warps\":4,\"num_stages\":3},\"96\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":16,\"num_warps\":4,\"num_stages\":5},\"128\":{\"BLOCK_SIZE_M\":16,\"BLOCK_SIZE_N\":32,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":16,\"num_warps\":4,\"num_stages\":5},\"2048\":{\"BLOCK_SIZE_M\":64,\"BLOCK_SIZE_N\":64,\"BLOCK_SIZE_K\":128,\"GROUP_SIZE_M\":32,\"num_warps\":4,\"num_stages\":5}}",
+      "sha256": "8c78f8933ff671f3ac18d755ade66e7b3443654db97ca8115dad84c623ed957b"
+     }
+    ],
+    "digest": "sha256:1160b9941802bc4f936ae4879e761bf35059e456fa4befd8c26d5c6546607f61"
+   },
+   "report": {
+    "plan": {
+     "tune": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      24,
+      32,
+      48,
+      64,
+      96,
+      128,
+      2048
+     ],
+     "default": [
+      5,
+      9,
+      17,
+      65
+     ]
+    },
+    "keys": {
+     "1": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 4
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 105472, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 45.158,
+      "engine_spread": 0.0045,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "best_us": 41.162,
+      "gain": 0.0971,
+      "settings_timed": 19,
+      "seconds": 1.3,
+      "memory_floor_us": 28.748,
+      "engine_floor_share": 0.637,
+      "best_floor_share": 0.698,
+      "check": {
+       "finite": true,
+       "error": 0.052972,
+       "engine_error": 0.052972,
+       "passed": true
+      }
+     },
+     "2": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "engine",
+      "engine_us": 89.542,
+      "engine_spread": 0.001,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 16,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "best_us": 86.938,
+      "gain": 0.03,
+      "settings_timed": 26,
+      "seconds": 11.2,
+      "memory_floor_us": 56.611,
+      "engine_floor_share": 0.632,
+      "best_floor_share": 0.651,
+      "reason": "not faster than the engine's choice beyond the noise"
+     },
+     "4": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 4
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 159.232,
+      "engine_spread": 0.0013,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 154.419,
+      "gain": 0.0312,
+      "settings_timed": 23,
+      "seconds": 1.7,
+      "memory_floor_us": 109.787,
+      "engine_floor_share": 0.689,
+      "best_floor_share": 0.711,
+      "check": {
+       "finite": true,
+       "error": 0.046258,
+       "engine_error": 0.046258,
+       "passed": true
+      }
+     },
+     "8": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 288.205,
+      "engine_spread": 0.016,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "best_us": 269.19,
+      "gain": 0.0706,
+      "settings_timed": 26,
+      "seconds": 10.5,
+      "memory_floor_us": 206.654,
+      "engine_floor_share": 0.717,
+      "best_floor_share": 0.768,
+      "check": {
+       "finite": true,
+       "error": 0.039373,
+       "engine_error": 0.039373,
+       "passed": true
+      }
+     },
+     "16": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "engine",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 32,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 1,
+         "num_warps": 8,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 148480, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 494.373,
+      "engine_spread": 0.0186,
+      "best": {
+       "BLOCK_SIZE_M": 32,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 1,
+       "num_warps": 8,
+       "num_stages": 5
+      },
+      "best_us": 480.768,
+      "gain": 0.0283,
+      "settings_timed": 26,
+      "seconds": 20.7,
+      "memory_floor_us": 367.535,
+      "engine_floor_share": 0.743,
+      "best_floor_share": 0.764,
+      "reason": "not faster than the engine's choice beyond the noise"
+     },
+     "24": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "engine",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 32,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 8,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 148480, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 646.605,
+      "engine_spread": 0.0074,
+      "best": {
+       "BLOCK_SIZE_M": 32,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 8,
+       "num_stages": 5
+      },
+      "best_us": 628.122,
+      "gain": 0.0294,
+      "settings_timed": 22,
+      "seconds": 10.6,
+      "memory_floor_us": 492.784,
+      "engine_floor_share": 0.762,
+      "best_floor_share": 0.785,
+      "reason": "not faster than the engine's choice beyond the noise"
+     },
+     "32": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 32,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 8,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 148480, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 777.37,
+      "engine_spread": 0.008,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 745.779,
+      "gain": 0.0424,
+      "settings_timed": 27,
+      "seconds": 12.8,
+      "memory_floor_us": 590.297,
+      "engine_floor_share": 0.759,
+      "best_floor_share": 0.792,
+      "check": {
+       "finite": true,
+       "error": 0.052796,
+       "engine_error": 0.052796,
+       "passed": true
+      }
+     },
+     "48": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       },
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 954.47,
+      "engine_spread": 0.0034,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 16,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 916.787,
+      "gain": 0.0411,
+      "settings_timed": 26,
+      "seconds": 19.2,
+      "memory_floor_us": 725.337,
+      "engine_floor_share": 0.76,
+      "best_floor_share": 0.791,
+      "check": {
+       "finite": true,
+       "error": 0.048692,
+       "engine_error": 0.048692,
+       "passed": true
+      }
+     },
+     "64": {
+      "engine": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       },
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 1058.144,
+      "engine_spread": 0.0007,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 1016.832,
+      "gain": 0.0406,
+      "settings_timed": 26,
+      "seconds": 9.9,
+      "memory_floor_us": 807.223,
+      "engine_floor_share": 0.763,
+      "best_floor_share": 0.794,
+      "check": {
+       "finite": true,
+       "error": 0.050095,
+       "engine_error": 0.050095,
+       "passed": true
+      }
+     },
+     "96": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       },
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 1166.797,
+      "engine_spread": 0.0008,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 16,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 1115.955,
+      "gain": 0.0456,
+      "settings_timed": 26,
+      "seconds": 10.8,
+      "memory_floor_us": 887.061,
+      "engine_floor_share": 0.76,
+      "best_floor_share": 0.795,
+      "check": {
+       "finite": true,
+       "error": 0.047284,
+       "engine_error": 0.047284,
+       "passed": true
+      }
+     },
+     "128": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 16,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 16,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 140288, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 1208.166,
+      "engine_spread": 0.0001,
+      "best": {
+       "BLOCK_SIZE_M": 16,
+       "BLOCK_SIZE_N": 32,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 16,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 1156.506,
+      "gain": 0.0447,
+      "settings_timed": 15,
+      "seconds": 7.0,
+      "memory_floor_us": 916.566,
+      "engine_floor_share": 0.759,
+      "best_floor_share": 0.793,
+      "check": {
+       "finite": true,
+       "error": 0.048496,
+       "engine_error": 0.048496,
+       "passed": true
+      }
+     },
+     "2048": {
+      "engine": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 128,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "SPLIT_K": 1,
+       "num_warps": 4,
+       "num_stages": 3
+      },
+      "kept": "tuned",
+      "failed": [
+       {
+        "config": {
+         "BLOCK_SIZE_M": 64,
+         "BLOCK_SIZE_N": 256,
+         "BLOCK_SIZE_K": 128,
+         "GROUP_SIZE_M": 32,
+         "num_warps": 4,
+         "num_stages": 5
+        },
+        "error": "OutOfResources: out of resource: shared memory, Required: 164864, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.",
+        "does_not_fit": true
+       }
+      ],
+      "engine_us": 1591.45,
+      "engine_spread": 0.0003,
+      "best": {
+       "BLOCK_SIZE_M": 64,
+       "BLOCK_SIZE_N": 64,
+       "BLOCK_SIZE_K": 128,
+       "GROUP_SIZE_M": 32,
+       "num_warps": 4,
+       "num_stages": 5
+      },
+      "best_us": 1536.205,
+      "gain": 0.036,
+      "settings_timed": 20,
+      "seconds": 16.8,
+      "memory_floor_us": 951.713,
+      "engine_floor_share": 0.598,
+      "best_floor_share": 0.62,
+      "check": {
+       "finite": true,
+       "error": 0.044837,
+       "engine_error": 0.044837,
+       "passed": true
+      }
+     }
+    },
+    "hidden": {
+     "3": {
+      "engine_us": 131.482,
+      "engine_error": null,
+      "file_us": 122.778,
+      "slower": false
+     },
+     "6": {
+      "engine_us": 225.587,
+      "engine_error": null,
+      "file_us": 220.877,
+      "slower": false
+     },
+     "12": {
+      "engine_us": 388.71,
+      "engine_error": null,
+      "file_us": 389.325,
+      "slower": false
+     },
+     "20": {
+      "engine_us": 575.488,
+      "engine_error": null,
+      "file_us": 575.283,
+      "slower": false
+     },
+     "28": {
+      "engine_us": 719.258,
+      "engine_error": null,
+      "file_us": 718.336,
+      "slower": false
+     },
+     "40": {
+      "engine_us": 881.357,
+      "engine_error": null,
+      "file_us": 848.794,
+      "slower": false
+     },
+     "56": {
+      "engine_us": 1009.766,
+      "engine_error": null,
+      "file_us": 971.674,
+      "slower": false
+     },
+     "80": {
+      "engine_us": 1126.298,
+      "engine_error": null,
+      "file_us": 1126.605,
+      "slower": false
+     },
+     "112": {
+      "engine_us": 1189.67,
+      "engine_error": null,
+      "file_us": 1140.634,
+      "slower": false
+     },
+     "1088": {
+      "engine_us": 1411.786,
+      "engine_error": null,
+      "file_us": 1357.005,
+      "slower": false
+     }
+    },
+    "stand_in": false,
+    "device": "NVIDIA_L40S",
+    "shape": {
+     "experts": 256,
+     "intermediate": 512,
+     "dtype": "fp8_w8a8",
+     "block_n": 128,
+     "block_k": 128,
+     "hidden": 2048,
+     "topk": 8
+    },
+    "peak_bandwidth": 864000000000.0,
+    "budget_seconds": 420.0,
+    "kept_tuned": [
+     1,
+     4,
+     8,
+     32,
+     48,
+     64,
+     96,
+     128,
+     2048
+    ],
+    "engine_fails_at": [],
+    "replaces_failing_default": [],
+    "seconds": 148.7
+   },
+   "gpu": {
+    "samples": 152,
+    "sm_clock_mhz_mean": 2373.4,
+    "power_w_mean": 191.7,
+    "temperature_c_max": 66.7,
+    "utilization_pct_mean": 50.0,
+    "memory_used_mib_max": 9788.0
+   },
+   "seconds": 152.2
+  }
+ ],
+ "facts": {
+  "gpu_count": 1,
+  "name": "NVIDIA L40S",
+  "uuid": "GPU-b9cc6d5b-54f0-63f4-39a2-bd1e8382683f",
+  "pci.bus_id": "00000000:AC:00.0",
+  "driver_version": "620.70.06",
+  "vbios_version": "95.02.66.00.15",
+  "memory.total": "46068 MiB",
+  "power.limit": "350.00 W",
+  "clocks.max.sm": "2520 MHz",
+  "modal_region": "us-east",
+  "modal_cloud_provider": "CLOUD_PROVIDER_OCI",
+  "modal_task_id": "ta-01M8B5SVYVGFXH0BJP4AC1ZP7R"
+ },
+ "shipped": {
+  "E=128,N=768,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json": false,
+  "E=256,N=512,device_name=NVIDIA_L40S,dtype=fp8_w8a8,block_shape=[128,128].json": false
+ },
+ "verdict": {
+  "rows": [
+   {
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "running": 128,
+    "step_size": 128,
+    "kept": "tuned",
+    "share_estimate": 0.874,
+    "status": "measured",
+    "kernel_gain": 0.0474,
+    "projected_end_to_end": 1.0412,
+    "planner_gate_1_05": false
+   },
+   {
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "running": 32,
+    "step_size": 32,
+    "kept": "tuned",
+    "share_estimate": 0.92,
+    "status": "measured",
+    "kernel_gain": 0.0427,
+    "projected_end_to_end": 1.0391,
+    "planner_gate_1_05": false
+   },
+   {
+    "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+    "running": 128,
+    "step_size": 128,
+    "kept": "tuned",
+    "share_estimate": 0.614,
+    "status": "measured",
+    "kernel_gain": 0.0447,
+    "projected_end_to_end": 1.027,
+    "planner_gate_1_05": false
+   },
+   {
+    "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+    "running": 32,
+    "step_size": 32,
+    "kept": "tuned",
+    "share_estimate": 0.733,
+    "status": "measured",
+    "kernel_gain": 0.0424,
+    "projected_end_to_end": 1.0307,
+    "planner_gate_1_05": false
+   }
+  ],
+  "projected_gate": 1.02,
+  "ask_for_rung3": true,
+  "summary": "ask for rung 3",
+  "unknown": []
+ },
+ "container_seconds": 301.8
+}

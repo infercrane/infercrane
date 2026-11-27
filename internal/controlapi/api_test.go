@@ -981,23 +981,36 @@ func TestHuggingFaceCatalogIncludesReviewedAndUnmeasuredPublisherCandidates(t *t
 				HardwareVendor   string `json:"hardware_vendor"`
 			} `json:"optimization"`
 			PublisherBuilds []struct {
-				HardwareVendor string `json:"hardware_vendor"`
-				Eligibility    string `json:"eligibility"`
+				HardwareVendor   string `json:"hardware_vendor"`
+				Eligibility      string `json:"eligibility"`
+				ProductSupport   string `json:"product_support"`
+				OutputRepository string `json:"repository"`
 			} `json:"publisher_builds"`
 		} `json:"models"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
 		t.Fatal(err)
 	}
+	amdCandidates := 0
 	for _, model := range snapshot.Models {
+		// The model-level optimization names no GPU, so it is never an AMD
+		// build; an AMD candidate is proposed only on a matching AMD GPU.
 		if model.Optimization != nil && model.Optimization.HardwareVendor != "nvidia" {
 			t.Fatalf("non-NVIDIA build was offered as the optimization: %+v", model.Optimization)
 		}
 		for _, build := range model.PublisherBuilds {
 			if build.HardwareVendor != "nvidia" && build.Eligibility == "candidate" {
-				t.Fatalf("non-NVIDIA build is a candidate: %+v", build)
+				if build.HardwareVendor != "amd" || build.ProductSupport != "runnable" {
+					t.Fatalf("a build for hardware the product cannot run is a candidate: %+v", build)
+				}
+				amdCandidates++
 			}
 		}
+	}
+	// With vLLM 0.34.0 pinned, AMD LLM Compressor builds meet their engine
+	// requirement and can seed setups on their own targets.
+	if amdCandidates == 0 {
+		t.Fatal("no AMD build is a candidate under the vLLM 0.34.0 pin")
 	}
 }
 
@@ -3940,7 +3953,9 @@ func TestPortableRuntimeDeployValidationAndPersistence(t *testing.T) {
 		status     int
 		contains   string
 	}{
-		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12@sha256:`},
+		{"sglang-default", `{"name":"sg","model":"org/model","runtime":"sglang","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.23@sha256:`},
+		{"sglang-legacy", `{"name":"sg","model":"org/model","runtime":"sglang","runtime_version":"0.5.12","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusAccepted, `"image":"lmsysorg/sglang:v0.5.12@sha256:`},
+		{"sglang-unpinned", `{"name":"sg","model":"org/model","runtime":"sglang","runtime_version":"0.5.30","cloud":"aws","region":"eu-central-1","gpu":"L40S"}`, http.StatusUnprocessableEntity, `runtime sglang 0.5.30 is not pinned`},
 		{"kubernetes-vllm", `{"name":"kube","model":"org/model","runtime":"vllm","cloud":"kubernetes","gpu":"NVIDIA-L40S"}`, http.StatusAccepted, `"cloud":"kubernetes"`},
 		{"custom", `{"name":"custom","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + validWorkload + `}`, http.StatusAccepted, `"runtime":"custom-oci"`},
 		{"mutable", `{"name":"bad","model":"org/model","runtime":"custom-oci","cloud":"aws","region":"eu-central-1","gpu":"L40S","workload":` + strings.Replace(validWorkload, "@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ":latest", 1) + `}`, http.StatusUnprocessableEntity, `pinned by @sha256`},

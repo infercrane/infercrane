@@ -32,8 +32,11 @@ const (
 	EvalSetSchemaV1 = "infercrane.dev/quality-eval-set/v1"
 	// EvalSetSchemaV2 adds conversations and function tools to a case.
 	EvalSetSchemaV2 = "infercrane.dev/quality-eval-set/v2"
-	// MaxEvalSetBytes bounds an uploaded eval set.
-	MaxEvalSetBytes = 512 << 10
+	// MaxEvalSetBytes bounds an uploaded eval set. A task set of 1,000
+	// items with their instructions needs about 700 KiB.
+	MaxEvalSetBytes = 1 << 20
+	// maxGeneralEvalSetBytes bounds every set but a task set.
+	maxGeneralEvalSetBytes = 512 << 10
 	// MaxPrompts bounds the prompts in one eval set. Every prompt is sent to
 	// two revisions during a campaign, so the bound also caps that load.
 	MaxPrompts      = 200
@@ -86,6 +89,9 @@ type EvalSet struct {
 	Grading   string   `json:"grading,omitempty"`
 	Prompts   []Prompt `json:"prompts"`
 	Digest    string   `json:"-"`
+	// pairing is the pairing digest of a set whose prompts are held
+	// elsewhere (RemoteSet); empty for a set decoded here.
+	pairing string
 }
 
 // Grading methods of a graded eval set.
@@ -97,6 +103,10 @@ const (
 	GradingTokenF1 = "token_f1"
 	maxExpected    = 8
 )
+
+// Task reports whether the set is a task set: each answer is right or wrong
+// against one gold answer, and setups are compared item by item.
+func (s EvalSet) Task() bool { return s.Grading == GradingAnswerLine }
 
 // Graded reports whether the set scores answers against expected answers.
 func (s EvalSet) Graded() bool { return s.Grading != "" }
@@ -152,17 +162,26 @@ func DecodeEvalSet(body []byte) (EvalSet, error) {
 			return EvalSet{}, fmt.Errorf("eval set %s must be 1 to %d characters without @ or control characters", field, maxNameBytes)
 		}
 	}
-	if set.Grading != "" && set.Grading != GradingExactMatch && set.Grading != GradingTokenF1 {
-		return EvalSet{}, fmt.Errorf("eval set grading must be %s or %s", GradingExactMatch, GradingTokenF1)
+	if set.Grading != "" && set.Grading != GradingExactMatch && set.Grading != GradingTokenF1 && set.Grading != GradingAnswerLine {
+		return EvalSet{}, fmt.Errorf("eval set grading must be %s, %s, or %s", GradingExactMatch, GradingTokenF1, GradingAnswerLine)
+	}
+	// A task set holds more items, with room for working, than a set scored
+	// by agreement.
+	limitBytes, limitPrompts, limitTokens := maxGeneralEvalSetBytes, MaxPrompts, maxMaxTokens
+	if set.Task() {
+		limitBytes, limitPrompts, limitTokens = MaxEvalSetBytes, MaxTaskPrompts, maxTaskTokens
+	}
+	if len(body) > limitBytes {
+		return EvalSet{}, fmt.Errorf("eval set must be at most %d KiB", limitBytes>>10)
 	}
 	if set.MaxTokens == 0 {
 		set.MaxTokens = defaultMaxToken
 	}
-	if set.MaxTokens < 1 || set.MaxTokens > maxMaxTokens {
-		return EvalSet{}, fmt.Errorf("eval set max_tokens must be between 1 and %d", maxMaxTokens)
+	if set.MaxTokens < 1 || set.MaxTokens > limitTokens {
+		return EvalSet{}, fmt.Errorf("eval set max_tokens must be between 1 and %d", limitTokens)
 	}
-	if len(set.Prompts) < 1 || len(set.Prompts) > MaxPrompts {
-		return EvalSet{}, fmt.Errorf("eval set must contain 1 to %d prompts", MaxPrompts)
+	if len(set.Prompts) < 1 || len(set.Prompts) > limitPrompts {
+		return EvalSet{}, fmt.Errorf("eval set must contain 1 to %d prompts", limitPrompts)
 	}
 	seen := make(map[string]struct{}, len(set.Prompts))
 	for index, prompt := range set.Prompts {
@@ -213,6 +232,9 @@ func (s EvalSet) SuiteVersion() string { return s.Version + "@" + s.Digest }
 // PairingDigest commits evidence from both revisions to the same ordered
 // prompt identities without storing them.
 func (s EvalSet) PairingDigest() string {
+	if s.pairing != "" && len(s.Prompts) == 0 {
+		return s.pairing
+	}
 	ids := make([]string, 0, len(s.Prompts))
 	for _, prompt := range s.Prompts {
 		ids = append(ids, prompt.ID)
@@ -224,7 +246,13 @@ func (s EvalSet) PairingDigest() string {
 func validExpected(grading string, prompt Prompt) error {
 	if grading == "" {
 		if len(prompt.Expected) > 0 {
-			return fmt.Errorf("prompt %q has expected answers, which only a set with grading %s or %s uses", prompt.ID, GradingExactMatch, GradingTokenF1)
+			return fmt.Errorf("prompt %q has expected answers, which only a set with grading %s, %s, or %s uses", prompt.ID, GradingExactMatch, GradingTokenF1, GradingAnswerLine)
+		}
+		return nil
+	}
+	if grading == GradingAnswerLine {
+		if len(prompt.Expected) != 1 || !validTaskGold(prompt.Expected[0]) {
+			return fmt.Errorf("prompt %q of a task set needs one expected answer: a number or a letter from A to D", prompt.ID)
 		}
 		return nil
 	}

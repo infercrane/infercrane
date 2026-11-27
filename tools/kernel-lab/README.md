@@ -69,9 +69,15 @@ An integration declares the exact runtime versions it was reviewed against in
 GPU spend, and the integration refuses it again when the server starts. The
 residual-RMSNorm integration registers a vLLM IR provider and supports vLLM
 0.22.1 only. vLLM IR is deprecated and vLLM 0.34.0 removes its op-priority
-setting, so this pack needs a CustomOp-based integration, reviewed and qualified,
-before any vLLM 0.34 or later pin. Versions between 0.22.1 and 0.34.0 stay
-unsupported until someone reviews and tests them.
+setting. `integration-vllm-0.34/` is the pack's CustomOp-based plugin for vLLM
+0.34.0: a `vllm.general_plugins` entry point (its `.dist-info` sits next to the
+package, so the folder goes on PYTHONPATH with `VLLM_PLUGINS=infercrane_kernels`)
+that replaces `RMSNorm` for the qualified shapes only (`INFERCRANE_KERNEL_SHAPES`)
+and falls back to the library kernel otherwise; enable it with
+`--compilation-config '{"custom_ops":["+RMSNorm"]}'`. It is tested against a stub
+of vLLM 0.34.0's API only, so `runtime_versions` lists it after a GPU
+qualification. Versions between 0.22.1 and 0.34.0 stay unsupported until someone
+reviews and tests them.
 
 Check a kernel on a laptop without a GPU with
 `screen-kernel.sh FAMILY KERNEL.py`. It runs the pack's evaluator on CPU with

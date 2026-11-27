@@ -769,3 +769,84 @@ func TestEngineMetricTargetsUseRouteCredentialsAndSkipProviderAPIs(t *testing.T)
 		t.Fatalf("tenant compute target=%s", byoc.TargetID)
 	}
 }
+
+type probeEventStore struct {
+	*fakeStore
+	events []string
+}
+
+func (s *probeEventStore) SetTargetHealth(_ context.Context, _ string, health string) error {
+	s.target.Health = health
+	return nil
+}
+
+func (s *probeEventStore) Event(_ context.Context, _, _, eventType, _, _ string) error {
+	s.events = append(s.events, eventType)
+	return nil
+}
+
+// scriptedRuntime answers each probe with the next result of its script.
+type scriptedRuntime struct{ results []bool }
+
+func (r *scriptedRuntime) Inspect(context.Context, string) (bool, map[string]struct{}) {
+	passed := r.results[0]
+	r.results = r.results[1:]
+	if !passed {
+		return false, nil
+	}
+	return true, map[string]struct{}{"model": {}}
+}
+
+func TestHealthyTargetKeepsItsRouteThroughOneMissedProbe(t *testing.T) {
+	// Step 1 of the optimizer plan, second attempt: one probe failed six seconds into a load of
+	// 128 requests at once while every running request kept streaming, the route was withdrawn
+	// for a pass, and the gateway turned away 4,550 requests in ten seconds.
+	fixture, directory := reconcilerFixture()
+	fixture.generation.WorkerSetHash = router.WorkerSetHash("round-robin", []string{"http://gpu"})
+	store := &probeEventStore{fakeStore: fixture}
+	probes := &scriptedRuntime{results: []bool{false, true, false, false, true}}
+	backend := &fakeRouter{routes: directory}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: backend, Runtimes: testRuntimeBackends(t, probes), RouterStartPort: 18080, InstanceID: "instance"}
+	pass := func(wantRouted bool, wantHealth string, wantEvents ...string) {
+		t.Helper()
+		store.events = nil
+		if err := reconciler.Once(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if _, routed := directory.Get("prod"); routed != wantRouted || store.target.Health != wantHealth || strings.Join(store.events, ",") != strings.Join(wantEvents, ",") {
+			t.Fatalf("routed=%t health=%q events=%v; want routed=%t health=%q events=%v", routed, store.target.Health, store.events, wantRouted, wantHealth, wantEvents)
+		}
+	}
+	pass(true, "healthy", "replica_probe_missed") // one miss: the route stays
+	pass(true, "healthy")                         // a pass clears the count
+	pass(true, "healthy", "replica_probe_missed") // a new single miss: still routed
+	pass(false, "unhealthy", "replica_unhealthy") // a second in a row: withdrawn
+	pass(true, "healthy", "replica_healthy")      // back after one passing probe
+	if len(backend.stopped) != 0 {
+		t.Fatalf("a missed probe restarted the router: stopped=%v", backend.stopped)
+	}
+}
+
+func TestUnhealthyOrWrongModelTargetGetsNoGrace(t *testing.T) {
+	fixture, directory := reconcilerFixture()
+	fixture.target.Health = "unhealthy"
+	store := &probeEventStore{fakeStore: fixture}
+	reconciler := Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, &scriptedRuntime{results: []bool{false}}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, routed := directory.Get("prod"); routed || len(store.events) != 0 {
+		t.Fatalf("an unhealthy target that failed its probe was routed: events=%v", store.events)
+	}
+	// A healthy target that answers without its model is wrong, not slow.
+	fixture, directory = reconcilerFixture()
+	fixture.target.UpstreamModel = "another-model"
+	store = &probeEventStore{fakeStore: fixture}
+	reconciler = Reconciler{Store: store, Routes: directory, Router: &fakeRouter{routes: directory}, Runtimes: testRuntimeBackends(t, healthyRuntime{}), RouterStartPort: 18080, InstanceID: "instance"}
+	if err := reconciler.Once(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, routed := directory.Get("prod"); routed || store.target.Health != "unhealthy" {
+		t.Fatalf("a target serving another model kept its route: health=%q events=%v", store.target.Health, store.events)
+	}
+}

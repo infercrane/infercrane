@@ -35,6 +35,12 @@ const (
 	// API key could otherwise keep working.
 	DataPlaneValidity    = 15 * time.Minute
 	MaxDataPlaneValidity = 24 * time.Hour
+	// MaxOfflineGrace bounds how long past a snapshot's validity an agent
+	// out of contact with its control plane keeps serving the endpoints'
+	// own servers. DefaultOfflineGrace is what a serving agent uses unless
+	// its operator sets another value; 0 refuses at the validity.
+	MaxOfflineGrace     = 24 * time.Hour
+	DefaultOfflineGrace = 24 * time.Hour
 
 	MaxDataPlaneRoutes      = MaxServers
 	MaxDataPlaneBindings    = 16
@@ -89,6 +95,10 @@ type DataPlaneBinding struct {
 	Runtime       string                               `json:"runtime"`
 	Weight        int                                  `json:"weight"`
 	Capabilities  runtimecontract.ProtocolCapabilities `json:"capabilities"`
+	// Rollout marks a server a rollout started beside the endpoint's own
+	// server. An agent serving out of contact with its control plane routes
+	// only to the endpoint's own servers, never to a rollout's.
+	Rollout bool `json:"rollout,omitempty"`
 }
 
 // DataPlaneCredential is one API key that may call the agent's endpoints,
@@ -144,11 +154,21 @@ func ValidGeneration(value string) bool { return generationPattern.MatchString(v
 // Validate bounds a snapshot before the agent serves with it, so a broken
 // control plane cannot make the agent route somewhere unexpected.
 func (s DataPlaneSnapshot) Validate(now time.Time) error {
+	if s.ValidUntil.IsZero() || s.ValidUntil.Before(now) || s.ValidUntil.After(now.Add(MaxDataPlaneValidity)) {
+		return errors.New("data plane valid_until is outside the accepted window")
+	}
+	return s.ValidateStored()
+}
+
+// ValidateStored bounds a snapshot an agent saved to disk, whatever its age:
+// everything Validate checks except the validity window, which the agent
+// judges against its offline grace.
+func (s DataPlaneSnapshot) ValidateStored() error {
 	if !ValidGeneration(s.Generation) {
 		return errors.New("data plane generation is invalid")
 	}
-	if s.ValidUntil.IsZero() || s.ValidUntil.Before(now) || s.ValidUntil.After(now.Add(MaxDataPlaneValidity)) {
-		return errors.New("data plane valid_until is outside the accepted window")
+	if s.ValidUntil.IsZero() {
+		return errors.New("data plane valid_until is required")
 	}
 	if !identifierPattern.MatchString(s.TenantID) {
 		return errors.New("data plane tenant_id is invalid")

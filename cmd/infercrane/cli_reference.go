@@ -156,6 +156,17 @@ var commandActions = map[string][][2]string{
 		{"list DEPLOYMENT", "list issued records"},
 		{"verify FILE", "verify a record"},
 	},
+	"report": {
+		{"proof RUN [RUN...]", "the signed before-and-after Proof Report of finished runs"},
+		{"proof verify FILE", "verify a saved Proof Report"},
+	},
+	"results": {
+		{"import FILE...", "keep measured results as records"},
+		{"list", "list kept records"},
+		{"show RECORD_ID", "show one record"},
+		{"export", "write kept records as JSON"},
+		{"rank --query FILE", "rank setups from similar measured results"},
+	},
 	"training": {
 		{"keygen", "create a signing key"},
 		{"sign DEPLOYMENT REVISION", "sign a checkpoint record"},
@@ -275,6 +286,12 @@ var moreExamples = map[string]string{
   infercrane evaluation list qwen-prod`,
 	"passport": `  infercrane passport issue qwen-prod --file qwen-prod.passport.json
   infercrane passport verify qwen-prod.passport.json`,
+	"report": `  # One workload at two loads, printable, and saved to verify later
+  infercrane report proof RUN_A RUN_B --prepared-for "Example Labs" --html proof.html
+  infercrane report proof RUN_A RUN_B --output json > proof.json
+  infercrane report proof verify proof.json`,
+	"results": `  infercrane results import benchmark-report.json
+  infercrane results rank --query query.json --output json`,
 	"replay": `  # Record the last day of traffic's shape, without prompts or answers
   infercrane replay qwen-prod --window 24h`,
 	"capacity": `  infercrane capacity --window 168h`,

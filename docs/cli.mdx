@@ -267,7 +267,7 @@ configured control plane:
 |---|---|
 | `status`, `delete`, `logs`, and other deployment commands | deployment names, with state and model |
 | `endpoint inspect` and other endpoint actions | endpoint names, with state |
-| `optimize report`, `inspect`, `results`, `watch`, `approve`, `activate`, `cancel` | optimization run IDs, with model and state |
+| `optimize report`, `gate`, `inspect`, `results`, `watch`, `approve`, `activate`, `cancel` | optimization run IDs, with model and state |
 | `optimize activate RUN --candidate` | that run's setup IDs, with state |
 | `optimize propose`, `deploy`, `plan`, `apply` | catalog models |
 | `--gpu`, `--region`, `--provider`, `--cloud` | values from the sourced GPU price catalog, narrowed by the provider and GPU already typed |
@@ -465,6 +465,43 @@ for the built-in prompts; it checks that the eval set is uploaded and changes on
 saved policy. See
 [Semantic quality evidence](/features/semantic-quality#use-your-own-test-set).
 
+### `results`
+
+```bash
+infercrane results import cases.json --store results.jsonl \
+  --architecture hybrid --params-b 27 --checkpoint fp8 --recorded-at 2030-01-01T00:00:00Z
+infercrane results list --store results.jsonl --gpu H100 --kind short --min-load 64
+infercrane results show RECORD_ID --store results.jsonl
+infercrane results export --store results.jsonl > records.json
+infercrane results import records.json --share numbers
+infercrane results import .infercrane/benchmark/RUN --store results.jsonl --technique fp8-kv-cache.json
+infercrane results rank --query query.json --store results.jsonl
+```
+
+Keeps measured results and ranks the setups worth measuring from similar ones. With `--store FILE`
+the results live in a local JSON Lines file and no control plane is needed; without it they are your
+organization's on the control plane. `import` reads bundles of results, JSON Lines of results, and
+cases files (`infercrane.planner-gym/v1`), and takes the facts a file lacks from flags (`--architecture`, `--params-b`,
+`--checkpoint`, `--recorded-at`, `--commit`, `--image-digest`, `--basis`). A benchmark run directory
+imports as a whole; `--technique FILE` (repeatable) gives the manifests its results are judged by,
+and a result without one makes no claim. Results are private unless imported with
+`--share numbers`. `rank` orders what to measure; it is not a result. See
+[Measured results](/features/results-store).
+
+### `report`
+
+```bash
+infercrane report proof RUN_A RUN_B --prepared-for "Example Labs" --html proof.html --markdown proof.md
+infercrane report proof RUN_A RUN_B --output json > proof.json
+infercrane report proof verify proof.json --public-key KEY
+```
+
+Prints the Proof Report of finished runs: before and after per workload and load, output per GPU,
+latency against your limits, cost per 1M output tokens where the price was recorded, answer quality,
+and the saving, stated only when it is verified. `--output` is `text`, `json`, `markdown`, or `html`;
+`--html FILE` and `--markdown FILE` also write the print-ready documents. `verify` checks a report
+saved with `--output json` offline. See [Proof Report](/features/proof-report).
+
 ### `mcp`
 
 ```bash
@@ -603,6 +640,35 @@ report to be signed by that base64 Ed25519 key. See
 ```bash
 infercrane optimize report RUN_ID --output json > report.json
 infercrane optimize report verify report.json --public-key OPERATOR_PUBLIC_KEY
+```
+
+`optimize compare CURRENT.yaml PROPOSED.yaml` creates a run of exactly two setups from two
+DeploymentSpecs: the current setup, which is the run's control, and the proposed change. Both run
+on fresh, isolated servers; nothing that serves production changes. They must serve the same model
+artifact, pinned to an immutable commit, on the same accelerator, GPU count, provider, and region;
+anything else is refused with the reason, and so is a pair that differs only in name. It takes
+`--objective`, `--profile`, `--workload-fingerprint`, `--quality-check`, and `--eval-set` like
+`optimize create`, and derives a stable `--idempotency-key` from both setups. Start it with
+`optimize approve`.
+
+`optimize gate RUN_ID` turns a run's signed report into a merge verdict for the setup a change
+introduced: `PASS`, `WATCH`, `BLOCK`, or `UNKNOWN`. It verifies the report's signature first, then
+reads the setup's measured change against the noise measured in the same window, its fresh-server
+confirmation, its guards, and its own answer check. `--wait 3h` reads the report until the run
+finishes; a run still unfinished then is `UNKNOWN`. `--file REPORT.json` decides from a saved report
+without the control plane. `--setup ID` names the setup when the run measured several,
+`--on-watch neutral|fail|pass` sets the conclusion for `WATCH` (default `neutral`),
+`--require-signature` and `--public-key KEY` make an unsigned or foreign report `UNKNOWN`, and
+`--save-report FILE` keeps the signed report byte for byte. `--output json` prints the result with
+the pull-request comment under `markdown`; `--output markdown` prints the comment alone. It exits
+non-zero when the check fails: `BLOCK`, `UNKNOWN`, or `WATCH` with `--on-watch fail`. The GitHub
+Action's [proof gate](/integrations/github-actions#gate-a-pull-request-on-the-proof) runs these three
+commands.
+
+```bash
+infercrane optimize compare deploy/current.yaml deploy/qwen.yaml --objective latency --output json
+infercrane optimize approve RUN_ID --max-cost-usd 20 --expires-in 3h
+infercrane optimize gate RUN_ID --wait 3h
 ```
 
 `inspect`, `results`, `approve`, `activate`, and `cancel` print a **Proposal warnings** block when
@@ -899,8 +965,9 @@ Use `--model` when the endpoint exposes more than one physical model. Use `--man
 when the endpoint has been qualified and should immediately enter the InferCrane logical route.
 For a server started with an API key, `--token-env VAR` sends the key held in `VAR` once; the control
 plane stores it encrypted and uses it for discovery, health checks, and, with `--manage-traffic`,
-the requests it routes to the server (this needs
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane). `connect` refuses a loopback URL when
+the requests it routes to the server (this needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and
+`INFERCRANE_WORKER_CREDENTIAL_KEY`, each at least 32 bytes, on the control plane: see
+[keys for stored credentials](/integrations/kubernetes#keys-for-stored-credentials)). `connect` refuses a loopback URL when
 the control plane runs elsewhere, because the control plane would probe its own machine; use the
 agent for that server.
 The advanced ownership-compatible command remains available:

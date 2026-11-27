@@ -8,6 +8,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/support"
@@ -104,5 +105,156 @@ func TestCloudRequestAdmitsOnlyReviewedRuntimeEnv(t *testing.T) {
 	sglang.Runtime, sglang.Cloud, sglang.ProviderAdapter = "sglang", "kubernetes", "kubernetes"
 	if err := sglang.Validate(); err == nil {
 		t.Fatal("SGLang accepted a vLLM switch")
+	}
+}
+
+// A built-in vLLM request runs a pinned release: the current one when it
+// names none, the legacy one when it records it, and never another release
+// under the current image. Serverless and custom images bring their own.
+func TestCloudRequestRunsOnlyPinnedEngineReleases(t *testing.T) {
+	request := func(version string) CloudRequest {
+		return CloudRequest{Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", ProviderAdapter: "runpod-pods", GPU: "H100", MinReplicas: 1, MaxReplicas: 1, RuntimeVersion: version}
+	}
+	for version, want := range map[string]string{"": support.DefaultRuntimeVersion, "0.34.0": "0.34.0", "v0.34.0": "0.34.0", "0.22.1": support.LegacyVLLMRuntimeVersion} {
+		valid := request(version)
+		if err := valid.Validate(); err != nil || valid.RuntimeVersion != want {
+			t.Fatalf("%q: version=%q err=%v", version, valid.RuntimeVersion, err)
+		}
+	}
+	unpinned := request("0.30.0")
+	if err := unpinned.Validate(); err == nil || !strings.Contains(err.Error(), "runtime vllm 0.30.0 is not pinned") {
+		t.Fatalf("unpinned release err=%v", err)
+	}
+	serverless := request("0.10.2")
+	serverless.ComputeMode, serverless.ProviderAdapter, serverless.MinReplicas = "serverless", "", 0
+	if err := serverless.Validate(); err != nil {
+		t.Fatalf("serverless runs the template's release: %v", err)
+	}
+	custom := request("2.0.0")
+	custom.Runtime, custom.Workload = "custom-oci", support.VLLMWorkload()
+	if err := custom.Validate(); err != nil || custom.RuntimeVersion != "2.0.0" {
+		t.Fatalf("custom image version=%q err=%v", custom.RuntimeVersion, err)
+	}
+	// The release decides the image provisioning fills in; serverless takes
+	// only the contract's paths from the current release.
+	if legacy := request("0.22.1"); legacy.imageRelease() != "0.22.1" {
+		t.Fatalf("legacy image release %q", legacy.imageRelease())
+	}
+	if serverless.imageRelease() != "" {
+		t.Fatalf("serverless image release %q", serverless.imageRelease())
+	}
+}
+
+// An SGLang request stores the image of its release: the current one when
+// it names none, the legacy one when it records it; an unpinned release is
+// refused instead of stored under another release's image.
+func TestCloudRequestStoresTheSGLangReleaseImage(t *testing.T) {
+	request := func(version string) CloudRequest {
+		return CloudRequest{Name: "qwen", Model: "Qwen/Qwen3-8B", Runtime: "sglang", Cloud: "kubernetes", ProviderAdapter: "kubernetes", GPU: "H100", MinReplicas: 1, MaxReplicas: 1, RuntimeVersion: version}
+	}
+	for version, release := range map[string]string{"": support.SGLangRuntimeVersion, "v0.5.23": "0.5.23", "0.5.12": support.LegacySGLangRuntimeVersion} {
+		valid := request(version)
+		pinned, _ := support.PinnedImage("sglang", release, "cuda")
+		if err := valid.Validate(); err != nil || valid.RuntimeVersion != release || valid.Workload.Image != pinned.Image {
+			t.Fatalf("%q: version=%q image=%q err=%v", version, valid.RuntimeVersion, valid.Workload.Image, err)
+		}
+	}
+	unpinned := request("0.5.30")
+	if err := unpinned.Validate(); err == nil || !strings.Contains(err.Error(), "runtime sglang 0.5.30 is not pinned") {
+		t.Fatalf("unpinned SGLang release err=%v", err)
+	}
+	// A stored 0.5.12 revision keeps its image on every later operation.
+	legacy := request("0.5.12")
+	stored, _ := support.RuntimeWorkloadFor("sglang", "0.5.12", "cuda")
+	legacy.Workload = stored
+	if err := legacy.Validate(); err != nil || legacy.Workload.Image != stored.Image {
+		t.Fatalf("stored legacy workload image=%q err=%v", legacy.Workload.Image, err)
+	}
+}
+
+func TestCloudRequestCarriesOnlyATunedSetThatFitsAndKeepsItsEvidenceApart(t *testing.T) {
+	shape := kerneltuning.FusedMoEShape{Experts: 256, Intermediate: 512, DType: "fp8_w8a8", BlockN: 128, BlockK: 128}
+	file, err := kerneltuning.NewFile(shape, "NVIDIA_H100_80GB_HBM3", map[int]kerneltuning.TileConfig{128: {BlockSizeM: 16, BlockSizeN: 64, BlockSizeK: 128, GroupSizeM: 1, NumWarps: 4, NumStages: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := kerneltuning.NewSet("vllm", support.DefaultRuntimeVersion, "NVIDIA_H100_80GB_HBM3", []domain.KernelConfigFile{file})
+	request := CloudRequest{Name: "qwen", Model: "Qwen/Qwen3.6-35B-A3B-FP8", Cloud: "kubernetes", ProviderAdapter: "kubernetes", GPU: "H100", MinReplicas: 1, MaxReplicas: 1, KernelConfigs: &set}
+	if err = request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	untuned := request
+	untuned.KernelConfigs = nil
+	if runtimeDigest(request) == runtimeDigest(untuned) {
+		t.Fatal("tuned and untuned replicas share capacity evidence")
+	}
+	if runtimeDigest(untuned) != support.RuntimeArgsDigest(untuned.RuntimeArgs, untuned.RuntimeEnv) {
+		t.Fatal("a replica without a set changed its evidence digest")
+	}
+	other := request
+	other.GPU = "H200"
+	if err = other.Validate(); err == nil || !strings.Contains(err.Error(), "kernel configs") {
+		t.Fatalf("a set tuned on an H100 was accepted for an H200: %v", err)
+	}
+}
+
+// A deployment's extra engine arguments are a reviewed set on a built-in
+// runtime's image; refused flags are refused on any image.
+func TestCloudRequestChecksEngineArguments(t *testing.T) {
+	request := func(args ...string) CloudRequest {
+		return CloudRequest{Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "runpod", ProviderAdapter: "runpod-pods", GPU: "H100", MinReplicas: 1, MaxReplicas: 1, RuntimeArgs: args}
+	}
+	if valid := request("--max-num-seqs", "256", "--enable-prefix-caching"); valid.Validate() != nil {
+		t.Fatalf("reviewed arguments: %v", valid.Validate())
+	}
+	for args, want := range map[string]string{
+		"--trust-remote-code":             "--trust-remote-code is refused",
+		"--enable-custom-logit-processor": "is refused",
+		"--host":                          "--host is not reviewed for vllm",
+		"--load-format":                   "--load-format is not reviewed",
+	} {
+		refused := request(args)
+		if err := refused.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: err=%v, want %q", args, err, want)
+		}
+	}
+	custom := request("--whatever-the-image-takes")
+	custom.Runtime, custom.Workload = "custom-oci", support.VLLMWorkload()
+	if err := custom.Validate(); err != nil {
+		t.Fatalf("custom image arguments: %v", err)
+	}
+	custom.RuntimeArgs = []string{"--trust-remote-code"}
+	if err := custom.Validate(); err == nil || !strings.Contains(err.Error(), "is refused") {
+		t.Fatalf("custom image remote code err=%v", err)
+	}
+}
+
+// An SGLang deployment's server starts with the worker key; a stored revision
+// gets it the next time it is provisioned, and vLLM is unchanged.
+func TestCloudRequestStartsSGLangWithTheWorkerKey(t *testing.T) {
+	request := CloudRequest{Name: "qwen", Model: "Qwen/Qwen3-8B", Runtime: "sglang", Cloud: "kubernetes", ProviderAdapter: "kubernetes", GPU: "H100", MinReplicas: 1, MaxReplicas: 1}
+	if err := request.Validate(); err != nil || !support.EngineKeyRequired(request.Workload) {
+		t.Fatalf("new SGLang request command=%v err=%v", request.Workload.Command, err)
+	}
+	stored := request
+	stored.Workload = support.SGLangWorkload()
+	if err := stored.Validate(); err != nil || !support.EngineKeyRequired(stored.Workload) {
+		t.Fatalf("stored SGLang revision command=%v err=%v", stored.Workload.Command, err)
+	}
+	if err := stored.Validate(); err != nil || strings.Count(strings.Join(stored.Workload.Command, " "), "infercrane-engine-key") != 1 {
+		t.Fatalf("validated twice: %v err=%v", stored.Workload.Command, err)
+	}
+	// A tenant's own SGLang command behind a prefix gets the launcher, and the
+	// command after it is unchanged.
+	prefixed := request
+	prefixed.Workload = support.SGLangWorkload()
+	own := append([]string{"numactl", "--interleave=all"}, prefixed.Workload.Command...)
+	prefixed.Workload.Command = own
+	if err := prefixed.Validate(); err != nil || !support.EngineKeyRequired(prefixed.Workload) || strings.Join(prefixed.Workload.Command[4:], " ") != strings.Join(own, " ") {
+		t.Fatalf("prefixed SGLang command=%v err=%v", prefixed.Workload.Command, err)
+	}
+	vllm := CloudRequest{Name: "qwen", Model: "Qwen/Qwen3-8B", Cloud: "kubernetes", ProviderAdapter: "kubernetes", GPU: "H100", MinReplicas: 1, MaxReplicas: 1}
+	if err := vllm.Validate(); err != nil || support.EngineKeyRequired(vllm.Workload) {
+		t.Fatalf("vLLM request command=%v err=%v", vllm.Workload.Command, err)
 	}
 }

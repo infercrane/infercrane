@@ -156,3 +156,25 @@ func TestDataPlaneShapesMustNameTheAgentManagedBinding(t *testing.T) {
 		t.Fatal("a gateway shape with data-plane fields was valid")
 	}
 }
+
+// A rollout's server is marked in the snapshot and the endpoint's own
+// server is not, so an agent out of contact knows which one to keep.
+func TestDataPlaneMarksARolloutServersBinding(t *testing.T) {
+	now := time.Date(2026, 11, 26, 18, 0, 0, 0, time.UTC)
+	row := func(binding, key string, priority int, rollout bool) domain.AgentDataPlaneBinding {
+		return domain.AgentDataPlaneBinding{EndpointID: "endpoint-1", EndpointName: "support-bot", LogicalModelID: "model-1", EnvironmentID: "production", ServingPlanID: "plan-2", RoutingPolicy: "primary-fallback",
+			BindingID: binding, TargetID: "target-" + binding, ServerKey: key, UpstreamModel: "Qwen/Qwen3-8B", Runtime: "vllm", Health: "healthy", Priority: priority, Weight: 100, Rollout: rollout}
+	}
+	store := &fakeDataPlaneStore{bindings: []domain.AgentDataPlaneBinding{row("binding-rollout", "rollout-8000", 0, true), row("binding-own", "vllm-8000", 1, false)}}
+	snapshot, err := (&Service{Store: store, Now: func() time.Time { return now }}).DataPlane(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = snapshot.Validate(now); err != nil {
+		t.Fatal(err)
+	}
+	bindings := snapshot.Routes[0].Bindings
+	if len(bindings) != 2 || bindings[0].BindingID != "binding-rollout" || !bindings[0].Rollout || bindings[1].Rollout {
+		t.Fatalf("bindings: %+v", bindings)
+	}
+}

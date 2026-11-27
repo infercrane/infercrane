@@ -61,14 +61,15 @@ func ManualTrigger(actor string) Trigger {
 }
 
 // PinnedEngine is the engine release InferCrane currently pins for a runtime
-// on the setup's GPU platform.
+// on the setup's GPU platform. A legacy image, kept only for revisions that
+// record its release, is never the pinned release.
 func PinnedEngine(setup Setup) (support.RuntimeImage, bool) {
 	runtime := strings.ToLower(strings.TrimSpace(setup.Runtime))
 	if runtime == "" {
 		runtime = support.DefaultRuntime
 	}
 	platform := provideridentity.AcceleratorPlatform(setup.GPU)
-	for _, image := range support.RuntimeImages() {
+	for _, image := range support.CurrentRuntimeImages() {
 		if image.Runtime == runtime && image.Platform == platform {
 			return image, true
 		}

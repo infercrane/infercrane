@@ -1,0 +1,22 @@
+# The pull request's change: a larger prefill batch. Same model, engine,
+# and GPU, so one run measures both setups on one kind of machine.
+apiVersion: infercrane.dev/v1
+kind: Deployment
+name: qwen-chat
+model:
+  id: Qwen/Qwen3-8B
+  revision: b968826d9c46dd6066d109eabc6255188de91218
+runtime:
+  engine: vllm
+  version: 0.22.1
+  args:
+    - --enable-prefix-caching
+    - --max-num-batched-tokens
+    - "8192"
+resources:
+  gpu: NVIDIA H100 80GB HBM3
+provider:
+  cloud: runpod
+scaling:
+  min_replicas: 1
+  max_replicas: 1

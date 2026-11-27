@@ -50,6 +50,12 @@ func (a API) huggingFaceCatalogModels(w http.ResponseWriter, r *http.Request) {
 		return a.Repository < b.Repository
 	})
 	for _, candidate := range candidates {
+		// The model-level optimization names no GPU, so it is drawn only from
+		// builds for the default CUDA platform. A candidate for an AMD target
+		// stays in publisher_builds and is proposed only on a matching GPU.
+		if candidate.Hardware.Vendor != checkpointcatalog.CUDAVendor {
+			continue
+		}
 		key := strings.ToLower(candidate.Base.Repository)
 		entry, found := entries[key]
 		if !found {

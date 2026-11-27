@@ -192,3 +192,30 @@ func TestServerConsoleURLIsValidated(t *testing.T) {
 		t.Fatal("invalid console URL was accepted")
 	}
 }
+
+// A context saved for the hosted product keeps its dashboard. A run that
+// points the CLI at another control plane with INFERCRANE_URL, such as a
+// local stack, gets no link from it: the live L4 run of 26 Nov printed the
+// hosted dashboard for a workload on a laptop's control plane.
+func TestAnotherControlPlaneDoesNotInheritTheSavedDashboard(t *testing.T) {
+	useKeychain(t, true)
+	if _, err := SaveClientLogin(ClientLogin{Context: "hosted", ControlURL: "https://api.infercrane.com", ConsoleURL: HostedConsoleURL, APIKey: loginKey}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := LoadClient(); err != nil || cfg.ConsoleURL != HostedConsoleURL {
+		t.Fatalf("saved context: console=%q err=%v", cfg.ConsoleURL, err)
+	}
+	t.Setenv("INFERCRANE_URL", "https://api.infercrane.com/")
+	if cfg, err := LoadClient(); err != nil || cfg.ConsoleURL != HostedConsoleURL {
+		t.Fatalf("same control plane: console=%q err=%v", cfg.ConsoleURL, err)
+	}
+	t.Setenv("INFERCRANE_URL", "http://127.0.0.1:18081")
+	t.Setenv("INFERCRANE_API_KEY", "ic_from_environment_0000000000")
+	if cfg, err := LoadClient(); err != nil || cfg.ConsoleURL != "" || cfg.ControlURL != "http://127.0.0.1:18081" {
+		t.Fatalf("local control plane: console=%q control=%q err=%v", cfg.ConsoleURL, cfg.ControlURL, err)
+	}
+	t.Setenv("INFERCRANE_CONSOLE_URL", "http://127.0.0.1:3502")
+	if cfg, err := LoadClient(); err != nil || cfg.ConsoleURL != "http://127.0.0.1:3502" {
+		t.Fatalf("an explicit dashboard still applies: console=%q err=%v", cfg.ConsoleURL, err)
+	}
+}

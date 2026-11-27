@@ -1,0 +1,276 @@
+{
+  "schema_version": "infercrane.poc-modal-result/v3",
+  "campaign_id": "planner-only-8376983e2e988136",
+  "campaign_state": "planner_only",
+  "decision": "stand-in servers, no model and no GPU: \u201cplanner asked, nothing measured: it proposed nothing this GPU can run\u201d is the pipeline's answer to scripted speeds, not a measurement",
+  "planner_only": true,
+  "harness": {
+    "commit": "e9d4c3bfbefde920335b4ab7062964e9085bdef3",
+    "uncommitted_changes": false
+  },
+  "run": {
+    "traffic": "map-cell",
+    "shape": "map cell short/128",
+    "requests_at_once": 128,
+    "corpus": null,
+    "smoke": false,
+    "stand_in": "local",
+    "current_setup": "publisher-speculation",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100",
+    "driver": "the first host's"
+  },
+  "prompt_text_check": null,
+  "warnings": [],
+  "copy_of_current_setup": null,
+  "model": {
+    "id": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+    "chosen_by": "poc_modal.py choose-model: most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits one H100"
+  },
+  "current_setup": {
+    "args": [
+      "--tensor-parallel-size",
+      "1",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--reasoning-parser",
+      "qwen3",
+      "--mm-encoder-tp-mode",
+      "data",
+      "--max-num-seqs",
+      "512",
+      "--speculative-config",
+      "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+    ],
+    "env": {
+      "VLLM_USE_RUST_FRONTEND": "1"
+    },
+    "publisher_args": [
+      "--tensor-parallel-size",
+      "1",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--reasoning-parser",
+      "qwen3",
+      "--mm-encoder-tp-mode",
+      "data"
+    ],
+    "publisher_env": {
+      "VLLM_USE_RUST_FRONTEND": "1"
+    },
+    "added_args": [
+      "--max-num-seqs",
+      "512"
+    ],
+    "added_because": "vLLM 0.34.0 does not start the publisher's command on one H100: max_num_seqs 1024 exceeds the 904 recurrent-state (Mamba) cache blocks, and vLLM asks for at most 904. A campaign holds at most 32 requests at once, so 512 changes nothing it measures.",
+    "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.json?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-21, unchanged 2026-11-23)"
+  },
+  "planner": {
+    "diagnosis": {
+      "rules_version": "diagnosis-technique-rules-v8",
+      "endpoint": "gpu-baseline",
+      "state": "no_actionable_findings",
+      "primary_bottleneck": "prefill-and-first-token",
+      "summary": "The diagnosis points at time to first token, but none of the changes it chose applies here, so only the starting setup is measured; each change says why.",
+      "techniques": [
+        {
+          "technique": "speculation-length",
+          "label": "Shorter speculation",
+          "priority": 50,
+          "expected_benefit": "low",
+          "rules": [
+            "speculative.low_acceptance"
+          ],
+          "reason": "Only 33% of drafted tokens were accepted (floor 50%), so the current speculation spends more than it saves.",
+          "evidence": [
+            {
+              "signal": "runtime_spec_decode_acceptance",
+              "observed": 0.333333,
+              "comparison": "<",
+              "threshold": 0.5,
+              "unit": "ratio"
+            }
+          ],
+          "candidate_ids": [],
+          "skipped": "The draft length is chosen by the cache room the engine reports (one or three draft tokens, or none); a length tuned by acceptance alone is not planned yet."
+        }
+      ],
+      "needed_evidence": []
+    },
+    "input_diagnosis": {
+      "source": "endpoint_readiness",
+      "endpoint": "gpu-baseline",
+      "algorithm_version": "monitoring-stage-triage-v2",
+      "window_start": "2026-11-25T05:02:10Z",
+      "window_end": "2026-11-25T06:02:10Z",
+      "state": "profile-ready",
+      "primary_bottleneck": "prefill-and-first-token",
+      "confidence": "stage-and-engine-level",
+      "findings": [
+        {
+          "rule": "speculative.low_acceptance",
+          "signal": "runtime_spec_decode_acceptance",
+          "observed": 0.333333,
+          "comparison": "<",
+          "threshold": 0.5,
+          "unit": "ratio"
+        }
+      ],
+      "signals": {
+        "error_rate": 0,
+        "mean_input_tokens": 26.468196037539105,
+        "mean_output_tokens": 63.07299270072993,
+        "p95_generation": 1778.4112999999998,
+        "p95_latency": 6838.0617999999995,
+        "p95_queue": 0,
+        "p95_ttft": 5095.7104,
+        "runtime_kv_cache_timeseries": 0,
+        "runtime_preemptions_per_completed_request": 0,
+        "runtime_prefix_cache_hit_rate": 0,
+        "runtime_queue_time_p95": 9.5,
+        "runtime_requests_running_per_replica": 128,
+        "runtime_requests_waiting_per_replica": 0,
+        "runtime_spec_decode_acceptance": 0.333333,
+        "runtime_spec_decode_draft_length": 3,
+        "runtime_ttft_p95": 9750,
+        "shared_prefix_request_ratio": 0
+      }
+    },
+    "model_features": [
+      "native_mtp"
+    ],
+    "setups": [],
+    "documented_speculation": null,
+    "asked": "while the cell's own requests ran at 128 requests at once, 50 s into the hold"
+  },
+  "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+  "engine": "vllm-0.34.0",
+  "gpu": "stand-in servers on the laptop (no GPU, no model, no Modal)",
+  "rate": {
+    "usd_per_hour": 3.9492,
+    "basis": "Modal list price, NVIDIA H100 SXM5 80GB, GPU only, read 2026-11-20"
+  },
+  "load": {
+    "profile": "overload",
+    "requests_at_once": 128,
+    "objective": "throughput",
+    "trace": "none: the requests are a fast-track map cell's own",
+    "shape": "map cell short/128",
+    "shape_medians": null,
+    "trace_license": null,
+    "traffic": {
+      "source": "map_cell",
+      "cell": "short/128",
+      "kind": "short",
+      "requests_at_once": 128,
+      "reasoning": "off",
+      "requests": 1087,
+      "failed": 0,
+      "failure_reasons": {},
+      "output_tokens": 68679,
+      "seconds": 56.5,
+      "sessions_started": 1087,
+      "list_started_again": false,
+      "first_requests_cut": true,
+      "stagger_seed": 20261123,
+      "prompts_sha256": "2f6b05635659520db775d85d218d0b2ded0104cecc634183e318fe87d4fac984",
+      "cells_sha256": "2b90a36ae706d516ca1674a999366bb5dc0e134acdf95a1915fa76a909918af4",
+      "ask_after_seconds": 45,
+      "cell_warmup_seconds": 30.0,
+      "limit_seconds": 300,
+      "health_checks": {
+        "missed_with_route_kept": 1,
+        "withdrawn": 0
+      }
+    },
+    "reasoning": "as the map's cell says; see traffic.reasoning"
+  },
+  "measured_from": "the control plane in a kind cluster on the laptop; the stand-in servers run on the same laptop, so no request leaves it",
+  "laptop": {
+    "at_start": {
+      "at": "2026-11-25T06:00:44Z",
+      "load_average": [
+        5.33,
+        5.12,
+        4.48
+      ],
+      "cpus": 8
+    },
+    "at_end": {
+      "at": "2026-11-25T06:02:36Z",
+      "load_average": [
+        4.64,
+        5.06,
+        4.54
+      ],
+      "cpus": 8
+    }
+  },
+  "diagnosis": null,
+  "setups": [],
+  "network": {},
+  "broker": {
+    "schema_version": "infercrane.poc-modal-ledger/v1",
+    "dry": true,
+    "budget_usd": 1.0,
+    "rate_usd_per_second": 0.0,
+    "rate_basis": "stand-in servers on this machine: no Modal, no spend",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100",
+    "billing_basis": "from the container's reported start minus 120 s (from the request until the start is known) to its end",
+    "estimated_usd": 0.0,
+    "exhausted": false,
+    "started_at": 1795586445.2302861,
+    "updated_at": 1795586556.066837,
+    "leases": [
+      {
+        "lease_id": "022c39bddc0870badf71fab5-68dddd7d7-mv867-9d13db",
+        "pod": "infercrane-022c39bddc0870badf71fab5-68dddd7d7-mv867",
+        "model": "Qwen/Qwen3.8-27B-FP8",
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3.8-27B-FP8",
+          "--tensor-parallel-size",
+          "1",
+          "--enable-auto-tool-choice",
+          "--tool-call-parser",
+          "qwen3_coder",
+          "--reasoning-parser",
+          "qwen3",
+          "--mm-encoder-tp-mode",
+          "data",
+          "--max-num-seqs",
+          "512",
+          "--speculative-config",
+          "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+        ],
+        "state": "stopped",
+        "requested_at": 1795586448.374181,
+        "last_heartbeat": 1795586538.406894,
+        "dry": true,
+        "deadline": 1795608048.374181,
+        "call_id": "local-022c39bddc0870badf71fab5-68dddd7d7-mv867-9d13db",
+        "refreshed_at": 1795586555.433111,
+        "container_started_at": 1795586448.374321,
+        "runtime_image": "stand-in on this machine",
+        "renewed_at": 1795586538.406975,
+        "url": "http://host.docker.internal:51045",
+        "startup_seconds": 0.5,
+        "ready_at": 1795586448.8992379,
+        "stop_requested_at": 1795586550.847445,
+        "stop_reason": "released by the pod",
+        "error": "",
+        "stopped_at": 1795586552.5818172,
+        "reason": "released",
+        "ended_at": 1795586555.43314,
+        "seconds": 107.1,
+        "estimated_usd": 0.0
+      }
+    ]
+  }
+}

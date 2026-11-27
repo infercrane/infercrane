@@ -1,0 +1,814 @@
+{
+  "schema_version": "infercrane.poc-modal-result/v3",
+  "campaign_id": "b3b5d025dd56b3aad807bb5c01d0f3bd",
+  "campaign_state": "qualified",
+  "decision": "stand-in servers, no model and no GPU: \u201ckeep the current setup\u201d is the pipeline's answer to scripted speeds, not a measurement",
+  "planner_only": false,
+  "harness": {
+    "commit": "b27c05c37a2416a83347628eb4a0c6685f4005a7",
+    "uncommitted_changes": false
+  },
+  "run": {
+    "traffic": "map-cell",
+    "shape": "map cell short/128",
+    "requests_at_once": 128,
+    "corpus": {
+      "digest": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+      "name": "Fast-track prompt set v1 as a prompt corpus (oasst1 prompts, CNN/DailyMail articles)",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/datasets/abisee/cnn_dailymail at 96df5e686bee (3.0.0/train-00000-of-00003.parquet); https://huggingface.co/datasets/OpenAssistant/oasst1 at fdf72ae0827c (data/train-00000-of-00001-b42a775f407cee45.parquet); selected by tools/fast-track-map, prompt set sha256 c3c912dfb64e963f",
+      "tokenizer": "Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+      "passages": 1500,
+      "prompts": 1000
+    },
+    "smoke": false,
+    "stand_in": "local",
+    "current_setup": "publisher-speculation",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100",
+    "driver": "the first host's"
+  },
+  "prompt_text_check": {
+    "expected": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+    "measured_on": [
+      "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7"
+    ],
+    "ok": true
+  },
+  "warnings": [],
+  "copy_of_current_setup": {
+    "must_not_win": true,
+    "won": false,
+    "state": "ranked",
+    "failure_code": "",
+    "objective_decision": "no_measurable_difference"
+  },
+  "model": {
+    "id": "Qwen/Qwen3.8-27B-FP8",
+    "revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+    "chosen_by": "poc_modal.py choose-model: most downloaded FP8 checkpoint from Qwen, Z.ai and DeepSeek that fits one H100"
+  },
+  "current_setup": {
+    "args": [
+      "--tensor-parallel-size",
+      "1",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--reasoning-parser",
+      "qwen3",
+      "--mm-encoder-tp-mode",
+      "data",
+      "--max-num-seqs",
+      "512",
+      "--speculative-config",
+      "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+    ],
+    "env": {
+      "VLLM_USE_RUST_FRONTEND": "1"
+    },
+    "publisher_args": [
+      "--tensor-parallel-size",
+      "1",
+      "--enable-auto-tool-choice",
+      "--tool-call-parser",
+      "qwen3_coder",
+      "--reasoning-parser",
+      "qwen3",
+      "--mm-encoder-tp-mode",
+      "data"
+    ],
+    "publisher_env": {
+      "VLLM_USE_RUST_FRONTEND": "1"
+    },
+    "added_args": [
+      "--max-num-seqs",
+      "512"
+    ],
+    "added_because": "vLLM 0.34.0 does not start the publisher's command on one H100: max_num_seqs 1024 exceeds the 904 recurrent-state (Mamba) cache blocks, and vLLM asks for at most 904. A campaign holds at most 32 requests at once, so 512 changes nothing it measures.",
+    "source": "https://recipes.vllm.ai/Qwen/Qwen3.8-27B.json?hardware=h100&variant=fp8&strategy=single_node_tp (read 2026-11-21, unchanged 2026-11-23)"
+  },
+  "planner": {
+    "diagnosis": {
+      "rules_version": "diagnosis-technique-rules-v8",
+      "endpoint": "gpu-baseline",
+      "state": "no_actionable_findings",
+      "primary_bottleneck": "decode-and-generation",
+      "summary": "The diagnosis points at writing answers, but none of the changes it chose applies here, so only the starting setup is measured; each change says why.",
+      "techniques": [
+        {
+          "technique": "fp8-weights",
+          "label": "FP8 weights",
+          "priority": 60,
+          "expected_benefit": "low",
+          "rules": [
+            "bottleneck.decode"
+          ],
+          "reason": "Writing answers takes 97% of p95 request time with 128 requests running per server, so smaller weights move fewer bytes per step.",
+          "evidence": [
+            {
+              "signal": "p95_generation",
+              "observed": 1737.71,
+              "unit": "ms"
+            },
+            {
+              "signal": "p95_latency",
+              "observed": 1797.4205,
+              "unit": "ms"
+            },
+            {
+              "signal": "runtime_requests_running_per_replica",
+              "observed": 128,
+              "unit": "requests"
+            }
+          ],
+          "candidate_ids": [],
+          "skipped": "The model's weights already look quantized, so FP8 weights would not apply."
+        },
+        {
+          "technique": "speculation-length",
+          "label": "Shorter speculation",
+          "priority": 50,
+          "expected_benefit": "low",
+          "rules": [
+            "speculative.low_acceptance"
+          ],
+          "reason": "Only 33% of drafted tokens were accepted (floor 50%), so the current speculation spends more than it saves.",
+          "evidence": [
+            {
+              "signal": "runtime_spec_decode_acceptance",
+              "observed": 0.333277,
+              "comparison": "<",
+              "threshold": 0.5,
+              "unit": "ratio"
+            }
+          ],
+          "candidate_ids": [],
+          "skipped": "The draft length is chosen by the cache room the engine reports (one or three draft tokens, or none); a length tuned by acceptance alone is not planned yet."
+        }
+      ],
+      "needed_evidence": []
+    },
+    "input_diagnosis": {
+      "source": "endpoint_readiness",
+      "endpoint": "gpu-baseline",
+      "algorithm_version": "monitoring-stage-triage-v2",
+      "window_start": "2026-11-25T01:46:36Z",
+      "window_end": "2026-11-25T02:46:36Z",
+      "state": "profile-ready",
+      "primary_bottleneck": "decode-and-generation",
+      "confidence": "stage-and-engine-level",
+      "findings": [
+        {
+          "rule": "speculative.low_acceptance",
+          "signal": "runtime_spec_decode_acceptance",
+          "observed": 0.333277,
+          "comparison": "<",
+          "threshold": 0.5,
+          "unit": "ratio"
+        }
+      ],
+      "signals": {
+        "error_rate": 0.007085643869377696,
+        "mean_input_tokens": 27.854483400558486,
+        "mean_output_tokens": 63.766987278932675,
+        "p95_generation": 1737.71,
+        "p95_latency": 1797.4205,
+        "p95_queue": 0,
+        "p95_ttft": 96.7978,
+        "runtime_kv_cache_timeseries": 0,
+        "runtime_preemptions_per_completed_request": 0,
+        "runtime_prefix_cache_hit_rate": 0,
+        "runtime_queue_time_p95": 9.5,
+        "runtime_requests_running_per_replica": 128,
+        "runtime_requests_waiting_per_replica": 0,
+        "runtime_spec_decode_acceptance": 0.333277,
+        "runtime_spec_decode_draft_length": 3,
+        "runtime_ttft_p95": 97.5,
+        "shared_prefix_request_ratio": 0
+      }
+    },
+    "model_features": [
+      "native_mtp"
+    ],
+    "setups": [],
+    "documented_speculation": null,
+    "asked": "while the cell's own requests ran at 128 requests at once, 45 s into the hold"
+  },
+  "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+  "engine": "vllm-0.34.0",
+  "gpu": "stand-in servers on the laptop (no GPU, no model, no Modal)",
+  "rate": {
+    "usd_per_hour": 3.9492,
+    "basis": "Modal list price, NVIDIA H100 SXM5 80GB, GPU only, read 2026-11-20"
+  },
+  "load": {
+    "profile": "overload",
+    "requests_at_once": 128,
+    "objective": "throughput",
+    "trace": "the shape (lengths and order, no text) of the map cell's own requests the gateway recorded while the planner was asked, up to 1000; the control plane composed each measured request's text from the run's prompt corpus",
+    "shape": "map cell short/128",
+    "shape_medians": null,
+    "trace_license": null,
+    "traffic": {
+      "source": "map_cell",
+      "cell": "short/128",
+      "kind": "short",
+      "requests_at_once": 128,
+      "reasoning": "off",
+      "requests": 3376,
+      "failed": 23,
+      "output_tokens": 213841,
+      "seconds": 47.6,
+      "sessions_started": 3376,
+      "list_started_again": false,
+      "first_requests_cut": true,
+      "stagger_seed": 20261123,
+      "prompts_sha256": "2f6b05635659520db775d85d218d0b2ded0104cecc634183e318fe87d4fac984",
+      "cells_sha256": "2b90a36ae706d516ca1674a999366bb5dc0e134acdf95a1915fa76a909918af4",
+      "ask_after_seconds": 45,
+      "cell_warmup_seconds": 30.0,
+      "limit_seconds": 300
+    },
+    "reasoning": "The planner saw the cell's requests with reasoning as the cell says. The recorded shape does not keep that switch, so the campaign's measured requests leave the model's reasoning on, each answer capped at its recorded length; output tokens per second count reasoning tokens."
+  },
+  "measured_from": "the control plane in a kind cluster on the laptop; the stand-in servers run on the same laptop, so no request leaves it",
+  "laptop": {
+    "at_start": {
+      "at": "2026-11-25T02:45:11Z",
+      "load_average": [
+        3.56,
+        4.93,
+        5.41
+      ],
+      "cpus": 8
+    },
+    "at_end": {
+      "at": "2026-11-25T03:04:46Z",
+      "load_average": [
+        3.09,
+        4.59,
+        4.94
+      ],
+      "cpus": 8
+    }
+  },
+  "diagnosis": {
+    "diagnosis": {
+      "rules_version": "diagnosis-technique-rules-v8",
+      "endpoint": "gpu-baseline",
+      "state": "no_actionable_findings",
+      "primary_bottleneck": "decode-and-generation",
+      "summary": "The diagnosis points at writing answers, but none of the changes it chose applies here, so only the starting setup is measured; each change says why.",
+      "techniques": [
+        {
+          "technique": "fp8-weights",
+          "label": "FP8 weights",
+          "priority": 60,
+          "expected_benefit": "low",
+          "rules": [
+            "bottleneck.decode"
+          ],
+          "reason": "Writing answers takes 97% of p95 request time with 128 requests running per server, so smaller weights move fewer bytes per step.",
+          "evidence": [
+            {
+              "signal": "p95_generation",
+              "observed": 1737.71,
+              "unit": "ms"
+            },
+            {
+              "signal": "p95_latency",
+              "observed": 1797.4205,
+              "unit": "ms"
+            },
+            {
+              "signal": "runtime_requests_running_per_replica",
+              "observed": 128,
+              "unit": "requests"
+            }
+          ],
+          "candidate_ids": [],
+          "skipped": "The model's weights already look quantized, so FP8 weights would not apply."
+        },
+        {
+          "technique": "speculation-length",
+          "label": "Shorter speculation",
+          "priority": 50,
+          "expected_benefit": "low",
+          "rules": [
+            "speculative.low_acceptance"
+          ],
+          "reason": "Only 33% of drafted tokens were accepted (floor 50%), so the current speculation spends more than it saves.",
+          "evidence": [
+            {
+              "signal": "runtime_spec_decode_acceptance",
+              "observed": 0.333277,
+              "comparison": "<",
+              "threshold": 0.5,
+              "unit": "ratio"
+            }
+          ],
+          "candidate_ids": [],
+          "skipped": "The draft length is chosen by the cache room the engine reports (one or three draft tokens, or none); a length tuned by acceptance alone is not planned yet."
+        }
+      ],
+      "needed_evidence": []
+    },
+    "input_diagnosis": {
+      "source": "endpoint_readiness",
+      "endpoint": "gpu-baseline",
+      "algorithm_version": "monitoring-stage-triage-v2",
+      "window_start": "2026-11-25T01:46:36Z",
+      "window_end": "2026-11-25T02:46:36Z",
+      "state": "profile-ready",
+      "primary_bottleneck": "decode-and-generation",
+      "confidence": "stage-and-engine-level",
+      "findings": [
+        {
+          "rule": "speculative.low_acceptance",
+          "signal": "runtime_spec_decode_acceptance",
+          "observed": 0.333277,
+          "comparison": "<",
+          "threshold": 0.5,
+          "unit": "ratio"
+        }
+      ],
+      "signals": {
+        "error_rate": 0.007085643869377696,
+        "mean_input_tokens": 27.854483400558486,
+        "mean_output_tokens": 63.766987278932675,
+        "p95_generation": 1737.71,
+        "p95_latency": 1797.4205,
+        "p95_queue": 0,
+        "p95_ttft": 96.7978,
+        "runtime_kv_cache_timeseries": 0,
+        "runtime_preemptions_per_completed_request": 0,
+        "runtime_prefix_cache_hit_rate": 0,
+        "runtime_queue_time_p95": 9.5,
+        "runtime_requests_running_per_replica": 128,
+        "runtime_requests_waiting_per_replica": 0,
+        "runtime_spec_decode_acceptance": 0.333277,
+        "runtime_spec_decode_draft_length": 3,
+        "runtime_ttft_p95": 97.5,
+        "shared_prefix_request_ratio": 0
+      }
+    },
+    "model_features": [
+      "native_mtp"
+    ],
+    "setups": [],
+    "documented_speculation": null,
+    "asked": "while the cell's own requests ran at 128 requests at once, 45 s into the hold"
+  },
+  "setups": [
+    {
+      "label": "Your current setup (the publisher's vLLM command with its documented speculation option)",
+      "candidate_id": "28499bf9397155437ebffa7f7c4aece9",
+      "state": "qualified",
+      "failure_code": "",
+      "speculation": {
+        "candidate/first": {
+          "draft_tokens": 384000.0,
+          "accepted_tokens": 128000.0,
+          "runs": 4,
+          "acceptance": 0.3333
+        }
+      },
+      "prompt_text_corpus": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+      "output_tokens_per_second": 4351.228635842437,
+      "request_throughput": 67.98794743503808,
+      "ttft_p95_ms": 72.670219,
+      "latency_p95_ms": 1856.9587717499999,
+      "tpot_p95_ms": 28.51895934126984,
+      "usd_per_million_output_tokens": null,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {},
+      "confirmation": null,
+      "runs": 4,
+      "requests_per_run": 1000,
+      "concurrency": 128,
+      "succeeded": 4000,
+      "failed": 0
+    },
+    {
+      "label": "The publisher's plain command",
+      "candidate_id": "2ee5b6d33e426d2543ff9dcafa850815",
+      "state": "rejected",
+      "failure_code": "measured_candidate_regressed",
+      "speculation": {
+        "control/first": {
+          "draft_tokens": 480000.0,
+          "accepted_tokens": 160000.0,
+          "runs": 5,
+          "acceptance": 0.3333
+        }
+      },
+      "prompt_text_corpus": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+      "output_tokens_per_second": 2182.3016644821587,
+      "request_throughput": 34.09846350753373,
+      "ttft_p95_ms": 70.76508324999999,
+      "latency_p95_ms": 3693.9534395,
+      "tpot_p95_ms": 57.66515793650793,
+      "usd_per_million_output_tokens": null,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {
+        "tpot_p95_ms": {
+          "delta": 1.0219179216213283,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "regressed",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.01732107170760222,
+          "control_mean": 28.51145279365079,
+          "candidate_mean": 57.66515793650793,
+          "control_spread": 0.008911808910144503,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.0006682269806970307
+        },
+        "ttft_p95_ms": {
+          "delta": 0.010443588313086893,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.11040339366367036,
+          "control_mean": 70.1524834,
+          "candidate_mean": 70.76508324999999,
+          "control_spread": 0.02503000485368415,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.06166538587643888
+        },
+        "latency_p95_ms": {
+          "delta": 0.9896586918591583,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "regressed",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.01815730491241596,
+          "control_mean": 1856.1361338,
+          "candidate_mean": 3693.9534395,
+          "control_spread": 0.009269009253528093,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.002268947445091836
+        },
+        "request_throughput": {
+          "delta": -0.4999837646013159,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "regressed",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.01725202714409657,
+          "control_mean": 68.1783080920442,
+          "candidate_mean": 34.09846350753373,
+          "control_spread": 0.0038028951340611703,
+          "higher_is_better": true,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.001011139506505478
+        },
+        "output_token_throughput": {
+          "delta": -0.4999837646013159,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "regressed",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.01725202714409657,
+          "control_mean": 4363.411717890829,
+          "candidate_mean": 2182.3016644821587,
+          "control_spread": 0.0038028951340611703,
+          "higher_is_better": true,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.001011139506505478
+        }
+      },
+      "confirmation": null,
+      "runs": 4,
+      "requests_per_run": 1000,
+      "concurrency": 128,
+      "succeeded": 4000,
+      "failed": 0
+    },
+    {
+      "label": "A copy of your current setup (must not win)",
+      "candidate_id": "697c64802f2689d1eb3d260b7c950fe4",
+      "state": "ranked",
+      "failure_code": "",
+      "speculation": {
+        "control/first": {
+          "draft_tokens": 480000.0,
+          "accepted_tokens": 160000.0,
+          "runs": 5,
+          "acceptance": 0.3333
+        },
+        "candidate/first": {
+          "draft_tokens": 384000.0,
+          "accepted_tokens": 128000.0,
+          "runs": 4,
+          "acceptance": 0.3333
+        }
+      },
+      "prompt_text_corpus": "sha256:4acd33074d11f45f255bf89c2378166557fd0dd7e77da9ae2146dbd16e39efc7",
+      "output_tokens_per_second": 4352.869854003251,
+      "request_throughput": 68.0135914688008,
+      "ttft_p95_ms": 70.90843749999999,
+      "latency_p95_ms": 1898.8594905,
+      "tpot_p95_ms": 29.17099786111111,
+      "usd_per_million_output_tokens": null,
+      "answer_match": 1,
+      "answer_check": "passed",
+      "answer_check_source": "infercrane",
+      "comparison": {
+        "tpot_p95_ms": {
+          "delta": 0.02508082023549907,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.1184425279562169,
+          "control_mean": 28.436688507936502,
+          "candidate_mean": 29.17099786111111,
+          "control_spread": 0.002752657374138738,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.07395111404048071
+        },
+        "ttft_p95_ms": {
+          "delta": -0.003564043052060595,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.03527693879572724,
+          "control_mean": 71.15405000000001,
+          "candidate_mean": 70.90843749999999,
+          "control_spread": 0.04756111563572267,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.013956141216565325
+        },
+        "latency_p95_ms": {
+          "delta": 0.02526294767879045,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.11938300315454109,
+          "control_mean": 1850.7005674,
+          "candidate_mean": 1898.8594905,
+          "control_spread": 0.0029156742560362482,
+          "higher_is_better": false,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.07484271983105929
+        },
+        "request_throughput": {
+          "delta": -0.003035064350557226,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.021493177893639803,
+          "control_mean": 68.20849833591771,
+          "candidate_mean": 68.0135914688008,
+          "control_spread": 0.003760092606924979,
+          "higher_is_better": true,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.008530881083870484
+        },
+        "output_token_throughput": {
+          "delta": -0.003035064350557226,
+          "pairs": 4,
+          "method": "paired_bracketing_log_ratio",
+          "decision": "no_measurable_difference",
+          "confidence": 0.975,
+          "comparisons": 2,
+          "noise_floor": 0.021493177893639803,
+          "control_mean": 4365.343893498733,
+          "candidate_mean": 4352.869854003251,
+          "control_spread": 0.003760092606924979,
+          "higher_is_better": true,
+          "machine_difference": 0.0075,
+          "candidate_uncertainty": 0.008530881083870484
+        }
+      },
+      "confirmation": null,
+      "runs": 4,
+      "requests_per_run": 1000,
+      "concurrency": 128,
+      "succeeded": 4000,
+      "failed": 0
+    }
+  ],
+  "network": {
+    "infercrane-19ccfe22d6d198d33cafe0e8-66fb599bbb-qx4x9": {
+      "lease_id": "9ccfe22d6d198d33cafe0e8-66fb599bbb-qx4x9-5977f9",
+      "health_rtt_samples": 209,
+      "health_rtt_p50_ms": 1.178,
+      "health_rtt_p95_ms": 3.274,
+      "health_rtt_min_ms": 0.426,
+      "upstream_host": "host.docker.internal:57629"
+    },
+    "infercrane-29ff419d0eae73d01fc16173-5467969f6d-xtr6p": {
+      "lease_id": "9ff419d0eae73d01fc16173-5467969f6d-xtr6p-d0f96c",
+      "health_rtt_samples": 165,
+      "health_rtt_p50_ms": 1.168,
+      "health_rtt_p95_ms": 3.425,
+      "health_rtt_min_ms": 0.363,
+      "upstream_host": "host.docker.internal:61559"
+    },
+    "infercrane-1e23865c06932055f3b571b7-656574bcf4-zng2w": {
+      "lease_id": "e23865c06932055f3b571b7-656574bcf4-zng2w-478854",
+      "health_rtt_samples": 69,
+      "health_rtt_p50_ms": 0.991,
+      "health_rtt_p95_ms": 2.368,
+      "health_rtt_min_ms": 0.473,
+      "upstream_host": "host.docker.internal:53292"
+    }
+  },
+  "broker": {
+    "schema_version": "infercrane.poc-modal-ledger/v1",
+    "dry": true,
+    "budget_usd": 1.0,
+    "rate_usd_per_second": 0.0,
+    "rate_basis": "stand-in servers on this machine: no Modal, no spend",
+    "engine": "vllm-0.34.0",
+    "runtime_image": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+    "gpu_type": "H100",
+    "billing_basis": "from the container's reported start minus 120 s (from the request until the start is known) to its end",
+    "estimated_usd": 0.0,
+    "exhausted": false,
+    "started_at": 1795574712.179778,
+    "updated_at": 1795575886.596607,
+    "leases": [
+      {
+        "lease_id": "9960a5259025581b96b552ae-b6d55dd46-rwvmf-711f27",
+        "pod": "infercrane-9960a5259025581b96b552ae-b6d55dd46-rwvmf",
+        "model": "Qwen/Qwen3.8-27B-FP8",
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3.8-27B-FP8",
+          "--tensor-parallel-size",
+          "1",
+          "--enable-auto-tool-choice",
+          "--tool-call-parser",
+          "qwen3_coder",
+          "--reasoning-parser",
+          "qwen3",
+          "--mm-encoder-tp-mode",
+          "data",
+          "--max-num-seqs",
+          "512",
+          "--speculative-config",
+          "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+        ],
+        "state": "stopped",
+        "requested_at": 1795574714.788605,
+        "last_heartbeat": 1795574784.814494,
+        "dry": true,
+        "deadline": 1795596314.788605,
+        "call_id": "local-9960a5259025581b96b552ae-b6d55dd46-rwvmf-711f27",
+        "refreshed_at": 1795574807.305604,
+        "container_started_at": 1795574714.7887738,
+        "runtime_image": "stand-in on this machine",
+        "renewed_at": 1795574784.814507,
+        "url": "http://host.docker.internal:52495",
+        "startup_seconds": 0.5,
+        "ready_at": 1795574715.322834,
+        "stop_requested_at": 1795574801.946997,
+        "stop_reason": "released by the pod",
+        "error": "",
+        "stopped_at": 1795574803.8718011,
+        "reason": "released",
+        "ended_at": 1795574807.305633,
+        "seconds": 92.5,
+        "estimated_usd": 0.0
+      },
+      {
+        "lease_id": "9ccfe22d6d198d33cafe0e8-66fb599bbb-qx4x9-5977f9",
+        "pod": "infercrane-19ccfe22d6d198d33cafe0e8-66fb599bbb-qx4x9",
+        "model": "Qwen/Qwen3.8-27B-FP8",
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3.8-27B-FP8",
+          "--tensor-parallel-size",
+          "1",
+          "--enable-auto-tool-choice",
+          "--tool-call-parser",
+          "qwen3_coder",
+          "--reasoning-parser",
+          "qwen3",
+          "--mm-encoder-tp-mode",
+          "data",
+          "--max-num-seqs",
+          "512",
+          "--speculative-config",
+          "{\"method\":\"mtp\",\"num_speculative_tokens\":3}"
+        ],
+        "state": "ready",
+        "requested_at": 1795574808.751095,
+        "last_heartbeat": 1795575878.925886,
+        "dry": true,
+        "deadline": 1795596408.751095,
+        "call_id": "local-9ccfe22d6d198d33cafe0e8-66fb599bbb-qx4x9-5977f9",
+        "refreshed_at": 1795575884.256062,
+        "container_started_at": 1795574808.751214,
+        "runtime_image": "stand-in on this machine",
+        "renewed_at": 1795575878.926063,
+        "url": "http://host.docker.internal:57629",
+        "startup_seconds": 0.5,
+        "ready_at": 1795574809.266915,
+        "seconds": 1077.8,
+        "estimated_usd": 0.0
+      },
+      {
+        "lease_id": "9ff419d0eae73d01fc16173-5467969f6d-xtr6p-d0f96c",
+        "pod": "infercrane-29ff419d0eae73d01fc16173-5467969f6d-xtr6p",
+        "model": "Qwen/Qwen3.8-27B-FP8",
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3.8-27B-FP8",
+          "--tensor-parallel-size",
+          "1",
+          "--enable-auto-tool-choice",
+          "--tool-call-parser",
+          "qwen3_coder",
+          "--reasoning-parser",
+          "qwen3",
+          "--mm-encoder-tp-mode",
+          "data",
+          "--max-num-seqs",
+          "512"
+        ],
+        "state": "ready",
+        "requested_at": 1795575032.8252969,
+        "last_heartbeat": 1795575882.9634078,
+        "dry": true,
+        "deadline": 1795596632.8252969,
+        "call_id": "local-9ff419d0eae73d01fc16173-5467969f6d-xtr6p-d0f96c",
+        "refreshed_at": 1795575882.963446,
+        "container_started_at": 1795575032.825453,
+        "runtime_image": "stand-in on this machine",
+        "renewed_at": 1795575882.96343,
+        "url": "http://host.docker.internal:61559",
+        "startup_seconds": 0.5,
+        "ready_at": 1795575033.346146,
+        "seconds": 853.8,
+        "estimated_usd": 0.0
+      },
+      {
+        "lease_id": "e23865c06932055f3b571b7-656574bcf4-zng2w-478854",
+        "pod": "infercrane-1e23865c06932055f3b571b7-656574bcf4-zng2w",
+        "model": "Qwen/Qwen3.8-27B-FP8",
+        "args": [
+          "--served-model-name",
+          "Qwen/Qwen3.8-27B-FP8",
+          "--tensor-parallel-size",
+          "1",
+          "--enable-auto-tool-choice",
+          "--tool-call-parser",
+          "qwen3_coder",
+          "--reasoning-parser",
+          "qwen3",
+          "--mm-encoder-tp-mode",
+          "data",
+          "--max-num-seqs",
+          "512",
+          "--speculative-config",
+          "{\"method\":\"mtp\",\"num_speculative_tokens\":3}",
+          "--seed",
+          "1"
+        ],
+        "state": "ready",
+        "requested_at": 1795575513.1272829,
+        "last_heartbeat": 1795575883.204074,
+        "dry": true,
+        "deadline": 1795597113.1272829,
+        "call_id": "local-e23865c06932055f3b571b7-656574bcf4-zng2w-478854",
+        "refreshed_at": 1795575883.2042,
+        "container_started_at": 1795575513.127415,
+        "runtime_image": "stand-in on this machine",
+        "renewed_at": 1795575883.2041311,
+        "url": "http://host.docker.internal:53292",
+        "startup_seconds": 0.5,
+        "ready_at": 1795575513.6390452,
+        "seconds": 373.5,
+        "estimated_usd": 0.0
+      }
+    ]
+  }
+}

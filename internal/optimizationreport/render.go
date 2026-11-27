@@ -35,6 +35,7 @@ var reasonWords = map[string]string{
 	"measured_candidate_outside_constraints": "missed your speed or cost limits",
 	"measured_ranking_inconclusive":          "results were not comparable",
 	"quality_gate_rejected":                  "failed the answer-quality check",
+	"quality_answers_not_shown_held":         "answers not shown to hold within 1 point",
 	"release_guard_rejected":                 "failed the safety check",
 	"release_guard_inconclusive":             "safety check had too little evidence",
 	"approval_expired_before_activation":     "approval expired before rollout",

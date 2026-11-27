@@ -21,7 +21,15 @@
 ## Reconciliation
 
 1. A replica loads active deployments and their targets from PostgreSQL.
-2. Worker health/model endpoints are probed concurrently under a fixed bound.
+2. Worker health/model endpoints are probed concurrently under a fixed bound. A healthy worker
+   keeps its place through one probe that fails or times out, recorded as a
+   `replica_probe_missed` event, and leaves when a second probe in a row fails: a probe can time
+   out while the server admits a burst and serves every running request, and withdrawing the
+   route then turns away every new request until the next pass. A worker that answers without
+   its model, a new or unhealthy worker, and a worker whose probe cannot run (no runtime backend,
+   no credential evidence) get no such grace. The count lives in each control-plane process. The
+   cost: a worker that has died keeps its route up to one more pass, and requests sent to it then
+   fail as upstream errors instead of being refused for want of a route.
 3. Healthy membership and routing policy produce a deterministic worker-set hash.
 4. If local state differs, the replica replaces its supervised router process and records an
    instance-owned generation.
@@ -63,8 +71,10 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
    concurrency bound, redirects followed only on the same host. Results are cached in memory by
    commit; reads made with a token are cached under the tenant and credential.
 4. The check compares the architecture with the committed runtime registry snapshot, sizes the GPU
-   from the price catalog already in memory, and returns. The planner itself never reads the
-   network.
+   from the price catalog already in memory, and returns. For a proposal planned from an endpoint
+   diagnosis, it also adds the served weights' bytes and the KV cache bytes per token to that
+   diagnosis, from which the planner predicts the cache room of precision changes. The planner
+   itself never reads the network.
 
 Nothing is written to PostgreSQL, and the inference request path is not involved.
 
@@ -112,6 +122,22 @@ Both return a target that follows the same runtime and reconciliation path as an
    compares two analyzed captures. None is a typed 404.
 5. A proposal planned from an endpoint diagnosis reads the newest capture's kernel-class shares.
    Neither capture nor read runs on the inference path, and the gateway never reads `gpu_profiles`.
+
+## Results scrape
+
+1. Prometheus calls `GET /api/v1/metrics` with an API key that has read permission. The control API
+   authenticates it like any other route and reads only the key's workspace.
+2. `store.ResultMetrics` runs bounded, tenant-scoped reads: deployments and endpoints (500 each, by
+   name), the latest and counted `release_guard_evaluations` and `endpoint_release_guard_evaluations`,
+   the latest `release_guard_monitors` row, rollback events in `deployment_events`, the active
+   serving plan's bindings and weights, and the latest optimization run per targeted endpoint.
+   Counters are counts of stored rows, so every replica returns the same value and a restart never
+   lowers one.
+3. For at most four runs per scrape, the control API assembles the run's report to read its outcome
+   and cost per million output tokens, and caches the result in memory by run and last change.
+4. `internal/resultmetrics` writes the Prometheus text format, or JSON when `Accept` is
+   `application/json`. Unknown values have no series. None of this runs on the inference path, and
+   the gateway's own `/metrics` carries no workspace names.
 
 ## Optimization run notifications
 
@@ -197,3 +223,25 @@ Both return a target that follows the same runtime and reconciliation path as an
    which extends the lease and tells it when the run was cancelled.
 4. The agent deletes the candidate and posts the result: AIPerf summaries, the noise figure,
    per-prompt agreement scores and digests, readiness time, and cleanup. Nothing else is sent.
+
+## Measured results and their ranking
+
+1. `infercrane results import` reads a record bundle, JSON Lines of records, or a planner-gym cases
+   file on the caller's machine, and seals each record (`internal/resultstore`): its ID is derived
+   from its content, and its fields are numbers and bounded names, never prompts or answers. With
+   `--store FILE` the records go to a local JSON Lines file and nothing else is contacted.
+2. Otherwise the CLI posts at most 2,000 sealed records at a time to `POST
+   /api/v1/optimization/results` with deploy permission. The control API rejects unknown fields,
+   bodies over 8 MiB, and any record whose ID does not match its content, and sets every record's
+   sharing to the request's (`private` unless `numbers` was asked for).
+3. The store inserts each record into `result_records`, keyed by tenant and record ID, in one
+   transaction. A record already there is kept and takes the new sharing. A trigger refuses any
+   other change to a stored record. The row's `claim` column is the claim when it was written; reads
+   decide it again with the technique contract's rule (`Record.Claim` calls `Result.Claim`).
+4. `GET /api/v1/optimization/results` and `GET …/results/{id}` read the caller's own rows only.
+5. `POST /api/v1/optimization/results/rank` reads the caller's rows and other tenants' rows whose
+   sharing is `numbers`; the store reduces each of those to its numbers (`Record.NumbersOnly`)
+   before it leaves the store, and the ranking names such a cell only by those numbers. The prior
+   (`internal/resultprior`) is deterministic. Neither the gateway nor the inference path reads
+   `result_records`.
+

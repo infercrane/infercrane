@@ -27,6 +27,17 @@ const (
 	MeasurementPreemptions        = "runtime_preemptions"
 	MeasurementPrefixCacheHitRate = "runtime_prefix_cache_hit_rate"
 	MeasurementSpecDecodeAccept   = "runtime_spec_decode_acceptance"
+	// MeasurementSpecDraftLength is the number of draft tokens the server
+	// speculates with: draft tokens per drafting step since the engine started.
+	MeasurementSpecDraftLength = "runtime_spec_decode_draft_length"
+	// MeasurementKVCacheBlocks is the number of cache blocks the engine
+	// allocated, MeasurementKVCacheBlockTokens the tokens one block holds, and
+	// MeasurementStatePageBytes the page of a model's recurrent state, reported
+	// only for models with recurrent-state layers. With the cache use and the
+	// running requests they give the cache blocks one running request holds.
+	MeasurementKVCacheBlocks      = "runtime_kv_cache_blocks"
+	MeasurementKVCacheBlockTokens = "runtime_kv_cache_block_tokens"
+	MeasurementStatePageBytes     = "runtime_state_cache_page_bytes"
 )
 
 // Aggregation modes say how monitoring combines one measurement across the
@@ -61,6 +72,10 @@ var EngineMeasurementCatalog = []MeasurementSpec{
 	{MeasurementPreemptions, "count", AggregateSum},
 	{MeasurementPrefixCacheHitRate, "ratio", AggregateWeighted},
 	{MeasurementSpecDecodeAccept, "ratio", AggregateWeighted},
+	{MeasurementSpecDraftLength, "tokens", AggregateMax},
+	{MeasurementKVCacheBlocks, "count", AggregateSum},
+	{MeasurementKVCacheBlockTokens, "tokens", AggregateMax},
+	{MeasurementStatePageBytes, "bytes", AggregateMax},
 }
 
 // EngineMeasurementOptions binds one scrape to a replica and a validity
@@ -109,6 +124,21 @@ func EngineMeasurements(previous *EngineSnapshot, current EngineSnapshot, option
 	}
 	if current.KVCacheUsage != nil && *current.KVCacheUsage <= 1 {
 		add(MeasurementKVCacheUsage, *current.KVCacheUsage*100, 1)
+	}
+	// The cache layout is fixed when the engine starts, so one scrape is
+	// enough. A count or size of zero is not a layout and stays unavailable.
+	for _, item := range []struct {
+		name  string
+		value *float64
+	}{{MeasurementKVCacheBlocks, current.KVCacheBlocks}, {MeasurementKVCacheBlockTokens, current.KVCacheBlockTokens}, {MeasurementStatePageBytes, current.StateCachePageBytes}} {
+		if item.value != nil && *item.value > 0 {
+			add(item.name, *item.value, 1)
+		}
+	}
+	// The draft length is fixed for the life of the process, so the totals
+	// since it started give it exactly; no window is needed.
+	if current.SpecDrafts != nil && current.SpecDraftTokens != nil && *current.SpecDrafts > 0 && *current.SpecDraftTokens >= *current.SpecDrafts {
+		add(MeasurementSpecDraftLength, *current.SpecDraftTokens / *current.SpecDrafts, *current.SpecDrafts)
 	}
 
 	window := SameEngineProcess(previous, current)
@@ -227,7 +257,8 @@ func SameEngineProcess(previous *EngineSnapshot, current EngineSnapshot) bool {
 		{previous.PromptTokens, current.PromptTokens}, {previous.GenerationTokens, current.GenerationTokens},
 		{previous.Preemptions, current.Preemptions}, {previous.PrefixCacheQueries, current.PrefixCacheQueries},
 		{previous.PrefixCacheHits, current.PrefixCacheHits}, {previous.SpecDraftTokens, current.SpecDraftTokens},
-		{previous.SpecAcceptedTokens, current.SpecAcceptedTokens}, {previous.DecodeSeconds, current.DecodeSeconds},
+		{previous.SpecAcceptedTokens, current.SpecAcceptedTokens}, {previous.SpecDrafts, current.SpecDrafts},
+		{previous.DecodeSeconds, current.DecodeSeconds},
 		{previous.DecodeTokens, current.DecodeTokens},
 	} {
 		if pair[0] != nil && pair[1] != nil && *pair[1] < *pair[0] {

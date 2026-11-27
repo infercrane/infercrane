@@ -96,7 +96,9 @@ The CLI finds the dashboard in this order:
 
 1. `--console-url` on `login`, or the `INFERCRANE_CONSOLE_URL` environment variable;
 2. the dashboard the control plane advertises (`INFERCRANE_CONSOLE_URL` on the server);
-3. the dashboard saved in the context by the last `login`;
+3. the dashboard saved in the context by the last `login`, only while the CLI talks to that
+   context's control plane: `INFERCRANE_URL` naming another control plane, such as a local stack,
+   leaves it out;
 4. `https://console.infercrane.com` when the control plane is a hosted `infercrane.com` address.
 
 Local and self-hosted control planes have no dashboard until you configure one, so they print no

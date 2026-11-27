@@ -1,0 +1,145 @@
+{
+ "schema": "infercrane.kernel-tune-dry-run/v1",
+ "date": "2026-11-26",
+ "what": "After rung 2's first L40S run (Triton OutOfResources inside the tuner, a zero gain reported for errored shapes) and the H100 download's startup crash at 8f579b02 (ModuleNotFoundError: proof): the stand-in dry runs of rungs 2 and 3 with the fixes, and the first Modal CPU smoke checks. Stand-in numbers are a made-up surface, not measurements.",
+ "rung2_dry": {
+  "commit": "60d1a207 (799ada1f changes only the smoke functions)",
+  "stand_in": true,
+  "cost_usd": 0,
+  "plan": "moe-shapes-l40s",
+  "rules": "tools/kernel-tune/rules-moe-shapes-l40s-2026-11-26-v2.md",
+  "stand_in_failure_rule": "a made-up shared-memory limit (stages x tiles + 8 KiB against 101,376 bytes) and the stand-in default failing at 1 to 4 tokens",
+  "shapes": [
+   {
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "error": null,
+    "engine_fails_at": [
+     1,
+     2,
+     4
+    ],
+    "replaces_failing_default": [
+     1,
+     2,
+     4
+    ],
+    "kept_tuned": [
+     96,
+     128,
+     2048
+    ],
+    "settings_that_did_not_fit": 40
+   },
+   {
+    "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+    "error": null,
+    "engine_fails_at": [
+     1,
+     2,
+     4
+    ],
+    "replaces_failing_default": [
+     1,
+     2,
+     4
+    ],
+    "kept_tuned": [
+     96,
+     128,
+     2048
+    ],
+    "settings_that_did_not_fit": 40
+   }
+  ],
+  "verdict_summary": "ask for rung 3",
+  "ask_for_rung3": true,
+  "unknown": [
+   "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8: the engine's own setting does not run at step sizes [1, 2, 4] on this GPU",
+   "Qwen/Qwen3.6-35B-A3B-FP8: the engine's own setting does not run at step sizes [1, 2, 4] on this GPU"
+  ]
+ },
+ "rung3_dry": {
+  "commit": "60d1a207",
+  "stand_in": true,
+  "cost_usd": 0,
+  "plan": "qwen3-30b-a3b-l40s",
+  "set": "rung 2 v2 dry run's stand-in set for E=128,N=768 on NVIDIA_L40S, given with --set (shapes-result.json)",
+  "first_window_decision": "unknown",
+  "decision": "no_measurable_gain",
+  "changes_answers": "no",
+  "cells": [
+   [
+    "short/128",
+    "not_confirmed"
+   ],
+   [
+    "short/32",
+    "not_confirmed"
+   ]
+  ]
+ },
+ "modal_cpu_smoke": {
+  "commit": "799ada1f",
+  "stand_in": false,
+  "gpu": null,
+  "cost": "cents of CPU time (not read from billing)",
+  "what": "smoke_download and smoke_engine started in Modal on CPU; each container imports kernel_tune_modal.py as every function does",
+  "first_attempt": "at 60d1a207 both containers started and imported the driver, then the smoke functions themselves failed on the shapes plan (no model); fixed in 799ada1f",
+  "plans": {
+   "moe-shapes-l40s": {
+    "passed": true,
+    "checks": {
+     "download_container_ran": true,
+     "engine_container_ran": true,
+     "same_plan_in_both": true,
+     "reproduction_carried": true,
+     "engine_imports_vllm": true,
+     "tuner_starts": true
+    },
+    "engine": {
+     "vllm": "0.34.0",
+     "triton": "3.8.0",
+     "torch": "2.14.0"
+    },
+    "model": null,
+    "revision": null
+   },
+   "qwen3-30b-a3b-l40s": {
+    "passed": true,
+    "checks": {
+     "download_container_ran": true,
+     "engine_container_ran": true,
+     "same_plan_in_both": true,
+     "reproduction_carried": true,
+     "engine_imports_vllm": true,
+     "tuner_starts": true
+    },
+    "engine": {
+     "vllm": "0.34.0",
+     "triton": "3.8.0",
+     "torch": "2.14.0"
+    },
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+    "revision": "5a5a776300a41aaa681dd7ff0106608ef2bc90db"
+   },
+   "qwen36-moe-h100": {
+    "passed": true,
+    "checks": {
+     "download_container_ran": true,
+     "engine_container_ran": true,
+     "same_plan_in_both": true,
+     "reproduction_carried": true,
+     "engine_imports_vllm": true,
+     "tuner_starts": true
+    },
+    "engine": {
+     "vllm": "0.34.0",
+     "triton": "3.8.0",
+     "torch": "2.14.0"
+    },
+    "model": "Qwen/Qwen3.6-35B-A3B-FP8",
+    "revision": "c653bba46dfa06e9658dcc0b0dc87fe4685f14a2"
+   }
+  }
+ }
+}

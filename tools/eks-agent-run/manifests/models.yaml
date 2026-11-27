@@ -1,0 +1,95 @@
+# The customer's side before InferCrane arrives: one namespace and the model
+# server the customer already runs: vLLM 0.34.0 (the product's pinned image)
+# serving Qwen3-0.6B on a quarter of the shared L4. 40-run.sh creates the
+# Secret model-server-token (the server's own API key, random, made on this
+# machine) before applying this file, and fills @@GPU_PRODUCT@@ with the label
+# NVIDIA's GPU feature discovery wrote on the node. The pod asks for one
+# nvidia.com/gpu like any GPU workload would.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: @@NAMESPACE_MODELS@@
+  labels:
+    app.kubernetes.io/part-of: infercrane-eks-proof
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3
+  namespace: @@NAMESPACE_MODELS@@
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  # The image is 9.2 GB compressed and the weights are 8 GB; a first start
+  # takes several minutes.
+  progressDeadlineSeconds: 1800
+  selector:
+    matchLabels:
+      app: qwen3
+  template:
+    metadata:
+      labels:
+        app: qwen3
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      nodeSelector:
+        nvidia.com/gpu.product: "@@GPU_PRODUCT@@"
+      containers:
+        - name: vllm
+          image: @@VLLM_IMAGE@@
+          imagePullPolicy: IfNotPresent
+          command: ["vllm"]
+          args:
+            - serve
+            - "@@MODEL@@"
+            - --revision
+            - "@@MODEL_REVISION@@"
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --max-model-len
+            - "@@MAX_MODEL_LEN@@"
+            - --gpu-memory-utilization
+            - "@@GPU_MEMORY_FRACTION@@"
+            - --enable-prefix-caching
+          env:
+            - name: VLLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: model-server-token
+                  key: token
+          ports:
+            - name: http
+              containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 500m
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3
+  namespace: @@NAMESPACE_MODELS@@
+spec:
+  selector:
+    app: qwen3
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

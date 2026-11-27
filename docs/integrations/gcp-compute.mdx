@@ -151,6 +151,9 @@ worker. Real attach, mount, and startup-time improvement still require paid GCP 
 The advanced `provider.adapter` field selects an exact infrastructure profile. It is optional while
 only one default adapter exists for a cloud/runtime pair.
 
+A 24 GB GPU such as the L4 can't hold the model's full context, so the spec caps it with
+`--max-model-len 8192`.
+
 ```yaml
 apiVersion: infercrane.dev/v1
 kind: Deployment
@@ -159,6 +162,9 @@ model:
   id: Qwen/Qwen3-8B
 runtime:
   engine: vllm
+  args:
+    - --max-model-len
+    - "8192"
 compute:
   mode: elastic
 resources:

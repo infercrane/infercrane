@@ -13,3 +13,18 @@ regexes = [
   '''^017b9c7af6b5689d5dd426a76e0bc077eb5ca20a$''',
   '''^0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3$''',
 ]
+
+[[allowlists]]
+description = "Traffic-cell name (kind/load/mode) in planner and results-store test data"
+regexTarget = "secret"
+regexes = ['''^short/32/reasoning$''']
+
+[[allowlists]]
+description = "Synthetic marker the agent data-plane test asserts never leaves the cluster"
+regexTarget = "secret"
+regexes = ['''^PRIVATE-EVAL-ITEM-c41d$''']
+
+[[allowlists]]
+description = "Public fingerprint of the fixed test signing key in the proof-report goldens"
+regexTarget = "secret"
+regexes = ['''^3ab86a91c1e46782\.$''']

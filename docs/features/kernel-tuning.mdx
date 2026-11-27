@@ -1,0 +1,187 @@
+---
+title: Kernels tuned for your shapes
+description: Tune the serving engine's own MoE kernel for your GPU and the batch sizes your traffic runs at, deliver it as data the engine reads, and keep it only when a paired measurement on your setup shows more output.
+---
+
+# Kernels tuned for your shapes
+
+A mixture-of-experts model spends much of each decoding step in one kernel: the fused MoE
+layer. vLLM's Triton version of that kernel picks its tile settings from a JSON file named
+after the model's MoE shape and the GPU. When vLLM ships no file for that pair, it runs a
+built-in default and says so in its log: `Using default MoE config. Performance might be
+sub-optimal!`
+
+InferCrane reads that line, tunes the tile settings for your GPU at the token counts your
+traffic's steps carry, and offers the result as one more setup in an optimization campaign.
+The campaign measures it against the same engine untuned, on your traffic, and checks answer
+quality before anything is proposed.
+
+<Note>
+**In testing.** The checks, the campaign candidate and the proof harness are built. No tuned set
+has been measured on a GPU yet, so any gain is unknown. The first proof is planned for
+Qwen3.6-35B-A3B-FP8 on one H100 (`tools/kernel-tune/rules-qwen36-moe-h100-2026-11-26.md`).
+Sets are made with the development harness on a disposable GPU; the control plane does not run
+tuning jobs itself yet.
+</Note>
+
+```text title="What the untuned engine logs on an H100 for Qwen3.6-35B-A3B-FP8 (vLLM 0.34.0)"
+Using TRITON Fp8 MoE backend out of potential backends: ['TRITON', ...].
+Using default MoE config. Performance might be sub-optimal! Config file not found at
+  .../E=256,N=512,device_name=NVIDIA_H100_80GB_HBM3,dtype=fp8_w8a8,block_shape=[128,128].json
+```
+
+vLLM 0.34.0 ships that file for the H200, B200, RTX PRO 6000, GB10 and MI325, not for the
+H100; vLLM 0.22.1 ships none for the H100 either.
+
+## What it delivers
+
+The tuned set is **data, not code**. It holds the engine's own file format: for each step size
+(tokens in one engine step), six tile settings for vLLM's own reviewed kernel.
+
+```json title="One entry of a tuned file (values illustrative)"
+{"128":{"BLOCK_SIZE_M":16,"BLOCK_SIZE_N":64,"BLOCK_SIZE_K":128,"GROUP_SIZE_M":1,"num_warps":4,"num_stages":3}}
+```
+
+The control plane accepts a set only when every part of it checks out:
+
+| Check | Rule |
+|---|---|
+| Engine | vLLM 0.22.1 or 0.34.0, whose tuned-file lookup was read from their source |
+| Kernel | block-quantized FP8 fused MoE (`fp8_w8a8`, 128×128 blocks); other types fail closed |
+| File names | exactly the name the engine looks for, for the set's GPU; no down-projection or backend files |
+| Content | canonical JSON of the six tile settings (`SPLIT_K` only as 1); powers of two in bounded ranges; tiles aligned to the quantization block |
+| Integrity | each file's sha256 and the set's digest match |
+| Fit | the revision's engine release and GPU are the ones the set was tuned for, on that release's pinned image |
+
+### Fallback
+
+vLLM reads the tuned folder first and its own files second, per file: a set for another shape
+or GPU changes nothing. Inside a file, every step size where tuning did not measure better keeps
+the engine's own default. The tuner also adds one key on each side of every step size where the
+engine's default changes its tiles, so the nearest key to any step reproduces the default
+exactly (`internal/kerneltuning` `Keys`).
+
+## How a set is made
+
+<Steps>
+<Step title="Find the gap">
+Start the endpoint's engine once, untuned, and read its log: the MoE backend it chose and the
+tuned file it looked for and did not find. Another backend, a shipped file, or more than one
+missing shape means there is nothing to tune.
+</Step>
+<Step title="Plan the step sizes">
+From the loads the workload runs at: decode steps up to the requests held at once (times one
+plus the draft tokens when the setup speculates) and prefill steps up to the engine's step
+budget, plus the keys that keep the default exact.
+</Step>
+<Step title="Tune on a disposable GPU of the same type">
+For each step size, time the engine's own choice twice, search tile settings from it, and keep
+a setting only when it is at least 3% faster and faster by more than twice that step size's own
+spread, its error against an FP32 reference is no worse than the engine's, and no time is below
+what the GPU's memory bandwidth allows. Then check the file as the engine reads it at step
+sizes the search never timed. Kernel timings choose what to measure; they are never reported as
+a serving gain.
+</Step>
+<Step title="Measure end to end">
+The campaign serves the starting setup and the same setup with the set, and judges output per
+second with its paired comparison. Answers are checked with a task set, because new tile
+settings can change the last digits of a result.
+</Step>
+</Steps>
+
+## Prove a set on your traffic
+
+A proposal adds the setup when the request carries a set:
+
+```json title="POST /api/v1/optimization/proposals (excerpt)"
+{"model_identity": "Qwen/Qwen3.6-35B-A3B-FP8", "provider": "kubernetes", "gpu": "H100",
+ "diagnosis_endpoint": "chat", "kernel_configs": { "operator": "fused-moe", "runtime": "vllm", "...": "..." }}
+```
+
+The added candidate is the starting setup with nothing changed but the set, labelled
+**Kernels tuned for your shapes**. Its required evidence includes the engine log showing the
+tuned file was read, the control's log showing the default, and a task score. A set that does
+not fit the starting setup's engine version is left out with a warning.
+
+Kubernetes serves it: before the engine starts, the Pod writes each file into a folder of its
+own from its environment, checks the sha256, and points `VLLM_TUNED_CONFIG_FOLDER` at it. Other
+adapters refuse a revision with a set rather than serve a different one.
+
+### Judge a recorded proof
+
+The development harness (`tools/kernel-tune`) serves both setups in turn on one GPU, restarting
+the engine between runs, control first and last, then repeats on a fresh machine. Serving both on
+one machine removes the difference between machines, which reached 13% to 18% between H100s
+this month, far above a kernel's likely gain.
+
+```bash
+infercrane optimize evidence kernel-tuning --file window-first.json --fresh window-fresh.json \
+  --set kernel-configs.json --evidence-dir .
+```
+
+| Decision | When |
+|---|---|
+| `propose` | At least one load gained on the first machine and again on a fresh one, no load lost, and the task set shows no measurable difference |
+| `no_measurable_gain` | No load gained beyond the noise, or a first-window gain did not repeat |
+| `reject` | A load served less output, or the task set scored worse |
+| `unknown` | A window was invalid (a run failed, the control drifted more than 15%, or a run did not prove what it served), or answers did not settle |
+
+A slower p95 first token or time per token is shown as a warning beside the decision.
+
+The verdict carries one [technique contract](/features/technique-contract) result per load. The
+technique requires the evidence `kernel-invocation-proof`: for every server start of both
+windows, what the engine log said about the fused-MoE kernel. Each tuned start must have read
+every tuned file from the mount, and each control start must have reported the engine's default.
+`--evidence-dir` writes it as `kernel-invocation-proof.json`, and every result names that file's
+sha256. If any start served something other than its arm, the evidence is missing and no result
+is shown. A load the fresh window confirmed also carries that window's digest as
+`fresh-machine-confirmation` (`--evidence-dir` writes it as `fresh-machine-confirmation.json`);
+without a fresh window, no load is shown.
+
+## Where agent-written kernel code runs
+
+Tuned tile settings are data for a kernel the engine already ships, so they may serve in your
+own cluster once proven. Code a language model writes (`internal/kernelgen`) is different:
+
+- It is written as source text only, with no tools, and screened on CPU first (static checks,
+  then the Triton interpreter in a Brezel sandbox).
+- Every GPU test runs in a **disposable GPU container of InferCrane's own**, one container per
+  evaluation, on the GPU type it targets: no network, no credentials, nothing kept but the
+  result and the content digest of the source. Today that container is on Modal.
+- It never runs on a customer's cluster or next to customer inference until it has passed the
+  hardened evaluator, end-to-end qualification on the customer's traffic, Release Guard and an
+  explicit promotion. Firecracker sandboxes cannot pass a GPU through, and published agent loops
+  have reset GPUs and taken machines out of service, so the boundary is a whole disposable GPU,
+  not a process on a shared one.
+
+## Agent-written kernels on vLLM 0.34
+
+The residual-RMSNorm pack's serving integration for vLLM 0.22.1 goes through vLLM IR, whose
+operator-priority setting vLLM 0.34.0 removed. vLLM 0.34.0 keeps `CustomOp.register_oot` and
+loads `vllm.general_plugins` entry points named in `VLLM_PLUGINS`, so the pack now also has a
+plugin (`integration-vllm-0.34`) that goes on the serving container's path instead of a fork.
+It replaces `RMSNorm`, calls the generated kernel only for the shapes it was qualified on, falls
+back to the library kernel for every other call, counts both, and leaves a marker on the first
+generated call. A candidate enables it with `VLLM_PLUGINS=infercrane_kernels` and
+`--compilation-config '{"custom_ops":["+RMSNorm"]}'`. It is tested against a stub of vLLM
+0.34.0's API, not yet on a GPU, so the pack still lists vLLM 0.22.1 only, and qualification does
+not use the plugin yet.
+
+The rest of the pipeline moved with it:
+
+- **Shapes from real traffic.** A GPU profile now names each hotspot's input shapes and dtypes,
+  read from the operator that launched each kernel. Kernels replayed from a CUDA graph have no
+  launching operator, so their shapes stay unknown rather than guessed.
+- **A harder evaluator.** Correctness runs at those shapes and at row counts next to them that a
+  hidden seed picks. Both kernels are timed inside a CUDA graph, the library kernel in place with
+  no copies, each call reading inputs that do not fit in the L2 cache. A time faster than the
+  GPU's memory allows fails as a timing fault. The generated module runs in the evaluator's
+  process, so the evaluator records its own files and every function its checks call before the
+  module loads, and any change fails the run.
+- **The end-to-end gate is unchanged:** control, candidate, control on the same GPU with your
+  traffic, the invocation proof, then Release Guard.
+
+## Next
+
+- [Optimization campaigns](/features/optimization): how candidates are measured and proposed.
+- [GPU profiling](/features/gpu-profiling): whether the MoE layer is where the GPU's time goes.

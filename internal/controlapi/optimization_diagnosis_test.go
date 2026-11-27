@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,7 +91,7 @@ func diagnosisHandler(t *testing.T, store *diagnosisCampaignStore) func(method, 
 	}
 }
 
-const diagnosisProposalBody = `{"model_identity":"acme/novel-open-model","model_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider":"runpod-pods","gpu":"H100","runtimes":["vllm"],"max_candidates":3,"diagnosis_endpoint":"chat-production"}`
+const diagnosisProposalBody = `{"model_identity":"acme/novel-open-model","model_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider":"runpod-pods","gpu":"H100","runtimes":["vllm"],"max_candidates":4,"diagnosis_endpoint":"chat-production"}`
 
 func TestProposalOrdersCandidatesByTheEndpointsRecordedDiagnosis(t *testing.T) {
 	store := &diagnosisCampaignStore{fakeOptimizationCampaignStore: &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}, snapshot: kvPressureSnapshot(), profile: attentionHeavyProfile()}
@@ -121,7 +122,8 @@ func TestProposalOrdersCandidatesByTheEndpointsRecordedDiagnosis(t *testing.T) {
 		}
 		order = append(order, candidate.Reason.Role+":"+candidate.Reason.Technique)
 	}
-	if strings.Join(order, ",") != "control:,diagnosis:fp8-kv-cache,diagnosis:kv-sequence-cap" {
+	// A copy of the starting setup follows the first choice on every list.
+	if strings.Join(order, ",") != "control:,diagnosis:fp8-kv-cache,copy:,diagnosis:kv-sequence-cap" {
 		t.Fatalf("order=%v", order)
 	}
 	if fp8 := proposal.Candidates[1].Reason; !contains(fp8.Rules, optimizer.RuleProfileAttentionHeavy) || fp8.ExpectedBenefit != "high" {
@@ -152,7 +154,7 @@ func TestProposalOrdersCandidatesByTheEndpointsRecordedDiagnosis(t *testing.T) {
 		t.Fatalf("campaign read lost the diagnosis plan: %#v", read.Campaign["diagnosis"])
 	}
 	candidates, _ := read.Campaign["candidates"].([]any)
-	if len(candidates) != 3 {
+	if len(candidates) != 4 {
 		t.Fatalf("candidates=%#v", read.Campaign["candidates"])
 	}
 	for _, raw := range candidates {
@@ -289,4 +291,115 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// setupStore adds what the endpoint runs now to a diagnosis store.
+type setupStore struct {
+	*diagnosisCampaignStore
+	spec domain.DeploymentRevisionSpec
+	err  error
+}
+
+func (s *setupStore) EndpointActiveSetup(context.Context, string, string) (string, int, domain.DeploymentRevisionSpec, error) {
+	return "chat-production-qwen", 7, s.spec, s.err
+}
+
+// Package 8 of the optimizer plan: with a diagnosis, the server reads the
+// endpoint's active setup and the plan starts from it; a client cannot send
+// one.
+func TestProposalStartsFromTheEndpointsActiveSetup(t *testing.T) {
+	store := &setupStore{diagnosisCampaignStore: &diagnosisCampaignStore{fakeOptimizationCampaignStore: &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}, snapshot: kvPressureSnapshot(), profileErr: gpuprofile.ErrNotRecorded},
+		spec: domain.DeploymentRevisionSpec{Runtime: "vllm", RuntimeVersion: "0.34.0", RuntimeArgs: []string{"--max-num-seqs", "512"}, GPU: "H100", GPUCount: 1}}
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := (API{Store: store, APIKey: "secret", OptimizationCosts: fakeOptimizationCosts{}, Integrations: registry.Snapshot()}).Handler()
+	call := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/optimization/proposals", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer secret")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	response := call(diagnosisProposalBody)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var proposed struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &proposed); err != nil {
+		t.Fatal(err)
+	}
+	setup := proposed.Proposal.Input.StartingSetup
+	if setup == nil || setup.Deployment != "chat-production-qwen" || setup.Revision != 7 || setup.Version != "0.34.0" {
+		t.Fatalf("starting setup=%+v", setup)
+	}
+	control := proposed.Proposal.Candidates[0].Deployment.Runtime
+	if control.Version != "0.34.0" || strings.Join(control.Args, " ") != "--max-num-seqs 512" {
+		t.Fatalf("the plan did not start from the endpoint: %+v", control)
+	}
+	forged := strings.Replace(diagnosisProposalBody, `"max_candidates":4`, `"max_candidates":4,"starting_setup":{"deployment":"x","revision":1,"engine":"vllm","version":"0.34.0"}`, 1)
+	if response = call(forged); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "starting_setup are read by the server") {
+		t.Fatalf("client starting setup status=%d body=%s", response.Code, response.Body.String())
+	}
+	// An endpoint without one deployment to start from plans as before.
+	store.err = domain.ErrNotFound
+	if response = call(diagnosisProposalBody); response.Code != http.StatusOK || strings.Contains(response.Body.String(), `"starting_setup"`) {
+		t.Fatalf("no single setup: status=%d", response.Code)
+	}
+	store.err = errors.New("database down")
+	if response = call(diagnosisProposalBody); response.Code != http.StatusInternalServerError {
+		t.Fatalf("store failure status=%d", response.Code)
+	}
+}
+
+const draftsProposalBody = `{"model_identity":"acme/novel-open-model","model_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","provider":"runpod-pods","gpu":"H100","runtimes":["vllm"],"max_candidates":10,%s"speculative_drafts":[{"name":"support-chat","source":"trained","method":"eagle3","repository":"acme/novel-open-model-draft","revision":"0123456789abcdef0123456789abcdef01234567","base_model":"acme/novel-open-model","base_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","draft_tokens":3,"artifact_digest":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","pinned":{"engine":"vllm","engine_version":"0.34.0","accelerator":"H100"},"training":{"framework":"speculators","framework_version":"0.9.0","data_source":"prompt_set","dataset_fingerprint":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","examples":9000,"held_out_examples":400,"training_tokens":4000000,"held_out_acceptance":[0.8,0.5,0.5],"produced_at":"2026-11-25T00:00:00Z"}}]}`
+
+func TestProposalMeasuresANamedTrainedDraftFromTheDiagnosis(t *testing.T) {
+	store := &diagnosisCampaignStore{fakeOptimizationCampaignStore: &fakeOptimizationCampaignStore{fakeStore: &fakeStore{}}, snapshot: kvPressureSnapshot(), profileErr: gpuprofile.ErrNotRecorded}
+	call := diagnosisHandler(t, store)
+
+	if response := call(http.MethodPost, "/api/v1/optimization/proposals", fmt.Sprintf(draftsProposalBody, ""), ""); response.Code == http.StatusOK || !strings.Contains(response.Body.String(), "diagnosis_endpoint") {
+		t.Fatalf("drafts without a diagnosis: status=%d body=%s", response.Code, response.Body.String())
+	}
+	response := call(http.MethodPost, "/api/v1/optimization/proposals", fmt.Sprintf(draftsProposalBody, `"diagnosis_endpoint":"chat-production",`), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("proposal status=%d body=%s", response.Code, response.Body.String())
+	}
+	var proposed struct {
+		Proposal optimizer.Proposal `json:"proposal"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &proposed); err != nil {
+		t.Fatal(err)
+	}
+	proposal := proposed.Proposal
+	if len(proposal.Input.SpeculativeDrafts) != 1 || proposal.Input.SpeculativeDrafts[0].Training == nil {
+		t.Fatalf("the draft record is not bound into the proposal input: %+v", proposal.Input.SpeculativeDrafts)
+	}
+	var trained *optimizer.Candidate
+	for index := range proposal.Candidates {
+		if reason := proposal.Candidates[index].Reason; reason != nil && reason.Technique == optimizer.TechniqueSpeculativeTrainedDraft {
+			trained = &proposal.Candidates[index]
+		}
+	}
+	if trained == nil || !strings.Contains(strings.Join(trained.Deployment.Runtime.Args, " "), `"model":"acme/novel-open-model-draft"`) {
+		t.Fatalf("no trained-draft setup in %+v", proposal.Diagnosis.Techniques)
+	}
+	encoded, err := json.Marshal(map[string]any{"proposal": proposal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response = call(http.MethodPost, "/api/v1/optimization/campaigns", string(encoded), "drafts-campaign-1"); response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = call(http.MethodGet, "/api/v1/optimization/campaigns/"+store.campaign.ID, "", "")
+	var read struct {
+		Campaign map[string]any `json:"campaign"`
+	}
+	if err = json.Unmarshal(response.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	assertMatchesDocumentedSchema(t, "OptimizationCampaign", read.Campaign)
 }

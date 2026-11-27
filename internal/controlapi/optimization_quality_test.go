@@ -118,6 +118,37 @@ func TestCandidateQualityReportsBuiltinAndCustomerVerdicts(t *testing.T) {
 	if customer.State != qualityStateBlocked || customer.Source != domain.QualityEvidenceSourceCustomer || customer.BlockLimitPercent != nil || !strings.Contains(customer.Reason, "Your signed evaluation support failed") {
 		t.Fatalf("customer = %+v", customer)
 	}
+	// The evaluator says exactly what scored the row: answer agreement or a
+	// task score, InferCrane's or the customer's.
+	task := builtin(0.71, true, "rev-control")
+	row := task.evidence["q1"]
+	row.Evaluator = qualitycheck.TaskEvaluator
+	task.evidence["q1"] = row
+	if view := candidateQuality(campaign, ranked, task); view.Evaluator != qualitycheck.TaskEvaluator || view.WatchLimitPercent != nil || !strings.Contains(view.Reason, "task items right") {
+		t.Fatalf("task row = %+v", view)
+	}
+	// A setup that changes answers is read by the stricter rule: held within a
+	// point, or not shown to hold, which is inconclusive and never promoted.
+	for name, test := range map[string]struct {
+		passed       bool
+		distribution string
+		state, says  string
+	}{
+		"held":           {true, `{"task_rule":"held_within_1_point","task_verdict":"task_score_held_within_1_point","task_servers":1}`, qualityStatePassed, "held within 1 point"},
+		"not shown held": {false, `{"task_rule":"held_within_1_point","task_verdict":"task_score_not_shown_held_within_1_point","task_servers":1}`, qualityStateInconclusive, "not shown to hold within 1 point of the reference on one server each"},
+		"worse":          {false, `{"task_rule":"held_within_1_point","task_verdict":"task_score_worse","task_servers":1}`, qualityStateBlocked, "whole 95% interval"},
+	} {
+		inputs := builtin(0.84, test.passed, "rev-control")
+		changed := inputs.evidence["q1"]
+		changed.Evaluator, changed.DistributionJSON = qualitycheck.TaskEvaluator, test.distribution
+		inputs.evidence["q1"] = changed
+		if view := candidateQuality(campaign, ranked, inputs); view.State != test.state || !strings.Contains(view.Reason, test.says) {
+			t.Fatalf("%s: view = %+v", name, view)
+		}
+	}
+	if view := candidateQuality(campaign, ranked, builtin(0.98, true, "rev-control")); view.Evaluator != qualitycheck.Evaluator {
+		t.Fatalf("agreement row evaluator = %q", view.Evaluator)
+	}
 	unread := candidateQuality(campaign, ranked, campaignQualityInputs{})
 	if unread.State != qualityStatePassed || unread.Score != nil || unread.EvidenceID != "q1" {
 		t.Fatalf("unread evidence = %+v", unread)

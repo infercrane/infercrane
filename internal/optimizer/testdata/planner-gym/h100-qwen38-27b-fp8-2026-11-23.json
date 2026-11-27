@@ -1,0 +1,2403 @@
+{
+ "schema": "infercrane.planner-gym/v1",
+ "title": "Qwen/Qwen3.8-27B-FP8 on one H100, vLLM 0.34.0: the map, the crossover run and the product's planner checks of 2026-11-23",
+ "model": {
+  "id": "Qwen/Qwen3.8-27B-FP8",
+  "revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+  "features": [
+   "native_mtp"
+  ]
+ },
+ "gpu": "H100",
+ "engine": "vllm",
+ "engine_version": "0.34.0",
+ "max_num_seqs": 904,
+ "first_token_limit_ms": 1000.0,
+ "useful_output": "output tokens per second, counted inside the measured window, of requests whose first token came within the limit",
+ "setups": {
+  "plain": {
+   "label": "The publisher's command (with --max-num-seqs 512)",
+   "drafts": 0,
+   "kv_cache_dtype": "auto",
+   "blocks": 867,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "three-drafts": {
+   "label": "Plus the documented speculation option, 3 draft tokens",
+   "drafts": 3,
+   "kv_cache_dtype": "auto",
+   "blocks": 779,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "one-draft": {
+   "label": "The same option with 1 draft token",
+   "drafts": 1,
+   "kv_cache_dtype": "auto",
+   "blocks": 788,
+   "block_tokens": 832,
+   "state_page_bytes": 3407872
+  },
+  "three-drafts-fp8-kv": {
+   "label": "3 draft tokens plus an FP8 KV cache (arguments written by hand)",
+   "drafts": 3,
+   "kv_cache_dtype": "fp8",
+   "blocks": 809,
+   "block_tokens": 1600,
+   "state_page_bytes": 3276800
+  },
+  "plain-fp8-kv": {
+   "label": "The publisher's command plus an FP8 KV cache",
+   "drafts": 0,
+   "kv_cache_dtype": "fp8"
+  }
+ },
+ "cells": [
+  {
+   "key": "short/4",
+   "kind": "short",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 318.07,
+      "min": 315.48,
+      "max": 319.13,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 318.07,
+      "min": 315.48,
+      "max": 319.13,
+      "servers": 3
+     },
+     "ttft_p50_ms": 54.2,
+     "ttft_p95_ms": 77.14,
+     "window": {
+      "requests": 104,
+      "running": 3.9474,
+      "waiting": 0.0,
+      "cache_use_max": 0.0185,
+      "prompt_tokens_mean": 39.63,
+      "completion_tokens_mean": 271.78,
+      "latency_p95_ms": 3735.54,
+      "generation_p95_ms": 3676.77,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 607.69,
+      "min": 566.83,
+      "max": 609.67,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 607.69,
+      "min": 566.83,
+      "max": 609.67,
+      "servers": 3
+     },
+     "ttft_p50_ms": 71.4,
+     "ttft_p95_ms": 101.24,
+     "window": {
+      "requests": 202,
+      "running": 3.8947,
+      "waiting": 0.0,
+      "cache_use_max": 0.0668,
+      "prompt_tokens_mean": 40.88,
+      "completion_tokens_mean": 269.5,
+      "accepted_per_draft": 1.7324,
+      "latency_p95_ms": 2270.01,
+      "generation_p95_ms": 2198.37,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 487.57,
+      "min": 487.4,
+      "max": 487.8,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 487.57,
+      "min": 487.4,
+      "max": 487.8,
+      "servers": 3
+     },
+     "ttft_p50_ms": 61.4,
+     "ttft_p95_ms": 64.79,
+     "window": {
+      "requests": 162,
+      "running": 3.8421,
+      "waiting": 0.0,
+      "cache_use_max": 0.0356,
+      "prompt_tokens_mean": 40.55,
+      "completion_tokens_mean": 268.93,
+      "accepted_per_draft": 0.8248,
+      "latency_p95_ms": 2540.15,
+      "generation_p95_ms": 2477.71,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 599.41,
+      "min": 597.21,
+      "max": 602.6,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 599.41,
+      "min": 597.21,
+      "max": 602.6,
+      "servers": 3
+     },
+     "ttft_p50_ms": 65.4,
+     "ttft_p95_ms": 91.25,
+     "window": {
+      "requests": 201,
+      "running": 3.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.0644,
+      "prompt_tokens_mean": 41.04,
+      "completion_tokens_mean": 269.9,
+      "accepted_per_draft": 1.7598,
+      "latency_p95_ms": 2306.83,
+      "generation_p95_ms": 2233.1,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/32",
+   "kind": "short",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "capacity test (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1820.97,
+      "min": 1771.75,
+      "max": 1863.67,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1820.97,
+      "min": 1771.75,
+      "max": 1863.67,
+      "servers": 3
+     },
+     "ttft_p50_ms": 60.3,
+     "ttft_p95_ms": 95.36,
+     "window": {
+      "requests": 605,
+      "running": 31.5263,
+      "waiting": 0.0,
+      "cache_use_max": 0.1478,
+      "prompt_tokens_mean": 40.35,
+      "completion_tokens_mean": 269.06,
+      "latency_p95_ms": 5234.66,
+      "generation_p95_ms": 5170.08,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2869.53,
+      "min": 2455.31,
+      "max": 2902.08,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2869.53,
+      "min": 2455.31,
+      "max": 2902.08,
+      "servers": 3
+     },
+     "ttft_p50_ms": 89.2,
+     "ttft_p95_ms": 154.96,
+     "window": {
+      "requests": 957,
+      "running": 31.1053,
+      "waiting": 0.0,
+      "cache_use_max": 0.5347,
+      "prompt_tokens_mean": 40.01,
+      "completion_tokens_mean": 269.99,
+      "accepted_per_draft": 1.7311,
+      "latency_p95_ms": 3781.02,
+      "generation_p95_ms": 3671.7,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 2580.32,
+      "min": 2575.92,
+      "max": 2617.25,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2580.32,
+      "min": 2575.92,
+      "max": 2617.25,
+      "servers": 3
+     },
+     "ttft_p50_ms": 70.0,
+     "ttft_p95_ms": 113.59,
+     "window": {
+      "requests": 862,
+      "running": 31.4737,
+      "waiting": 0.0,
+      "cache_use_max": 0.2846,
+      "prompt_tokens_mean": 40.33,
+      "completion_tokens_mean": 270.58,
+      "accepted_per_draft": 0.8175,
+      "latency_p95_ms": 3892.39,
+      "generation_p95_ms": 3802.39,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 2833.32,
+      "min": 2817.79,
+      "max": 2844.89,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2833.32,
+      "min": 2817.79,
+      "max": 2844.89,
+      "servers": 3
+     },
+     "ttft_p50_ms": 91.1,
+     "ttft_p95_ms": 138.6,
+     "window": {
+      "requests": 941,
+      "running": 30.8421,
+      "waiting": 0.0,
+      "cache_use_max": 0.5149,
+      "prompt_tokens_mean": 40.2,
+      "completion_tokens_mean": 270.07,
+      "accepted_per_draft": 1.7325,
+      "latency_p95_ms": 3820.26,
+      "generation_p95_ms": 3719.6,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/48",
+   "kind": "short",
+   "requests_at_once": 48,
+   "reasoning": "off",
+   "run": "crossover",
+   "rules_built_from": "capacity test (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2198.93,
+      "min": 2161.16,
+      "max": 2469.94,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2198.93,
+      "min": 2161.16,
+      "max": 2469.94,
+      "servers": 3
+     },
+     "ttft_p50_ms": 76.35,
+     "ttft_p95_ms": 124.03,
+     "window": {
+      "requests": 732,
+      "running": 47.3684,
+      "waiting": 0.0,
+      "cache_use_max": 0.2217,
+      "latency_p95_ms": 6541.37,
+      "generation_p95_ms": 6462.98,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3310.43,
+      "min": 3082.74,
+      "max": 3391.48,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3310.43,
+      "min": 3082.74,
+      "max": 3391.48,
+      "servers": 3
+     },
+     "ttft_p50_ms": 123.75,
+     "ttft_p95_ms": 182.47,
+     "window": {
+      "requests": 1106,
+      "running": 46.7368,
+      "waiting": 0.0,
+      "cache_use_max": 0.8021,
+      "latency_p95_ms": 4899.78,
+      "generation_p95_ms": 4765.58,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 3139.59,
+      "min": 2912.28,
+      "max": 3315.88,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3139.59,
+      "min": 2912.28,
+      "max": 3315.88,
+      "servers": 3
+     },
+     "ttft_p50_ms": 84.95,
+     "ttft_p95_ms": 153.04,
+     "window": {
+      "requests": 1052,
+      "running": 46.8947,
+      "waiting": 0.0,
+      "cache_use_max": 0.4269,
+      "latency_p95_ms": 4836.88,
+      "generation_p95_ms": 4729.6,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/64",
+   "kind": "short",
+   "requests_at_once": 64,
+   "reasoning": "off",
+   "run": "crossover",
+   "rules_built_from": "capacity test (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 2806.32,
+      "min": 2594.39,
+      "max": 2978.57,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2806.32,
+      "min": 2594.39,
+      "max": 2978.57,
+      "servers": 3
+     },
+     "ttft_p50_ms": 71.3,
+     "ttft_p95_ms": 124.28,
+     "window": {
+      "requests": 916,
+      "running": 63.4737,
+      "waiting": 0.0,
+      "cache_use_max": 0.2956,
+      "latency_p95_ms": 7010.88,
+      "generation_p95_ms": 6913.18,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3565.36,
+      "min": 3424.58,
+      "max": 3612.55,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3565.36,
+      "min": 3409.31,
+      "max": 3609.27,
+      "servers": 3
+     },
+     "ttft_p50_ms": 470.05,
+     "ttft_p95_ms": 732.81,
+     "window": {
+      "requests": 1170,
+      "running": 58.1579,
+      "waiting": 4.5263,
+      "cache_use_max": 0.9859,
+      "latency_p95_ms": 6040.1,
+      "generation_p95_ms": 5515.77,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 3726.55,
+      "min": 3543.59,
+      "max": 3820.73,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3726.55,
+      "min": 3543.59,
+      "max": 3820.73,
+      "servers": 3
+     },
+     "ttft_p50_ms": 105.1,
+     "ttft_p95_ms": 155.4,
+     "window": {
+      "requests": 1227,
+      "running": 62.6316,
+      "waiting": 0.0,
+      "cache_use_max": 0.5693,
+      "latency_p95_ms": 5354.54,
+      "generation_p95_ms": 5241.88,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/96",
+   "kind": "short",
+   "requests_at_once": 96,
+   "reasoning": "off",
+   "run": "crossover",
+   "rules_built_from": "capacity test (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 3584.54,
+      "min": 3307.01,
+      "max": 3589.63,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3584.54,
+      "min": 3307.01,
+      "max": 3589.63,
+      "servers": 3
+     },
+     "ttft_p50_ms": 85.2,
+     "ttft_p95_ms": 128.06,
+     "window": {
+      "requests": 1185,
+      "running": 95.0526,
+      "waiting": 0.0,
+      "cache_use_max": 0.4434,
+      "latency_p95_ms": 7999.57,
+      "generation_p95_ms": 7912.67,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3574.33,
+      "min": 3358.15,
+      "max": 3590.01,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 2878.85,
+     "ttft_p95_ms": 3531.35,
+     "window": {
+      "requests": 1182,
+      "running": 58.1579,
+      "waiting": 36.6316,
+      "cache_use_max": 0.9859,
+      "latency_p95_ms": 8611.4,
+      "generation_p95_ms": 5482.19,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 4406.83,
+      "min": 4060.01,
+      "max": 4424.93,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4406.83,
+      "min": 4060.01,
+      "max": 4424.93,
+      "servers": 3
+     },
+     "ttft_p50_ms": 122.3,
+     "ttft_p95_ms": 163.05,
+     "window": {
+      "requests": 1472,
+      "running": 94.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.8539,
+      "latency_p95_ms": 6739.65,
+      "generation_p95_ms": 6609.2,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/128",
+   "kind": "short",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "capacity test (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 4081.12,
+      "min": 4026.77,
+      "max": 4092.97,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 4081.12,
+      "min": 4026.77,
+      "max": 4092.97,
+      "servers": 3
+     },
+     "ttft_p50_ms": 98.5,
+     "ttft_p95_ms": 133.6,
+     "window": {
+      "requests": 1345,
+      "running": 126.9474,
+      "waiting": 0.0,
+      "cache_use_max": 0.5912,
+      "prompt_tokens_mean": 41.35,
+      "completion_tokens_mean": 272.8,
+      "latency_p95_ms": 9309.3,
+      "generation_p95_ms": 9213.78,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 3652.16,
+      "min": 3327.19,
+      "max": 3671.92,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 5256.0,
+     "ttft_p95_ms": 5623.51,
+     "window": {
+      "requests": 1199,
+      "running": 58.3158,
+      "waiting": 68.5263,
+      "cache_use_max": 0.9859,
+      "prompt_tokens_mean": 41.31,
+      "completion_tokens_mean": 273.0,
+      "accepted_per_draft": 1.7358,
+      "latency_p95_ms": 10707.15,
+      "generation_p95_ms": 5388.19,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 4596.65,
+      "min": 4568.93,
+      "max": 4605.68,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2064.69,
+      "min": 2053.0,
+      "max": 2123.67,
+      "servers": 3
+     },
+     "ttft_p50_ms": 1015.95,
+     "ttft_p95_ms": 1426.7,
+     "window": {
+      "requests": 1522,
+      "running": 111.2105,
+      "waiting": 15.0,
+      "cache_use_max": 0.9962,
+      "prompt_tokens_mean": 40.83,
+      "completion_tokens_mean": 272.0,
+      "accepted_per_draft": 0.8184,
+      "latency_p95_ms": 8623.96,
+      "generation_p95_ms": 7460.49,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 3595.52,
+      "min": 3590.63,
+      "max": 3641.07,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 5125.4,
+     "ttft_p95_ms": 5504.06,
+     "window": {
+      "requests": 1182,
+      "running": 61.2632,
+      "waiting": 65.3684,
+      "cache_use_max": 0.9975,
+      "prompt_tokens_mean": 41.23,
+      "completion_tokens_mean": 272.88,
+      "accepted_per_draft": 1.7337,
+      "latency_p95_ms": 10993.55,
+      "generation_p95_ms": 5766.01,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "short/32/reasoning",
+   "kind": "short",
+   "requests_at_once": 32,
+   "reasoning": "on",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1823.72,
+      "min": 1763.76,
+      "max": 1860.87,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1823.72,
+      "min": 1763.76,
+      "max": 1860.87,
+      "servers": 3
+     },
+     "ttft_p50_ms": 60.3,
+     "ttft_p95_ms": 96.8,
+     "window": {
+      "requests": 589,
+      "running": 31.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.1478,
+      "prompt_tokens_mean": 81.5,
+      "completion_tokens_mean": 278.97,
+      "latency_p95_ms": 5271.66,
+      "generation_p95_ms": 5198.36,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2376.9,
+      "min": 2324.94,
+      "max": 2723.64,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2376.9,
+      "min": 2324.94,
+      "max": 2723.64,
+      "servers": 3
+     },
+     "ttft_p50_ms": 110.6,
+     "ttft_p95_ms": 183.44,
+     "window": {
+      "requests": 773,
+      "running": 31.2105,
+      "waiting": 0.0,
+      "cache_use_max": 0.5347,
+      "prompt_tokens_mean": 81.43,
+      "completion_tokens_mean": 277.07,
+      "accepted_per_draft": 1.6076,
+      "latency_p95_ms": 4685.54,
+      "generation_p95_ms": 4575.68,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/4",
+   "kind": "prefix",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 282.74,
+      "min": 281.02,
+      "max": 282.99,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 282.74,
+      "min": 281.02,
+      "max": 282.99,
+      "servers": 3
+     },
+     "ttft_p50_ms": 112.9,
+     "ttft_p95_ms": 235.26,
+     "window": {
+      "requests": 110,
+      "running": 3.8947,
+      "waiting": 0.0,
+      "cache_use_max": 0.0393,
+      "prompt_tokens_mean": 3858.11,
+      "completion_tokens_mean": 229.68,
+      "latency_p95_ms": 5744.96,
+      "generation_p95_ms": 5665.72,
+      "prefix_cache_hit_rate": 0.7528
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 526.64,
+      "min": 487.41,
+      "max": 536.09,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 526.64,
+      "min": 487.41,
+      "max": 536.09,
+      "servers": 3
+     },
+     "ttft_p50_ms": 129.5,
+     "ttft_p95_ms": 259.18,
+     "window": {
+      "requests": 205,
+      "running": 3.6842,
+      "waiting": 0.0,
+      "cache_use_max": 0.0938,
+      "prompt_tokens_mean": 3858.78,
+      "completion_tokens_mean": 229.86,
+      "accepted_per_draft": 1.9187,
+      "latency_p95_ms": 3069.26,
+      "generation_p95_ms": 2918.6,
+      "prefix_cache_hit_rate": 0.751
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 425.57,
+      "min": 424.3,
+      "max": 426.1,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 425.57,
+      "min": 424.3,
+      "max": 426.1,
+      "servers": 3
+     },
+     "ttft_p50_ms": 107.7,
+     "ttft_p95_ms": 251.21,
+     "window": {
+      "requests": 167,
+      "running": 3.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.061,
+      "prompt_tokens_mean": 3856.48,
+      "completion_tokens_mean": 228.85,
+      "accepted_per_draft": 0.8464,
+      "latency_p95_ms": 3703.95,
+      "generation_p95_ms": 3587.77,
+      "prefix_cache_hit_rate": 0.759
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 523.0,
+      "min": 517.22,
+      "max": 524.6,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 523.0,
+      "min": 517.22,
+      "max": 524.6,
+      "servers": 3
+     },
+     "ttft_p50_ms": 112.35,
+     "ttft_p95_ms": 261.98,
+     "window": {
+      "requests": 202,
+      "running": 3.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.078,
+      "prompt_tokens_mean": 3858.66,
+      "completion_tokens_mean": 231.6,
+      "accepted_per_draft": 1.9173,
+      "latency_p95_ms": 3123.17,
+      "generation_p95_ms": 2963.51,
+      "prefix_cache_hit_rate": 0.7257
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/32",
+   "kind": "prefix",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1127.53,
+      "min": 1011.44,
+      "max": 1180.93,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1127.53,
+      "min": 1011.44,
+      "max": 1180.93,
+      "servers": 3
+     },
+     "ttft_p50_ms": 121.8,
+     "ttft_p95_ms": 289.7,
+     "window": {
+      "requests": 421,
+      "running": 31.4211,
+      "waiting": 0.0,
+      "cache_use_max": 0.3048,
+      "prompt_tokens_mean": 3860.67,
+      "completion_tokens_mean": 241.55,
+      "latency_p95_ms": 11621.0,
+      "generation_p95_ms": 11503.4,
+      "prefix_cache_hit_rate": 0.7599
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 1619.49,
+      "min": 1376.9,
+      "max": 1735.32,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1619.49,
+      "min": 1376.9,
+      "max": 1735.32,
+      "servers": 3
+     },
+     "ttft_p50_ms": 216.05,
+     "ttft_p95_ms": 406.06,
+     "window": {
+      "requests": 596,
+      "running": 30.8947,
+      "waiting": 0.0,
+      "cache_use_max": 0.7134,
+      "prompt_tokens_mean": 3862.2,
+      "completion_tokens_mean": 242.62,
+      "accepted_per_draft": 1.8907,
+      "latency_p95_ms": 8246.6,
+      "generation_p95_ms": 8014.05,
+      "prefix_cache_hit_rate": 0.752
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 1488.72,
+      "min": 1483.63,
+      "max": 1504.14,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1488.72,
+      "min": 1483.63,
+      "max": 1504.14,
+      "servers": 3
+     },
+     "ttft_p50_ms": 131.6,
+     "ttft_p95_ms": 337.36,
+     "window": {
+      "requests": 552,
+      "running": 30.9474,
+      "waiting": 0.0,
+      "cache_use_max": 0.4574,
+      "prompt_tokens_mean": 3862.19,
+      "completion_tokens_mean": 241.92,
+      "accepted_per_draft": 0.8397,
+      "latency_p95_ms": 8811.5,
+      "generation_p95_ms": 8673.7,
+      "prefix_cache_hit_rate": 0.7507
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 1599.59,
+      "min": 1568.16,
+      "max": 1614.31,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1599.59,
+      "min": 1568.16,
+      "max": 1614.31,
+      "servers": 3
+     },
+     "ttft_p50_ms": 218.75,
+     "ttft_p95_ms": 423.45,
+     "window": {
+      "requests": 594,
+      "running": 30.9474,
+      "waiting": 0.0,
+      "cache_use_max": 0.5978,
+      "prompt_tokens_mean": 3862.35,
+      "completion_tokens_mean": 241.03,
+      "accepted_per_draft": 1.8947,
+      "latency_p95_ms": 8321.18,
+      "generation_p95_ms": 8072.05,
+      "prefix_cache_hit_rate": 0.7237
+     }
+    }
+   }
+  },
+  {
+   "key": "prefix/128",
+   "kind": "prefix",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 797.26,
+      "min": 788.66,
+      "max": 803.54,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.86,
+      "min": 0.86,
+      "max": 3.2,
+      "servers": 3
+     },
+     "ttft_p50_ms": 6703.7,
+     "ttft_p95_ms": 7618.49,
+     "window": {
+      "requests": 315,
+      "running": 105.5789,
+      "waiting": 21.0526,
+      "cache_use_max": 0.9988,
+      "prompt_tokens_mean": 3863.98,
+      "completion_tokens_mean": 243.98,
+      "latency_p95_ms": 57776.52,
+      "generation_p95_ms": 51184.02,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 22.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 808.59,
+      "min": 804.25,
+      "max": 853.26,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 24894.95,
+     "ttft_p95_ms": 25650.52,
+     "window": {
+      "requests": 312,
+      "running": 43.6316,
+      "waiting": 82.4737,
+      "cache_use_max": 0.9923,
+      "prompt_tokens_mean": 3863.5,
+      "completion_tokens_mean": 249.12,
+      "accepted_per_draft": 1.8901,
+      "latency_p95_ms": 46635.82,
+      "generation_p95_ms": 21723.19,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 16.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 799.16,
+      "min": 790.52,
+      "max": 818.49,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.21,
+      "min": 0.0,
+      "max": 0.24,
+      "servers": 3
+     },
+     "ttft_p50_ms": 17395.45,
+     "ttft_p95_ms": 18164.04,
+     "window": {
+      "requests": 314,
+      "running": 69.2632,
+      "waiting": 57.2105,
+      "cache_use_max": 1.0,
+      "prompt_tokens_mean": 3864.37,
+      "completion_tokens_mean": 247.68,
+      "accepted_per_draft": 0.8377,
+      "latency_p95_ms": 50791.01,
+      "generation_p95_ms": 33467.26,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 13.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 824.21,
+      "min": 812.57,
+      "max": 829.43,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1.09,
+      "min": 0.0,
+      "max": 1.14,
+      "servers": 3
+     },
+     "ttft_p50_ms": 22089.55,
+     "ttft_p95_ms": 22700.03,
+     "window": {
+      "requests": 316,
+      "running": 51.6842,
+      "waiting": 74.1053,
+      "cache_use_max": 0.995,
+      "prompt_tokens_mean": 3863.59,
+      "completion_tokens_mean": 250.27,
+      "accepted_per_draft": 1.8924,
+      "latency_p95_ms": 46636.33,
+      "generation_p95_ms": 24741.18,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/32",
+   "kind": "long",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 786.44,
+      "min": 776.23,
+      "max": 791.38,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 786.44,
+      "min": 776.23,
+      "max": 791.38,
+      "servers": 3
+     },
+     "ttft_p50_ms": 256.5,
+     "ttft_p95_ms": 361.12,
+     "window": {
+      "requests": 240,
+      "running": 31.5789,
+      "waiting": 0.0,
+      "cache_use_max": 0.3083,
+      "prompt_tokens_mean": 3905.55,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 12023.92,
+      "generation_p95_ms": 11766.73,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 952.1,
+      "min": 944.16,
+      "max": 986.69,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 927.77,
+      "min": 894.92,
+      "max": 980.13,
+      "servers": 3
+     },
+     "ttft_p50_ms": 512.2,
+     "ttft_p95_ms": 887.11,
+     "window": {
+      "requests": 290,
+      "running": 30.6842,
+      "waiting": 0.0,
+      "cache_use_max": 0.7262,
+      "prompt_tokens_mean": 3906.2,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 2.0829,
+      "latency_p95_ms": 10880.97,
+      "generation_p95_ms": 10273.64,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 886.14,
+      "min": 873.65,
+      "max": 902.3,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 873.03,
+      "min": 870.37,
+      "max": 902.3,
+      "servers": 3
+     },
+     "ttft_p50_ms": 357.6,
+     "ttft_p95_ms": 723.65,
+     "window": {
+      "requests": 271,
+      "running": 31.2632,
+      "waiting": 0.0,
+      "cache_use_max": 0.46,
+      "prompt_tokens_mean": 3905.66,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 0.8745,
+      "latency_p95_ms": 11110.7,
+      "generation_p95_ms": 10647.3,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 938.06,
+      "min": 932.08,
+      "max": 955.31,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 922.24,
+      "min": 921.12,
+      "max": 948.2,
+      "servers": 3
+     },
+     "ttft_p50_ms": 507.85,
+     "ttft_p95_ms": 943.17,
+     "window": {
+      "requests": 286,
+      "running": 30.6316,
+      "waiting": 0.0,
+      "cache_use_max": 0.5978,
+      "prompt_tokens_mean": 3906.12,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 2.0852,
+      "latency_p95_ms": 11101.83,
+      "generation_p95_ms": 10480.2,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "long/128",
+   "kind": "long",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "FP8 KV cache on a full state cache (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 910.17,
+      "min": 902.48,
+      "max": 919.76,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 7606.4,
+     "ttft_p95_ms": 9837.66,
+     "window": {
+      "requests": 283,
+      "running": 104.1579,
+      "waiting": 22.5263,
+      "cache_use_max": 1.0,
+      "prompt_tokens_mean": 3904.92,
+      "completion_tokens_mean": 295.0,
+      "latency_p95_ms": 43319.16,
+      "generation_p95_ms": 34032.76,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 48.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 944.81,
+      "min": 943.78,
+      "max": 990.42,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 26604.9,
+     "ttft_p95_ms": 27621.72,
+     "window": {
+      "requests": 289,
+      "running": 43.3158,
+      "waiting": 83.1579,
+      "cache_use_max": 0.9923,
+      "prompt_tokens_mean": 3905.94,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 2.077,
+      "latency_p95_ms": 41706.08,
+      "generation_p95_ms": 14798.26,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 28.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 929.67,
+      "min": 919.72,
+      "max": 940.06,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 19521.95,
+     "ttft_p95_ms": 20379.08,
+     "window": {
+      "requests": 282,
+      "running": 68.2632,
+      "waiting": 58.2105,
+      "cache_use_max": 1.0,
+      "prompt_tokens_mean": 3905.38,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 0.8734,
+      "latency_p95_ms": 41929.84,
+      "generation_p95_ms": 22519.29,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 34.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 952.87,
+      "min": 943.8,
+      "max": 969.88,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "servers": 3
+     },
+     "ttft_p50_ms": 23743.0,
+     "ttft_p95_ms": 24535.14,
+     "window": {
+      "requests": 289,
+      "running": 52.0526,
+      "waiting": 74.3158,
+      "cache_use_max": 0.9913,
+      "prompt_tokens_mean": 3905.21,
+      "completion_tokens_mean": 295.0,
+      "accepted_per_draft": 2.0781,
+      "latency_p95_ms": 41198.42,
+      "generation_p95_ms": 17174.62,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/4",
+   "kind": "output",
+   "requests_at_once": 4,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 317.78,
+      "min": 314.03,
+      "max": 319.53,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 317.78,
+      "min": 314.03,
+      "max": 319.53,
+      "servers": 3
+     },
+     "ttft_p50_ms": 115.4,
+     "ttft_p95_ms": 117.21,
+     "window": {
+      "requests": 20,
+      "running": 4.0,
+      "waiting": 0.0,
+      "cache_use_max": 0.0277,
+      "prompt_tokens_mean": 825.7,
+      "completion_tokens_mean": 1439.0,
+      "latency_p95_ms": 24172.5,
+      "generation_p95_ms": 24057.31,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 582.82,
+      "min": 560.58,
+      "max": 585.58,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 582.82,
+      "min": 560.58,
+      "max": 585.58,
+      "servers": 3
+     },
+     "ttft_p50_ms": 131.0,
+     "ttft_p95_ms": 140.0,
+     "window": {
+      "requests": 40,
+      "running": 4.0,
+      "waiting": 0.0,
+      "cache_use_max": 0.0771,
+      "prompt_tokens_mean": 779.85,
+      "completion_tokens_mean": 1352.92,
+      "accepted_per_draft": 1.5558,
+      "latency_p95_ms": 12985.82,
+      "generation_p95_ms": 12856.25,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 482.23,
+      "min": 481.95,
+      "max": 482.63,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 482.23,
+      "min": 481.95,
+      "max": 482.63,
+      "servers": 3
+     },
+     "ttft_p50_ms": 108.4,
+     "ttft_p95_ms": 112.65,
+     "window": {
+      "requests": 31,
+      "running": 4.0,
+      "waiting": 0.0,
+      "cache_use_max": 0.0457,
+      "prompt_tokens_mean": 808.81,
+      "completion_tokens_mean": 1385.9,
+      "accepted_per_draft": 0.7769,
+      "latency_p95_ms": 15862.5,
+      "generation_p95_ms": 15754.8,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 561.42,
+      "min": 559.21,
+      "max": 570.17,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 561.42,
+      "min": 559.21,
+      "max": 570.17,
+      "servers": 3
+     },
+     "ttft_p50_ms": 112.8,
+     "ttft_p95_ms": 118.16,
+     "window": {
+      "requests": 37,
+      "running": 4.0,
+      "waiting": 0.0,
+      "cache_use_max": 0.0693,
+      "prompt_tokens_mean": 794.49,
+      "completion_tokens_mean": 1347.24,
+      "accepted_per_draft": 1.5337,
+      "latency_p95_ms": 13564.08,
+      "generation_p95_ms": 13452.6,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/32",
+   "kind": "output",
+   "requests_at_once": 32,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1705.26,
+      "min": 1691.85,
+      "max": 1723.74,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 1705.26,
+      "min": 1691.81,
+      "max": 1723.74,
+      "servers": 3
+     },
+     "ttft_p50_ms": 123.0,
+     "ttft_p95_ms": 182.08,
+     "window": {
+      "requests": 109,
+      "running": 31.8421,
+      "waiting": 0.0,
+      "cache_use_max": 0.2044,
+      "prompt_tokens_mean": 833.32,
+      "completion_tokens_mean": 1370.68,
+      "latency_p95_ms": 36129.02,
+      "generation_p95_ms": 36005.92,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2604.09,
+      "min": 2409.03,
+      "max": 2618.15,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2604.09,
+      "min": 2409.03,
+      "max": 2618.15,
+      "servers": 3
+     },
+     "ttft_p50_ms": 146.0,
+     "ttft_p95_ms": 222.76,
+     "window": {
+      "requests": 172,
+      "running": 31.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.6041,
+      "prompt_tokens_mean": 827.32,
+      "completion_tokens_mean": 1347.54,
+      "accepted_per_draft": 1.5551,
+      "latency_p95_ms": 23022.45,
+      "generation_p95_ms": 22885.28,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 2438.49,
+      "min": 2436.2,
+      "max": 2439.94,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2438.49,
+      "min": 2436.2,
+      "max": 2439.94,
+      "servers": 3
+     },
+     "ttft_p50_ms": 118.7,
+     "ttft_p95_ms": 181.22,
+     "window": {
+      "requests": 165,
+      "running": 31.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.3482,
+      "prompt_tokens_mean": 833.44,
+      "completion_tokens_mean": 1348.61,
+      "accepted_per_draft": 0.7789,
+      "latency_p95_ms": 25104.32,
+      "generation_p95_ms": 24974.94,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 2542.98,
+      "min": 2538.42,
+      "max": 2554.14,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 2542.98,
+      "min": 2538.42,
+      "max": 2554.14,
+      "servers": 3
+     },
+     "ttft_p50_ms": 141.35,
+     "ttft_p95_ms": 217.65,
+     "window": {
+      "requests": 172,
+      "running": 31.7895,
+      "waiting": 0.0,
+      "cache_use_max": 0.5384,
+      "prompt_tokens_mean": 827.93,
+      "completion_tokens_mean": 1342.56,
+      "accepted_per_draft": 1.5542,
+      "latency_p95_ms": 23636.33,
+      "generation_p95_ms": 23424.12,
+      "prefix_cache_hit_rate": 0.0
+     }
+    }
+   }
+  },
+  {
+   "key": "output/128",
+   "kind": "output",
+   "requests_at_once": 128,
+   "reasoning": "off",
+   "run": "map part A and part B",
+   "rules_built_from": "FP8 KV cache on a full state cache (103ded87)",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 3483.67,
+      "min": 3424.8,
+      "max": 3496.41,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 3225.15,
+      "min": 3161.51,
+      "max": 3237.29,
+      "servers": 3
+     },
+     "ttft_p50_ms": 155.2,
+     "ttft_p95_ms": 242.04,
+     "window": {
+      "requests": 233,
+      "running": 127.6842,
+      "waiting": 0.0,
+      "cache_use_max": 0.806,
+      "prompt_tokens_mean": 826.6,
+      "completion_tokens_mean": 1330.33,
+      "latency_p95_ms": 70494.12,
+      "generation_p95_ms": 70339.52,
+      "prefix_cache_hit_rate": 0.0
+     }
+    },
+    "three-drafts": {
+     "output": {
+      "median": 2988.74,
+      "min": 2791.85,
+      "max": 3082.43,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.0,
+      "min": 0.0,
+      "max": 1.1,
+      "servers": 3
+     },
+     "ttft_p50_ms": 33360.25,
+     "ttft_p95_ms": 35548.65,
+     "window": {
+      "requests": 196,
+      "running": 53.4211,
+      "waiting": 74.3158,
+      "cache_use_max": 0.9987,
+      "prompt_tokens_mean": 826.26,
+      "completion_tokens_mean": 1334.87,
+      "accepted_per_draft": 1.5625,
+      "latency_p95_ms": 66614.45,
+      "generation_p95_ms": 33613.05,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 63.0
+     }
+    },
+    "one-draft": {
+     "output": {
+      "median": 3580.14,
+      "min": 3577.14,
+      "max": 3628.29,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 6.67,
+      "min": 6.41,
+      "max": 8.69,
+      "servers": 3
+     },
+     "ttft_p50_ms": 13647.55,
+     "ttft_p95_ms": 15865.38,
+     "window": {
+      "requests": 236,
+      "running": 93.1579,
+      "waiting": 34.4737,
+      "cache_use_max": 1.0,
+      "prompt_tokens_mean": 826.83,
+      "completion_tokens_mean": 1354.26,
+      "accepted_per_draft": 0.7787,
+      "latency_p95_ms": 63190.28,
+      "generation_p95_ms": 49160.18,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 109.0
+     }
+    },
+    "three-drafts-fp8-kv": {
+     "output": {
+      "median": 3121.55,
+      "min": 3115.41,
+      "max": 3160.39,
+      "servers": 3
+     },
+     "useful_output": {
+      "median": 0.81,
+      "min": 0.56,
+      "max": 0.82,
+      "servers": 3
+     },
+     "ttft_p50_ms": 29466.3,
+     "ttft_p95_ms": 31959.07,
+     "window": {
+      "requests": 209,
+      "running": 59.5789,
+      "waiting": 68.1053,
+      "cache_use_max": 1.0,
+      "prompt_tokens_mean": 825.8,
+      "completion_tokens_mean": 1333.78,
+      "accepted_per_draft": 1.5549,
+      "latency_p95_ms": 65798.6,
+      "generation_p95_ms": 36312.42,
+      "prefix_cache_hit_rate": 0.0,
+      "evicted": 57.0
+     }
+    }
+   }
+  }
+ ],
+ "product_cases": [
+  {
+   "name": "check 1: short/128",
+   "source": "planner-cells-2026-11-23/1-short-128-speculation-result.json",
+   "cell": "short/128",
+   "current": "three-drafts",
+   "requests_at_once": 128,
+   "rules_built_from": "capacity test (103ded87)",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T13:11:07Z",
+    "window_end": "2026-11-23T14:11:07Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "kv-cache-pressure",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "kv_cache.saturation",
+      "signal": "runtime_kv_cache_timeseries",
+      "observed": 97.164948,
+      "comparison": ">=",
+      "threshold": 90,
+      "unit": "percent"
+     }
+    ],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 40.089030206677265,
+     "p95_generation": 5257.464999999999,
+     "p95_latency": 10606.533,
+     "p95_queue": 0.001,
+     "p95_ttft": 5639.844,
+     "runtime_internal_tpot": 24.385246,
+     "runtime_kv_cache_timeseries": 97.164948,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 8012.820513,
+     "runtime_requests_running_per_replica": 58,
+     "runtime_spec_decode_acceptance": 0.578988,
+     "runtime_ttft_p95": 7123.97541,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 66,
+    "runtime_kv_cache_blocks_per_replica": 779,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 273.0,
+    "runtime_spec_decode_draft_length": 3
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 2: output/128",
+   "source": "planner-cells-2026-11-23/2-output-128-speculation-result.json",
+   "cell": "output/128",
+   "current": "three-drafts",
+   "requests_at_once": 128,
+   "rules_built_from": "FP8 KV cache on a full state cache (103ded87)",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T13:21:30Z",
+    "window_end": "2026-11-23T14:21:30Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "kv-cache-pressure",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "kv_cache.preemption",
+      "signal": "runtime_preemptions_per_completed_request",
+      "observed": 0.15853658536585366,
+      "comparison": ">=",
+      "threshold": 0.01,
+      "unit": "ratio"
+     },
+     {
+      "rule": "kv_cache.saturation",
+      "signal": "runtime_kv_cache_timeseries",
+      "observed": 96.903226,
+      "comparison": ">=",
+      "threshold": 90,
+      "unit": "percent"
+     },
+     {
+      "rule": "speculative.low_acceptance",
+      "signal": "runtime_spec_decode_acceptance",
+      "observed": 0.498681,
+      "comparison": "<",
+      "threshold": 0.5,
+      "unit": "ratio"
+     }
+    ],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 772.4871794871794,
+     "p95_generation": 29582.335399999996,
+     "p95_latency": 38944.389,
+     "p95_queue": 0.001,
+     "p95_ttft": 23743.996199999998,
+     "runtime_internal_tpot": 43.4375,
+     "runtime_kv_cache_timeseries": 96.903226,
+     "runtime_preemptions_per_completed_request": 0.15853658536585366,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 21800,
+     "runtime_requests_running_per_replica": 53,
+     "runtime_spec_decode_acceptance": 0.498681,
+     "runtime_ttft_p95": 35344.827586,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 74,
+    "runtime_kv_cache_blocks_per_replica": 779,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 1334.87,
+    "runtime_spec_decode_draft_length": 3
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 3: short/128",
+   "source": "planner-cells-2026-11-23/3-short-128-publisher-result.json",
+   "cell": "short/128",
+   "current": "plain",
+   "requests_at_once": 128,
+   "rules_built_from": "capacity test (103ded87)",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T14:13:42Z",
+    "window_end": "2026-11-23T15:13:42Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "decode-and-generation",
+    "confidence": "stage-and-engine-level",
+    "findings": [],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 40.52977099236641,
+     "p95_generation": 9261.9562,
+     "p95_latency": 9490.9496,
+     "p95_queue": 0.001,
+     "p95_ttft": 878.9298,
+     "runtime_internal_tpot": 48.733624,
+     "runtime_kv_cache_timeseries": 58.660508,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 285,
+     "runtime_requests_running_per_replica": 127,
+     "runtime_ttft_p95": 459.684685,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 272.8
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 4: output/128",
+   "source": "planner-cells-2026-11-23/4-output-128-publisher-result.json",
+   "cell": "output/128",
+   "current": "plain",
+   "requests_at_once": 128,
+   "rules_built_from": "FP8 KV cache on a full state cache (103ded87)",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T14:22:31Z",
+    "window_end": "2026-11-23T15:22:31Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "decode-and-generation",
+    "confidence": "stage-and-engine-level",
+    "findings": [],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 753.1666666666666,
+     "p95_generation": 37626.723999999995,
+     "p95_latency": 41682.0573,
+     "p95_queue": 0.001,
+     "p95_ttft": 5481.63055,
+     "runtime_internal_tpot": 147.5,
+     "runtime_kv_cache_timeseries": 71.676301,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 4630.952381,
+     "runtime_requests_running_per_replica": 125,
+     "runtime_ttft_p95": 4803.308824,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 1330.33
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 5: short/32",
+   "source": "planner-cells-2026-11-23/5-short-32-publisher-result.json",
+   "cell": "short/32",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "capacity test (103ded87)",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T14:42:01Z",
+    "window_end": "2026-11-23T15:42:01Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "decode-and-generation",
+    "confidence": "stage-and-engine-level",
+    "findings": [],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 39.45744680851064,
+     "p95_generation": 5222.341299999999,
+     "p95_latency": 5428.6546,
+     "p95_queue": 0.001,
+     "p95_ttft": 653.117,
+     "runtime_internal_tpot": 24.25,
+     "runtime_kv_cache_timeseries": 14.318707,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 285,
+     "runtime_requests_running_per_replica": 31,
+     "runtime_ttft_p95": 200.645161,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 269.06
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 6: output/32",
+   "source": "planner-cells-2026-11-23/6-output-32-publisher-result.json",
+   "cell": "output/32",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T14:52:16Z",
+    "window_end": "2026-11-23T15:52:16Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "decode-and-generation",
+    "confidence": "stage-and-engine-level",
+    "findings": [],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 762.7368421052631,
+     "p95_generation": 34777.6845,
+     "p95_latency": 35091.437,
+     "p95_queue": 0.001,
+     "p95_ttft": 1834.87025,
+     "runtime_internal_tpot": 24.25,
+     "runtime_kv_cache_timeseries": 20.092379,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 285,
+     "runtime_requests_running_per_replica": 32,
+     "runtime_ttft_p95": 393.75,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 1370.68
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 7: prefix/32",
+   "source": "planner-cells-2026-11-23/7-prefix-32-publisher-result.json",
+   "cell": "prefix/32",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T15:01:41Z",
+    "window_end": "2026-11-23T16:01:41Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "queueing-and-admission",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "queue.engine_wait",
+      "signal": "runtime_queue_time_p95",
+      "observed": 7750,
+      "comparison": ">=",
+      "threshold": 2878.6704,
+      "unit": "ms"
+     }
+    ],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 3860.3584905660377,
+     "p95_generation": 12315.1098,
+     "p95_latency": 14393.351999999999,
+     "p95_queue": 0.002,
+     "p95_ttft": 6278.0123,
+     "runtime_internal_tpot": 187.5,
+     "runtime_kv_cache_timeseries": 29.214781,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0.442344,
+     "runtime_queue_time_p95": 7750,
+     "runtime_requests_running_per_replica": 31,
+     "runtime_ttft_p95": 6444.444444,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 241.55
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "check 8: long/32",
+   "source": "planner-cells-2026-11-23/8-long-32-publisher-result.json",
+   "cell": "long/32",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T15:09:46Z",
+    "window_end": "2026-11-23T16:09:46Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "queueing-and-admission",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "queue.engine_wait",
+      "signal": "runtime_queue_time_p95",
+      "observed": 5350,
+      "comparison": ">=",
+      "threshold": 3375.58654,
+      "unit": "ms"
+     }
+    ],
+    "signals": {
+     "error_rate": 0.009708737864077669,
+     "mean_input_tokens": 3904.156862745098,
+     "p95_generation": 13359.90785,
+     "p95_latency": 16877.932699999998,
+     "p95_queue": 0.002,
+     "p95_ttft": 6166.835349999999,
+     "runtime_internal_tpot": 104.375,
+     "runtime_kv_cache_timeseries": 30.057803,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_prefix_cache_hit_rate": 0,
+     "runtime_queue_time_p95": 5350,
+     "runtime_requests_running_per_replica": 32,
+     "runtime_ttft_p95": 5763.888889,
+     "shared_prefix_request_ratio": 0
+    }
+   },
+   "added_signals": {
+    "runtime_requests_waiting_per_replica": 0,
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872,
+    "mean_output_tokens": 295.0
+   },
+   "added_because": "The agent on 23 November did not relay these. Waiting is what the harness logged when the planner was asked; the cache layout is what this setup's engine reported on every map server; the answer length is the map's for this cell and setup."
+  },
+  {
+   "name": "campaign 1: short chat trace replay at 32 from the plain command",
+   "source": "campaign-1-short-chat-2026-11-23/b983caf56e2371bf3b1a87ac9ebd2dea-result.json",
+   "cell": "",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T06:50:44Z",
+    "window_end": "2026-11-23T07:50:44Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "decode-and-generation",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "decode.low_concurrency",
+      "signal": "runtime_requests_running_per_replica",
+      "observed": 0,
+      "comparison": "<=",
+      "threshold": 4,
+      "unit": "requests"
+     }
+    ],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 5587.94,
+     "p95_generation": 54568.74245,
+     "p95_latency": 57751.30085,
+     "p95_queue": 0.0010499999999999956,
+     "p95_ttft": 9663.724099999996,
+     "runtime_internal_tpot": 49.805556,
+     "runtime_kv_cache_timeseries": 0,
+     "runtime_preemptions_per_completed_request": 0,
+     "runtime_queue_time_p95": 9265.625,
+     "runtime_requests_running_per_replica": 0,
+     "shared_prefix_request_ratio": 0.51
+    }
+   },
+   "added_signals": {
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872
+   },
+   "added_because": "The agent on 23 November did not relay the cache layout; it is what the plain command's engine reported on every map server. Waiting and answer length were not recorded and stay unknown.",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 1.0,
+      "servers": 1
+     },
+     "judge": "the current setup"
+    },
+    "three-drafts": {
+     "output": {
+      "median": 1.321,
+      "min": 1.2867,
+      "max": 1.3554,
+      "servers": 1
+     },
+     "judge": "improved"
+    }
+   },
+   "measured_as": "relative output tokens per second against the current setup, from the product's judge in the campaign's first window; the range is the judge's noise floor"
+  },
+  {
+   "name": "campaign 2: long shared prefix trace replay at 32 from the plain command (the burst case)",
+   "source": "campaign-2-long-prefix-2026-11-23/e0bc61716c6fa21bd8d5956cc5fbbac9-result.json",
+   "cell": "",
+   "current": "plain",
+   "requests_at_once": 32,
+   "rules_built_from": "",
+   "diagnosis": {
+    "source": "endpoint_readiness",
+    "endpoint": "gpu-baseline",
+    "algorithm_version": "monitoring-stage-triage-v2",
+    "window_start": "2026-11-23T10:32:39Z",
+    "window_end": "2026-11-23T11:32:39Z",
+    "state": "profile-ready",
+    "primary_bottleneck": "kv-cache-pressure",
+    "confidence": "stage-and-engine-level",
+    "findings": [
+     {
+      "rule": "kv_cache.preemption",
+      "signal": "runtime_preemptions_per_completed_request",
+      "observed": 0.1375,
+      "comparison": ">=",
+      "threshold": 0.01,
+      "unit": "ratio"
+     }
+    ],
+    "signals": {
+     "error_rate": 0,
+     "mean_input_tokens": 9454.652482269503,
+     "p95_generation": 82490.751,
+     "p95_latency": 91627.136,
+     "p95_queue": 0.001,
+     "p95_ttft": 34020.194,
+     "runtime_internal_tpot": 300,
+     "runtime_kv_cache_timeseries": 54.272517,
+     "runtime_preemptions_per_completed_request": 0.1375,
+     "runtime_prefix_cache_hit_rate": 0.086079,
+     "runtime_queue_time_p95": 50000,
+     "runtime_requests_running_per_replica": 28,
+     "runtime_ttft_p95": 59600,
+     "shared_prefix_request_ratio": 0.49645390070921985
+    }
+   },
+   "added_signals": {
+    "runtime_kv_cache_blocks_per_replica": 867,
+    "runtime_kv_cache_block_tokens": 832,
+    "runtime_state_cache_page_bytes": 3407872
+   },
+   "added_because": "The agent on 23 November did not relay the cache layout; it is what the plain command's engine reported on every map server. Waiting and answer length were not recorded and stay unknown.",
+   "measured": {
+    "plain": {
+     "output": {
+      "median": 1.0,
+      "min": 1.0,
+      "max": 1.0,
+      "servers": 1
+     },
+     "judge": "the current setup"
+    },
+    "plain-fp8-kv": {
+     "output": {
+      "median": 0.9334,
+      "min": 0.9076,
+      "max": 0.9591,
+      "servers": 1
+     },
+     "judge": "regressed"
+    },
+    "three-drafts": {
+     "output": {
+      "median": 1.2334,
+      "min": 1.1923,
+      "max": 1.2745,
+      "servers": 1
+     },
+     "judge": "improved"
+    }
+   },
+   "measured_as": "relative output tokens per second against the current setup, from the product's judge in the campaign's first window; the range is the judge's noise floor"
+  }
+ ],
+ "built_from": [
+  {
+   "file": "map-h100-evidence/summary.json",
+   "sha256": "01278dc917749754e9fe544b1de268d07b26860713d83af290768ffc46e6b035"
+  },
+  {
+   "file": "map-h100-evidence/crossover-summary.json",
+   "sha256": "5992475753eb1d5d7371c9527873ed20c6bf23c8bd23cc2c22f87bad097cdbf3"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-planner-mtp3-kvfp8-s1.json",
+   "sha256": "be648788cb8e12f262d50255ccac1c5fc3362222062c54cced0f3ab3cefb1953"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-planner-mtp3-kvfp8-s2.json",
+   "sha256": "74d468175baed4166d6773346b6a5cdeb5f74a93bff6644f52c312bfc40130b4"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-planner-mtp3-kvfp8-s3.json",
+   "sha256": "a4ff3da7864874d93aefc00be2b0ca9b965befeed593fec40c4da6c115143fd9"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp1-s1.json",
+   "sha256": "6b275be18752da3c02a6e4bd30b61cd3db53e7714d798e40474a45541fa3702b"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp1-s2.json",
+   "sha256": "cb9df678381bc04ce549c44abd418b36ed97065a60156fe3bebe0551b491cd16"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp1-s3.json",
+   "sha256": "7e812b5315ec433b90d020f6c429f17ab002f48e99c955b3a920629f1faee35c"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp3-s1.json",
+   "sha256": "ff537dcd4c2becfa5d8abca251ec43fe656eabaf6112bc7ae3eacc824c01db1b"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp3-s2.json",
+   "sha256": "8c61cb0ba4b850c223d638b25f463533054dabe911b22c7cc892dd167ab1e0dc"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-mtp3-s3.json",
+   "sha256": "fd05ea28fd4021de202e9c59365031ca6b0c7629690dc60e53ba72fbc04049a7"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-s1.json",
+   "sha256": "ffd4a2233a2e25fa7b23cb8c7ebdb8e951fa2031fb4ff3937f01334892ac9902"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-s2.json",
+   "sha256": "9193c2ddd6c12eb8a2b81c2ce88773ab919c292a9c6f5beb798fc672f03de196"
+  },
+  {
+   "file": "map-h100-evidence/raw/h100-vllm-publisher-s3.json",
+   "sha256": "2cc165fe62f511600e78e0ffca0267ada0a7d8cc1fd82a707572b7b74cf81e2b"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp1-s1.json",
+   "sha256": "bd61652ea2abbded2f124578b70c651ee20190be367171834832f93b34ee0118"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp1-s2.json",
+   "sha256": "0082836c5840817ebb12adf81d2b4a375b1cc071aec330c0cb5557163f305fca"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp1-s3.json",
+   "sha256": "74749b85458315c8e1683efc95a3705fa761c01592f417c00c5bbf956db87857"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp3-s1.json",
+   "sha256": "b4f838582242e73b1f85bceba22d9215815db4c497df673006723140947ccac3"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp3-s2.json",
+   "sha256": "989ad568eca870c9518e5f64717c1dfa9c1e144e63ae49858a38c7969bd990ad"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-mtp3-s3.json",
+   "sha256": "a8f0e0fd52506c5c6cc71167b5d36fea53bf358ae865c9551fae34dfcc171e79"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-s1.json",
+   "sha256": "893ce4b03abf5a61f75d41e3b7b4714878c08610a00f2816737c4214082b9953"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-s2.json",
+   "sha256": "9d6e4ae9263d67c7f45f8462fa5d228d617065ae3d2a45a3b24253e6d2bede16"
+  },
+  {
+   "file": "map-h100-evidence/raw-crossover/h100-vllm-publisher-s3.json",
+   "sha256": "0ce43954dbd778b4aefe4affa0000af1dd23d33b825901ff4fe5405f9de6b8e5"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/1-short-128-speculation-result.json",
+   "sha256": "d6287b1e147f007869e4c020b35511a18e225a791fa73f909ff87ea089bd358f"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/2-output-128-speculation-result.json",
+   "sha256": "9b170ad1854086959158d861b1463fe7f48b4d17c45c35a0c7ec4fc3c8733fb2"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/3-short-128-publisher-result.json",
+   "sha256": "650158eb4a752191793312a0c3277a055ee6d01fb1a1f076e0f29367cdb95e3d"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/4-output-128-publisher-result.json",
+   "sha256": "6a1a6104650914c61fee5138966de793200dcdb95c49dd2e6f74015a0b5f74a0"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/5-short-32-publisher-result.json",
+   "sha256": "dead73f61d7b917721a147ad29d7ddd08bc5c5a625264c9b564851dd5e031740"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/6-output-32-publisher-result.json",
+   "sha256": "af99d8161a82a41f83a1eef0613aaba1d88a3571e3d2510ed668a4c411569b15"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/7-prefix-32-publisher-result.json",
+   "sha256": "6ee881271f3fd867a0ae2588c0b55961cf175b96f4de49393d1773d24136be90"
+  },
+  {
+   "file": "product-path-evidence/planner-cells-2026-11-23/8-long-32-publisher-result.json",
+   "sha256": "40f2df8cee5139d73b7414b146e314177a7cf269cf715280a52cd4a3d69a2e04"
+  },
+  {
+   "file": "product-path-evidence/campaign-1-short-chat-2026-11-23/b983caf56e2371bf3b1a87ac9ebd2dea-result.json",
+   "sha256": "2c29b139e734fe8a3b115c9a87b6e673db405d3e2f42696c6f92772c18ca4caa"
+  },
+  {
+   "file": "product-path-evidence/campaign-2-long-prefix-2026-11-23/e0bc61716c6fa21bd8d5956cc5fbbac9-result.json",
+   "sha256": "50321a346b3768b4e515f05db5f177c85d6489517966e9a553217f62da502757"
+  }
+ ]
+}

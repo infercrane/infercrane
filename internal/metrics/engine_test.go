@@ -206,3 +206,56 @@ func TestHistogramQuantileBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// vLLM reports its cache layout as labels of cache_config_info and the draft
+// length through its speculation counters. A model without recurrent-state
+// layers reports its state page as "None", which stays unavailable.
+func TestParseEngineReadsTheCacheLayoutAndDraftLength(t *testing.T) {
+	hybrid := fixture(t, "vllm_0.34_hybrid_mtp3.prom")
+	if *hybrid.KVCacheBlocks != 779 || *hybrid.KVCacheBlockTokens != 832 || *hybrid.StateCachePageBytes != 3407872 || *hybrid.SpecDrafts != 101492 {
+		t.Fatalf("layout=%v %v %v drafts=%v", *hybrid.KVCacheBlocks, *hybrid.KVCacheBlockTokens, *hybrid.StateCachePageBytes, *hybrid.SpecDrafts)
+	}
+	observed := time.Date(2026, 11, 23, 15, 40, 0, 0, time.UTC)
+	rows, err := EngineMeasurements(nil, hybrid, EngineMeasurementOptions{ReplicaID: "h100-1", ObservedAt: observed, TTL: 90 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]domain.OperationalMeasurement{}
+	for _, row := range rows {
+		if row.Unit != measurementUnit(row.Name) {
+			t.Fatalf("row %s unit %q", row.Name, row.Unit)
+		}
+		byName[row.Name] = row
+	}
+	// No previous scrape: the layout and the draft length still come from this
+	// one, because they are fixed for the life of the process.
+	expectValues(t, byName, map[string]float64{
+		MeasurementRequestsRunning: 58, MeasurementRequestsWaiting: 37, MeasurementKVCacheUsage: 99,
+		MeasurementKVCacheBlocks: 779, MeasurementKVCacheBlockTokens: 832, MeasurementStatePageBytes: 3407872, MeasurementSpecDraftLength: 3,
+	}, MeasurementSpecDecodeAccept, MeasurementPreemptions)
+	if byName[MeasurementSpecDraftLength].SampleCount != 101492 {
+		t.Fatalf("draft length sample count=%d", byName[MeasurementSpecDraftLength].SampleCount)
+	}
+
+	// Two data-parallel engine cores add their blocks like their running
+	// requests; a plain attention model has no state page.
+	payload := strings.Join([]string{
+		`vllm:num_requests_running{engine="0"} 40`,
+		`vllm:num_requests_running{engine="1"} 38`,
+		`vllm:cache_config_info{block_size="16",engine="0",mamba_page_size_padded="None",num_gpu_blocks="40000"} 1.0`,
+		`vllm:cache_config_info{block_size="16",engine="1",mamba_page_size_padded="None",num_gpu_blocks="39000"} 1.0`,
+	}, "\n")
+	plain, err := ParseEngine(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.KVCacheBlocks == nil || *plain.KVCacheBlocks != 79000 || *plain.KVCacheBlockTokens != 16 || plain.StateCachePageBytes != nil || plain.SpecDrafts != nil {
+		t.Fatalf("data-parallel layout=%+v", plain)
+	}
+	plainRows := measured(t, plain, plain)
+	expectValues(t, plainRows, map[string]float64{MeasurementKVCacheBlocks: 79000, MeasurementKVCacheBlockTokens: 16}, MeasurementStatePageBytes, MeasurementSpecDraftLength)
+
+	// The older fixtures report neither the layout nor a drafts counter.
+	older := measured(t, fixture(t, "vllm_scrape0.prom"), fixture(t, "vllm_scrape1.prom"))
+	expectValues(t, older, nil, MeasurementKVCacheBlocks, MeasurementKVCacheBlockTokens, MeasurementStatePageBytes, MeasurementSpecDraftLength)
+}

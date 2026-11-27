@@ -1,0 +1,178 @@
+{
+ "schema": "infercrane.poc-modal.rehearsal-without-fix/v1",
+ "what": "Step 1 run A's command with --stand-in local --budget-usd 1 on overloaded stand-ins, control plane without the reconciler grace (main's rule)",
+ "control_plane_commit": "dbb1be90",
+ "started_cet": "2026-11-25 06:47:40",
+ "ended_cet": "2026-11-25 06:54:40",
+ "cell": "short/128",
+ "requests_at_once": 128,
+ "cell_load": {
+  "seconds": 231,
+  "requests": 40128,
+  "failed": 36489,
+  "failure_reasons": {
+   "404": 36489
+  }
+ },
+ "request_records": {
+  "recorded": 3639,
+  "status_200": 3639,
+  "note": "a 404 for want of a route is refused before admission and is not recorded"
+ },
+ "deployment_events": [
+  {
+   "at": "2026-11-25 05:49:59.713493+00",
+   "type": "deployment_submitted",
+   "summary": "Cloud deployment submitted"
+  },
+  {
+   "at": "2026-11-25 05:50:20.953588+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:50:44.951987+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:50:50.948229+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:51:04.951425+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:51:21.013672+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:51:30.949804+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:51:41.000633+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:51:54.949564+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:52:01.007608+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:52:20.946944+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:52:31.018968+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:52:44.949818+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:52:51.037956+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:53:10.94792+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:53:21.032259+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:53:34.951271+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:53:41.005812+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:54:00.94784+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  },
+  {
+   "at": "2026-11-25 05:54:11.019725+00",
+   "type": "replica_healthy",
+   "summary": "Target gpu-baseline-r0 became healthy"
+  },
+  {
+   "at": "2026-11-25 05:54:24.950159+00",
+   "type": "replica_unhealthy",
+   "summary": "Target gpu-baseline-r0 became unhealthy"
+  }
+ ],
+ "router_generations": [
+  {
+   "generation": "1",
+   "status": "retired",
+   "at": "2026-11-25 05:50:21.421816+00"
+  },
+  {
+   "generation": "2",
+   "status": "retired",
+   "at": "2026-11-25 05:51:21.474106+00"
+  },
+  {
+   "generation": "3",
+   "status": "retired",
+   "at": "2026-11-25 05:51:41.468145+00"
+  },
+  {
+   "generation": "4",
+   "status": "retired",
+   "at": "2026-11-25 05:52:01.470584+00"
+  },
+  {
+   "generation": "5",
+   "status": "retired",
+   "at": "2026-11-25 05:52:31.483373+00"
+  },
+  {
+   "generation": "6",
+   "status": "retired",
+   "at": "2026-11-25 05:52:51.504207+00"
+  },
+  {
+   "generation": "7",
+   "status": "retired",
+   "at": "2026-11-25 05:53:21.487983+00"
+  },
+  {
+   "generation": "8",
+   "status": "retired",
+   "at": "2026-11-25 05:53:41.464214+00"
+  },
+  {
+   "generation": "9",
+   "status": "active",
+   "at": "2026-11-25 05:54:11.478226+00"
+  }
+ ],
+ "planner_asked": false,
+ "spent_usd": 0
+}

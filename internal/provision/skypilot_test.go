@@ -93,14 +93,26 @@ func (f *fakeSkyRunner) Run(_ context.Context, _ []string, args ...string) ([]by
 }
 
 func TestEnsureUsesPinnedRuntimeImageByDefault(t *testing.T) {
+	// The RunPod variant is pinned for vLLM 0.22.1: a revision on it boots
+	// that digest. The current release has no published variant yet, so it
+	// boots its version tag, which the runtime-image workflow only attaches to
+	// an image whose vLLM is that version.
 	runner := &fakeSkyRunner{}
 	provider := SkyPilot{APIKey: "secret", Runner: runner}
-	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"})
+	_, err := provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S", RuntimeVersion: "0.22.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultRunPodVLLMImage) || strings.Contains(runner.launchTask, "pip install") {
-		t.Fatalf("launch task does not use the pinned default runtime image: %s", runner.launchTask)
+	if !strings.Contains(runner.launchTask, "image_id: docker:"+runPodVLLMImages["0.22.1"]) || strings.Contains(runner.launchTask, "pip install") {
+		t.Fatalf("launch task does not use the pinned runtime image: %s", runner.launchTask)
+	}
+	runner = &fakeSkyRunner{}
+	provider = SkyPilot{APIKey: "secret", Runner: runner}
+	if _, err = provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "runpod", GPU: "L40S"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "image_id: docker:ghcr.io/infercrane/vllm-runpod:v"+support.DefaultRuntimeVersion) {
+		t.Fatalf("current release on RunPod: %s", runner.launchTask)
 	}
 }
 
@@ -120,8 +132,18 @@ func TestEnsureUsesProviderNeutralImageOutsideRunPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(runner.launchTask, "image_id: docker:"+defaultVLLMImage) {
+	current, _ := support.PinnedImage("vllm", "", "cuda")
+	if current.EngineVersion != support.DefaultRuntimeVersion || !strings.Contains(runner.launchTask, "image_id: docker:"+current.Image) {
 		t.Fatalf("launch task does not use the provider-neutral runtime image: %s", runner.launchTask)
+	}
+	// A revision on the legacy release keeps its own digest.
+	runner = &fakeSkyRunner{}
+	provider = SkyPilot{APIKey: "secret", Runner: runner}
+	if _, err = provider.EnsureReplica(context.Background(), ReplicaSpec{ExternalKey: "prod-r0", Model: "model", Cloud: "aws", GPU: "L40S", RuntimeVersion: "v0.22.1"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.launchTask, "image_id: docker:vllm/vllm-openai@sha256:953d3a06d5e64ab582985cd7401289d3abf2a2c14ef2158e9a84313daeec77d7") {
+		t.Fatalf("legacy release launch task: %s", runner.launchTask)
 	}
 }
 

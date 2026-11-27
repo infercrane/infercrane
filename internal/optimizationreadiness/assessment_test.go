@@ -155,6 +155,16 @@ func TestEngineQueueAndTTFTSignalsFillGatewayGaps(t *testing.T) {
 		t.Fatalf("engine queue=%+v", queued)
 	}
 	leadingFamilies(t, queued, "batch-token budget", "continuous batching", "replica scaling")
+	// A long queue time with the engine's waiting gauge at zero is a total over
+	// the window from an earlier burst, not a queue now.
+	drained := Assess(withEngine(fixtureSnapshot(), map[string]engineValue{metrics.MeasurementQueueTimeP95: {value: 300, samples: 100}, metrics.MeasurementRequestsWaiting: {value: 0, samples: 1}}), Policy{})
+	if drained.PrimaryBottleneck == "queueing-and-admission" || len(drained.Findings) != 0 {
+		t.Fatalf("queue time with nobody waiting=%+v", drained)
+	}
+	waiting := Assess(withEngine(fixtureSnapshot(), map[string]engineValue{metrics.MeasurementQueueTimeP95: {value: 300, samples: 100}, metrics.MeasurementRequestsWaiting: {value: 3, samples: 1}}), Policy{})
+	if waiting.PrimaryBottleneck != "queueing-and-admission" || len(waiting.Findings) != 1 || waiting.Findings[0].Rule != RuleEngineQueue {
+		t.Fatalf("queue time with requests waiting=%+v", waiting)
+	}
 	prefill := Assess(withEngine(fixtureSnapshot(), map[string]engineValue{metrics.MeasurementTTFTP95: {value: 600, samples: 100}}), Policy{})
 	if prefill.PrimaryBottleneck != "prefill-and-first-token" || prefill.ProfilePhase != "prefill" {
 		t.Fatalf("engine TTFT fallback=%+v", prefill)
@@ -383,5 +393,41 @@ func TestGPUBottleneckRules(t *testing.T) {
 				t.Fatalf("GPU utilization raised confidence: %s", assessment.Confidence)
 			}
 		})
+	}
+}
+
+// The cache layout the planner's capacity test reads is reported per
+// replica, like the running requests: two replicas of a speculating server on
+// one H100 each, 58 running and 37 waiting on each.
+func TestCacheLayoutSignalsArePerReplica(t *testing.T) {
+	snapshot := withEngine(fixtureSnapshot(), map[string]engineValue{
+		metrics.MeasurementRequestsRunning: {value: 116, samples: 2}, metrics.MeasurementRequestsWaiting: {value: 74, samples: 2},
+		metrics.MeasurementKVCacheUsage: {value: 99}, metrics.MeasurementKVCacheBlocks: {value: 1558, samples: 2},
+		metrics.MeasurementKVCacheBlockTokens: {value: 832}, metrics.MeasurementStatePageBytes: {value: 3407872},
+		metrics.MeasurementSpecDraftLength: {value: 3, samples: 101492},
+	})
+	snapshot.Summary.OutputTokens, snapshot.Summary.OutputTokenSamples = 26900, 100
+	values := map[string]float64{}
+	for _, signal := range Assess(snapshot, Policy{}).Signals {
+		if signal.Value != nil {
+			values[signal.Name] = *signal.Value
+		}
+	}
+	for name, want := range map[string]float64{
+		SignalRunningPerReplica: 58, SignalWaitingPerReplica: 37, SignalCacheBlocksPerReplica: 779, metrics.MeasurementKVCacheUsage: 99,
+		metrics.MeasurementKVCacheBlockTokens: 832, metrics.MeasurementStatePageBytes: 3407872, metrics.MeasurementSpecDraftLength: 3, SignalMeanOutputTokens: 269,
+	} {
+		if got, ok := values[name]; !ok || got != want {
+			t.Errorf("%s = %v (reported %v), want %v", name, got, ok, want)
+		}
+	}
+	// A plain server without these readings leaves them unavailable.
+	for _, signal := range Assess(fixtureSnapshot(), Policy{}).Signals {
+		switch signal.Name {
+		case SignalWaitingPerReplica, SignalCacheBlocksPerReplica, metrics.MeasurementStatePageBytes, metrics.MeasurementSpecDraftLength:
+			if signal.Value != nil || signal.Availability != "unavailable" {
+				t.Errorf("%s reported without a reading: %+v", signal.Name, signal)
+			}
+		}
 	}
 }

@@ -220,6 +220,9 @@ func TestMigrationCampaignChecksItsBaselineBeforeItIsStored(t *testing.T) {
 			s.evalSet = `{"schema":"infercrane.dev/quality-eval-set/v1","name":"s","version":"1","prompts":[{"id":"a","prompt":"hi"}]}`
 		}, "quality_eval_set_not_graded"},
 		"too few prompts": {func(s *fakeMigrationStore, _ *optimizer.Request) { s.evalSet = graded(10) }, "quality_eval_set_too_small"},
+		"task set": {func(s *fakeMigrationStore, _ *optimizer.Request) {
+			s.evalSet = strings.Replace(graded(30), `"grading":"exact_match"`, `"grading":"answer_line"`, 1)
+		}, ""},
 		"customer evidence": {func(s *fakeMigrationStore, r *optimizer.Request) {
 			s.evalSet, r.QualityCheck, r.QualityEvalSet = "", optimizer.QualityCheckCustomer, ""
 		}, ""},

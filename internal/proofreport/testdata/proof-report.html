@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Proof Report</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--ink:#17181a;--muted:#5d6168;--line:#e2e3e0;--good:#0f7b4a;--good-bg:#e6f4ec;--bad:#b42318;--bad-bg:#fdecea;--watch:#9a6700;--watch-bg:#fff4d6;--neutral:#3b4048;--neutral-bg:#eef0f2}
+@media screen and (prefers-color-scheme:dark){:root{--bg:#121315;--panel:#1b1d20;--ink:#ecedee;--muted:#a3a7ad;--line:#2c2f33;--good:#5fd39a;--good-bg:#12301f;--bad:#ff8a80;--bad-bg:#3a1714;--watch:#f2c14e;--watch-bg:#33290f;--neutral:#c9ccd1;--neutral-bg:#26292d}}
+@page{size:A4;margin:16mm 14mm}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:28px 16px 48px}
+.eyebrow{color:var(--muted);font-size:13px;margin:0 0 4px}
+h1{font-size:26px;line-height:1.25;margin:0 0 8px}
+h2{font-size:19px;margin:36px 0 8px}
+h3{font-size:15px;margin:24px 0 8px}
+.lead{font-size:17px;font-weight:600;margin:12px 0 20px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 12px}
+.panel p{margin:0 0 8px}.panel p:last-child{margin:0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+td{overflow-wrap:anywhere;min-width:5.5em}
+td:first-child,th{white-space:nowrap}
+p,li{overflow-wrap:anywhere}
+th{color:var(--muted);font-weight:600;font-size:12px}
+tr:last-child td{border-bottom:0}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0}
+dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}
+.mono,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
+pre{white-space:pre-wrap;margin:0}
+.pill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600}
+.good{color:var(--good);background:var(--good-bg)}.bad{color:var(--bad);background:var(--bad-bg)}.watch{color:var(--watch);background:var(--watch-bg)}.neutral{color:var(--neutral);background:var(--neutral-bg)}.unknown{color:var(--muted);background:var(--neutral-bg)}
+.note{color:var(--muted);font-size:12.5px}
+.warning{color:var(--watch);background:var(--watch-bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:0 0 10px}
+.workload{break-before:page}
+.workload:first-of-type{break-before:auto}
+.run{break-inside:avoid-page}
+footer{color:var(--muted);font-size:12px;margin-top:32px}
+footer p{margin:0 0 6px}
+@media print{body{background:#fff}.panel{border-color:#ccc}main{max-width:none;padding:0}}
+</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Prepared for Example Labs · runs measured 2026-11-02 to 2026-11-03 · InferCrane Proof Report</p>
+<h1>Proof Report</h1>
+<p class="lead">Saving verified on 1 of 2 workloads, with at least &#43;10.0% output per GPU.</p>
+<section class="panel" aria-label="Summary"><dl>
+<dt>Workloads</dt><dd>2</dd>
+<dt>Saving verified</dt><dd>1 of 2 workloads</dd>
+<dt>Verified saving a month</dt><dd>unknown: no workload has a verified saving with a recorded price and your traffic volume</dd>
+<dt>Output per GPU, verified workloads</dt><dd>at least &#43;10.0%</dd>
+</dl></section>
+<section class="panel" aria-label="How to read this report"><p><strong>How to read this report.</strong> A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup&#39;s task score. Anything less is &#34;not shown&#34;. A number marked unknown was not measured or not comparable; nothing is estimated.</p></section>
+<section class="workload" aria-label="Workload 1: Qwen/Qwen3-8B · chat">
+<h2>Workload 1: Qwen/Qwen3-8B · chat</h2>
+<p>Saving verified at 16 at once, 64 at once; not at 128 at once, so no saving is stated for the workload.</p>
+<p class="note">Traffic: your captured traffic, replayed by shape (lengths and order, no text): sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.</p>
+
+<h3>Verdict per load</h3>
+<p>One setup wins at every load measured.</p>
+<div class="panel"><table><thead><tr><th>Load</th><th>Decision</th><th>Setup</th><th>Why</th></tr></thead><tbody>
+<tr><td>16 at once</td><td>Winner</td><td>Up to 256 concurrent requests</td><td>The judge chose it at this load, and its saving is verified.</td></tr>
+<tr><td>64 at once</td><td>Winner</td><td>Up to 256 concurrent requests</td><td>The judge chose it at this load, and its saving is verified.</td></tr>
+<tr><td>128 at once</td><td>Winner</td><td>Up to 256 concurrent requests</td><td>The judge chose it at this load, but its saving is not shown: its gain is not shown under the claim rule: it lacks a fresh machine&#39;s confirmation of the gain.</td></tr>
+</tbody></table></div>
+<article class="run">
+<h3>At 16 requests at once · run run-a</h3>
+<p><strong>Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic.</strong></p>
+
+<div class="panel"><table><thead><tr><th>Measured on</th><th>Before (your current setup)</th><th>After</th></tr></thead><tbody>
+<tr><td>Setup</td><td>vLLM defaults</td><td>Up to 256 concurrent requests</td></tr>
+<tr><td>Model</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td></tr>
+<tr><td>GPU</td><td>L4 × 1</td><td>L4 × 1</td></tr>
+<tr><td>Engine</td><td>vllm 0.34.0</td><td>vllm 0.34.0</td></tr>
+<tr><td>Image</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td></tr>
+<tr><td>Flags</td><td>engine defaults</td><td>--max-num-seqs 256</td></tr>
+<tr><td>Your hourly price</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td></tr>
+</tbody></table></div>
+<div class="panel"><dl><dt>Workload</dt><dd>your traffic, replayed, profile chat, 480 requests per run, method campaign-interleaved-control-v3</dd><dt>Traffic shape</dt><dd>sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</dd><dt>Baseline</dt><dd>vLLM defaults, measured side by side on the same traffic: 3 runs of it, 2 of the new setup; measured noise ±3.0%; measured again on fresh servers</dd></dl></div>
+<div class="panel"><table><thead><tr><th>Outcome</th><th>Before</th><th>After</th><th>Change</th><th>Noise</th><th>Decision</th></tr></thead><tbody>
+<tr><td>Output per GPU</td><td>1,000 tokens/s</td><td>1,300 tokens/s</td><td>&#43;30.0%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Cost per 1M output tokens</td><td>$0.2222</td><td>$0.1709</td><td>-23.1%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Time to first token, p95</td><td>420 ms</td><td>400 ms</td><td>-4.8%</td><td>±8.0%</td><td><span class="pill neutral">no measurable difference</span></td></tr>
+<tr><td>Output speed per user</td><td>40.0 tokens/s</td><td>47.6 tokens/s</td><td>&#43;19.0%</td><td>±5.0%</td><td><span class="pill good">improved</span></td></tr>
+</tbody></table></div>
+<div class="panel"><table><thead><tr><th>Your limit</th><th>Before</th><th>After</th></tr></thead><tbody>
+<tr><td>Time to first token, p95 ≤ 1,000 ms</td><td>420 ms · met</td><td>400 ms · met</td></tr>
+</tbody></table></div>
+<div class="panel">
+<p><strong>Answer quality.</strong> Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval&#39;s pass or fail.</p>
+<p><span class="pill good">Claim shown · output token throughput &#43;27.0% against ±3.0% noise, the smaller of both windows.</span></p>
+<p><span class="pill good">Saving verified: output per GPU &#43;30.0%, so the same traffic needs 23.1% fewer GPU hours; cost per 1M output tokens 23.1% lower; $135 a month at your captured traffic ($584 → $449); $1,617 a year at that rate (projection); 730 → 562 GPU hours a month. Basis: measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included.</span></p>
+
+</div>
+<div class="panel"><p><strong>Evidence</strong></p><dl><dt>This run&#39;s signed report</dt><dd class="mono">sha256:a09c806d40367e52911a4b0b860faa6073791e5bddf6eda8e016fb4c191fb3eb at /api/v1/optimization/campaigns/run-a/report</dd><dt>Check it</dt><dd class="mono">infercrane optimize report run-a --output json &gt; run.json &amp;&amp; infercrane optimize report verify run.json</dd><dt>campaign input</dt><dd class="mono">run-a · sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · Qwen/Qwen3-8B</dd><dt>proposal</dt><dd class="mono">sha256:0cc9a1e4ad13e73cb360882317d8d42c49325d16d357d807df74530f0eb1fec5 · catalog-v1</dd><dt>winner benchmark</dt><dd class="mono">bench-run-a-winner · sha256:78c80827372bcfb89363de9c4d3077d5b922e3e3217e0a2a2f96b9ca6a62fc13 · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-a-winner</dd><dt>winner quality</dt><dd class="mono">q-run-a-winner · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>baseline benchmark</dt><dd class="mono">bench-run-a-control · sha256:815dbae9dbe0364f3053fc26763daa2d8bba403ca9fc687bbe8369174bf78353 · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-a-control</dd><dt>baseline quality</dt><dd class="mono">q-run-a-control · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>replayed traffic</dt><dd class="mono">trace-1 · sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 100 requests, content not stored</dd></dl></div>
+<div class="panel"><p><strong>Measure it again</strong></p><pre>infercrane optimize create Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L4 --objective throughput --profile chat --workload-fingerprint sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --target-concurrency 16 --max-ttft-p95-ms 1000 --max-candidates 4
+infercrane optimize watch NEW_RUN
+infercrane optimize report NEW_RUN --output json &gt; new-run.json
+</pre></div>
+</article>
+<article class="run">
+<h3>At 64 requests at once · run run-b</h3>
+<p><strong>Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic.</strong></p>
+
+<div class="panel"><table><thead><tr><th>Measured on</th><th>Before (your current setup)</th><th>After</th></tr></thead><tbody>
+<tr><td>Setup</td><td>vLLM defaults</td><td>Up to 256 concurrent requests</td></tr>
+<tr><td>Model</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td></tr>
+<tr><td>GPU</td><td>L4 × 1</td><td>L4 × 1</td></tr>
+<tr><td>Engine</td><td>vllm 0.34.0</td><td>vllm 0.34.0</td></tr>
+<tr><td>Image</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td></tr>
+<tr><td>Flags</td><td>engine defaults</td><td>--max-num-seqs 256</td></tr>
+<tr><td>Your hourly price</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td></tr>
+</tbody></table></div>
+<div class="panel"><dl><dt>Workload</dt><dd>your traffic, replayed, profile chat, 480 requests per run, method campaign-interleaved-control-v3</dd><dt>Traffic shape</dt><dd>sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</dd><dt>Baseline</dt><dd>vLLM defaults, measured side by side on the same traffic: 3 runs of it, 2 of the new setup; measured noise ±3.0%; measured again on fresh servers</dd></dl></div>
+<div class="panel"><table><thead><tr><th>Outcome</th><th>Before</th><th>After</th><th>Change</th><th>Noise</th><th>Decision</th></tr></thead><tbody>
+<tr><td>Output per GPU</td><td>1,000 tokens/s</td><td>1,200 tokens/s</td><td>&#43;20.0%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Cost per 1M output tokens</td><td>$0.2222</td><td>$0.1852</td><td>-16.7%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Time to first token, p95</td><td>420 ms</td><td>400 ms</td><td>-4.8%</td><td>±8.0%</td><td><span class="pill neutral">no measurable difference</span></td></tr>
+<tr><td>Output speed per user</td><td>40.0 tokens/s</td><td>47.6 tokens/s</td><td>&#43;19.0%</td><td>±5.0%</td><td><span class="pill good">improved</span></td></tr>
+</tbody></table></div>
+<div class="panel"><table><thead><tr><th>Your limit</th><th>Before</th><th>After</th></tr></thead><tbody>
+<tr><td>Time to first token, p95 ≤ 1,000 ms</td><td>420 ms · met</td><td>400 ms · met</td></tr>
+</tbody></table></div>
+<div class="panel">
+<p><strong>Answer quality.</strong> Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval&#39;s pass or fail.</p>
+<p><span class="pill good">Claim shown · output token throughput &#43;18.0% against ±3.0% noise, the smaller of both windows.</span></p>
+<p><span class="pill good">Saving verified: output per GPU &#43;20.0%, so the same traffic needs 16.7% fewer GPU hours; cost per 1M output tokens 16.7% lower; $97.33 a month at your captured traffic ($584 → $487); $1,168 a year at that rate (projection); 730 → 608 GPU hours a month. Basis: measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included.</span></p>
+
+</div>
+<div class="panel"><p><strong>Evidence</strong></p><dl><dt>This run&#39;s signed report</dt><dd class="mono">sha256:d4b155d8afdb54813161ff4ea39a73e0616f9421e78705eb5975c7e9c76ebd55 at /api/v1/optimization/campaigns/run-b/report</dd><dt>Check it</dt><dd class="mono">infercrane optimize report run-b --output json &gt; run.json &amp;&amp; infercrane optimize report verify run.json</dd><dt>campaign input</dt><dd class="mono">run-b · sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · Qwen/Qwen3-8B</dd><dt>proposal</dt><dd class="mono">sha256:28cf54a6ac729f5bcb1fb60a8391ccf8ae47d0fae2336ae00683e0a2038e89ea · catalog-v1</dd><dt>winner benchmark</dt><dd class="mono">bench-run-b-winner · sha256:87d363b92c9f6fc454cdaea8a60c84f40364af1e092d648399963216a2493146 · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-b-winner</dd><dt>winner quality</dt><dd class="mono">q-run-b-winner · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>baseline benchmark</dt><dd class="mono">bench-run-b-control · sha256:768c4166cebf80c7ecac11e8b92fb64e073de1abf3b7c92261dc814b6a434b83 · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-b-control</dd><dt>baseline quality</dt><dd class="mono">q-run-b-control · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>replayed traffic</dt><dd class="mono">trace-1 · sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 100 requests, content not stored</dd></dl></div>
+<div class="panel"><p><strong>Measure it again</strong></p><pre>infercrane optimize create Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L4 --objective throughput --profile chat --workload-fingerprint sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --target-concurrency 64 --max-ttft-p95-ms 1000 --max-candidates 4
+infercrane optimize watch NEW_RUN
+infercrane optimize report NEW_RUN --output json &gt; new-run.json
+</pre></div>
+</article>
+<article class="run">
+<h3>At 128 requests at once · run run-d</h3>
+<p><strong>Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic.</strong></p>
+
+<div class="panel"><table><thead><tr><th>Measured on</th><th>Before (your current setup)</th><th>After</th></tr></thead><tbody>
+<tr><td>Setup</td><td>vLLM defaults</td><td>Up to 256 concurrent requests</td></tr>
+<tr><td>Model</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td><td>Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567</td></tr>
+<tr><td>GPU</td><td>L4 × 1</td><td>L4 × 1</td></tr>
+<tr><td>Engine</td><td>vllm 0.34.0</td><td>vllm 0.34.0</td></tr>
+<tr><td>Image</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td></tr>
+<tr><td>Flags</td><td>engine defaults</td><td>--max-num-seqs 256</td></tr>
+<tr><td>Your hourly price</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td><td>$0.80 per replica, from your-aws-price-list/2026-11-01</td></tr>
+</tbody></table></div>
+<div class="panel"><dl><dt>Workload</dt><dd>your traffic, replayed, profile chat, 480 requests per run, method campaign-interleaved-control-v3</dd><dt>Traffic shape</dt><dd>sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</dd><dt>Baseline</dt><dd>vLLM defaults, measured side by side on the same traffic: 3 runs of it, 2 of the new setup; measured noise ±3.0%; not measured again on fresh servers</dd></dl></div>
+<div class="panel"><table><thead><tr><th>Outcome</th><th>Before</th><th>After</th><th>Change</th><th>Noise</th><th>Decision</th></tr></thead><tbody>
+<tr><td>Output per GPU</td><td>1,000 tokens/s</td><td>1,250 tokens/s</td><td>&#43;25.0%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Cost per 1M output tokens</td><td>$0.2222</td><td>$0.1778</td><td>-20.0%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Time to first token, p95</td><td>420 ms</td><td>400 ms</td><td>-4.8%</td><td>±8.0%</td><td><span class="pill neutral">no measurable difference</span></td></tr>
+<tr><td>Output speed per user</td><td>40.0 tokens/s</td><td>47.6 tokens/s</td><td>&#43;19.0%</td><td>±5.0%</td><td><span class="pill good">improved</span></td></tr>
+</tbody></table></div>
+<div class="panel"><table><thead><tr><th>Your limit</th><th>Before</th><th>After</th></tr></thead><tbody>
+<tr><td>Time to first token, p95 ≤ 1,000 ms</td><td>420 ms · met</td><td>400 ms · met</td></tr>
+</tbody></table></div>
+<div class="panel">
+<p><strong>Answer quality.</strong> Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval&#39;s pass or fail.</p>
+<p><span class="pill watch">Claim not shown · lacks a fresh machine&#39;s confirmation of the gain.</span></p>
+<p><span class="pill watch">Saving not shown.</span></p>
+<ul><li>its gain is not shown under the claim rule: it lacks a fresh machine&#39;s confirmation of the gain</li></ul>
+</div>
+<div class="panel"><p><strong>Evidence</strong></p><dl><dt>This run&#39;s signed report</dt><dd class="mono">sha256:66385524e2b8000a61c50710907dfa76ab4de511c89376ebfbbc37d491c482b7 at /api/v1/optimization/campaigns/run-d/report</dd><dt>Check it</dt><dd class="mono">infercrane optimize report run-d --output json &gt; run.json &amp;&amp; infercrane optimize report verify run.json</dd><dt>campaign input</dt><dd class="mono">run-d · sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · Qwen/Qwen3-8B</dd><dt>proposal</dt><dd class="mono">sha256:ad447be969d4fd7e0f49818a7eb71f911a2d30faf3cdf7af4ee1e3ffc3c49c1e · catalog-v1</dd><dt>winner benchmark</dt><dd class="mono">bench-run-d-winner · sha256:13906abe7eaa0538922551fb1dc3f2f415b7049b4e728d7599e8811784e0390f · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-d-winner</dd><dt>winner quality</dt><dd class="mono">q-run-d-winner · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>baseline benchmark</dt><dd class="mono">bench-run-d-control · sha256:a972a45b5ef174224917cc9329ed0a499e8885c9548be804efc00677ef7133c4 · Qwen/Qwen3-8B@0123456789abcdef0123456789abcdef01234567 revision rev-run-d-control</dd><dt>baseline quality</dt><dd class="mono">q-run-d-control · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>replayed traffic</dt><dd class="mono">trace-1 · sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 100 requests, content not stored</dd></dl></div>
+<div class="panel"><p><strong>Measure it again</strong></p><pre>infercrane optimize create Qwen/Qwen3-8B --provider aws --region eu-central-1 --gpu L4 --objective throughput --profile chat --workload-fingerprint sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --target-concurrency 128 --max-ttft-p95-ms 1000 --max-candidates 4
+infercrane optimize watch NEW_RUN
+infercrane optimize report NEW_RUN --output json &gt; new-run.json
+</pre></div>
+</article>
+</section>
+<section class="workload" aria-label="Workload 2: zai-org/GLM-5 · chat">
+<h2>Workload 2: zai-org/GLM-5 · chat</h2>
+<p>Saving verified at every load measured (16 at once).</p>
+<p class="note">Traffic: your captured traffic, replayed by shape (lengths and order, no text): sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.</p>
+<div class="panel"><dl><dt>Output per GPU</dt><dd>at least &#43;10.0%</dd><dt>GPU hours for the same traffic</dt><dd>at least 9.1% fewer</dd></dl></div>
+
+<article class="run">
+<h3>At 16 requests at once · run run-c</h3>
+<p><strong>Roll out “Up to 256 concurrent requests”: it measured better than your current setup on the same traffic.</strong></p>
+
+<div class="panel"><table><thead><tr><th>Measured on</th><th>Before (your current setup)</th><th>After</th></tr></thead><tbody>
+<tr><td>Setup</td><td>vLLM defaults</td><td>Up to 256 concurrent requests</td></tr>
+<tr><td>Model</td><td>zai-org/GLM-5@0123456789abcdef0123456789abcdef01234567</td><td>zai-org/GLM-5@0123456789abcdef0123456789abcdef01234567</td></tr>
+<tr><td>GPU</td><td>L4 × 1</td><td>L4 × 1</td></tr>
+<tr><td>Engine</td><td>vllm 0.34.0</td><td>vllm 0.34.0</td></tr>
+<tr><td>Image</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td><td>sha256:1111111111111111111111111111111111111111111111111111111111111111</td></tr>
+<tr><td>Flags</td><td>engine defaults</td><td>--max-num-seqs 256</td></tr>
+<tr><td>Your hourly price</td><td>unknown: none recorded</td><td>unknown: none recorded</td></tr>
+</tbody></table></div>
+<div class="panel"><dl><dt>Workload</dt><dd>your traffic, replayed, profile chat, 480 requests per run, method campaign-interleaved-control-v3</dd><dt>Traffic shape</dt><dd>sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</dd><dt>Baseline</dt><dd>vLLM defaults, measured side by side on the same traffic: 3 runs of it, 2 of the new setup; measured noise ±3.0%; measured again on fresh servers</dd></dl></div>
+<div class="panel"><table><thead><tr><th>Outcome</th><th>Before</th><th>After</th><th>Change</th><th>Noise</th><th>Decision</th></tr></thead><tbody>
+<tr><td>Output per GPU</td><td>1,000 tokens/s</td><td>1,100 tokens/s</td><td>&#43;10.0%</td><td>±3.0%</td><td><span class="pill good">improved</span></td></tr>
+<tr><td>Cost per 1M output tokens</td><td>unknown</td><td>unknown</td><td>—</td><td>—</td><td><span class="pill unknown">unknown</span><div class="note">baseline: no sourced hourly price</div></td></tr>
+<tr><td>Time to first token, p95</td><td>420 ms</td><td>400 ms</td><td>-4.8%</td><td>±8.0%</td><td><span class="pill neutral">no measurable difference</span></td></tr>
+<tr><td>Output speed per user</td><td>40.0 tokens/s</td><td>47.6 tokens/s</td><td>&#43;19.0%</td><td>±5.0%</td><td><span class="pill good">improved</span></td></tr>
+</tbody></table></div>
+<div class="panel"><table><thead><tr><th>Your limit</th><th>Before</th><th>After</th></tr></thead><tbody>
+<tr><td>Time to first token, p95 ≤ 1,000 ms</td><td>420 ms · met</td><td>400 ms · met</td></tr>
+</tbody></table></div>
+<div class="panel">
+<p><strong>Answer quality.</strong> Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval&#39;s pass or fail.</p>
+<p><span class="pill good">Claim shown · output token throughput &#43;9.0% against ±3.0% noise, the smaller of both windows.</span></p>
+<p><span class="pill good">Saving verified: output per GPU &#43;10.0%, so the same traffic needs 9.1% fewer GPU hours; 730 → 664 GPU hours a month. Monthly amount unknown: cost per output token is unknown: baseline: no sourced hourly price. Basis: measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included.</span></p>
+
+</div>
+<div class="panel"><p><strong>Evidence</strong></p><dl><dt>This run&#39;s signed report</dt><dd class="mono">sha256:0160492a02f8ef8b51cc9ddff4a56eec9a50c933e132cc01d4ba3ea8ecc2ac7c at /api/v1/optimization/campaigns/run-c/report</dd><dt>Check it</dt><dd class="mono">infercrane optimize report run-c --output json &gt; run.json &amp;&amp; infercrane optimize report verify run.json</dd><dt>campaign input</dt><dd class="mono">run-c · sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc · zai-org/GLM-5</dd><dt>proposal</dt><dd class="mono">sha256:0a292af805ba477eed8a617e23749e52ce65f7b9b7542d82ef88e987bdd785a2 · catalog-v1</dd><dt>winner benchmark</dt><dd class="mono">bench-run-c-winner · sha256:466342b1fffd6a9c87c74f09af9f92a5adadc22d93afcfac3c1ac19f451138fb · zai-org/GLM-5@0123456789abcdef0123456789abcdef01234567 revision rev-run-c-winner</dd><dt>winner quality</dt><dd class="mono">q-run-c-winner · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>baseline benchmark</dt><dd class="mono">bench-run-c-control · sha256:9703906c5628be1ce1c3dcbb2bb9041bc272ddd475efbc0bceb1b7002d3004cd · zai-org/GLM-5@0123456789abcdef0123456789abcdef01234567 revision rev-run-c-control</dd><dt>baseline quality</dt><dd class="mono">q-run-c-control · sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · support-tasks@3 signed by customer-key</dd><dt>replayed traffic</dt><dd class="mono">trace-1 · sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb · 100 requests, content not stored</dd></dl></div>
+<div class="panel"><p><strong>Measure it again</strong></p><pre>infercrane optimize create zai-org/GLM-5 --provider aws --region eu-central-1 --gpu L4 --objective throughput --profile chat --workload-fingerprint sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb --target-concurrency 16 --max-ttft-p95-ms 1000 --max-candidates 4
+infercrane optimize watch NEW_RUN
+infercrane optimize report NEW_RUN --output json &gt; new-run.json
+</pre></div>
+</article>
+</section>
+
+<h2>Limits</h2>
+<div class="panel"><ul><li>Every number was measured on the hardware, engine version and traffic named beside it. It says nothing about other GPUs, engines, versions, models or traffic.</li><li>Prompts and answers were not stored: traffic is replayed by its shape, and answers are compared by their check&#39;s score.</li><li>Qwen/Qwen3-8B · chat: answer quality was checked on support-tasks@3 (1,000 prompts) only; other tasks are not measured.</li><li>Qwen/Qwen3-8B · chat was measured at 16, 64, 128 requests at once; other loads are not covered.</li><li>zai-org/GLM-5 · chat: answer quality was checked on support-tasks@3 (1,000 prompts) only; other tasks are not measured.</li><li>zai-org/GLM-5 · chat was measured at 16 requests at once; other loads are not covered.</li><li>Cost uses the hourly price recorded with each measurement, which is your compute&#39;s price; where none was recorded, cost is unknown, never estimated.</li><li>Monthly figures are cost per output token times your captured output-token volume. They assume servers stay busy, so idle capacity is not included.</li><li>A year is twelve months at the captured rate; growth and seasonality are not included.</li></ul></div>
+<h2>Unknown, never estimated</h2>
+<div class="panel"><ul><li>zai-org/GLM-5 · chat at 16 at once: Cost per 1M output tokens: baseline: no sourced hourly price</li><li>zai-org/GLM-5 · chat at 16 at once: monthly saving: cost per output token is unknown: baseline: no sourced hourly price</li></ul></div>
+<footer><p>Report digest <span class="mono">sha256:f6f9cb3fe5bb7d70dd330b4b929ac77c0509caa0fa108ed63b1d6cf9a3f24527</span>. Every number comes from the runs' persisted measurements.</p>
+<p>Signed by key sha256:3ab86a91c1e46782. Verify with infercrane report proof verify FILE, where FILE is this report saved with --output json.</p></footer>
+</main>
+</body>
+</html>

@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { evaluateRelease, redact, renderPlan, resolveCLI, run } = require("./lib.js");
+const { proofGate } = require("./gate.js");
 
 function input(name, fallback = "") {
   return process.env[`INPUT_${name.toUpperCase().replaceAll("-", "_")}`] ?? fallback;
@@ -20,6 +21,10 @@ function output(name, value) {
 function summary(markdown) {
   append(process.env.GITHUB_STEP_SUMMARY, markdown);
 }
+function warn(message) {
+  const escaped = redact(message).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+  process.stdout.write(`::warning title=InferCrane proof gate::${escaped}\n`);
+}
 
 async function main() {
   const mode = input("mode", "plan"),
@@ -27,14 +32,16 @@ async function main() {
     deployment = input("deployment"),
     expectedRevision = input("revision");
   const artifactPath = input("output-path", "infercrane-delivery.json");
-  if (!["plan", "apply", "release-check"].includes(mode))
-    throw new Error("mode must be plan, apply, or release-check");
+  if (!["plan", "apply", "release-check", "proof-gate"].includes(mode))
+    throw new Error("mode must be plan, apply, release-check, or proof-gate");
   const cli = await resolveCLI(
     input("cli-path", "auto"),
-    input("version", "v2.0.2"),
+    input("version", "v2.1.0"),
     path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "infercrane-action"),
   );
-  if (mode === "plan") {
+  if (mode === "proof-gate") {
+    await proofGate({ input, cli, output, summary, warn });
+  } else if (mode === "plan") {
     if (!spec) throw new Error("spec is required for plan");
     const raw = run(cli, ["plan", spec, "--output", "json"]);
     const plan = JSON.parse(raw);

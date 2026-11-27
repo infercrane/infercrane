@@ -1,0 +1,44 @@
+# Helm values for deploy/helm/infercrane-agent in the customer's namespace.
+#
+# 30-install.sh adds what is only known at install time:
+#   image.repository + image.digest   the image 10-image.sh pushed
+#   controlPlane.url                  https://infercrane.<hosted namespace>.svc:8443
+#   controlPlane.caBundle             the stand-in control plane's certificate
+#   agent.endpointName, agent.model   from env.sh
+#   executor.allowedAccelerators[0]   the node's nvidia.com/gpu.product label
+
+agent:
+  # Created by 30-install.sh from the key POST /api/v1/agents returns.
+  keySecret:
+    name: infercrane-agent-key
+    key: key
+  # The customer's model server, by its in-cluster Service name.
+  servers:
+    - http://qwen3.models.svc:8000
+  # The server's own API key. The agent sends it only to that server.
+  serverTokenSecret:
+    name: model-server-token
+    key: token
+
+dataPlane:
+  enabled: true
+
+executor:
+  enabled: true
+  # Candidates may use the vLLM image and nothing else.
+  allowedImages:
+    - vllm/vllm-openai
+  gpuResource: nvidia.com/gpu
+  gpuProductLabel: nvidia.com/gpu.product
+
+# The agent also runs AIPerf, so it gets more memory than the chart's default
+# and stays off the GPU node.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 4Gi
+
+nodeSelector:
+  infercrane.dev/pool: system

@@ -9,7 +9,7 @@ model:
 
 runtime:
   engine: vllm
-  version: 0.22.1
+  version: 0.34.0
   args:
     - --enable-prefix-caching
 

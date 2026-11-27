@@ -27,6 +27,6 @@
   "integration": "integration",
   "runtimes": ["vllm"],
   "runtime_versions": {"vllm": ["0.22.1"]},
-  "runtime_version_note": "this integration registers a vLLM IR provider; vLLM IR is deprecated and vLLM 0.34.0 removes its op-priority setting, so any vLLM 0.34 or later pin needs a CustomOp-based integration reviewed and qualified first",
+  "runtime_version_note": "this integration registers a vLLM IR provider; vLLM IR is deprecated and vLLM 0.34.0 removes its op-priority setting. integration-vllm-0.34 is the CustomOp plugin for vLLM 0.34.0, tested against a stub of its API; it is listed here only after it is qualified on a GPU",
   "candidate_args": ["--kernel-config.ir_op_priority.fused_add_rms_norm=infercrane,vllm_c,native"]
 }

@@ -14,7 +14,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fatal(errors.New("manifest paths are required"))
 	}
-	seenRoute, seenDeployment, seenService, seenPVCRead, seenKServeRole, seenDynamoRole := false, false, false, false, false, false
+	seenRoute, seenDeployment, seenService, seenNetworkPolicy, seenPVCRead, seenKServeRole, seenDynamoRole := false, false, false, false, false, false, false
 	for _, path := range os.Args[1:] {
 		file, err := os.Open(path)
 		if err != nil {
@@ -46,6 +46,7 @@ func main() {
 				for _, resource := range resources {
 					seenDeployment = seenDeployment || resource == "deployments"
 					seenService = seenService || resource == "services"
+					seenNetworkPolicy = seenNetworkPolicy || resource == "networkpolicies"
 					seenPVCRead = seenPVCRead || resource == "persistentvolumeclaims"
 					seenKServeRole = seenKServeRole || resource == "inferenceservices"
 					seenDynamoRole = seenDynamoRole || resource == "dynamographdeployments"
@@ -65,8 +66,8 @@ func main() {
 			fatal(err)
 		}
 	}
-	if !seenRoute || !seenDeployment || !seenService || !seenPVCRead || !seenKServeRole || !seenDynamoRole {
-		fatal(errors.New("manifests do not cover deployment RBAC, read-only PVC evidence, KServe RBAC, Dynamo RBAC, and Gateway API exposure"))
+	if !seenRoute || !seenDeployment || !seenService || !seenNetworkPolicy || !seenPVCRead || !seenKServeRole || !seenDynamoRole {
+		fatal(errors.New("manifests do not cover deployment and engine NetworkPolicy RBAC, read-only PVC evidence, KServe RBAC, Dynamo RBAC, and Gateway API exposure"))
 	}
 	fmt.Println("Kubernetes manifests are syntactically valid and preserve bounded ownership.")
 }

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://infercrane.dev/schemas/result-record-v1.schema.json",
+  "title": "InferCrane result record v1",
+  "description": "One setup's measured outcome in one cell (one kind of traffic at one load on one GPU), as the results store keeps it: a technique result (technique-result-v1.schema.json) plus the model's content-free facts, the setup's knobs, the cell, and the measured number. Numbers and names only, never prompts or answers. See docs/features/results-store.mdx.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "sharing", "model", "setup", "cell", "observed", "result", "source", "recorded_at"],
+  "properties": {
+    "schema_version": {"const": "infercrane.dev/result-record/v1"},
+    "id": {"type": "string", "pattern": "^rr_[a-f0-9]{32}$", "description": "Derived from the record's content: the same record imported twice is stored once."},
+    "sharing": {"enum": ["private", "numbers"], "description": "private: read and used by its own tenant only. numbers: the prior may use its numbers, without names, when ranking setups for other tenants; it is never returned to them."},
+    "model": {"type": "object", "additionalProperties": false, "required": ["id", "architecture"],
+      "properties": {
+        "id": {"type": "string", "maxLength": 128},
+        "revision": {"type": "string", "maxLength": 128},
+        "architecture": {"enum": ["dense", "moe", "hybrid", "unknown"]},
+        "params_b": {"type": "number", "minimum": 0},
+        "active_params_b": {"type": "number", "minimum": 0},
+        "checkpoint": {"type": "string", "maxLength": 32},
+        "features": {"type": "array", "maxItems": 16, "items": {"type": "string", "maxLength": 128}}
+      }},
+    "setup": {"type": "object", "additionalProperties": false, "required": ["name", "speculation"],
+      "properties": {
+        "name": {"type": "string", "maxLength": 128},
+        "label": {"type": "string", "maxLength": 200},
+        "speculation": {"enum": ["none", "mtp", "ngram", "draft-model", "eagle", "unknown"]},
+        "drafts": {"type": "integer", "minimum": 0, "maximum": 64},
+        "quantization": {"type": "string", "maxLength": 32},
+        "kv_cache": {"type": "string", "maxLength": 32, "description": "The KV cache format the setup asks the engine for (auto for the engine's own); absent takes result.precision.kv_cache."},
+        "flags": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^--", "maxLength": 256}}
+      }},
+    "cell": {"type": "object", "additionalProperties": false, "required": ["id", "set", "key"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^cell_[a-f0-9]{24}$"},
+        "set": {"type": "string", "maxLength": 128},
+        "key": {"type": "string", "maxLength": 128}
+      }},
+    "observed": {"type": "object", "additionalProperties": false, "required": ["median", "min", "max", "runs"],
+      "properties": {
+        "median": {"type": "number", "minimum": 0},
+        "min": {"type": "number", "minimum": 0},
+        "max": {"type": "number", "minimum": 0},
+        "runs": {"type": "integer", "minimum": 0}
+      }},
+    "result": {"type": "object", "description": "A technique result, technique-result-v1.schema.json."},
+    "source": {"type": "object", "additionalProperties": false, "required": ["kind", "importer"],
+      "properties": {
+        "kind": {"type": "string", "maxLength": 32},
+        "file": {"type": "string", "maxLength": 128, "pattern": "^[^/\\\\]*$"},
+        "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+        "importer": {"type": "string", "maxLength": 64}
+      }},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "judgement": {"type": "object", "additionalProperties": false,
+      "description": "How the importer judged the claim beyond the result's own fields. The claim is the technique contract's own (Result.Claim with the manifest's evidence, as Manifest.ClaimOf adds it), shown only when the record is not a baseline, was judged against its technique's manifest, and no check of its run failed.",
+      "properties": {
+        "manifest": {"type": "string", "maxLength": 200, "description": "id@version sha256:<digest> of the technique manifest whose evidence list was copied into the result's required evidence."},
+        "failed": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 128}, "description": "The run's checks that failed, for example bar.copy-inside-noise."},
+        "unsettled": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 128}, "description": "The run's checks it could not decide (its unknown), for example bar.repeats-steady. Never the same check as a failed one: an unknown is not a failure."},
+        "dry": {"type": "boolean", "description": "A dry run on stand-in servers; it makes no claim."},
+        "baseline": {"type": "boolean", "description": "A setup measured to compare with (the current setup, the publisher's setup, a copy). A baseline is not a technique: it needs no manifest and makes no claim."}
+      }}
+  }
+}

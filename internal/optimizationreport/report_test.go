@@ -879,3 +879,81 @@ func TestReportKeepsTheMetricAnEarlierRankingCompared(t *testing.T) {
 		t.Fatalf("an earlier ranking was relabelled:\n%s", Text(Document{Report: report}))
 	}
 }
+
+// Campaign 1 of 23 November (short chat at 32 on H100s): the chosen setup gained
+// 32% output, and its p95 first token rose 16% inside the noise in the first
+// window and 31% on fresh servers, which the judge called a regression. The
+// report showed only the first window and warned of nothing. These are that
+// campaign's stored comparisons.
+func TestReportWarnsWhenTheWinnerGotSlowerToItsFirstToken(t *testing.T) {
+	f := winnerFixture()
+	measured := interleaved()
+	measured.Comparison["ttft_p95_ms"] = optimizationcampaign.MetricComparison{ControlMean: 7176.09, CandidateMean: 8445.92, Delta: 0.1570, NoiseFloor: 0.4297, Decision: optimizationcampaign.DecisionNoMeasurableDifference, Method: optimizationcampaign.ComparisonPaired, Pairs: 4}
+	measured.Confirmation = &optimizationcampaign.ConfirmationEvidence{Comparison: map[string]optimizationcampaign.MetricComparison{
+		"output_token_throughput": {HigherIsBetter: true, Delta: 0.3311, NoiseFloor: 0.0266, Decision: optimizationcampaign.DecisionImproved},
+		"ttft_p95_ms":             {ControlMean: 6039.47, CandidateMean: 8064.40, Delta: 0.3144, NoiseFloor: 0.1221, Decision: optimizationcampaign.DecisionRegressed},
+	}, FreshCandidate: true, FreshControl: true}
+	f.arms[1].measured = measured
+	report := Assemble(f.evidence())
+	var warning string
+	for _, text := range report.Warnings {
+		if strings.Contains(text, "first token") {
+			warning = text
+		}
+	}
+	for _, want := range []string{"got slower to its first token", "+16% in the first window (inside the noise, noise ±43%)", "+31% on fresh servers (judged slower, noise ±12%)", "chosen on throughput"} {
+		if !strings.Contains(warning, want) {
+			t.Fatalf("warning %q lacks %q (all: %v)", warning, want, report.Warnings)
+		}
+	}
+	// Without a slower window there is nothing to warn about.
+	if report := Assemble(winnerFixture().evidence()); strings.Contains(strings.Join(report.Warnings, " "), "first token") {
+		t.Fatalf("warned without a slower first token: %v", report.Warnings)
+	}
+}
+
+// A campaign that ranked on useful output shows it beside the other outcomes,
+// from the interleaved comparison.
+func TestReportShowsUsefulOutputWhenALimitWasSet(t *testing.T) {
+	f := winnerFixture()
+	f.objective = "useful-output"
+	measured := interleaved()
+	measured.Comparison["useful_output_throughput"] = optimizationcampaign.MetricComparison{HigherIsBetter: true, ControlMean: 800, CandidateMean: 1100, Delta: 0.375, NoiseFloor: 0.05, Decision: optimizationcampaign.DecisionImproved}
+	f.arms[1].measured = measured
+	report := Assemble(f.evidence())
+	metric := metricByKey(t, report, MetricUsefulOutput)
+	if !near(metric.Baseline, 800) || !near(metric.Winner, 1100) || metric.Decision != optimizationcampaign.DecisionImproved || report.ObjectiveMetric != "useful_output_throughput" {
+		t.Fatalf("useful output=%+v objective=%s", metric, report.ObjectiveMetric)
+	}
+	for _, current := range Assemble(winnerFixture().evidence()).Metrics {
+		if current.Key == MetricUsefulOutput {
+			t.Fatal("useful output shown for a campaign that set no limit")
+		}
+	}
+}
+
+// A setup that lost is checked for a slow server too: its window on fresh
+// servers can be why it lost, and the report says so without GPU telemetry.
+func TestReportNamesASlowServerOfASetupThatLost(t *testing.T) {
+	f := gpuRunFixture()
+	run := func(arm string, tps, tpot, running float64) optimizationcampaign.RunSummary {
+		return optimizationcampaign.RunSummary{Arm: arm, Requests: 121, OutputTokenThroughput: &tps, TPOTP95MS: &tpot, ServerMetrics: serverMetricsRunning(running)}
+	}
+	measured := *f.arms[2].measured
+	measured.Runs = []optimizationcampaign.RunSummary{run("control", 246, 20, 30), run("candidate", 184, 26, 30), run("control", 246, 20, 30), run("candidate", 185, 26, 30), run("control", 247, 20, 30), run("candidate", 184, 26, 30), run("control", 246, 20, 30)}
+	measured.Confirmation = &optimizationcampaign.ConfirmationEvidence{Control: measured.Control, FreshCandidate: true, FreshControl: true,
+		Runs: []optimizationcampaign.RunSummary{run("control", 246, 20, 30), run("candidate", 160, 31, 30), run("control", 246, 20, 30), run("candidate", 161, 31, 30), run("control", 247, 20, 30), run("candidate", 160, 31, 30), run("control", 246, 20, 30)}}
+	f.arms[2].measured = &measured
+	report := Assemble(f.evidence())
+	found := false
+	for _, warning := range report.Warnings {
+		found = found || strings.Contains(warning, "took 19% longer per output token on its fresh server than on its other one")
+	}
+	if !found {
+		t.Fatalf("warnings = %q", report.Warnings)
+	}
+}
+
+func serverMetricsRunning(avg float64) *benchmark.ServerMetrics {
+	return &benchmark.ServerMetrics{Collected: true, Metrics: map[string]benchmark.ServerMetricSummary{"vllm:num_requests_running": {Type: "gauge", Stats: map[string]float64{"avg": avg}}}}
+}

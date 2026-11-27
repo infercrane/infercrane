@@ -52,7 +52,8 @@ infercrane connect http://gpu-host.internal:8000/v1 --as support-production
 
 If the server requires an API key, pass the name of an environment variable that holds it with
 `--token-env VLLM_API_KEY`. The control plane stores the key encrypted and uses it for discovery and
-health checks; that needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane. Otherwise use
+health checks; that needs `INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` and
+`INFERCRANE_WORKER_CREDENTIAL_KEY`, each at least 32 bytes, on the control plane. Otherwise use
 the agent, which keeps the key on the host.
 
 The connection begins `observe-only`. InferCrane may discover the served model and record health,

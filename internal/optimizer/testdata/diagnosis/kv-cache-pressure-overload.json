@@ -1,0 +1,44 @@
+{
+ "_comment": "Synthetic: round made-up signals of a vLLM server whose KV cache is full under overload, with three draft tokens. Not a measurement.",
+ "source": "endpoint_readiness",
+ "endpoint": "chat",
+ "algorithm_version": "monitoring-stage-triage-v2",
+ "window_start": "2026-01-01T00:00:00Z",
+ "window_end": "2026-01-01T01:00:00Z",
+ "state": "profile-ready",
+ "primary_bottleneck": "kv-cache-pressure",
+ "confidence": "stage-and-engine-level",
+ "findings": [
+  {
+   "rule": "kv_cache.saturation",
+   "signal": "runtime_kv_cache_timeseries",
+   "observed": 95,
+   "comparison": ">=",
+   "threshold": 90,
+   "unit": "percent"
+  }
+ ],
+ "signals": {
+  "error_rate": 0,
+  "mean_input_tokens": 40,
+  "mean_output_tokens": 250,
+  "p95_generation": 6000,
+  "p95_latency": 12000,
+  "p95_queue": 0,
+  "p95_ttft": 6000,
+  "runtime_internal_tpot": 25,
+  "runtime_kv_cache_block_tokens": 800,
+  "runtime_kv_cache_blocks_per_replica": 800,
+  "runtime_kv_cache_timeseries": 95,
+  "runtime_preemptions_per_completed_request": 0,
+  "runtime_prefix_cache_hit_rate": 0,
+  "runtime_queue_time_p95": 10000,
+  "runtime_requests_running_per_replica": 60,
+  "runtime_requests_waiting_per_replica": 60,
+  "runtime_spec_decode_acceptance": 0.6,
+  "runtime_spec_decode_draft_length": 3,
+  "runtime_state_cache_page_bytes": 3400000,
+  "runtime_ttft_p95": 7000,
+  "shared_prefix_request_ratio": 0
+ }
+}

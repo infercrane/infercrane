@@ -11,12 +11,17 @@ import (
 	"strings"
 
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
+	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
 const (
-	// SearchRecipes adds bounded runtime-recipe experiments to a proposal.
+	// SearchSetups adds bounded, unmeasured setups to try to a proposal.
+	SearchSetups = "setups"
+	// SearchRecipes is an earlier name of SearchSetups, accepted so existing
+	// scripts keep working; it is never shown.
 	SearchRecipes = "recipes"
 
 	// FeatureNativeMTP means the pinned model configuration declares a native
@@ -64,8 +69,22 @@ func InspectModelConfig(raw []byte) (ModelConfigEvidence, error) {
 			}
 		}
 	}
+	// Each technique package reads the features its manifest requires from
+	// the same pinned config, so a technique is asked only for models it can
+	// change (technique.Manifest.Requires.ModelFeatures).
+	for _, read := range modelFeatureReaders {
+		for _, feature := range read(raw) {
+			if !contains(evidence.Features, feature) {
+				evidence.Features = append(evidence.Features, feature)
+			}
+		}
+	}
 	return evidence, nil
 }
+
+// modelFeatureReaders are the technique packages' readers of a pinned
+// config.json: kernel tuning names block-FP8 fused MoE.
+var modelFeatureReaders = []func(config []byte) []string{kerneltuning.ModelFeatures}
 
 // recipeArm is one launch configuration on a pinned runtime image. Arms stay
 // unmeasured for every new model: exercisedBy records where these flags were
@@ -84,14 +103,42 @@ type recipeArm struct {
 }
 
 type recipeTemplate struct {
-	id           string
-	engine       string
-	version      string
-	image        string
-	launcher     []string
-	accelerators []string
+	id       string
+	engine   string
+	version  string
+	image    string
+	launcher []string
+	// accelerators are the accelerators the template's setups are reviewed
+	// for, each with its qualification. Any other accelerator gets none.
+	accelerators []recipeAccelerator
 	arms         []recipeArm
 }
+
+// Recipe accelerator statuses. Qualification is data: a listed accelerator
+// that is not qualified gets no setups, only a warning saying why.
+const (
+	// recipeQualified: the template's image runs on the accelerator and its
+	// setups were exercised there (exercisedBy).
+	recipeQualified = "qualified"
+	// recipeNotQualified: the accelerator is listed so the proposal can say
+	// what is missing, but no setup is added until its platform has a pinned
+	// build of the image and a measured run.
+	recipeNotQualified = "not-qualified"
+)
+
+// recipeAccelerator is one accelerator a template names. Name is the
+// canonical alias: provideridentity's for reviewed accelerators, so every
+// provider spelling of an MI300X matches one entry.
+type recipeAccelerator struct {
+	name   string
+	status string
+	// reason says why an accelerator is not qualified, in customer words.
+	reason string
+}
+
+// sglang0520ROCm is why the SGLang 0.5.20 setups are not qualified on AMD
+// Instinct GPUs: the template pins the CUDA image only.
+const sglang0520ROCm = "the pinned SGLang 0.5.20 image is a CUDA build, no ROCm build of it is pinned, and none of these setups has run on an AMD GPU."
 
 var (
 	boundedGraphArgs = []string{
@@ -123,12 +170,18 @@ func joinArgs(parts ...[]string) []string {
 
 func recipeTemplates() []recipeTemplate {
 	return []recipeTemplate{{
-		id:           "sglang-0520",
-		engine:       "sglang",
-		version:      "0.5.20",
-		image:        "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
-		launcher:     []string{"/opt/sglang/bin/python", "-m", "sglang.launch_server"},
-		accelerators: []string{"H100", "H200", "B200"},
+		id:       "sglang-0520",
+		engine:   "sglang",
+		version:  "0.5.20",
+		image:    "lmsysorg/sglang@sha256:06e4f2ed21afde4ff513cda65070124e727ba23ccaeff7712b8c40e1097d611f",
+		launcher: []string{"/opt/sglang/bin/python", "-m", "sglang.launch_server"},
+		accelerators: []recipeAccelerator{
+			{name: "H100", status: recipeQualified},
+			{name: "H200", status: recipeQualified},
+			{name: "B200", status: recipeQualified},
+			{name: "MI300X", status: recipeNotQualified, reason: sglang0520ROCm},
+			{name: "MI355X", status: recipeNotQualified, reason: sglang0520ROCm},
+		},
 		arms: []recipeArm{
 			{id: "control", layers: []string{layerControl}, exercisedBy: "sglang-0520-bf16-kv-control"},
 			{id: "kv-fp8", layers: []string{layerPrecision}, args: []string{"--kv-cache-dtype", "fp8_e4m3"}, changesPrecision: true, exercisedBy: "sglang-0520-control"},
@@ -177,17 +230,17 @@ func validateSearch(request Request) error {
 	switch request.Search {
 	case "":
 		if request.Diagnosis == nil && (len(request.ModelFeatures) > 0 || request.ModelConfigDigest != "") {
-			return errors.New("model features and model config digest require search recipes or a diagnosis")
+			return errors.New("model features and model config digest require search setups or a diagnosis")
 		}
 		if request.Diagnosis == nil {
 			return nil
 		}
-	case SearchRecipes:
+	case SearchSetups, SearchRecipes:
 	default:
-		return errors.New("search must be recipes when set")
+		return errors.New("search must be setups when set")
 	}
 	for _, feature := range request.ModelFeatures {
-		if feature != FeatureNativeMTP {
+		if feature != FeatureNativeMTP && feature != kerneltuning.ModelFeatureFusedMoEFP8Block {
 			return fmt.Errorf("unsupported model feature %q", feature)
 		}
 	}
@@ -239,8 +292,12 @@ func (s CatalogSource) expandRecipeSearch(proposal Proposal) (Proposal, error) {
 }
 
 func buildRecipeExperiments(template recipeTemplate, model, revision string, compatibility []integration.RuntimeCompatibility, request Request) ([]Candidate, []string, error) {
-	if !recipeAcceleratorSupported(template, request.GPU) {
+	accelerator, listed := recipeAcceleratorFor(template, request.GPU)
+	if !listed {
 		return nil, []string{fmt.Sprintf("No reviewed %s setups exist for accelerator %s; none were added.", template.id, request.GPU)}, nil
+	}
+	if accelerator.status != recipeQualified {
+		return nil, []string{fmt.Sprintf("The %s setups are not qualified on %s: %s None were added.", template.id, accelerator.name, accelerator.reason)}, nil
 	}
 	if len(request.Runtimes) > 0 && !contains(request.Runtimes, template.engine) && !contains(request.Runtimes, recipeRuntime) {
 		return nil, []string{fmt.Sprintf("The runtime allowlist excludes the %s setups; none were added.", template.id)}, nil
@@ -348,9 +405,20 @@ func bestRecipeCompatibility(entries []integration.RuntimeCompatibility, request
 	return matches[0], true
 }
 
-func recipeAcceleratorSupported(template recipeTemplate, gpu string) bool {
-	normalized := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(gpu)), "NVIDIA-")
-	return contains(template.accelerators, normalized)
+// recipeAcceleratorFor finds the template's entry for a GPU. A reviewed
+// accelerator matches under every provider spelling; other names match their
+// upper-cased alias without an "NVIDIA-" prefix.
+func recipeAcceleratorFor(template recipeTemplate, gpu string) (recipeAccelerator, bool) {
+	name := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(gpu)), "NVIDIA-")
+	if accelerator, reviewed := provideridentity.LookupAccelerator(gpu); reviewed {
+		name = strings.ToUpper(accelerator.Name)
+	}
+	for _, accelerator := range template.accelerators {
+		if strings.ToUpper(accelerator.name) == name {
+			return accelerator, true
+		}
+	}
+	return recipeAccelerator{}, false
 }
 
 func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, model, revision string, compatible integration.RuntimeCompatibility, request Request) (Candidate, error) {
@@ -441,4 +509,9 @@ func buildRecipeCandidate(template recipeTemplate, arm recipeArm, priority int, 
 		CompatibilityState: string(compatible.State), CompatibilityEvidence: compatible.Evidence, Source: source,
 		Features: features, RequiredEvidence: required, Limitations: limitations, Deployment: draft,
 	}, nil
+}
+
+// searchesSetups reports whether a request asks for setups to try.
+func searchesSetups(request Request) bool {
+	return request.Search == SearchSetups || request.Search == SearchRecipes
 }

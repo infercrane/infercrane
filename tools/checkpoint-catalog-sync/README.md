@@ -62,6 +62,21 @@ go run ./tools/checkpoint-catalog-sync plan --snapshot .infercrane/checkpoint-ca
 ```
 
 Commit the catalog together with any policy change.
+
+## After an engine pin moves
+
+Eligibility also depends on the runtime images pinned in `internal/support`: a build whose card
+needs a newer engine than the pinned image stays catalog-only. When a pin moves, apply the gates
+again to the committed catalog. It needs no snapshot and no network, and it changes only each
+entry's `eligibility`:
+
+```bash
+go run ./tools/checkpoint-catalog-sync regate          # list the entries that would move
+go run ./tools/checkpoint-catalog-sync regate --write  # rewrite the committed catalog
+```
+
+`TestRegateAppliesTheEngineGateToTheCurrentPin` fails while the committed catalog is gated against
+another pin.
 `TestEmbeddedCatalogIsReviewedPinnedAndHardwareBound` fails when the committed
 catalog was not regenerated after a policy edit.
 

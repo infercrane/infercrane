@@ -6,7 +6,9 @@ import (
 	"os"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/modelimport"
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
@@ -35,6 +37,9 @@ type Deployment struct {
 		// Env is a small set of reviewed engine switches (support.EngineEnvironment).
 		Env      map[string]string        `yaml:"env,omitempty"`
 		Workload runtimecontract.Workload `yaml:"workload"`
+		// KernelConfigs is the engine's own kernels tuned for this GPU and
+		// workload, as data the engine reads (internal/kerneltuning).
+		KernelConfigs *domain.KernelConfigSet `yaml:"kernel_configs,omitempty"`
 	} `yaml:"runtime"`
 	Compute struct {
 		Mode string `yaml:"mode"`
@@ -81,7 +86,8 @@ func Load(path string) (Deployment, error) {
 	if out.Runtime.Engine == "" {
 		out.Runtime.Engine = "vllm"
 	}
-	out.Runtime.Workload = support.NormalizeWorkload(out.Runtime.Engine, out.Resources.GPU, out.Runtime.Workload)
+	pinnedImage := out.Runtime.Workload.Empty()
+	out.Runtime.Workload = support.NormalizeWorkload(out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU, out.Runtime.Workload)
 	if out.Compute.Mode == "" {
 		out.Compute.Mode = "elastic"
 	}
@@ -118,6 +124,21 @@ func Load(path string) (Deployment, error) {
 	if err := support.V1().ValidateAccelerator(out.Runtime.Engine, out.Provider.Cloud, out.Compute.Mode, out.Provider.Adapter, out.Resources.GPU); err != nil {
 		return out, fmt.Errorf("support policy: %w", err)
 	}
+	if pinnedImage {
+		if err := optimizationcapability.ValidateEngineArgs(out.Runtime.Engine, out.Runtime.Args); err != nil {
+			return out, err
+		}
+	} else if err := optimizationcapability.RefuseUnsafeEngineArgs(out.Runtime.Args); err != nil {
+		return out, err
+	}
+	// A serverless worker runs the operator's template image and a Dynamo
+	// serving graph the operator's Dynamo image, so only a pinned elastic image
+	// must match the recorded release.
+	if pinnedImage && out.Compute.Mode != "serverless" && out.Serving.Normalize().Empty() {
+		if err := support.ValidateRuntimeVersion(out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU); err != nil {
+			return out, fmt.Errorf("support policy: %w", err)
+		}
+	}
 	if out.Provider.Cloud == "aws" && out.Provider.Region == "" {
 		return out, fmt.Errorf("AWS BYOC requires provider.region")
 	}
@@ -134,6 +155,9 @@ func Load(path string) (Deployment, error) {
 	}
 	if err := support.ValidateRuntimeEnv(out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU, out.Runtime.Workload, out.Runtime.Env); err != nil {
 		return out, fmt.Errorf("runtime.env: %w", err)
+	}
+	if err := kerneltuning.ValidateForDeployment(out.Runtime.KernelConfigs, out.Runtime.Engine, out.Runtime.Version, out.Resources.GPU, out.Runtime.Workload.Empty()); err != nil {
+		return out, fmt.Errorf("runtime.kernel_configs: %w", err)
 	}
 	if err := modelimport.ValidateDeployment(out.Model.ID, out.Model.Revision, out.Runtime.Engine, out.Compute.Mode, out.Model.Adapters, out.Runtime.Args); err != nil {
 		return out, fmt.Errorf("model: %w", err)

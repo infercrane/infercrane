@@ -160,10 +160,19 @@ def kind_binary() -> str:
 
 
 def cli_binary() -> str:
+    """The CLI built from this checkout. It is built again whenever the checkout's commit or its
+    uncommitted changes differ from the ones it was built from: a CLI from another commit
+    decodes the control plane's answers with other types (step 1 of the optimizer plan lost a
+    rehearsal to a CLI that predated a proposal field and refused every proposal's digest)."""
     target = STATE_DIR / "bin" / "infercrane"
+    stamp = target.with_name("infercrane.source")
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists() or os.environ.get("POC_REBUILD"):
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    changes = subprocess.run(["git", "status", "--porcelain", "--", "cmd", "internal", "go.mod", "go.sum"], cwd=ROOT, capture_output=True, text=True).stdout
+    source = head + "\n" + hashlib.sha256(changes.encode()).hexdigest()
+    if not target.exists() or os.environ.get("POC_REBUILD") or not stamp.exists() or stamp.read_text() != source or changes:
         run("go", "build", "-o", str(target), "./cmd/infercrane", env={"GOFLAGS": "-trimpath"}, quiet=True)
+        stamp.write_text(source)
     return str(target)
 
 

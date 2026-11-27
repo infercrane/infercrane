@@ -36,6 +36,8 @@ const (
 	SpeculativeDecode  Mechanism = "speculative-decoding"
 	KVReuse            Mechanism = "kv-reuse"
 	Disaggregated      Mechanism = "prefill-decode-disaggregation"
+	// SchedulePolicy is the order in which waiting requests are admitted.
+	SchedulePolicy Mechanism = "schedule-policy"
 )
 
 // Descriptor is one exact compatibility fact. Empty model or accelerator
@@ -147,6 +149,12 @@ func compile(descriptor Descriptor, parameters map[string]string) ([]string, err
 			return nil, errors.New("prefix caching accepts no parameters")
 		}
 		return []string{"--enable-prefix-caching"}, nil
+	case "sglang-schedule-policy":
+		policy := strings.TrimSpace(parameters["policy"])
+		if !contains(descriptor.Parameters["policy"], policy) {
+			return nil, fmt.Errorf("policy must be one of %s", strings.Join(descriptor.Parameters["policy"], ", "))
+		}
+		return []string{"--schedule-policy", policy}, nil
 	case "vllm-batch-token-budget":
 		value := strings.TrimSpace(parameters["max_num_batched_tokens"])
 		parsed, err := strconv.Atoi(value)

@@ -116,6 +116,12 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 	defer cancel()
 	store := newMemoryStore()
 	relay := &agentrelay.Service{Store: store, RecommendedAgentVersion: "1.0.0"}
+	// A task set the operator keeps beside the agent. Its prompts never
+	// leave; a run names it by the digest of its bytes.
+	localSet, err := qualitycheck.DecodeEvalSet([]byte(`{"schema":"` + qualitycheck.EvalSetSchemaV1 + `","name":"support","version":"1","grading":"answer_line","prompts":[{"id":"s1","prompt":"` + evalSecret + ` one","expected":["1"]},{"id":"s2","prompt":"` + evalSecret + ` two","expected":["2"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	api := controlapi.API{Store: store, Authenticator: store, Agents: relay}
 	sent := &recorder{}
 	control := httptest.NewServer(sent.wrap(api.Handler()))
@@ -139,6 +145,7 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 		Executor: agent.KubernetesExecutor{
 			Provider: candidates, WorkerKey: "worker-key-in-cluster", AllowedImages: []string{"registry.example.test/models/"},
 			Benchmark: aiperf.run, Completer: qualitycheck.HTTPCompleter{}, PollInterval: 10 * time.Millisecond,
+			EvalSets: map[string]qualitycheck.EvalSet{"support": localSet},
 		},
 		Hardware: agent.HardwareProbe{Runner: noAccelerators{}, GOOS: "linux", GOARCH: "amd64"},
 	})
@@ -235,6 +242,7 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 	if err := <-commandsDone; err != nil {
 		t.Fatalf("commands: %v", err)
 	}
+	sent.waitForHeldPolls(t)
 	finished := store.command(runID)
 	if finished.State != "succeeded" {
 		t.Fatalf("candidate run: %+v", finished)
@@ -272,14 +280,53 @@ func TestAgentServesAgentManagedEndpointInsideCustomerCloud(t *testing.T) {
 	}
 	stopCommands()
 	<-commandsDone
+	sent.waitForHeldPolls(t)
 	if refused := store.command(refusedID); refused.State != "failed" || refused.FailureCode != "image_not_allowed" || len(candidates.specs) != 1 {
 		t.Fatalf("disallowed image: %+v (launched %d)", refused, len(candidates.specs))
+	}
+
+	// A measured window of an optimization run on this endpoint goes through
+	// the same channel: queued once per key, run here, and only its numbers
+	// and per-item scores come back.
+	windows := agentrelay.CampaignWindows{Service: relay}
+	tenant := store.agentTenant(agentID)
+	windowSpec := agentprotocol.WindowSpec{
+		Endpoint: "support-bot", Label: "run c1 setup parallel-8 window first",
+		Candidate: &agentprotocol.CandidateSetup{Model: "Qwen/Qwen3-8B", Workload: agentprotocolWorkload(), RuntimeArgs: []string{"--parallel", "8"}, Accelerator: "NVIDIA-L4", GPUCount: 1},
+		Rounds:    4, Warmup: 4, Load: agentprotocol.CandidateLoad{Requests: 20, Concurrency: 2, InputTokens: 64, OutputTokens: 16}, SeedBase: 1000,
+		Quality:     agentprotocol.WindowQuality{EvalSet: localSet.Digest, ReferenceSubject: "agentserver-0123456789abcdef01234567", CandidateSubject: "agentsetup-0123456789abcdef01234567"},
+		TimeoutSecs: 600,
+	}
+	queuedWindow, err := windows.QueueWindow(ctx, tenant, agentID, "optimization:c1:window-first-0", windowSpec)
+	if err != nil || queuedWindow.State != "queued" {
+		t.Fatalf("queue window: %+v %v", queuedWindow, err)
+	}
+	before := len(aiperf.endpoints)
+	commandCtx, stopCommands = context.WithCancel(ctx)
+	go func() { commandsDone <- runner.RunCommands(commandCtx) }()
+	for store.command(queuedWindow.ID).FinishedAt == nil && time.Now().Before(deadline.Add(30*time.Second)) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	stopCommands()
+	<-commandsDone
+	measuredWindow, err := windows.QueueWindow(ctx, tenant, agentID, "optimization:c1:window-first-0", windowSpec)
+	if err != nil || measuredWindow.ID != queuedWindow.ID || measuredWindow.State != "succeeded" || measuredWindow.Result == nil {
+		t.Fatalf("window: %+v %v (%+v)", measuredWindow, err, store.command(queuedWindow.ID))
+	}
+	if err = measuredWindow.Result.Turns(4, true); err != nil || !measuredWindow.Result.CleanedUp {
+		t.Fatalf("window runs: %v %+v", err, measuredWindow.Result)
+	}
+	if invocations := aiperf.endpoints[before:]; len(invocations) != 11 || invocations[0] != vllm.URL || invocations[2] != vllm.URL || invocations[3] == vllm.URL || invocations[10] != vllm.URL {
+		t.Fatalf("AIPerf ran against %v; want warm-ups, then current setup and candidate in turn", invocations)
+	}
+	if quality := measuredWindow.Result.Quality; quality == nil || quality.Items != 2 || len(quality.ReferenceScores) != 2 || quality.EvalSetDigest != localSet.Digest {
+		t.Fatalf("window answers: %+v (failure %q)", quality, measuredWindow.Result.QualityFailure)
 	}
 
 	// Nothing the agent sent carries a prompt, an answer, an eval prompt, a
 	// key, the caller's request ID, or the session ID.
 	everything := sent.all()
-	forbidden := []string{secretPrompt, "You are terse", "local answer", appKey, otherScopeKey, localAPIKey, "worker-key-in-cluster", "caller-chosen-request-id-5e1f", "customer-session-81aa", "aiperf profile --url"}
+	forbidden := []string{secretPrompt, evalSecret, "You are terse", "local answer", appKey, otherScopeKey, localAPIKey, "worker-key-in-cluster", "caller-chosen-request-id-5e1f", "customer-session-81aa", "aiperf profile --url"}
 	for _, prompt := range qualitycheck.Default().Prompts {
 		forbidden = append(forbidden, prompt.Prompt)
 	}

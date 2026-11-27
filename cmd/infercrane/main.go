@@ -33,6 +33,7 @@ import (
 	"github.com/infercrane/infercrane/internal/acceleratorlab"
 	"github.com/infercrane/infercrane/internal/accounting"
 	"github.com/infercrane/infercrane/internal/admission"
+	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/agentrelay"
 	"github.com/infercrane/infercrane/internal/alert"
 	"github.com/infercrane/infercrane/internal/artifact"
@@ -50,6 +51,7 @@ import (
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/doctor"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/enginetelemetry"
 	"github.com/infercrane/infercrane/internal/external"
 	"github.com/infercrane/infercrane/internal/gateway"
@@ -74,6 +76,7 @@ import (
 	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/readiness"
 	"github.com/infercrane/infercrane/internal/reconcile"
+	"github.com/infercrane/infercrane/internal/replay"
 	"github.com/infercrane/infercrane/internal/requestquota"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/routes"
@@ -194,7 +197,7 @@ func computeProviderInventory(cfg config.Config, configuredSkyPilotProviders []c
 	return providers
 }
 
-var version = "2.0.2"
+var version = "2.1.0"
 
 const controlPlaneProtocolMin, controlPlaneProtocolMax = 1, 2
 
@@ -328,6 +331,12 @@ func runLegacy(ctx context.Context, args []string) error {
 	}
 	if args[0] == "optimize" {
 		return optimizeCommand(ctx, args[1:])
+	}
+	if args[0] == "results" {
+		return resultsCommand(ctx, args[1:])
+	}
+	if args[0] == "report" {
+		return reportCommand(ctx, args[1:])
 	}
 	if args[0] == "discover" {
 		return discoverCommand(ctx, args[1:])
@@ -2008,6 +2017,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	strategy := "round-robin"
 	runtimeArgs := []string{}
 	var runtimeEnv map[string]string
+	var kernelConfigs *domain.KernelConfigSet
 	var runtimeWorkload runtimecontract.Workload
 	var servingTopology servingcontract.Topology
 	runtimeEngine := *runtimeFlag
@@ -2047,6 +2057,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		strategy = file.Routing.Strategy
 		runtimeArgs = file.Runtime.Args
 		runtimeEnv = file.Runtime.Env
+		kernelConfigs = file.Runtime.KernelConfigs
 		runtimeWorkload = file.Runtime.Workload
 		servingTopology = file.Serving
 		*minReplicas, *maxReplicas = file.Scaling.MinReplicas, file.Scaling.MaxReplicas
@@ -2108,7 +2119,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		path = "/api/v1/deployments/apply"
 		request = workflows.ApplyExistingRequest{Name: *name, EndpointName: *endpointName, Model: model, Targets: splitTargets(*targets), RoutingStrategy: strategy, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas, AutoscalingEnabled: *maxReplicas > *minReplicas}
 	} else if *cloud != "" && *gpu != "" {
-		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, ModelSecretReferenceID: modelSecretReferenceID, ModelAdapters: modelAdapters, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
+		request = workflows.CloudRequest{Name: *name, EndpointName: *endpointName, Model: model, ModelRevision: modelRevision, ModelSecretReferenceID: modelSecretReferenceID, ModelAdapters: modelAdapters, Runtime: runtimeEngine, RuntimeVersion: runtimeVersion, ComputeMode: *computeMode, Cloud: *cloud, ProviderAdapter: *providerAdapter, GPU: *gpu, GPUCount: *gpuCount, Region: *region, RuntimeArgs: runtimeArgs, RuntimeEnv: runtimeEnv, KernelConfigs: kernelConfigs, Workload: runtimeWorkload, Serving: servingTopology, MinReplicas: *minReplicas, MaxReplicas: *maxReplicas,
 			ComputeConnectionID: selfServe.connectionID, BillingMode: selfServe.billingMode, ManagedRuntimeSeconds: selfServe.runtimeSeconds}
 	} else {
 		return errors.New("provide --targets or both --cloud and --gpu")
@@ -4251,7 +4262,7 @@ func rolloutCommand(ctx context.Context, cfg config.Config, args []string) error
 			revisionSpec = domain.DeploymentRevisionSpec{
 				Model: candidate.Model.ID, ModelRevision: candidate.Model.Revision,
 				Runtime: candidate.Runtime.Engine, RuntimeVersion: candidate.Runtime.Version, RuntimeArgs: candidate.Runtime.Args, RuntimeEnv: candidate.Runtime.Env,
-				RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
+				KernelConfigs: candidate.Runtime.KernelConfigs, RoutingStrategy: candidate.Routing.Strategy, MinReplicas: candidate.Scaling.MinReplicas, MaxReplicas: candidate.Scaling.MaxReplicas,
 				AutoscalingEnabled: candidate.Scaling.MaxReplicas > candidate.Scaling.MinReplicas, ComputeMode: candidate.Compute.Mode,
 				Cloud: candidate.Provider.Cloud, ProviderAdapter: candidate.Provider.Adapter, GPU: candidate.Resources.GPU, GPUCount: candidate.Resources.GPUCount, Region: candidate.Provider.Region,
 				Workload: candidate.Runtime.Workload, Serving: candidate.Serving,
@@ -4819,6 +4830,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		Limit: 100, InFlightGrace: 10 * time.Minute,
 	}, 30*time.Second, logger)
 	controlAPI := controlapi.API{Store: s, APIKey: cfg.APIKey, Authenticator: controlAuthenticator, BenchmarkRunner: benchmark.Runner{}, Diagnostics: diagnostics, Backends: benchmarkBackends, Integrations: integrationRegistry.Snapshot(), GatewayURL: cfg.ControlURL, AIPerfBinary: cfg.AIPerfBinary, PassportPrivateKey: passportKey, EndpointRefresh: rec.RefreshEndpoints, CredentialRefresh: credentialCache.Refresh, DiscoveryClient: nil, Secrets: secretResolvers, SealedSecrets: secretResolvers.Sealed, AlertDeliverer: alert.Deliverer{Store: s, Secrets: secretResolvers}, ContextPassports: contextPassports, ArtifactCacheAdapters: artifactCacheAdapters, ProductVersion: version, GatewayInstanceID: cfg.InstanceID, AdmissionState: admissionPool, OptimizationCosts: optimizationCosts, AcceleratorLabEnabled: acceleratorEngine != nil, AcceleratorLabCatalog: acceleratorCatalog, ModelAPICatalog: modelAPICatalog, ModelAPIProducts: s, SandboxProvider: nativeSandboxProvider, SandboxBilling: cfg.ManagedSandboxPolicy(), SandboxProjectID: cfg.BrezelSandboxProjectID, SandboxPreviews: controlapi.NewSandboxPreviewBroker(), SandboxDefaultTemplate: cfg.BrezelSandboxDefaultTemplate, SandboxModelConnectors: cfg.BrezelSandboxModelConnectors, ModelAPIOperatorTenantID: cfg.ModelAPIOperatorTenantID, ComputeProviders: computeProviders, GPUPriceCatalog: priceCatalog, LaunchProbers: launchProbers, CredentialLaunchProbers: credentialLaunchProbers, DefaultProviderAdapters: defaultProviderAdapters, ManagedDeployments: managedbilling.DeploymentPolicy{Enabled: cfg.ManagedDeploymentsEnabled, Provider: "runpod"}, ConsoleURL: cfg.ConsoleURL, CLISessionUsage: &controlapi.CLISessionUsage{Store: s}, OperatorComputeTenants: cfg.OperatorComputeTenants}
+	controlAPI.ResultReports = &controlapi.ResultReports{}
 	huggingFaceSearch, huggingFaceSearchErr := huggingfacesearch.New(huggingfacesearch.Options{})
 	if huggingFaceSearchErr != nil {
 		return fmt.Errorf("configure Hugging Face model search: %w", huggingFaceSearchErr)
@@ -4846,13 +4858,18 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	bindUpstreamCredentials(&controlAPI, rec, upstreamCredentials)
 	// The agent protocol is part of the open-source core: any control plane
 	// can accept agents. Agents only ever dial in; nothing here dials them.
-	controlAPI.Agents = &agentrelay.Service{Store: s, RecommendedAgentVersion: version, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
+	dataPlaneValidity, err := agentDataPlaneValidity()
+	if err != nil {
+		return err
+	}
+	agentService := &agentrelay.Service{Store: s, RecommendedAgentVersion: version, DataPlaneValidity: dataPlaneValidity, RefreshEndpoints: rec.RefreshEndpoints, Capabilities: func(runtime string) runtimecontract.ProtocolCapabilities {
 		backend, err := runtimeBackends.ForRuntime(runtime)
 		if err != nil {
 			return runtimecontract.ProtocolCapabilities{}
 		}
 		return backend.Profile.ProtocolCapabilities()
 	}}
+	controlAPI.Agents = agentService
 	operationTelemetry := &operations.Telemetry{}
 	handlers := workflows.DeploymentHandlers(s)
 	if acceleratorEngine != nil {
@@ -4962,7 +4979,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 		if profileErr != nil {
 			return fmt.Errorf("configure Kubernetes integration: %w", profileErr)
 		}
-		kubernetesProvider := provision.Kubernetes{Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs, ObjectStoreSecretName: cfg.KubernetesObjectStoreSecret, S3FetchImage: cfg.KubernetesS3FetchImage, GCSFetchImage: cfg.KubernetesGCSFetchImage}
+		engineIngress, _, _ := engineingress.Parse(cfg.KubernetesEngineIngress)
+		kubernetesProvider := provision.Kubernetes{EngineIngress: engineIngress, Context: cfg.KubernetesContext, Namespace: cfg.KubernetesNamespace, WorkloadAPI: cfg.KubernetesWorkloadAPI, ServiceAccount: cfg.KubernetesServiceAccount, WorkerSecretName: cfg.KubernetesWorkerSecretName, WorkerSecretKey: cfg.KubernetesWorkerSecretKey, ImageDigest: cfg.KubernetesImageDigest, GPUResource: cfg.KubernetesGPUResource, GPUProductLabel: cfg.KubernetesGPUProductLabel, ImageCachePolicy: cfg.KubernetesImageCachePolicy, ArtifactCachePolicy: cfg.KubernetesArtifactCachePolicy, ArtifactPVCs: cfg.KubernetesArtifactPVCs, ObjectStoreSecretName: cfg.KubernetesObjectStoreSecret, S3FetchImage: cfg.KubernetesS3FetchImage, GCSFetchImage: cfg.KubernetesGCSFetchImage}
 		artifactCacheAdapters["kubernetes"] = kubernetesProvider
 		for _, runtimeName := range []string{"vllm", "sglang", "custom-oci"} {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes", Cloud: "kubernetes", Runtime: runtimeName, Profile: kubernetesProfile, Provider: kubernetesProvider})
@@ -5008,18 +5026,37 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	for name, backend := range benchmarkBackends {
 		candidateBackends[name] = optimizationcampaign.BenchmarkBackend{APIKey: backend.APIKey, APIKeyEnv: backend.APIKeyEnv, WorkerMaster: backend.WorkerMaster}
 	}
-	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
+	// A configured prompt corpus that cannot be read stops the start: falling
+	// back to synthetic text would measure another workload than the operator
+	// asked for.
+	var promptCorpus *replay.PromptCorpus
+	if cfg.ReplayPromptCorpusFile != "" {
+		if promptCorpus, err = replay.LoadPromptCorpus(cfg.ReplayPromptCorpusFile); err != nil {
+			return fmt.Errorf("INFERCRANE_REPLAY_PROMPT_CORPUS_FILE: %w", err)
+		}
+		identity := promptCorpus.Identity()
+		logger.Info("replay measurement composes prompts from the operator's corpus", "name", identity.Name, "digest", identity.Digest, "license", identity.License, "passages", identity.Passages, "prompts", identity.Prompts)
+	}
+	candidateBenchmark := optimizationcampaign.BenchmarkExecutor{Store: s, Runner: benchmark.Runner{}, Costs: optimizationCosts, Replays: s, PromptCorpus: promptCorpus, Backends: candidateBackends, AIPerfBinary: cfg.AIPerfBinary, Progress: s, Checkpoints: s}
 	qualitySigner, err := builtinQualitySigner(passportKey, logger)
 	if err != nil {
 		return err
 	}
 	qualityCheck := optimizationcampaign.BuiltinQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Signer: qualitySigner}
 	migrationCheck := optimizationcampaign.MigrationQualityCheck{Store: s, Backends: candidateBackends, Completer: qualitycheck.HTTPCompleter{}, Credentials: closedAPICredentials{upstreamCredentials}, Signer: qualitySigner}
-	driver := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s}
+	composite := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s, PromptCorpus: promptCorpus}
+	// A run on an agent's endpoint is measured by its agent in the customer's
+	// cluster; the control plane only judges the numbers it reports.
+	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner}
+	driver := optimizationcampaign.SiteDriver{Repository: s, Control: composite, Agent: agentDriver}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
 	}
-	for kind, handler := range optimizationcampaign.ActivationHandlers(s, rec.RefreshEndpoints, nil) {
+	// The winner of a run on an agent's endpoint is rolled out there: the
+	// agent starts it, the endpoint switches on Release Guard's PASS, and a
+	// watch window promotes it or rolls it back.
+	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}}
+	for kind, handler := range optimizationcampaign.ActivationHandlersWith(s, rec.RefreshEndpoints, nil, agentRollout) {
 		handlers[kind] = handler
 	}
 	// The gateway exists before the control API's handler so the dashboard's
@@ -5498,4 +5535,19 @@ func humanWindow(window time.Duration) string {
 	default:
 		return window.String()
 	}
+}
+
+// agentDataPlaneValidity reads INFERCRANE_AGENT_DATA_PLANE_VALIDITY: how long an
+// agent may serve on a data plane snapshot it could not refresh (default 15m,
+// 1m to 24h). Unset keeps the default.
+func agentDataPlaneValidity() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("INFERCRANE_AGENT_DATA_PLANE_VALIDITY"))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value < time.Minute || value > agentprotocol.MaxDataPlaneValidity {
+		return 0, errors.New("INFERCRANE_AGENT_DATA_PLANE_VALIDITY must be a duration from 1m to 24h")
+	}
+	return value, nil
 }

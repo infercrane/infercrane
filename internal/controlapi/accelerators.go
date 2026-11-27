@@ -10,12 +10,15 @@ import (
 // acceleratorCatalog is the reviewed accelerator identity the dashboard and
 // CLI use to name a GPU's vendor and platform without guessing from a model
 // number. Pinning an image is not a measurement: Measured stays false until
-// a recorded run on that platform exists.
+// a recorded run on that platform exists. Accelerators, RuntimeImages, and
+// Placement list only what a spec may select; NotQualified lists the
+// accelerators InferCrane recognizes but refuses.
 type acceleratorCatalog struct {
 	DefaultPlatform string                          `json:"default_platform"`
 	Accelerators    []acceleratorEntry              `json:"accelerators"`
 	RuntimeImages   []support.RuntimeImage          `json:"runtime_images"`
 	Placement       []support.PlatformQualification `json:"placement"`
+	NotQualified    []notQualifiedEntry             `json:"not_qualified"`
 }
 
 type acceleratorEntry struct {
@@ -25,6 +28,17 @@ type acceleratorEntry struct {
 	ProviderIDs map[string]string `json:"provider_ids"`
 	Measured    bool              `json:"measured"`
 	Limitations []string          `json:"limitations"`
+}
+
+// notQualifiedEntry is an accelerator that resolves to its own platform, so
+// it is never served a CUDA image, and that every spec, plan, and setup
+// refuses until a measured run qualifies the platform.
+type notQualifiedEntry struct {
+	provideridentity.Accelerator
+	// CandidateImages are the engine builds a first qualification run on the
+	// platform would pin. None is selectable.
+	CandidateImages []support.RuntimeImage `json:"candidate_images"`
+	Limitations     []string               `json:"limitations"`
 }
 
 func (a API) accelerators(w http.ResponseWriter, _ *http.Request) {
@@ -43,6 +57,19 @@ func buildAcceleratorCatalog() acceleratorCatalog {
 			entry.Limitations = append(entry.Limitations, "RunPod does not list this accelerator; run it on your own Kubernetes cluster.")
 		}
 		out.Accelerators = append(out.Accelerators, entry)
+	}
+	candidates := support.NotQualifiedRuntimeImages()
+	for _, accelerator := range provideridentity.NotQualifiedAccelerators() {
+		entry := notQualifiedEntry{Accelerator: accelerator, CandidateImages: []support.RuntimeImage{}, Limitations: []string{
+			"Not qualified: InferCrane recognizes this accelerator by name and refuses every spec, plan, and setup that names it until a measured run on its platform qualifies it.",
+			"Speed, cost, and quality on this accelerator are unknown.",
+		}}
+		for _, image := range candidates {
+			if image.Platform == accelerator.Platform {
+				entry.CandidateImages = append(entry.CandidateImages, image)
+			}
+		}
+		out.NotQualified = append(out.NotQualified, entry)
 	}
 	return out
 }

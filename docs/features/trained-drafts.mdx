@@ -1,0 +1,284 @@
+---
+title: Drafts trained on your traffic
+description: Train a speculative-decoding draft on your own prompts inside your own account, then let a campaign prove whether it serves your traffic faster than the draft you have.
+---
+
+# Drafts trained on your traffic
+
+Speculative decoding is fast only when the draft guesses what your model will write. A draft trained
+on public chat guesses public chat; on your traffic (your languages, your system prompts, your
+formats) it guesses less often. A draft trained on prompts from your traffic guesses more often. The
+training runs in your account, and a campaign measures the result against what you serve today before
+anything changes.
+
+This page covers three things:
+
+- where the training data comes from, and what is stored where;
+- the training job that runs in your cluster;
+- how a trained draft becomes a setup a campaign measures.
+
+## What is built and what is not
+
+| Part | State |
+|---|---|
+| Draft record, engine arguments, training job spec, Kubernetes Job manifest, training report (`internal/speculator`) | Built, tested |
+| Planning a named draft as a setup (`speculative_drafts`, rule `drafts.supplied`) | Built, tested, vLLM only |
+| The trained-draft technique in the [technique contract](/features/technique-contract) (`speculator.Technique`, `trained-draft` 0.1.0) | Built, tested |
+| Standalone CLI: `infercrane optimize draft job\|record\|args\|candidates` | Built, tested; no control plane needed |
+| Provenance in the existing artifact store (`optimizedartifact` plan and attestation, kind `speculator_checkpoint`) | Built, tested |
+| A trainer image that takes the job's arguments | **Not built.** The proof of concept (`tools/trained-draft`) runs the same steps on Modal: the model answers a prompt file, speculators trains, a report is written |
+| Opt-in capture of prompts from an endpoint | Designed on this page, **not built** |
+| Drafts kept in your own bucket (`s3://`, `gs://`) | Recorded, **not served yet**: the worker fetch step for drafts is not built |
+| Fine-tuning a draft converted from the original EAGLE-3 format with speculators 0.9.0 | **Fixed in the proof of concept, checked on an L4.** With transformers 5.19, `from_pretrained` fills the converted draft's missing token embedding with zeros, and speculators loads the verifier's embedding only into weights that are still NaN, so it skips it; the draft then trained with no token information. The proof of concept writes the verifier's embedding into the converted checkpoint first (`tools/trained-draft/draft_embedding.py`). Drafts in speculators' own format carry their embedding and are not affected |
+| An offline indication (rung 1, Qwen3-1.7B, 128 held-out oasst1 prompts, thinking off) | Measured in the trainer, not as speed: the published `AngelSlim/Qwen3-1.7B_eagle3` writes 1.75 tokens a verify step at 3 draft tokens (vLLM serves it at 1.66 on 16 prompts), the same draft fine-tuned on 512 answers writes 1.97, and the best draft-free method writes 1.30. Conversion is judged by served acceptance: the shipped and converted drafts both serve at 1.66 |
+| A measured gain on one small model (rung 2) | **One machine, not a shown claim.** `Qwen/Qwen3-1.7B` in BF16 on one L4, vLLM 0.34.0, 128 held-out oasst1 chat prompts (thinking off, answers up to 256 tokens). A draft trained on 4,000 in-distribution answers accepted 1.83 tokens a verify step against the published draft's 1.52, and served 17% more output tokens a second than the published draft at 1 request at once and 19% more at 8 (60% and 30% more than no speculation; noise floors 1.7% and 1.8%). Its result records read "not shown": no fresh machine has measured it again. Answers showed no sign of change by identical greedy text, which no speculation itself repeats for about a quarter of prompts, so quality is **not shown**. Other models, GPUs and traffic: **unknown** (rules: `tools/trained-draft/rules-rung2-l4-qwen3-1.7b-2026-11-26.md`) |
+| A measured gain on an 8B model (rung 3) | **Shown at 1 request at once, on two machines.** `Qwen/Qwen3-8B` with FP8 weights on an L4, vLLM 0.34.0, held-out oasst1 chat (thinking off). A draft trained on 2,000 in-distribution answers served 60% more output tokens a second than no speculation at 1 request at once, and 59% more on a second L4 with another GPU; the published draft served 48% more on the first. Task score held by this rung's 3-point rule (0.856 without speculation, 0.860 with); exact text not identical: the drafts reproduced no speculation's greedy text on 2 and 3 of 128 prompts, where no speculation repeats itself on all 128. Under the product's stricter rule for setups that change answers (held within 1 point), its quality is not shown yet; the H100 rung applies that rule. **At 32 requests at once on an L4, speculation should be off for this model:** both drafts were slower than no speculation (-3% and -7%), on both machines for the trained draft (rules: `tools/trained-draft/rules-rung3-l4-qwen3-8b-2026-11-26.md`) |
+| The same draft on an H100 (rung 4) | **Shown at both loads, on two H100s.** Rung 3's trained draft, unchanged, with FP8 weights on one H100: 54% more output tokens a second than no speculation at 1 request at once and 13% more at 32 at once, each the smaller of two machines' gains against a measured noise floor under 2.5%; the published draft served 41% and 6% more on the first machine. Answers held within 1 point by the product's rule for setups that change answers: 0.855 without speculation and 0.864 with it on 500 GSM8K and MMLU items, three servers each, interval -0.2 to +2.1 points. Exact text is not stable even without speculation on this GPU: a second server without speculation reproduced the first's greedy text on 30 of 128 prompts, the draft on 6. One model, one GPU type, oasst1 chat as a stand-in for a customer's traffic (rules: `tools/trained-draft/rules-rung4-h100-qwen3-8b-2026-11-26.md`) |
+
+## How it works
+
+1. **Prompts stay in your account.** Either you give the job a file of prompts, or the endpoint
+   captures prompts for you after you turn capture on. Neither leaves your cluster or bucket.
+2. **The job trains in your cluster.** A Kubernetes Job runs a pinned trainer image on your GPU. Your
+   model answers every prompt at temperature 0 inside the job, and the draft learns from those
+   answers. It starts from a published draft for the same model when there is one.
+3. **Numbers come back.** The job writes the draft and a report beside it. The report holds counts,
+   digests and acceptance shares, never text.
+4. **You name the draft in a plan.** With `diagnosis_endpoint` and `speculative_drafts`, the planner
+   adds a setup that serves your draft. It also adds the setups your draft must beat.
+5. **The judge decides.** The campaign measures each setup against your current one on your traffic
+   shape, scores answers on a task set, and confirms a gain on fresh servers. Nothing is applied
+   until you approve.
+
+## Where the training data comes from
+
+The draft learns from **your model's answers**, not your users' answers: EAGLE-3 drafts imitate the
+model they serve, so the job has the model answer each prompt again. Only prompts are needed.
+
+### A prompt file you choose (built)
+
+Put a JSON-lines file on a volume in your cluster, one conversation per line:
+
+```json
+{"id": "support-0001", "messages": [{"role": "system", "content": "You are Acme's support agent."}, {"role": "user", "content": "My invoice shows two charges."}]}
+```
+
+Use prompts you are allowed to process this way: a sample you already keep, synthetic prompts in your
+format, or a public dataset of the same kind. The job reads the file read-only. The job splits off
+10% as held-out prompts it never trains on and scores the draft on them.
+
+### Capture from an endpoint (designed, not built)
+
+Capture is off by default. It is turned on per endpoint by an operator, and only on an endpoint whose
+traffic is served by an InferCrane agent in your cluster. The hosted gateway never captures.
+
+| Question | Answer |
+|---|---|
+| **What is stored** | The request's `messages` (or `prompt`) and the model name, under a random record id, with the time it was received. Never answers, headers, API keys, key ids, user ids or addresses. Requests with images, audio or tool results are skipped. |
+| **Which requests** | A sample: 1% by default, set per endpoint, at most 50,000 records or 2 GiB per capture, whichever comes first. |
+| **Where** | A PersistentVolumeClaim or a bucket in your account that the operator names. The agent's data plane writes it; the control plane has no access. |
+| **What the control plane sees** | Capture on or off, record count, bytes, oldest record's age, and a digest of the record ids. No text. |
+| **How long** | 14 days by default, at most 30. The agent deletes expired records every hour. |
+| **How it is deleted** | Turning capture off deletes every record of that endpoint within an hour. `infercrane draft capture delete ENDPOINT` deletes at once. A training job deletes its working copy of prompts and generated answers when it ends. The report and the draft remain. |
+| **Who can read it** | The cluster's operator and the training job, which mounts it read-only. |
+
+<Warning>
+A draft trained on your prompts is derived from them and can reproduce phrases it saw often. Keep it
+where you keep the prompts: a private Hugging Face repository in your organisation, or your bucket.
+Delete it when you delete the data.
+</Warning>
+
+Capture is not built yet. It needs a change to the agent's data plane, so the invariant "prompts,
+completions, and request content never leave an agent's machine or cluster" holds exactly as
+written: captured prompts stay on the operator's volume, and nothing new goes to the control plane
+except the counts above.
+
+## The training job
+
+`speculator.TrainingJob` is a bounded spec, not a shell command. `KubernetesJob()` renders it as a
+`batch/v1` Job:
+
+- the trainer image, pinned by digest, which the operator allows;
+- the prompt volume mounted read-only at `/data` and an output volume at `/output`;
+- no service account token, a non-root user and no added capabilities;
+- `backoffLimit: 0`, so a failed run never trains twice;
+- the job's own deadline, and deletion an hour after it ends;
+- `HF_TOKEN` only from a Kubernetes Secret you name, for a gated model or a private starting draft.
+
+```json
+{
+  "name": "support-chat",
+  "base_model": "Qwen/Qwen3-8B",
+  "base_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "start_from": {"repository": "RedHatAI/Qwen3-8B-speculator.eagle3", "revision": "08610ffa01dd9f16731fe8f627b85905b6aa51c4"},
+  "data_source": "prompt_set",
+  "data_path": "prompts/support.jsonl",
+  "image": "registry.example.com/infercrane/draft-trainer@sha256:...",
+  "accelerator": "H100",
+  "namespace": "inference",
+  "data_claim": "prompts",
+  "output_claim": "drafts"
+}
+```
+
+Defaults: method `eagle3`, 10% held out, 50,000 prompts, 20 million answer tokens, 1,024 tokens per
+answer, 3 draft tokens, 1 epoch, 1 GPU, 6 hours. Upper bounds: 200,000 prompts, 200 million tokens,
+8 GPUs, 24 hours.
+
+The trainer is [speculators](https://github.com/vllm-project/speculators) 0.9.0 (Apache-2.0). vLLM
+0.34.0 serves its output format directly, and it can start from a published EAGLE-3 draft. While
+training, a vLLM server in the same job computes the model's hidden states on demand
+(`extract_hidden_states`). Nothing is stored between steps.
+
+### The report
+
+The job writes `report.json` beside the draft (`speculator.ReportSchema`). `DecodeReport` refuses
+unknown fields, so a report cannot carry text:
+
+```json
+{
+  "schema": "infercrane.dev/draft-training-report/v1",
+  "name": "support-chat", "method": "eagle3", "draft_tokens": 3,
+  "base_model": "Qwen/Qwen3-8B", "base_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "start_from": {"repository": "RedHatAI/Qwen3-8B-speculator.eagle3", "revision": "08610ffa01dd9f16731fe8f627b85905b6aa51c4"},
+  "framework": "speculators", "framework_version": "0.9.0", "data_source": "prompt_set",
+  "dataset_fingerprint": "sha256:...", "examples": 9000, "held_out_examples": 1000, "training_tokens": 4100000,
+  "held_out_acceptance": [0.81, 0.66, 0.55], "start_acceptance": [0.74, 0.58, 0.47],
+  "produced_at": "2026-11-26T09:00:00Z",
+  "files": [{"path": "config.json", "size": 1290, "sha256": "..."}, {"path": "model.safetensors", "size": 1610612736, "sha256": "..."}],
+  "artifact_digest": "sha256:...", "wall_seconds": 2400
+}
+```
+
+- `dataset_fingerprint` is the sha256 of the sorted example digests. It tells two training sets apart
+  without holding either.
+- `held_out_acceptance` gives, per draft position, the share of held-out positions where the draft's
+  token was the model's own, given the earlier positions were. It is an **offline estimate**. With the
+  values above, a step writes about 1 + 0.81 + 0.81 × 0.66 + 0.81 × 0.66 × 0.55 ≈ 2.6 tokens. Only a
+  campaign says whether serving gets faster.
+- `artifact_digest` is the sha256 of the file list: `path size sha256`, one line per file, sorted by
+  path. A draft kept in a bucket is pinned by this digest.
+
+## Name the draft in a plan
+
+Push the draft to a private Hugging Face repository in your organisation and pin its commit. Then ask
+for a plan from the endpoint's diagnosis:
+
+```json
+{
+  "model_identity": "Qwen/Qwen3-8B",
+  "model_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "provider": "kubernetes", "gpu": "H100",
+  "diagnosis_endpoint": "support-chat",
+  "model_secret_reference_id": "hf-token",
+  "speculative_drafts": [{
+    "name": "support-chat", "source": "trained", "method": "eagle3",
+    "repository": "acme/qwen3-8b-support-draft", "revision": "0123456789abcdef0123456789abcdef01234567",
+    "base_model": "Qwen/Qwen3-8B", "base_revision": "b968826d9c46dd6066d109eabc6255188de91218",
+    "draft_tokens": 3, "training": { "...": "the report's provenance fields" }
+  }]
+}
+```
+
+- At most one trained draft and one published draft. Each must be trained against exactly the plan's
+  model and commit: a draft reads that model's hidden layers.
+- Drafts need `diagnosis_endpoint`. The records enter the proposal's input and its digest; the files
+  never do.
+- A private draft is downloaded by the server with the same `model_secret_reference_id` as the model.
+
+### What the plan measures
+
+Rule `drafts.supplied` (rule set `diagnosis-technique-rules-v11`) adds these setups:
+
+| Setup | Order |
+|---|---|
+| **Your trained draft** (`trained-draft`; earlier `speculative-trained-draft`) | Right after the strongest speculation choice of the other rules. When no rule chose speculation, after the changes the diagnosis pointed at. |
+| The published draft (`speculative-draft-model`) | Two places below your draft. |
+| The model's own prediction head (`speculative-mtp`) | Four places below, only when the model's config declares one. |
+| No speculation (`speculation-off`) | Six places below, only when your current setup speculates. When it does not, your current setup is the no-speculation arm. |
+
+A setup another rule already chose keeps that rule's place. Each draft setup removes whatever
+speculation your current setup had before it adds the draft:
+
+```text
+--speculative-config {"method":"eagle3","model":"acme/qwen3-8b-support-draft","revision":"0123…","num_speculative_tokens":3}
+```
+
+A plan skips a draft, and says why, in these cases:
+
+- the server runs SGLang or a pinned custom image (only vLLM flags are reviewed);
+- the draft is in a bucket (not served yet);
+- the model is 1B parameters or smaller;
+- the draft record names no pin, or a pin to another engine version or GPU (see below).
+
+Speculation can change what the model writes, so every draft setup needs a task score against your
+current setup ([how a campaign checks answers](/features/optimization#how-a-campaign-checks-answers)).
+
+## Use it without InferCrane's control plane
+
+Every step runs from the CLI on your own machine, against any vLLM server, on any provider. Nothing is
+sent anywhere.
+
+```bash
+infercrane optimize draft job --file job.json | kubectl apply -f -
+```
+
+```bash
+infercrane optimize draft record --report report.json --repository acme/qwen3-1.7b-chat-draft --revision COMMIT --engine vllm --engine-version 0.34.0 --accelerator L4 > draft.json
+```
+
+```bash
+vllm serve Qwen/Qwen3-1.7B $(infercrane optimize draft args --record draft.json)
+```
+
+```bash
+infercrane optimize draft candidates --record draft.json --setup setup.json
+```
+
+`candidates` asks the trained-draft technique for its candidates in the
+[technique contract](/features/technique-contract), the same answer the optimizer gets. A candidate
+names the draft by its artifact digest, carries the starting setup's flags with the draft's
+speculation in place of its own, and predicts a low-load speed range from the offline acceptance
+in the report. The judge, not the prediction, decides.
+
+## Pinned, with a fallback
+
+A draft record is pinned to the engine version and GPU where it was built and qualified (`pinned`).
+On another engine version or GPU the technique proposes nothing and the starting setup serves
+unchanged, until the draft is qualified there. The same holds when the draft's files are missing: a
+setup without its draft is the starting setup. The training job maps onto the artifact store's
+provenance (`optimizedartifact.Plan`: tool `vllm-speculators`, exact version, builder image digest, the
+dataset fingerprint as the calibration digest, quality review required), and a finished report maps onto
+its attestation (repository, immutable revision, manifest digest).
+
+The draft is not built through `acceleratorlab`. That lab runs builds in InferCrane's own sandboxes, and a
+build that reads your prompts runs in your account (the technique contract refuses anything else).
+
+## Licences
+
+| Component | Licence | Role |
+|---|---|---|
+| vLLM | Apache-2.0 | serves the model and the draft; computes hidden states for training |
+| speculators (vLLM project) | Apache-2.0 | the trainer, and `convert` for drafts in the original EAGLE-3 format |
+| hs-connectors (speculators' dependency) | Apache-2.0 | moves hidden states from vLLM to the trainer |
+| Published drafts used as starting points | Red Hat's Qwen3 drafts: Apache-2.0; AngelSlim's: Apache-2.0 except third-party parts its licence file lists | optional; a draft can also start from scratch |
+| SpecForge, TorchSpec, AngelSpec | MIT, MIT, Apache-2.0 | not used; compatible trainers for SGLang targets |
+| EAGLE-4 | source-available, bars competing offerings without a paid licence | not used |
+| Aurora (Together) | MIT | not used: it pins patched engines from early 2026 |
+
+## What a result can and cannot say
+
+- The campaign compares each setup with your current one on the traffic shape you replay. With a prompt
+  corpus, the text is real; without one, acceptance on your content stays unknown (see
+  [how a campaign measures candidates](/features/optimization#how-a-campaign-measures-candidates)).
+- A draft is trained on traffic up to a date. When your traffic changes, its acceptance falls. Check
+  `produced_at`, and train again when a stay-optimized check shows acceptance dropping.
+- Every trained-draft result carries the evidence the technique's manifest requires,
+  `draft-acceptance`: acceptance read from vLLM's own speculation counters over the measured runs,
+  in a file whose sha256 the [technique record](/features/technique-contract) holds. A record
+  without it, or from a harness commit with uncommitted changes, is "not shown". Like every
+  technique's result, it is also "not shown" until a fresh machine has measured the gain again
+  (`fresh-machine-confirmation`).
+- Company figures for this technique are company-reported. Together AI reports 1.23x to 1.45x over its
+  base speculator; Fireworks AI reports a 76% against 29% hit rate. They are not InferCrane
+  measurements, and no InferCrane page compares with them as if they were.

@@ -1,13 +1,13 @@
 {
  "schema_version": "infercrane.runtime-model-registries/v1",
- "retrieved_at": "2026-11-17",
+ "retrieved_at": "2026-11-26",
  "runtimes": [
   {
    "runtime": "vllm",
-   "version": "0.22.1",
-   "tag": "v0.22.1",
-   "commit": "0decac0d96c42b49572498019f0a0e3600f50398",
-   "source_url": "https://github.com/vllm-project/vllm/blob/0decac0d96c42b49572498019f0a0e3600f50398/vllm/model_executor/models/registry.py",
+   "version": "0.34.0",
+   "tag": "v0.34.0",
+   "commit": "62d4bc3c7e33b1b6c906e233e6af2d3506c482ca",
+   "source_url": "https://github.com/vllm-project/vllm/blob/62d4bc3c7e33b1b6c906e233e6af2d3506c482ca/vllm/model_executor/models/registry.py",
    "architectures": {
     "AXK1ForCausalLM": [
      "text_generation"
@@ -15,41 +15,32 @@
     "AfmoeForCausalLM": [
      "text_generation"
     ],
+    "AliceAIForCausalLM": [
+     "text_generation"
+    ],
+    "Alpamayo2Super": [
+     "multimodal"
+    ],
     "ApertusForCausalLM": [
      "text_generation"
     ],
-    "AquilaForCausalLM": [
-     "text_generation"
-    ],
-    "AquilaModel": [
-     "text_generation"
-    ],
     "ArceeForCausalLM": [
-     "text_generation"
-    ],
-    "ArcticForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "AriaForConditionalGeneration": [
-     "multimodal"
+     "transformers_backend"
     ],
     "AudioFlamingo3ForConditionalGeneration": [
-     "multimodal"
-    ],
-    "AyaVisionForConditionalGeneration": [
      "multimodal"
     ],
     "BagelForConditionalGeneration": [
      "multimodal"
     ],
-    "BaiChuanForCausalLM": [
-     "text_generation"
-    ],
-    "BaichuanForCausalLM": [
-     "text_generation"
-    ],
     "BailingMoeForCausalLM": [
      "text_generation"
+    ],
+    "BailingMoeV25MTPModel": [
+     "speculative_decoding"
     ],
     "BailingMoeV2ForCausalLM": [
      "text_generation"
@@ -57,11 +48,23 @@
     "BailingMoeV2_5ForCausalLM": [
      "text_generation"
     ],
-    "BambaForCausalLM": [
+    "BailingMoeV3ForCausalLM": [
+     "text_generation"
+    ],
+    "BailingMoeV3MTPModel": [
+     "speculative_decoding"
+    ],
+    "BailingMoeV3VLForConditionalGeneration": [
+     "multimodal"
+    ],
+    "BeamForCausalLM": [
      "text_generation"
     ],
     "BeeForConditionalGeneration": [
      "multimodal"
+    ],
+    "BertForMaskedLM": [
+     "embedding"
     ],
     "BertForSequenceClassification": [
      "sequence_classification"
@@ -87,7 +90,7 @@
     "CLIPModel": [
      "embedding"
     ],
-    "ChameleonForConditionalGeneration": [
+    "CanaryForConditionalGeneration": [
      "multimodal"
     ],
     "ChatGLMForConditionalGeneration": [
@@ -96,11 +99,11 @@
     "ChatGLMModel": [
      "text_generation"
     ],
-    "Cheers": [
-     "multimodal"
+    "ClefFlashForJointSchema": [
+     "token_classification"
     ],
-    "CheersForConditionalGeneration": [
-     "multimodal"
+    "ClefOmniForJointSchema": [
+     "token_classification"
     ],
     "Cohere2ForCausalLM": [
      "text_generation"
@@ -112,6 +115,9 @@
      "multimodal"
     ],
     "CohereAsrForConditionalGeneration": [
+     "multimodal"
+    ],
+    "CohereCompassForConditionalGeneration": [
      "multimodal"
     ],
     "CohereForCausalLM": [
@@ -139,10 +145,49 @@
     "ColQwen3_5": [
      "late_interaction"
     ],
+    "ColUltraVBertForRetrieval": [
+     "late_interaction"
+    ],
+    "Cosmos3EdgeForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Cosmos3ForConditionalGeneration": [
+     "multimodal"
+    ],
     "CwmForCausalLM": [
-     "text_generation"
+     "transformers_backend"
+    ],
+    "D3ForSequenceClassification": [
+     "sequence_classification"
+    ],
+    "DFlash2BeamDraftModel": [
+     "speculative_decoding"
+    ],
+    "DFlash2DraftModel": [
+     "speculative_decoding"
+    ],
+    "DFlash2RicursiveDraftModel": [
+     "speculative_decoding"
     ],
     "DFlashDraftModel": [
+     "speculative_decoding"
+    ],
+    "DFlashLagunaForCausalLM": [
+     "speculative_decoding"
+    ],
+    "DFlashMuseGlimmerAssistantModel": [
+     "speculative_decoding"
+    ],
+    "DFlashQwen3XPressModel": [
+     "speculative_decoding"
+    ],
+    "DSparkDraftModel": [
+     "speculative_decoding"
+    ],
+    "DSparkMiniMaxDraftModel": [
+     "speculative_decoding"
+    ],
+    "DSparkV41DraftModel": [
      "speculative_decoding"
     ],
     "DbrxForCausalLM": [
@@ -173,17 +218,41 @@
     "DeepseekV32ForCausalLM": [
      "text_generation"
     ],
+    "DeepseekV32MTPModel": [
+     "speculative_decoding"
+    ],
+    "DeepseekV3BidirectionalModel": [
+     "embedding"
+    ],
     "DeepseekV3ForCausalLM": [
      "text_generation"
+    ],
+    "DeepseekV41ForCausalLM": [
+     "multimodal"
     ],
     "DeepseekV4ForCausalLM": [
      "text_generation"
     ],
+    "DeepseekV4ForConditionalGeneration": [
+     "multimodal"
+    ],
     "DeepseekVLV2ForCausalLM": [
      "multimodal"
     ],
-    "Dots1ForCausalLM": [
+    "DiffusionGemmaForBlockDiffusion": [
+     "multimodal"
+    ],
+    "DomynEdgeForCausalLM": [
      "text_generation"
+    ],
+    "DoryForCausalLM": [
+     "text_generation"
+    ],
+    "Dots3NoteForCausalLM": [
+     "multimodal"
+    ],
+    "Dots3NoteMTPModel": [
+     "speculative_decoding"
     ],
     "DotsOCRForCausalLM": [
      "multimodal"
@@ -204,6 +273,9 @@
      "speculative_decoding"
     ],
     "Eagle3Qwen2_5vlForCausalLM": [
+     "speculative_decoding"
+    ],
+    "Eagle3Qwen3ForCausalLM": [
      "speculative_decoding"
     ],
     "Eagle3Qwen3vlForCausalLM": [
@@ -230,6 +302,9 @@
     "EagleMistralLarge3ForCausalLM": [
      "speculative_decoding"
     ],
+    "EmbeddingGemma2Model": [
+     "embedding"
+    ],
     "Emu3ForConditionalGeneration": [
      "transformers_backend"
     ],
@@ -242,17 +317,8 @@
     "Ernie4_5_VLMoeForConditionalGeneration": [
      "multimodal"
     ],
-    "ErnieForSequenceClassification": [
-     "sequence_classification"
-    ],
-    "ErnieForTokenClassification": [
-     "token_classification"
-    ],
     "ErnieMTPModel": [
      "speculative_decoding"
-    ],
-    "ErnieModel": [
-     "embedding"
     ],
     "Exaone4ForCausalLM": [
      "text_generation"
@@ -269,14 +335,14 @@
     "ExaoneMoEForCausalLM": [
      "text_generation"
     ],
+    "ExaoneMoeForCausalLM": [
+     "text_generation"
+    ],
     "ExaoneMoeMTP": [
      "speculative_decoding"
     ],
     "ExtractHiddenStatesModel": [
      "speculative_decoding"
-    ],
-    "Fairseq2LlamaForCausalLM": [
-     "text_generation"
     ],
     "FalconForCausalLM": [
      "text_generation"
@@ -290,19 +356,16 @@
     "FireRedASR2ForConditionalGeneration": [
      "multimodal"
     ],
-    "FireRedLIDForConditionalGeneration": [
-     "multimodal"
-    ],
     "FlexOlmoForCausalLM": [
+     "transformers_backend"
+    ],
+    "FlintForCausalLM": [
      "text_generation"
     ],
     "FunASRForConditionalGeneration": [
      "multimodal"
     ],
     "FunAudioChatForConditionalGeneration": [
-     "multimodal"
-    ],
-    "FuyuForCausalLM": [
      "multimodal"
     ],
     "GLM4VForCausalLM": [
@@ -315,13 +378,13 @@
      "text_generation"
     ],
     "GPTBigCodeForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "GPTJForCausalLM": [
      "text_generation"
     ],
     "GPTNeoXForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "Gemma2ForCausalLM": [
      "text_generation"
@@ -344,6 +407,9 @@
     "Gemma3nForConditionalGeneration": [
      "multimodal"
     ],
+    "Gemma4DSparkModel": [
+     "speculative_decoding"
+    ],
     "Gemma4ForCausalLM": [
      "text_generation"
     ],
@@ -353,8 +419,11 @@
     "Gemma4MTPModel": [
      "speculative_decoding"
     ],
+    "Gemma4UnifiedForConditionalGeneration": [
+     "multimodal"
+    ],
     "GemmaForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "Glm4ForCausalLM": [
      "text_generation"
@@ -377,12 +446,20 @@
     "Glm4vMoeForConditionalGeneration": [
      "multimodal"
     ],
+    "Glm5NextForCausalLM": [
+     "text_generation"
+    ],
+    "Glm5NextForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Glm5NextMTPModel": [
+     "speculative_decoding"
+    ],
     "GlmAsrForConditionalGeneration": [
      "multimodal"
     ],
     "GlmForCausalLM": [
-     "embedding",
-     "text_generation"
+     "transformers_backend"
     ],
     "GlmMoeDsaForCausalLM": [
      "text_generation"
@@ -408,21 +485,20 @@
     "GraniteMoeHybridForCausalLM": [
      "text_generation"
     ],
+    "GraniteMoeSWAForCausalLM": [
+     "text_generation"
+    ],
     "GraniteMoeSharedForCausalLM": [
+     "text_generation"
+    ],
+    "GraniteSWAForCausalLM": [
      "text_generation"
     ],
     "GraniteSpeechForConditionalGeneration": [
      "multimodal"
     ],
-    "GritLM": [
-     "embedding",
-     "text_generation"
-    ],
-    "Grok1ForCausalLM": [
-     "text_generation"
-    ],
-    "Grok1ModelForCausalLM": [
-     "text_generation"
+    "GraniteSpeechPlusForConditionalGeneration": [
+     "multimodal"
     ],
     "GteModel": [
      "embedding"
@@ -436,9 +512,6 @@
     "H2OVLChatModel": [
      "multimodal"
     ],
-    "HCXVisionForCausalLM": [
-     "text_generation"
-    ],
     "HCXVisionV2ForCausalLM": [
      "text_generation"
     ],
@@ -451,17 +524,26 @@
     "HYV3MTPModel": [
      "speculative_decoding"
     ],
+    "HYV4ForCausalLM": [
+     "text_generation"
+    ],
+    "HYV4MTPModel": [
+     "speculative_decoding"
+    ],
     "HfMoondream": [
      "multimodal"
     ],
-    "HunYuanDenseV1ForCausalLM": [
+    "HrmTextForCausalLM": [
      "text_generation"
+    ],
+    "HunYuanDenseV1ForCausalLM": [
+     "transformers_backend"
     ],
     "HunYuanMoEV1ForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "HunYuanVLForConditionalGeneration": [
-     "multimodal"
+     "transformers_backend"
     ],
     "HyperCLOVAXForCausalLM": [
      "text_generation"
@@ -475,19 +557,22 @@
     "Idefics3ForConditionalGeneration": [
      "multimodal"
     ],
+    "InklingForCausalLM": [
+     "text_generation"
+    ],
+    "InklingForConditionalGeneration": [
+     "text_generation"
+    ],
+    "InklingMTPModel": [
+     "speculative_decoding"
+    ],
     "InternLM2ForCausalLM": [
      "text_generation"
     ],
     "InternLM2ForRewardModel": [
      "reward"
     ],
-    "InternLM2VEForCausalLM": [
-     "text_generation"
-    ],
     "InternLM3ForCausalLM": [
-     "text_generation"
-    ],
-    "InternLMForCausalLM": [
      "text_generation"
     ],
     "InternS1ForConditionalGeneration": [
@@ -495,6 +580,12 @@
     ],
     "InternS1ProForConditionalGeneration": [
      "multimodal"
+    ],
+    "InternS2MobiusForConditionalGeneration": [
+     "multimodal"
+    ],
+    "InternS2MobiusMTP": [
+     "speculative_decoding"
     ],
     "InternS2PreviewForConditionalGeneration": [
      "multimodal"
@@ -508,11 +599,8 @@
     "IsaacForConditionalGeneration": [
      "multimodal"
     ],
-    "JAISLMHeadModel": [
-     "text_generation"
-    ],
     "Jais2ForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "JambaForCausalLM": [
      "text_generation"
@@ -529,17 +617,26 @@
     "JinaVLForRanking": [
      "sequence_classification"
     ],
+    "K2HorizonForCausalLM": [
+     "text_generation"
+    ],
+    "K3DSparkModel": [
+     "speculative_decoding"
+    ],
     "KananaVForConditionalGeneration": [
-     "multimodal"
-    ],
-    "KeyeForConditionalGeneration": [
-     "multimodal"
-    ],
-    "KeyeVL1_5ForConditionalGeneration": [
      "multimodal"
     ],
     "KimiK25ForConditionalGeneration": [
      "multimodal"
+    ],
+    "KimiK31ForConditionalGeneration": [
+     "multimodal"
+    ],
+    "KimiK3ForConditionalGeneration": [
+     "multimodal"
+    ],
+    "KimiK3MTPModel": [
+     "speculative_decoding"
     ],
     "KimiLinearForCausalLM": [
      "text_generation"
@@ -547,11 +644,17 @@
     "KimiVLForConditionalGeneration": [
      "multimodal"
     ],
+    "Kolibri1ForCausalLM": [
+     "transformers_backend"
+    ],
     "LLaMAForCausalLM": [
      "text_generation"
     ],
     "LagunaForCausalLM": [
      "text_generation"
+    ],
+    "Lfm2BidirectionalModel": [
+     "embedding"
     ],
     "Lfm2ForCausalLM": [
      "text_generation"
@@ -561,6 +664,18 @@
     ],
     "Lfm2VlForConditionalGeneration": [
      "multimodal"
+    ],
+    "Lfm3AudioForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Lfm3ForCausalLM": [
+     "text_generation"
+    ],
+    "Lfm3VlForConditionalGeneration": [
+     "multimodal"
+    ],
+    "LiLiCorrDraftModel": [
+     "speculative_decoding"
     ],
     "LightOnOCRForConditionalGeneration": [
      "multimodal"
@@ -605,6 +720,9 @@
     "LlavaNextVideoForConditionalGeneration": [
      "multimodal"
     ],
+    "LlavaOnevision2ForConditionalGeneration": [
+     "multimodal"
+    ],
     "LlavaOnevisionForConditionalGeneration": [
      "multimodal"
     ],
@@ -614,7 +732,7 @@
     "LongcatFlashForCausalLM": [
      "text_generation"
     ],
-    "MPTForCausalLM": [
+    "LongcatFlashNgramForCausalLM": [
      "text_generation"
     ],
     "Mamba2ForCausalLM": [
@@ -623,14 +741,8 @@
     "MambaForCausalLM": [
      "text_generation"
     ],
-    "MantisForConditionalGeneration": [
-     "multimodal"
-    ],
-    "MedusaModel": [
-     "speculative_decoding"
-    ],
     "MellumForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "MiDashengLMModel": [
      "multimodal"
@@ -656,6 +768,9 @@
     "MiMoV2OmniMTPModel": [
      "speculative_decoding"
     ],
+    "MingV3ASRForConditionalGeneration": [
+     "multimodal"
+    ],
     "MiniCPM3ForCausalLM": [
      "text_generation"
     ],
@@ -665,25 +780,28 @@
     "MiniCPMO": [
      "multimodal"
     ],
+    "MiniCPMOcrForConditionalGeneration": [
+     "multimodal"
+    ],
     "MiniCPMV": [
      "multimodal"
     ],
     "MiniCPMV4_6ForConditionalGeneration": [
      "multimodal"
     ],
-    "MiniMaxForCausalLM": [
-     "text_generation"
-    ],
-    "MiniMaxM1ForCausalLM": [
-     "text_generation"
+    "MiniCPMV4_7ForConditionalGeneration": [
+     "multimodal"
     ],
     "MiniMaxM2ForCausalLM": [
      "text_generation"
     ],
-    "MiniMaxText01ForCausalLM": [
+    "MiniMaxM3MTP": [
+     "speculative_decoding"
+    ],
+    "MiniMaxM3SparseForCausalLM": [
      "text_generation"
     ],
-    "MiniMaxVL01ForConditionalGeneration": [
+    "MiniMaxM3SparseForConditionalGeneration": [
      "multimodal"
     ],
     "Ministral3ForCausalLM": [
@@ -696,6 +814,12 @@
      "text_generation"
     ],
     "MistralLarge3ForCausalLM": [
+     "text_generation"
+    ],
+    "MistralLarge4DSparkModel": [
+     "speculative_decoding"
+    ],
+    "MistralLarge4ForCausalLM": [
      "text_generation"
     ],
     "MistralModel": [
@@ -713,6 +837,9 @@
     "ModernBertModel": [
      "embedding"
     ],
+    "ModernVBertModel": [
+     "late_interaction"
+    ],
     "Molmo2ForConditionalGeneration": [
      "multimodal"
     ],
@@ -725,14 +852,38 @@
     "MoonshotKimiaForCausalLM": [
      "multimodal"
     ],
-    "MptForCausalLM": [
+    "MossAudioModel": [
+     "multimodal"
+    ],
+    "MossTranscribeDiarizeForConditionalGeneration": [
+     "multimodal"
+    ],
+    "MuseGlimmerAssistantModel": [
+     "speculative_decoding"
+    ],
+    "MuseGlimmerForCausalLM": [
      "text_generation"
     ],
-    "MusicFlamingoForConditionalGeneration": [
+    "MuseGlimmerForConditionalGeneration": [
+     "multimodal"
+    ],
+    "MuseSparkDSparkModel": [
+     "speculative_decoding"
+    ],
+    "MuseSparkForConditionalGeneration": [
      "multimodal"
     ],
     "NVLM_D": [
      "multimodal"
+    ],
+    "NanbeigeForCausalLM": [
+     "transformers_backend"
+    ],
+    "Nemotron3_5TranscribeForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Nemotron3_5TranscribeMTPModel": [
+     "speculative_decoding"
     ],
     "NemotronForCausalLM": [
      "text_generation"
@@ -752,6 +903,9 @@
     "NemotronH_Nano_VL_V2": [
      "multimodal"
     ],
+    "NemotronH_Omni_Reasoning_V3": [
+     "multimodal"
+    ],
     "NemotronH_Super_Omni_Reasoning_V3": [
      "multimodal"
     ],
@@ -765,19 +919,22 @@
      "text_generation"
     ],
     "Olmo2ForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "Olmo3ForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "OlmoForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "OlmoHybridForCausalLM": [
      "text_generation"
     ],
     "OlmoeForCausalLM": [
-     "text_generation"
+     "transformers_backend"
+    ],
+    "OpenAIPrivacyFilterForTokenClassification": [
+     "token_classification"
     ],
     "OpenCUAForConditionalGeneration": [
      "multimodal"
@@ -797,9 +954,6 @@
     "OrionForCausalLM": [
      "text_generation"
     ],
-    "OuroForCausalLM": [
-     "text_generation"
-    ],
     "Ovis": [
      "multimodal"
     ],
@@ -811,9 +965,6 @@
     ],
     "Ovis2_6_MoeForCausalLM": [
      "multimodal"
-    ],
-    "PEagleDraftModel": [
-     "speculative_decoding"
     ],
     "PaddleOCRVLForConditionalGeneration": [
      "multimodal"
@@ -833,11 +984,8 @@
     "Param2MoEForCausalLM": [
      "text_generation"
     ],
-    "PeagleLlamaForCausalLM": [
+    "ParseAuxMTPModel": [
      "speculative_decoding"
-    ],
-    "PersimmonForCausalLM": [
-     "text_generation"
     ],
     "Phi3ForCausalLM": [
      "embedding",
@@ -854,7 +1002,7 @@
      "multimodal"
     ],
     "PhiForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "PhiMoEForCausalLM": [
      "text_generation"
@@ -862,16 +1010,7 @@
     "PixtralForConditionalGeneration": [
      "multimodal"
     ],
-    "Plamo2ForCausalLM": [
-     "text_generation"
-    ],
     "Plamo3ForCausalLM": [
-     "text_generation"
-    ],
-    "PrithviGeoSpatialMAE": [
-     "embedding"
-    ],
-    "QWenLMHeadModel": [
      "text_generation"
     ],
     "QianfanOCRForConditionalGeneration": [
@@ -918,6 +1057,9 @@
     "Qwen3ASRRealtimeGeneration": [
      "multimodal"
     ],
+    "Qwen3DSparkModel": [
+     "speculative_decoding"
+    ],
     "Qwen3ForCausalLM": [
      "text_generation"
     ],
@@ -928,6 +1070,9 @@
      "text_generation"
     ],
     "Qwen3NextMTP": [
+     "speculative_decoding"
+    ],
+    "Qwen3OmniDSparkModel": [
      "speculative_decoding"
     ],
     "Qwen3OmniMoeForConditionalGeneration": [
@@ -942,11 +1087,20 @@
     "Qwen3VLNemotronEmbedModel": [
      "late_interaction"
     ],
+    "Qwen3XPressModel": [
+     "speculative_decoding"
+    ],
+    "Qwen3_5ForCausalLM": [
+     "text_generation"
+    ],
     "Qwen3_5ForConditionalGeneration": [
      "multimodal"
     ],
     "Qwen3_5MTP": [
      "speculative_decoding"
+    ],
+    "Qwen3_5MoeForCausalLM": [
+     "text_generation"
     ],
     "Qwen3_5MoeForConditionalGeneration": [
      "multimodal"
@@ -954,13 +1108,22 @@
     "Qwen3_5MoeMTP": [
      "speculative_decoding"
     ],
-    "QwenVLForConditionalGeneration": [
+    "Qwen4ExpForCausalLM": [
+     "text_generation"
+    ],
+    "Qwen4ExpForConditionalGeneration": [
      "multimodal"
+    ],
+    "Qwen4ExpMTP": [
+     "speculative_decoding"
     ],
     "RForConditionalGeneration": [
      "multimodal"
     ],
-    "RWForCausalLM": [
+    "RadioMBartPrefixForCausalLM": [
+     "multimodal"
+    ],
+    "RicursiveForCausalLM": [
      "text_generation"
     ],
     "Rnj1ForCausalLM": [
@@ -972,6 +1135,9 @@
     "RobertaForSequenceClassification": [
      "sequence_classification"
     ],
+    "RobertaForTokenClassification": [
+     "token_classification"
+    ],
     "RobertaModel": [
      "embedding"
     ],
@@ -982,7 +1148,7 @@
      "text_generation"
     ],
     "SeedOssForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "SiglipModel": [
      "embedding"
@@ -999,14 +1165,11 @@
     "SolarForCausalLM": [
      "text_generation"
     ],
-    "StableLMEpochForCausalLM": [
-     "text_generation"
-    ],
     "StableLmForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "Starcoder2ForCausalLM": [
-     "text_generation"
+     "transformers_backend"
     ],
     "Step1ForCausalLM": [
      "text_generation"
@@ -1023,13 +1186,19 @@
     "Step3p5MTP": [
      "speculative_decoding"
     ],
+    "Step3p7ForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Step5ForCausalLM": [
+     "text_generation"
+    ],
+    "Step5ForConditionalGeneration": [
+     "multimodal"
+    ],
+    "Step5MTP": [
+     "speculative_decoding"
+    ],
     "StepVLForConditionalGeneration": [
-     "multimodal"
-    ],
-    "Tarsier2ForConditionalGeneration": [
-     "multimodal"
-    ],
-    "TarsierForConditionalGeneration": [
      "multimodal"
     ],
     "TeleChat2ForCausalLM": [
@@ -1039,18 +1208,29 @@
     "TeleChat3ForCausalLM": [
      "text_generation"
     ],
-    "TeleChatForCausalLM": [
-     "embedding",
-     "text_generation"
-    ],
     "TeleFLMForCausalLM": [
      "text_generation"
     ],
     "Terratorch": [
      "embedding"
     ],
+    "UltraVBertModel": [
+     "late_interaction"
+    ],
     "UltravoxModel": [
      "multimodal"
+    ],
+    "UnlimitedOCR2TextForCausalLM": [
+     "text_generation"
+    ],
+    "UnlimitedOCRForCausalLM": [
+     "multimodal"
+    ],
+    "VaultGemmaForCausalLM": [
+     "transformers_backend"
+    ],
+    "VibeVoiceAsrForConditionalGeneration": [
+     "transformers_backend"
     ],
     "VoxtralForConditionalGeneration": [
      "multimodal"
@@ -1067,70 +1247,122 @@
     "XLMRobertaForSequenceClassification": [
      "sequence_classification"
     ],
+    "XLMRobertaForTokenClassification": [
+     "token_classification"
+    ],
     "XLMRobertaModel": [
      "embedding"
     ],
-    "XverseForCausalLM": [
+    "Zamba2ForCausalLM": [
      "text_generation"
     ],
-    "Zamba2ForCausalLM": [
+    "ZayaForCausalLM": [
      "text_generation"
     ]
    },
-   "quantization_source_url": "https://github.com/vllm-project/vllm/blob/0decac0d96c42b49572498019f0a0e3600f50398/vllm/model_executor/layers/quantization/__init__.py",
+   "quantization_source_url": "https://github.com/vllm-project/vllm/blob/62d4bc3c7e33b1b6c906e233e6af2d3506c482ca/vllm/model_executor/layers/quantization/__init__.py",
    "quantization_methods": [
+    "auto_awq",
     "auto_gptq",
     "awq",
     "awq_marlin",
-    "bitsandbytes",
     "compressed-tensors",
-    "cpu_awq",
     "deepseek_v4_fp8",
     "experts_int8",
     "fbgemm_fp8",
     "fp8",
     "fp8_per_block",
+    "fp8_per_channel",
     "fp8_per_tensor",
-    "fp_quant",
-    "gguf",
     "gpt_oss_mxfp4",
     "gptq",
     "gptq_marlin",
     "humming",
     "inc",
     "int8_per_channel_weight_only",
+    "lut_b_moe",
     "modelopt",
     "modelopt_fp4",
     "modelopt_mixed",
     "modelopt_mxfp8",
     "moe_wna16",
     "mxfp4",
+    "mxfp4_hadamard32",
     "mxfp8",
+    "nvfp4_per_token",
     "online",
     "quark",
-    "torchao"
+    "torchao",
+    "w4afp8"
    ],
    "previously_supported": {
+    "AquilaForCausalLM": "0.24.0",
+    "AquilaModel": "0.24.0",
+    "ArcticForCausalLM": "0.28.0",
+    "AyaVisionForConditionalGeneration": "0.24.0",
+    "BaiChuanForCausalLM": "0.23.0",
+    "BaichuanForCausalLM": "0.23.0",
+    "BambaForCausalLM": "0.23.0",
+    "ChameleonForConditionalGeneration": "0.28.0",
+    "Cheers": "0.28.0",
+    "CheersForConditionalGeneration": "0.28.0",
     "DonutForConditionalGeneration": "0.10.2",
+    "Dots1ForCausalLM": "0.23.0",
+    "ErnieForSequenceClassification": "0.23.0",
+    "ErnieForTokenClassification": "0.23.0",
+    "ErnieModel": "0.23.0",
+    "Fairseq2LlamaForCausalLM": "0.28.0",
+    "FireRedLIDForConditionalGeneration": "0.28.0",
+    "FuyuForCausalLM": "0.25.0",
+    "GritLM": "0.28.0",
+    "Grok1ForCausalLM": "0.24.0",
+    "Grok1ModelForCausalLM": "0.24.0",
+    "HCXVisionForCausalLM": "0.28.0",
+    "InternLM2VEForCausalLM": "0.23.0",
+    "InternLMForCausalLM": "0.23.0",
+    "JAISLMHeadModel": "0.22.0",
+    "KeyeForConditionalGeneration": "0.33.0",
+    "KeyeVL1_5ForConditionalGeneration": "0.33.0",
+    "MPTForCausalLM": "0.28.0",
+    "MantisForConditionalGeneration": "0.24.0",
+    "MiniMaxForCausalLM": "0.23.0",
+    "MiniMaxM1ForCausalLM": "0.23.0",
+    "MiniMaxText01ForCausalLM": "0.23.0",
+    "MiniMaxVL01ForConditionalGeneration": "0.23.0",
     "MllamaForConditionalGeneration": "0.10.2",
     "MotifForCausalLM": "0.10.2",
+    "MptForCausalLM": "0.28.0",
+    "MusicFlamingoForConditionalGeneration": "0.24.0",
+    "OuroForCausalLM": "0.26.0",
+    "PersimmonForCausalLM": "0.25.0",
     "Phi3SmallForCausalLM": "0.9.2",
     "Phi4FlashForCausalLM": "0.10.2",
-    "Phi4MultimodalForCausalLM": "0.12.0"
+    "Phi4MultimodalForCausalLM": "0.12.0",
+    "Plamo2ForCausalLM": "0.26.0",
+    "PrithviGeoSpatialMAE": "0.28.0",
+    "QWenLMHeadModel": "0.23.0",
+    "QwenVLForConditionalGeneration": "0.23.0",
+    "RWForCausalLM": "0.28.0",
+    "StableLMEpochForCausalLM": "0.28.0",
+    "Tarsier2ForConditionalGeneration": "0.23.0",
+    "TarsierForConditionalGeneration": "0.24.0",
+    "TeleChatForCausalLM": "0.25.0",
+    "XverseForCausalLM": "0.23.0"
    },
    "out_of_tree": {
     "BartForConditionalGeneration": "https://github.com/vllm-project/bart-plugin",
     "BartModel": "https://github.com/vllm-project/bart-plugin",
     "Florence2ForConditionalGeneration": "https://github.com/vllm-project/bart-plugin",
-    "MBartForConditionalGeneration": "https://github.com/vllm-project/bart-plugin"
+    "MBartForConditionalGeneration": "https://github.com/vllm-project/bart-plugin",
+    "Nemotron3_5AsrForRNNT": "https://github.com/Sohaib-Ahmed21/vllm-nemotron-asr-plugin"
    }
   },
   {
    "runtime": "sglang",
-   "version": "0.5.12",
-   "tag": "v0.5.12",
-   "commit": "127b9e3283f7c2a43234b852ff5c9f1796d53624",
-   "source_url": "https://github.com/sgl-project/sglang/tree/127b9e3283f7c2a43234b852ff5c9f1796d53624/python/sglang/srt/models",
+   "version": "0.5.23",
+   "tag": "v0.5.23",
+   "commit": "297e54fd105e974cdf401e5b4d20253a22c16f90",
+   "source_url": "https://github.com/sgl-project/sglang/tree/297e54fd105e974cdf401e5b4d20253a22c16f90/python/sglang/srt/models",
    "architectures": {
     "AfmoeForCausalLM": [
      "registered"
@@ -1142,6 +1374,12 @@
      "registered"
     ],
     "BaichuanForCausalLM": [
+     "registered"
+    ],
+    "BailingMM2NativeForConditionalGeneration": [
+     "registered"
+    ],
+    "BailingMMNativeForConditionalGeneration": [
      "registered"
     ],
     "BailingMoEForCausalLM": [
@@ -1159,6 +1397,15 @@
     "BailingMoeV2_5ForCausalLM": [
      "registered"
     ],
+    "BailingMoeV3ForCausalLM": [
+     "registered"
+    ],
+    "BailingMoeV3VLForConditionalGeneration": [
+     "registered"
+    ],
+    "BeamForCausalLM": [
+     "registered"
+    ],
     "BertForSequenceClassification": [
      "registered"
     ],
@@ -1174,13 +1421,40 @@
     "Cohere2ForCausalLM": [
      "registered"
     ],
+    "Cohere2MoeForCausalLM": [
+     "registered"
+    ],
+    "Cohere2VisionForConditionalGeneration": [
+     "registered"
+    ],
     "CohereForCausalLM": [
      "registered"
     ],
     "Contriever": [
      "registered"
     ],
+    "Cosmos3EdgeForConditionalGeneration": [
+     "registered"
+    ],
+    "Cosmos3ForConditionalGeneration": [
+     "registered"
+    ],
+    "DFlash2BeamDraftModel": [
+     "registered"
+    ],
+    "DFlash2DraftModel": [
+     "registered"
+    ],
     "DFlashDraftModel": [
+     "registered"
+    ],
+    "DFlashLagunaForCausalLM": [
+     "registered"
+    ],
+    "DSparkDraftModel": [
+     "registered"
+    ],
+    "DSparkMiniMaxDraftModel": [
      "registered"
     ],
     "DbrxForCausalLM": [
@@ -1210,10 +1484,22 @@
     "DeepseekV4ForCausalLM": [
      "registered"
     ],
+    "DeepseekV4ForCausalLMDSpark": [
+     "registered"
+    ],
     "DeepseekV4ForCausalLMNextN": [
      "registered"
     ],
     "DeepseekVL2ForCausalLM": [
+     "registered"
+    ],
+    "DiffusionGemmaForBlockDiffusion": [
+     "registered"
+    ],
+    "Dots3NoteForCausalLM": [
+     "registered"
+    ],
+    "Dots3NoteForCausalLMNextN": [
      "registered"
     ],
     "DotsOCRForCausalLM": [
@@ -1223,6 +1509,12 @@
      "registered"
     ],
     "Eagle3DeepseekV2ForCausalLM": [
+     "registered"
+    ],
+    "EmbeddingGemma2Model": [
+     "registered"
+    ],
+    "EmbeddingGemmaModel": [
      "registered"
     ],
     "Ernie4_5_ForCausalLM": [
@@ -1249,7 +1541,13 @@
     "ExaoneMoEForCausalLMMTP": [
      "registered"
     ],
+    "ExaoneMoeForCausalLM": [
+     "registered"
+    ],
     "FalconH1ForCausalLM": [
+     "registered"
+    ],
+    "FalconMambaForCausalLM": [
      "registered"
     ],
     "GPT2LMHeadModel": [
@@ -1288,7 +1586,19 @@
     "Gemma4ForConditionalGeneration": [
      "registered"
     ],
+    "Gemma4UnifiedAssistantForCausalLM": [
+     "registered"
+    ],
+    "Gemma4UnifiedForConditionalGeneration": [
+     "registered"
+    ],
     "GemmaForCausalLM": [
+     "registered"
+    ],
+    "GigaChat35ForCausalLM": [
+     "registered"
+    ],
+    "GigaChat35ForCausalLMNextN": [
      "registered"
     ],
     "Glm4ForCausalLM": [
@@ -1303,16 +1613,31 @@
     "Glm4MoeLiteForCausalLM": [
      "registered"
     ],
+    "Glm4MoeLiteForCausalLMNextN": [
+     "registered"
+    ],
     "Glm4vForConditionalGeneration": [
      "registered"
     ],
     "Glm4vMoeForConditionalGeneration": [
      "registered"
     ],
+    "Glm5NextForConditionalGeneration": [
+     "registered"
+    ],
+    "Glm5NextForConditionalGenerationNextN": [
+     "registered"
+    ],
     "GlmAsrForConditionalGeneration": [
      "registered"
     ],
+    "GlmImageForConditionalGeneration": [
+     "registered"
+    ],
     "GlmMoeDsaForCausalLM": [
+     "registered"
+    ],
+    "GlmMoeDsaForCausalLMNextN": [
      "registered"
     ],
     "GlmOcrForConditionalGeneration": [
@@ -1333,6 +1658,15 @@
     "GraniteMoeHybridForCausalLM": [
      "registered"
     ],
+    "GraniteMoeSWAForCausalLM": [
+     "registered"
+    ],
+    "GraniteMoeSharedForCausalLM": [
+     "registered"
+    ],
+    "GraniteSWAForCausalLM": [
+     "registered"
+    ],
     "Grok1ForCausalLM": [
      "registered"
     ],
@@ -1345,6 +1679,15 @@
     "HYV3ForCausalLMNextN": [
      "registered"
     ],
+    "HYV4ForCausalLM": [
+     "registered"
+    ],
+    "HYV4ForCausalLMNextN": [
+     "registered"
+    ],
+    "HrmTextForCausalLM": [
+     "registered"
+    ],
     "HunYuanDenseV1ForCausalLM": [
      "registered"
     ],
@@ -1355,6 +1698,18 @@
      "registered"
     ],
     "IQuestLoopCoderForCausalLM": [
+     "registered"
+    ],
+    "IQuestQ1ForCausalLM": [
+     "registered"
+    ],
+    "IQuestQ1MTP": [
+     "registered"
+    ],
+    "InklingForConditionalGeneration": [
+     "registered"
+    ],
+    "InklingForConditionalGenerationMTP": [
      "registered"
     ],
     "InternLM2ForCausalLM": [
@@ -1372,6 +1727,9 @@
     "InternS1ProForConditionalGeneration": [
      "registered"
     ],
+    "InternS2MobiusForConditionalGeneration": [
+     "registered"
+    ],
     "InternS2PreviewForConditionalGeneration": [
      "registered"
     ],
@@ -1384,7 +1742,16 @@
     "JetVLMForConditionalGeneration": [
      "registered"
     ],
+    "K2HorizonForCausalLM": [
+     "registered"
+    ],
     "KimiK25ForConditionalGeneration": [
+     "registered"
+    ],
+    "KimiK3ForConditionalGeneration": [
+     "registered"
+    ],
+    "KimiK3LinearForCausalLM": [
      "registered"
     ],
     "KimiLinearForCausalLM": [
@@ -1399,6 +1766,12 @@
     "LagunaForCausalLM": [
      "registered"
     ],
+    "Lfm2BidirectionalModel": [
+     "registered"
+    ],
+    "Lfm2DSparkDraftModel": [
+     "registered"
+    ],
     "Lfm2ForCausalLM": [
      "registered"
     ],
@@ -1408,7 +1781,13 @@
     "Lfm2VlForConditionalGeneration": [
      "registered"
     ],
+    "LiLiCorrDraftModel": [
+     "registered"
+    ],
     "LightOnOCRForConditionalGeneration": [
+     "registered"
+    ],
+    "LingDSparkModel": [
      "registered"
     ],
     "Llama4ForCausalLM": [
@@ -1453,10 +1832,22 @@
     "LlavaVidForCausalLM": [
      "registered"
     ],
+    "LocateAnythingForConditionalGeneration": [
+     "registered"
+    ],
     "LongcatFlashForCausalLM": [
      "registered"
     ],
     "LongcatFlashForCausalLMNextN": [
+     "registered"
+    ],
+    "Mamba2ForCausalLM": [
+     "registered"
+    ],
+    "MambaForCausalLM": [
+     "registered"
+    ],
+    "MellumForCausalLM": [
      "registered"
     ],
     "MiDashengLMModel": [
@@ -1466,6 +1857,9 @@
      "registered"
     ],
     "MiMoMTP": [
+     "registered"
+    ],
+    "MiMoV2ASRForCausalLM": [
      "registered"
     ],
     "MiMoV2FlashForCausalLM": [
@@ -1489,13 +1883,28 @@
     "MiniCPMO": [
      "registered"
     ],
+    "MiniCPMSALAForCausalLM": [
+     "registered"
+    ],
     "MiniCPMV": [
      "registered"
     ],
     "MiniCPMV4_6ForConditionalGeneration": [
      "registered"
     ],
+    "MiniCPMV4_7ForConditionalGeneration": [
+     "registered"
+    ],
+    "MiniMaxDFlash2DraftModel": [
+     "registered"
+    ],
     "MiniMaxM2ForCausalLM": [
+     "registered"
+    ],
+    "MiniMaxM3SparseForCausalLM": [
+     "registered"
+    ],
+    "MiniMaxM3SparseForConditionalGeneration": [
      "registered"
     ],
     "Ministral3ForCausalLM": [
@@ -1531,10 +1940,28 @@
     "MultiModalityCausalLM": [
      "registered"
     ],
+    "MuseGlimmerAssistantModel": [
+     "registered"
+    ],
+    "MuseGlimmerForCausalLM": [
+     "registered"
+    ],
+    "MuseGlimmerForConditionalGeneration": [
+     "registered"
+    ],
+    "MuseSparkForConditionalGeneration": [
+     "registered"
+    ],
     "NVILAForConditionalGeneration": [
      "registered"
     ],
     "NVILALiteForConditionalGeneration": [
+     "registered"
+    ],
+    "NanbeigeForCausalLM": [
+     "registered"
+    ],
+    "NanbeigeForSequenceClassification": [
      "registered"
     ],
     "NemotronHForCausalLM": [
@@ -1543,10 +1970,16 @@
     "NemotronHForCausalLMMTP": [
      "registered"
     ],
+    "NemotronHPuzzleForCausalLM": [
+     "registered"
+    ],
     "NemotronH_Nano_Omni_Reasoning_V3": [
      "registered"
     ],
     "NemotronH_Nano_VL_V2": [
+     "registered"
+    ],
+    "NemotronH_Omni_Reasoning_V3": [
      "registered"
     ],
     "OPTForCausalLM": [
@@ -1627,6 +2060,9 @@
     "Qwen3ASRForConditionalGeneration": [
      "registered"
     ],
+    "Qwen3DSparkModel": [
+     "registered"
+    ],
     "Qwen3ForCausalLM": [
      "registered"
     ],
@@ -1636,7 +2072,13 @@
     "Qwen3ForSequenceClassification": [
      "registered"
     ],
+    "Qwen3Model": [
+     "registered"
+    ],
     "Qwen3MoeForCausalLM": [
+     "registered"
+    ],
+    "Qwen3MoeForCausalLMMTP": [
      "registered"
     ],
     "Qwen3NextForCausalLM": [
@@ -1654,13 +2096,25 @@
     "Qwen3VLMoeForConditionalGeneration": [
      "registered"
     ],
+    "Qwen3_5ForCausalLM": [
+     "registered"
+    ],
     "Qwen3_5ForCausalLMMTP": [
      "registered"
     ],
     "Qwen3_5ForConditionalGeneration": [
      "registered"
     ],
+    "Qwen3_5MoeForCausalLM": [
+     "registered"
+    ],
     "Qwen3_5MoeForConditionalGeneration": [
+     "registered"
+    ],
+    "Qwen4ExpForCausalLMMTP": [
+     "registered"
+    ],
+    "Qwen4ExpForConditionalGeneration": [
      "registered"
     ],
     "SDARForCausalLM": [
@@ -1681,6 +2135,9 @@
     "SolarForCausalLM": [
      "registered"
     ],
+    "Spark2_5ForCausalLM": [
+     "registered"
+    ],
     "StableLmForCausalLM": [
      "registered"
     ],
@@ -1694,6 +2151,9 @@
      "registered"
     ],
     "Step3p5MTP": [
+     "registered"
+    ],
+    "Step3p7ForConditionalGeneration": [
      "registered"
     ],
     "StepVLForConditionalGeneration": [
@@ -1744,6 +2204,9 @@
     "TransformersMultiModalMoEForSequenceClassification": [
      "registered"
     ],
+    "UnlimitedOCRForCausalLM": [
+     "registered"
+    ],
     "VoxtralForConditionalGeneration": [
      "registered"
     ],
@@ -1756,6 +2219,9 @@
     "XLMRobertaModel": [
      "registered"
     ],
+    "XllmForCausalLM": [
+     "registered"
+    ],
     "XverseForCausalLM": [
      "registered"
     ],
@@ -1763,6 +2229,9 @@
      "registered"
     ],
     "YiVLForCausalLM": [
+     "registered"
+    ],
+    "ZayaForCausalLM": [
      "registered"
     ]
    }

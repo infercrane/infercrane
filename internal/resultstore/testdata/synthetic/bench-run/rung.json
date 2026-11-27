@@ -1,0 +1,199 @@
+{
+ "schema": "infercrane.dev/benchmark-run/v1",
+ "run_id": "synthetic-rung",
+ "dry": true,
+ "backend": "local",
+ "spec": {
+  "id": "example-rung",
+  "sha256": "b5e626f998dc4616454e2f69b631acb89499fbdc32ab63ff3f557cebb608878b"
+ },
+ "commit": "0123456789abcdef0123456789abcdef01234567",
+ "stopped": "",
+ "note": "synthetic run: every number is made up",
+ "cells": {
+  "example-8b/long/16": {
+   "state": "done",
+   "reason": "",
+   "container_seconds": 50.0,
+   "bars": {
+    "one-machine": "pass",
+    "repeats-steady": "pass",
+    "copy-inside-noise": "pass"
+   },
+   "found": "example-8b-fp8-kv-cache",
+   "found_value": 1500.0,
+   "best_baseline": "example-8b-publisher",
+   "best_baseline_value": 900.0,
+   "noise_floor": 0.02,
+   "verdicts": {
+    "example-8b-publisher": "passed",
+    "example-8b-copy": "passed",
+    "example-8b-fp8-weights": "passed",
+    "example-8b-fp8-kv-cache": "passed"
+   }
+  },
+  "example-8b/short/16": {
+   "state": "done",
+   "reason": "",
+   "container_seconds": 50.0,
+   "bars": {
+    "one-machine": "pass",
+    "repeats-steady": "pass",
+    "copy-inside-noise": "fail"
+   },
+   "found": "example-8b-fp8-kv-cache",
+   "found_value": 1480.0,
+   "best_baseline": "example-8b-publisher",
+   "best_baseline_value": 880.0,
+   "noise_floor": 0.0307,
+   "verdicts": {
+    "example-8b-publisher": "passed",
+    "example-8b-copy": "passed",
+    "example-8b-fp8-weights": "passed",
+    "example-8b-fp8-kv-cache": "passed"
+   }
+  }
+ },
+ "summaries": [
+  {
+   "cell": "example-8b/long/16",
+   "first_token_limit_ms": 3000,
+   "machine_error": null,
+   "order": [
+    "example-8b-engine-defaults",
+    "example-8b-publisher",
+    "example-8b-copy",
+    "example-8b-fp8-weights",
+    "example-8b-fp8-kv-cache",
+    "example-8b-engine-defaults"
+   ],
+   "arms": {
+    "example-8b-publisher": {
+     "key": "publisher",
+     "kind": "baseline",
+     "useful_output": 900.0,
+     "output": 900.0,
+     "change": 0.1222,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-copy": {
+     "key": "copy",
+     "kind": "baseline",
+     "useful_output": 795.0,
+     "output": 795.0,
+     "change": -0.0087,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-fp8-weights": {
+     "key": "fp8-weights",
+     "kind": "candidate",
+     "useful_output": 1250.0,
+     "output": 1250.0,
+     "change": 0.5586,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-fp8-kv-cache": {
+     "key": "fp8-kv-cache",
+     "kind": "candidate",
+     "useful_output": 1500.0,
+     "output": 1500.0,
+     "change": 0.8703,
+     "error": null,
+     "requests": 50
+    }
+   },
+   "current": "example-8b-engine-defaults",
+   "current_useful_output": {
+    "runs": [
+     800.0,
+     804.0
+    ],
+    "mean": 802.0,
+    "spread": 0.005
+   },
+   "current_output": {
+    "runs": [
+     800.0,
+     804.0
+    ],
+    "mean": 802.0,
+    "spread": 0.005
+   },
+   "copy_change": 0.0087,
+   "noise_floor": 0.02
+  },
+  {
+   "cell": "example-8b/short/16",
+   "first_token_limit_ms": 1000,
+   "machine_error": null,
+   "order": [
+    "example-8b-engine-defaults",
+    "example-8b-publisher",
+    "example-8b-copy",
+    "example-8b-fp8-weights",
+    "example-8b-fp8-kv-cache",
+    "example-8b-engine-defaults"
+   ],
+   "arms": {
+    "example-8b-publisher": {
+     "key": "publisher",
+     "kind": "baseline",
+     "useful_output": 880.0,
+     "output": 880.0,
+     "change": 0.1268,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-copy": {
+     "key": "copy",
+     "kind": "baseline",
+     "useful_output": 805.0,
+     "output": 805.0,
+     "change": 0.0307,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-fp8-weights": {
+     "key": "fp8-weights",
+     "kind": "candidate",
+     "useful_output": 1220.0,
+     "output": 1220.0,
+     "change": 0.5621,
+     "error": null,
+     "requests": 50
+    },
+    "example-8b-fp8-kv-cache": {
+     "key": "fp8-kv-cache",
+     "kind": "candidate",
+     "useful_output": 1480.0,
+     "output": 1480.0,
+     "change": 0.895,
+     "error": null,
+     "requests": 50
+    }
+   },
+   "current": "example-8b-engine-defaults",
+   "current_useful_output": {
+    "runs": [
+     780.0,
+     782.0
+    ],
+    "mean": 781.0,
+    "spread": 0.0026
+   },
+   "current_output": {
+    "runs": [
+     780.0,
+     782.0
+    ],
+    "mean": 781.0,
+    "spread": 0.0026
+   },
+   "copy_change": 0.0307,
+   "noise_floor": 0.0307
+  }
+ ]
+}

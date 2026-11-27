@@ -1,0 +1,69 @@
+{
+ "id": "Qwen/Qwen3-8B-FP8",
+ "sha": "220b46e3b2180893580a4454f21f22d3ebb187d3",
+ "pipeline_tag": "text-generation",
+ "library_name": "transformers",
+ "cardData": {
+  "license": "apache-2.0",
+  "base_model": [
+   "Qwen/Qwen3-8B"
+  ]
+ },
+ "tags": [
+  "safetensors",
+  "text-generation",
+  "license:apache-2.0"
+ ],
+ "gated": false,
+ "private": false,
+ "disabled": false,
+ "config": {
+  "architectures": [
+   "Qwen3ForCausalLM"
+  ],
+  "model_type": "qwen3"
+ },
+ "safetensors": {
+  "parameters": {
+   "BF16": 1244967936,
+   "F8_E4M3": 6945767424
+  },
+  "total": 8190735360
+ },
+ "siblings": [
+  {
+   "rfilename": "config.json",
+   "blobId": "9852f575a09be6d72ad0fa34d5b7191ece4bbc4d"
+  },
+  {
+   "rfilename": "generation_config.json",
+   "blobId": "6e9e36ca92eb5a9e511820485128f8fdc52106f5"
+  },
+  {
+   "rfilename": "merges.txt",
+   "blobId": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+  },
+  {
+   "rfilename": "model-00001-of-00002.safetensors",
+   "blobId": "341cbb13e5e55e69c3501d4a5b4d9e8856a01fd3",
+   "lfs": {
+    "sha256": "83bb444edc7d4a1ed91ab67ad19620e2ed74724cdd62ede330fcaa7748c64404"
+   }
+  },
+  {
+   "rfilename": "tokenizer.json",
+   "blobId": "cd71f61a15a522601badb3dc960d800d9cb3766c",
+   "lfs": {
+    "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   }
+  },
+  {
+   "rfilename": "tokenizer_config.json",
+   "blobId": "417d038a63fa3de29cfde265caedae14d1a58d92"
+  },
+  {
+   "rfilename": "vocab.json",
+   "blobId": "4783fe10ac3adce15ac8f358ef5462739852c569"
+  }
+ ]
+}

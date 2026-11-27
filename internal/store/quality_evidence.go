@@ -78,7 +78,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.distribution_json::text,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at,q.source,q.reference_revision_id FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
+	rows, err := s.QueryContext(ctx, `SELECT q.id,q.tenant_id,q.deployment_id,q.revision_id,'',q.suite,q.suite_version,q.evaluator,q.evaluator_version,q.score,q.passed,q.sample_count,q.distribution_json::text,q.artifact_digest,q.payload_digest,q.signature,q.public_key,q.algorithm,q.key_id,q.evaluated_at,q.created_at,q.source,q.reference_revision_id FROM revision_quality_evidence q JOIN deployments d ON d.id=q.deployment_id WHERE d.tenant_id=? AND d.name=? AND `+liveDeploymentD+` ORDER BY q.evaluated_at DESC,q.id DESC LIMIT ?`, tenant, deploymentName, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (s *Store) QualityEvidenceForDeployment(ctx context.Context, tenant, deploy
 }
 
 func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest string) (domain.QualityEvidence, error) {
-	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
+	row := s.QueryRowContext(ctx, `SELECT id,tenant_id,COALESCE(deployment_id,''),COALESCE(revision_id,agent_setup_id),COALESCE(agent_id,''),suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND payload_digest=?`, tenant, digest)
 	item, err := scanQualityEvidence(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, ErrNotFound
@@ -106,7 +106,7 @@ func (s *Store) qualityEvidenceByDigest(ctx context.Context, tenant, digest stri
 func scanQualityEvidence(row rowScanner) (domain.QualityEvidence, error) {
 	var item domain.QualityEvidence
 	var evaluatedAt, createdAt string
-	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.DistributionJSON, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt, &item.Source, &item.ReferenceRevisionID)
+	err := row.Scan(&item.ID, &item.TenantID, &item.DeploymentID, &item.RevisionID, &item.AgentID, &item.Suite, &item.SuiteVersion, &item.Evaluator, &item.EvaluatorVersion, &item.Score, &item.Passed, &item.SampleCount, &item.DistributionJSON, &item.ArtifactDigest, &item.PayloadDigest, &item.Signature, &item.PublicKey, &item.Algorithm, &item.KeyID, &evaluatedAt, &createdAt, &item.Source, &item.ReferenceRevisionID)
 	item.EvaluatedAt, item.CreatedAt = parseTime(evaluatedAt), parseTime(createdAt)
 	return item, err
 }
@@ -266,7 +266,7 @@ func (s *Store) QualityEvidenceByIDs(ctx context.Context, tenant string, ids []s
 	if len(unique) == 0 {
 		return out, nil
 	}
-	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,deployment_id,revision_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
+	rows, err := s.QueryContext(ctx, `SELECT id,tenant_id,COALESCE(deployment_id,''),COALESCE(revision_id,agent_setup_id),COALESCE(agent_id,''),suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json::text,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id FROM revision_quality_evidence WHERE tenant_id=? AND id=ANY(?)`, tenant, unique)
 	if err != nil {
 		return nil, err
 	}
@@ -279,4 +279,48 @@ func (s *Store) QualityEvidenceByIDs(ctx context.Context, tenant string, ids []s
 		out[item.ID] = item
 	}
 	return out, rows.Err()
+}
+
+// RecordAgentQualityEvidence stores InferCrane-run evidence for a setup an
+// agent measured in the customer's cluster. Its identity is the setup's own
+// (evidence.RevisionID, agentsetup-... or agentserver-...); no deployment or
+// revision exists. A repeated payload returns the stored row.
+func (s *Store) RecordAgentQualityEvidence(ctx context.Context, tenant, agentID string, evidence domain.QualityEvidence) (domain.QualityEvidence, bool, error) {
+	if tenant == "" || agentID == "" || !agentSetupIdentity.MatchString(evidence.RevisionID) {
+		return domain.QualityEvidence{}, false, errors.New("agent quality evidence needs a tenant, an agent, and the setup's identity")
+	}
+	if evidence.Source != domain.QualityEvidenceSourceInferCrane {
+		return domain.QualityEvidence{}, false, errors.New("agent quality evidence is InferCrane-run")
+	}
+	var err error
+	if evidence.ID == "" {
+		if evidence.ID, err = newID(); err != nil {
+			return domain.QualityEvidence{}, false, err
+		}
+	}
+	evidence.TenantID, evidence.DeploymentID, evidence.AgentID = tenant, "", agentID
+	if evidence.CreatedAt.IsZero() {
+		evidence.CreatedAt = time.Now().UTC()
+	}
+	result, err := s.ExecContext(ctx, `INSERT INTO revision_quality_evidence(id,tenant_id,agent_id,agent_setup_id,suite,suite_version,evaluator,evaluator_version,score,passed,sample_count,distribution_json,artifact_digest,payload_digest,signature,public_key,algorithm,key_id,evaluated_at,created_at,source,reference_revision_id) SELECT ?,?,a.id,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?,?,? FROM agents a WHERE a.tenant_id=? AND a.id=? ON CONFLICT(tenant_id,payload_digest) DO NOTHING`,
+		evidence.ID, tenant, evidence.RevisionID, evidence.Suite, evidence.SuiteVersion, evidence.Evaluator, evidence.EvaluatorVersion, evidence.Score, evidence.Passed, evidence.SampleCount, nullJSON(evidence.DistributionJSON), evidence.ArtifactDigest, evidence.PayloadDigest, evidence.Signature, evidence.PublicKey, evidence.Algorithm, evidence.KeyID, evidence.EvaluatedAt.Format(time.RFC3339Nano), evidence.CreatedAt.Format(time.RFC3339Nano), evidence.Source, evidence.ReferenceRevisionID, tenant, agentID)
+	if err != nil {
+		return domain.QualityEvidence{}, false, err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil {
+		return domain.QualityEvidence{}, false, affectedErr
+	} else if affected == 1 {
+		return evidence, true, nil
+	}
+	existing, err := s.qualityEvidenceByDigest(ctx, tenant, evidence.PayloadDigest)
+	if errors.Is(err, ErrNotFound) {
+		return domain.QualityEvidence{}, false, fmt.Errorf("%w: agent %s is not in this workspace", ErrNotFound, agentID)
+	}
+	if err != nil {
+		return domain.QualityEvidence{}, false, err
+	}
+	if existing.AgentID != agentID || existing.RevisionID != evidence.RevisionID || existing.Signature != evidence.Signature || existing.PublicKey != evidence.PublicKey || existing.Source != evidence.Source {
+		return domain.QualityEvidence{}, false, fmt.Errorf("%w: quality evidence digest already identifies another immutable record", ErrConflict)
+	}
+	return existing, false, nil
 }

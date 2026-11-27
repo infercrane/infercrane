@@ -1,8 +1,10 @@
 {{- if .Values.executor.enabled }}
 # The same namespaced grant the control plane's Kubernetes provider uses
-# (deploy/kubernetes/base/provider-rbac.yaml): one Deployment and one Service
-# per candidate, and read-only PersistentVolumeClaims for model caches. No
-# cluster-scoped permission, no Secrets, no Pods/exec.
+# (deploy/kubernetes/base/provider-rbac.yaml): one Deployment, one Service and
+# one engine NetworkPolicy per candidate, and read-only PersistentVolumeClaims
+# for model caches. Pods are read only, to name (as a keyed digest) the node
+# each measured server ran on. No cluster-scoped permission, no Secrets, no
+# Pods/exec.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -17,8 +19,14 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch", "delete"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

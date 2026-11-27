@@ -1,16 +1,16 @@
 name: InferCrane delivery
-description: Render semantic deployment plans, explicitly apply them, or verify a released revision.
+description: Plan and apply deployments, verify a released revision, and gate pull requests that change a model, engine setting, or serving setup on InferCrane's proof.
 author: InferCrane contributors
 branding:
   icon: activity
   color: blue
 inputs:
   mode:
-    description: plan, apply, or release-check
+    description: plan, apply, release-check, or proof-gate
     required: true
     default: plan
   spec:
-    description: DeploymentSpec path for plan or apply
+    description: DeploymentSpec path for plan or apply; for proof-gate, the pull request's spec whose change is proved
     required: false
   deployment:
     description: Logical deployment for release-check
@@ -33,14 +33,96 @@ inputs:
   version:
     description: Exact InferCrane release tag used when auto-installing
     required: false
-    default: v2.0.2
+    default: v2.1.0
   output-path:
-    description: Machine-readable plan or evidence path
+    description: Machine-readable plan, evidence, or proof-gate result path
     required: false
     default: infercrane-delivery.json
+  campaign:
+    description: proof-gate only. ID of a run to read the verdict of, instead of running a proof
+    required: false
+  current-spec:
+    description: proof-gate only. The current setup's spec; defaults to spec as it is on the pull request's base commit
+    required: false
+  base-ref:
+    description: proof-gate only. Commit to read the current setup's spec from; defaults to the pull request's base
+    required: false
+  objective:
+    description: proof-gate only. interactive, latency, throughput, or cost-efficiency
+    required: false
+    default: interactive
+  profile:
+    description: proof-gate only. Benchmark workload profile; defaults from objective
+    required: false
+  workload-fingerprint:
+    description: proof-gate only. Fingerprint of captured traffic both setups replay
+    required: false
+  quality-check:
+    description: proof-gate only. builtin (answers compared with the current setup's) or customer_evidence (your signed eval)
+    required: false
+  eval-set:
+    description: proof-gate only. Digest of an uploaded eval set for the built-in answer check
+    required: false
+  max-cost-usd:
+    description: proof-gate only. Required to run a proof. Hard cap on what both setups' GPU servers may spend
+    required: false
+  approval-window:
+    description: proof-gate only. How long the run may spend before its servers stop
+    required: false
+    default: 3h
+  proof-timeout:
+    description: proof-gate only. How long the job waits for the verdict; an unfinished run is UNKNOWN and fails
+    required: false
+    default: 3h
+  setup:
+    description: proof-gate only. Setup ID to judge when a read run measured several
+    required: false
+  on-watch:
+    description: proof-gate only. Check outcome for WATCH. neutral (passes with a warning), fail, or pass
+    required: false
+    default: neutral
+  require-signature:
+    description: proof-gate only. Treat an unsigned report as UNKNOWN
+    required: false
+    default: "false"
+  public-key:
+    description: proof-gate only. Base64 Ed25519 key the report must be signed by
+    required: false
+  release-servers:
+    description: proof-gate only. Cancel a run this job started once its verdict is read, so its servers stop
+    required: false
+    default: "true"
+  comment:
+    description: proof-gate only. Post or update one pull-request comment with the verdict
+    required: false
+    default: "true"
+  comment-key:
+    description: proof-gate only. Names this gate's comment when one pull request has several; defaults to spec
+    required: false
+  pull-request:
+    description: proof-gate only. Pull request number to comment on; defaults to the event's
+    required: false
+  github-token:
+    description: proof-gate only. Token that writes the pull-request comment
+    required: false
+    default: ${{ github.token }}
+  report-path:
+    description: proof-gate only. Where the signed report is saved, byte for byte, for offline verification
+    required: false
+    default: infercrane-proof-report.json
 outputs:
   result:
-    description: pass or fail
+    description: pass or fail; for proof-gate also neutral (WATCH) or skipped (spec unchanged)
+  verdict:
+    description: proof-gate PASS, WATCH, BLOCK, or UNKNOWN
+  conclusion:
+    description: proof-gate success, neutral, failure, or skipped
+  campaign-id:
+    description: Run the proof gate read or started
+  report-digest:
+    description: Digest of the signed report the verdict was decided from
+  comment-url:
+    description: The proof gate's pull-request comment
   operation-id:
     description: Durable operation submitted by apply
   endpoint:

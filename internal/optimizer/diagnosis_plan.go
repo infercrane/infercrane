@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationreadiness"
 	"github.com/infercrane/infercrane/internal/provideridentity"
 	"github.com/infercrane/infercrane/internal/support"
+	contract "github.com/infercrane/infercrane/internal/technique"
 )
 
 const (
@@ -44,7 +46,7 @@ const (
 	NeededEngineMetrics  = "serving-engine metrics: running and waiting requests, KV-cache usage, and preemptions"
 	NeededFewerErrors    = "an error rate at or below 2%, so failed requests do not bias a speed comparison"
 	engineSignalPrefix   = "runtime_"
-	differentArtifactWhy = "This setup serves different model files from the starting setup, and a campaign cannot rank setups that serve different files yet, so it was left out."
+	differentArtifactWhy = "This setup serves different model files from the starting setup. A diagnosis measures only a reviewed publisher's FP8 checkpoint of the exact model, beside FP8 at load, so it was left out."
 	moreGPUsWhy          = "This setup spreads the model over more GPUs per server than the starting setup, and the GPU trace shows communication between GPUs already holding the GPU idle, so it was left out."
 )
 
@@ -61,6 +63,10 @@ type DiagnosisPlan struct {
 	// NeededEvidence names what to collect before a diagnosis can choose a
 	// change. It is set whenever the proposal measures only the control.
 	NeededEvidence []string `json:"needed_evidence"`
+	// CacheRoom says how many requests fit at once with each draft length,
+	// beside the load the server is asked to hold. Absent when the engine
+	// did not report the readings it needs.
+	CacheRoom *CacheRoom `json:"cache_room,omitempty"`
 }
 
 // PlannedTechnique is one technique the diagnosis chose, in planning order.
@@ -94,11 +100,11 @@ type CandidateReason struct {
 // validateCandidateReason bounds a reason in an untrusted proposal. A reason
 // orders measurement; it can never mark a candidate measured or qualified.
 func validateCandidateReason(reason CandidateReason) error {
-	if reason.Role != ReasonControl && reason.Role != ReasonDiagnosis || reason.Label == "" || len(reason.Label) > 256 || len(reason.Summary) > maxReasonText || len(reason.Rules) > maxReasonItems || len(reason.Evidence) > maxReasonItems || reason.Priority < 0 || reason.Priority > 100 {
+	if reason.Role != ReasonControl && reason.Role != ReasonDiagnosis && reason.Role != ReasonReference && reason.Role != ReasonCopy || reason.Label == "" || len(reason.Label) > 256 || len(reason.Summary) > maxReasonText || len(reason.Rules) > maxReasonItems || len(reason.Evidence) > maxReasonItems || reason.Priority < 0 || reason.Priority > 100 {
 		return errors.New("proposal candidate reason is malformed")
 	}
 	if reason.Role == ReasonDiagnosis {
-		if _, known := techniques[reason.Technique]; !known {
+		if _, known := techniques[canonicalTechnique(reason.Technique)]; !known {
 			return errors.New("proposal candidate reason names an unknown technique")
 		}
 	} else if reason.Technique != "" {
@@ -128,13 +134,27 @@ type rankedCandidate struct {
 // the starting setup's required evidence.
 func applyDiagnosis(proposal Proposal) (Proposal, error) {
 	request := proposal.Input
-	diagnosis := *request.Diagnosis
+	// The plan starts from what the endpoint runs, when the control can take it.
+	if why := applyStartingSetup(&proposal); why != "" {
+		proposal.Warnings = append(proposal.Warnings, why)
+	}
+	// The plan is made for the load the server holds now; the recorded
+	// diagnosis stays in the proposal's input.
+	diagnosis, note := presentDiagnosis(*request.Diagnosis)
 	facts := planContext{objective: request.Objective, gpu: request.GPU}
+	var controlArgs []string
 	if len(proposal.Candidates) > 0 {
 		facts.engine, facts.version = proposal.Candidates[0].Deployment.Runtime.Engine, proposal.Candidates[0].Deployment.Runtime.Version
+		controlArgs = proposal.Candidates[0].Deployment.Runtime.Args
 	}
-	choices := planTechniques(diagnosis, facts)
-	plan := &DiagnosisPlan{RulesVersion: DiagnosisRulesVersion, Endpoint: diagnosis.Endpoint, PrimaryBottleneck: diagnosis.PrimaryBottleneck, Techniques: []PlannedTechnique{}, NeededEvidence: []string{}}
+	facts.drafts = currentDrafts(diagnosis, controlArgs)
+	if len(proposal.Candidates) > 0 {
+		facts.fp8Weights, facts.fp8Cache = precisionOf(proposal.Candidates[0].Deployment.Model.ID, controlArgs)
+	}
+	facts.supplied = suppliedDrafts(request)
+	choices := applyPrior(request, diagnosis, proposal, planTechniques(diagnosis, facts))
+	plan := &DiagnosisPlan{RulesVersion: DiagnosisRulesVersion, Endpoint: diagnosis.Endpoint, PrimaryBottleneck: diagnosis.PrimaryBottleneck, Techniques: []PlannedTechnique{}, NeededEvidence: []string{},
+		CacheRoom: cacheRoom(diagnosis, facts.drafts, facts.fp8Weights, facts.fp8Cache)}
 	proposal.Diagnosis = plan
 	planned := make([]PlannedTechnique, len(choices))
 	for index, choice := range choices {
@@ -147,7 +167,7 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		for index := range planned {
 			planned[index].Skipped = "No starting setup could be planned for this model and infrastructure, so there is nothing to change."
 		}
-		finishPlan(&proposal, planned, diagnosis, nil)
+		finishPlan(&proposal, planned, diagnosis, nil, note)
 		return proposal, nil
 	}
 
@@ -156,13 +176,18 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 	usable := map[string]*plannedChoice{}
 	for index := range choices {
 		choice := &choices[index]
-		if why := techniqueGate(choice.technique, control); why != "" {
+		if why := techniqueGate(choice.technique, control, request); why != "" {
 			skipped[choice.technique.id] = why
+			continue
+		}
+		if choice.skip != "" {
+			skipped[choice.technique.id] = choice.skip
 			continue
 		}
 		usable[choice.technique.id] = choice
 	}
 	var ranked []rankedCandidate
+	var checkpoints []ArtifactSeed
 	covered := map[string]bool{}
 	for index, candidate := range proposal.Candidates[1:] {
 		var best *plannedChoice
@@ -175,6 +200,14 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 			continue
 		}
 		if !sameArtifact(candidate, control) {
+			// A published FP8 checkpoint of the starting setup's exact model is
+			// measured beside FP8 weights quantized at load, not instead of them.
+			if best.technique.id == TechniqueFP8Weights && publishedFP8(candidate, control) {
+				if !slices.ContainsFunc(checkpoints, func(seed ArtifactSeed) bool { return seed.CatalogID == candidate.ArtifactSeed.CatalogID }) {
+					checkpoints = append(checkpoints, *candidate.ArtifactSeed)
+				}
+				continue
+			}
 			if skipped[best.technique.id] == "" && !covered[best.technique.id] {
 				skipped[best.technique.id] = differentArtifactWhy
 			}
@@ -190,9 +223,41 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		delete(skipped, best.technique.id)
 		ranked = append(ranked, rankedCandidate{candidate: candidate, choice: best, order: index})
 	}
+	var offers map[string][]contract.Candidate
+	var offerWhy map[string]string
+	var manifests map[string]contract.Manifest
 	for index := range choices {
 		choice := &choices[index]
 		if usable[choice.technique.id] == nil || covered[choice.technique.id] {
+			continue
+		}
+		// A contract technique's setups come from its own package, asked
+		// once per proposal (technique_path.go).
+		if contractTechniques[choice.technique.id] {
+			if offers == nil {
+				var err error
+				if offers, offerWhy, manifests, err = contractOffers(request, control); err != nil {
+					return Proposal{}, err
+				}
+			}
+			added := false
+			for _, offered := range offers[choice.technique.id] {
+				derived, skip, err := contractCandidate(control, manifests[choice.technique.id], offered, request)
+				if err != nil {
+					return Proposal{}, err
+				}
+				if skip != "" {
+					offerWhy[choice.technique.id] = sentence(skip)
+					continue
+				}
+				ranked = append(ranked, rankedCandidate{candidate: derived, choice: choice, derived: true, order: len(ranked)})
+				added = true
+			}
+			if added {
+				delete(skipped, choice.technique.id)
+			} else if skipped[choice.technique.id] == "" {
+				skipped[choice.technique.id] = offerWhy[choice.technique.id]
+			}
 			continue
 		}
 		args, env, reason := control.Deployment.Runtime.Args, map[string]string(nil), ""
@@ -214,7 +279,22 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		}
 		ranked = append(ranked, rankedCandidate{candidate: derived, choice: choice, derived: true, order: len(ranked)})
 	}
+	if weights := usable[TechniqueFP8Weights]; weights != nil && len(checkpoints) > 0 {
+		choice := checkpointChoice(*weights)
+		for _, seed := range checkpoints {
+			derived, err := checkpointSetup(control, seed, request)
+			if err != nil {
+				return Proposal{}, err
+			}
+			ranked = append(ranked, rankedCandidate{candidate: derived, choice: &choice, derived: true, order: len(ranked)})
+		}
+		planned = append(planned, PlannedTechnique{Technique: choice.technique.id, Label: choice.technique.label, Priority: choice.priority,
+			ExpectedBenefit: expectedBenefit(choice.priority), Rules: choice.rules, Reason: choice.reason, Evidence: choice.evidence, CandidateIDs: []string{}})
+	}
 	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].choice.priorOrder != ranked[j].choice.priorOrder {
+			return ranked[i].choice.priorOrder < ranked[j].choice.priorOrder
+		}
 		if ranked[i].choice.priority != ranked[j].choice.priority {
 			return ranked[i].choice.priority > ranked[j].choice.priority
 		}
@@ -227,26 +307,37 @@ func applyDiagnosis(proposal Proposal) (Proposal, error) {
 		return ranked[i].order < ranked[j].order
 	})
 
+	// The setups that test the plan itself come right after its first choice
+	// or after its last (diagnosis_standing.go).
+	standing, err := standingCandidates(control, ranked, diagnosis, request, plan.CacheRoom)
+	if err != nil {
+		return Proposal{}, err
+	}
 	control.Reason = &CandidateReason{Role: ReasonControl, Label: "Starting setup", ExpectedBenefit: "baseline", Rules: []string{}, Evidence: []ReasonEvidence{},
 		Summary: "The setup every other setup must beat; it is measured in turns with each of them on the same traffic."}
 	ordered := []Candidate{control}
-	for _, entry := range ranked {
+	for index, entry := range ranked {
 		candidate := entry.candidate
 		candidate.Reason = &CandidateReason{
 			Role: ReasonDiagnosis, Technique: entry.choice.technique.id, Label: entry.choice.technique.label, Priority: entry.choice.priority,
 			ExpectedBenefit: expectedBenefit(entry.choice.priority), Rules: entry.choice.rules, Summary: entry.choice.reason, Evidence: entry.choice.evidence,
 		}
 		ordered = append(ordered, candidate)
+		if index == 0 {
+			ordered = appendStanding(ordered, standing, false)
+		}
 	}
+	ordered = appendStanding(ordered, standing, true)
 	proposal.Candidates = ordered
-	finishPlan(&proposal, planned, diagnosis, skipped)
+	finishPlan(&proposal, planned, diagnosis, skipped, note)
 	return proposal, nil
 }
 
 // finishPlan bounds the candidates, links each planned technique to its
 // candidates or its skip reason, and sets the plan state, summary, and the
-// evidence to collect when only the starting setup is measured.
-func finishPlan(proposal *Proposal, planned []PlannedTechnique, diagnosis Diagnosis, skipped map[string]string) {
+// evidence to collect when only the starting setup is measured. A note from
+// reading the diagnosis for the present load opens the summary.
+func finishPlan(proposal *Proposal, planned []PlannedTechnique, diagnosis Diagnosis, skipped map[string]string, note string) {
 	plan, request := proposal.Diagnosis, proposal.Input
 	if len(proposal.Candidates) > request.MaxCandidates {
 		proposal.Candidates = proposal.Candidates[:request.MaxCandidates]
@@ -294,6 +385,9 @@ func finishPlan(proposal *Proposal, planned []PlannedTechnique, diagnosis Diagno
 		plan.NeededEvidence = append(plan.NeededEvidence, NeededEngineMetrics)
 	}
 	plan.Summary = diagnosisSummary(plan, diagnosis)
+	if note != "" {
+		plan.Summary = note + " " + plan.Summary
+	}
 	if plan.State == DiagnosisApplied {
 		warnings := []string{}
 		for _, warning := range proposal.Warnings {
@@ -367,9 +461,14 @@ func sentenceCase(label string) string {
 
 // techniqueGate says why a chosen change must not be measured for this model
 // at all, whoever would apply it.
-func techniqueGate(technique technique, control Candidate) string {
+func techniqueGate(technique technique, control Candidate, request Request) string {
 	if technique.outOfScope != "" && technique.id != TechniqueInt4Weights {
 		return technique.outOfScope
+	}
+	if technique.draft != "" {
+		if _, supplied := suppliedDrafts(request)[technique.draft]; !supplied {
+			return noDraftWhy[technique.draft]
+		}
 	}
 	size, sized := modelSizeBillions(control.Deployment.Model.ID)
 	switch {
@@ -388,6 +487,48 @@ func gpusPerServer(candidate Candidate) int {
 
 func sameArtifact(candidate, control Candidate) bool {
 	return candidate.Deployment.Model.ID == control.Deployment.Model.ID && candidate.Deployment.Model.Revision == control.Deployment.Model.Revision
+}
+
+// publishedFP8 reports whether candidate serves a reviewed publisher's FP8
+// checkpoint of the starting setup's exact model: the catalog's base is the
+// control's model, at the control's revision: the revision the publisher
+// declares, or else the one the catalog screened the build against. A build
+// the publisher declares only by repository matches no other revision.
+func publishedFP8(candidate, control Candidate) bool {
+	seed := candidate.ArtifactSeed
+	if seed == nil || !strings.Contains(strings.ToLower(seed.Algorithm), "fp8") || strings.Contains(strings.ToLower(seed.Algorithm), "fp4") || !strings.EqualFold(seed.BaseRepository, control.Deployment.Model.ID) {
+		return false
+	}
+	if seed.BaseRevision != "" {
+		return seed.BaseRevision == control.Deployment.Model.Revision
+	}
+	return seed.BaseScreeningRevision != "" && seed.BaseScreeningRevision == control.Deployment.Model.Revision
+}
+
+// checkpointSetup is the starting setup with only its weights replaced by a
+// published checkpoint: the same flags and environment, the checkpoint's
+// files, and the catalog's provenance.
+func checkpointSetup(control Candidate, seed ArtifactSeed, request Request) (Candidate, error) {
+	base := control
+	base.Deployment.Model.ID, base.Deployment.Model.Revision = seed.OutputRepository, seed.OutputRevision
+	derived, err := diagnosisCandidate(base, techniques[TechniqueFP8Checkpoint], control.Deployment.Runtime.Args, nil, request)
+	if err != nil {
+		return Candidate{}, err
+	}
+	derived.ArtifactSeed = &seed
+	derived.Deployment.Name = safeName(control.Deployment.Name + "-" + TechniqueFP8Checkpoint + "-" + strings.ToLower(seed.Publisher))
+	return derived, nil
+}
+
+// checkpointChoice is the FP8 weights choice carried to a published FP8
+// checkpoint: the same priority, ranked right after FP8 at load.
+func checkpointChoice(weights plannedChoice) plannedChoice {
+	return plannedChoice{
+		technique: techniques[TechniqueFP8Checkpoint], priority: weights.priority,
+		rules:    append(append([]string(nil), weights.rules...), "weights.published_checkpoint"),
+		reason:   weights.reason + " A reviewed publisher's FP8 checkpoint of this exact model is measured beside FP8 at load: its calibration may keep answers closer, and each must keep the task score on its own.",
+		evidence: append([]ReasonEvidence(nil), weights.evidence...),
+	}
 }
 
 // classifyCandidate names the techniques an existing candidate applies, from
@@ -445,18 +586,38 @@ func deriveArgs(control Candidate, technique technique, diagnosis Diagnosis, req
 	if !control.Deployment.Serving.Empty() {
 		return nil, "The starting setup is a Dynamo serving graph; its runtime changes go through the serving topology, not engine flags."
 	}
+	if technique.draft != "" {
+		return draftArgs(control.Deployment.Runtime.Args, engine, version, technique, request)
+	}
 	if technique.modelFeature != "" && !contains(request.ModelFeatures, technique.modelFeature) {
 		return nil, "The model's pinned config was not read or declares no native prediction head, which this technique needs."
 	}
 	if technique.nativeFP8 && !nativeFP8Accelerator(request.GPU) {
 		return nil, request.GPU + " is not an accelerator InferCrane knows runs FP8 in hardware (NVIDIA Ada, Hopper, or Blackwell, or AMD Instinct MI300X, MI325X, MI350X, or MI355X)."
 	}
-	if technique.id == TechniqueFP8Weights && quantizedModelName(control.Deployment.Model.ID) {
+	if (technique.id == TechniqueFP8Weights || contains(technique.parts, TechniqueFP8Weights)) && quantizedModelName(control.Deployment.Model.ID) {
 		return nil, "The model's weights already look quantized, so FP8 weights would not apply."
 	}
 	current := append([]string(nil), control.Deployment.Runtime.Args...)
+	for _, part := range technique.parts {
+		if _, changed := withArgs(current, techniques[part].args[engine]); !changed {
+			return nil, fmt.Sprintf("The starting setup already uses %s, so the pair is %s alone.", strings.ToLower(techniques[part].label), otherPart(technique, part))
+		}
+	}
 	if technique.id == TechniqueCUDAGraphs {
 		return cudaGraphArgs(current, engine, version, request.GPU, diagnosis)
+	}
+	// vLLM 0.34.0's Rust front end is one multithreaded process and ignores
+	// --api-server-count (entrypoints/cli/serve.py).
+	if technique.id == TechniqueAPIServers && engine == "vllm" && control.Deployment.Runtime.Env["VLLM_USE_RUST_FRONTEND"] == "1" {
+		return nil, "The starting setup serves through vLLM's Rust front end, which runs one multithreaded process and ignores the API server count."
+	}
+	if technique.id == TechniqueSpeculationOff {
+		without, removed := withoutFlagValues(current, "--speculative-config", "--speculative-algorithm", "--speculative-num-steps", "--speculative-eagle-topk", "--speculative-num-draft-tokens")
+		if !removed {
+			return nil, "The starting setup does not speculate."
+		}
+		return without, ""
 	}
 	if technique.id == TechniqueAsyncScheduling && hasSpeculation(current) {
 		return nil, fmt.Sprintf("The starting setup speculates, and its speculation method decides whether %s schedules ahead, so this cannot be changed on its own.", engineName(engine))
@@ -471,11 +632,17 @@ func deriveArgs(control Candidate, technique technique, diagnosis Diagnosis, req
 	}
 	args := technique.args[engine]
 	if sized := technique.sizedArgs[engine]; sized != nil {
-		class, known := acceleratorMemoryClass(request.GPU)
+		class, known := acceleratorMemoryClass(request.GPU, version)
 		if !known {
 			return nil, fmt.Sprintf("InferCrane does not know %s's memory, so it cannot tell %s's default batch limits.", request.GPU, engineName(engine))
 		}
 		args = sized[class]
+	}
+	if technique.id == TechniqueBatchBudget {
+		var why string
+		if args, why = capBatchToCache(args, current, engine, version, request.GPU, diagnosis); why != "" {
+			return nil, why
+		}
 	}
 	if len(args) == 0 {
 		return nil, fmt.Sprintf("No reviewed %s flag applies this technique yet.", engineName(engine))
@@ -614,6 +781,12 @@ func withoutFlags(current, flags []string) []string {
 // diagnosisCandidate copies the starting setup and applies one technique's
 // flags. The copy keeps every required evidence item of the starting setup.
 func diagnosisCandidate(control Candidate, technique technique, args []string, env map[string]string, request Request) (Candidate, error) {
+	return deriveCandidate(control, technique, args, env, request, nil)
+}
+
+// deriveCandidate builds a setup from the starting setup with technique's
+// change; adjust, when given, finishes it before its identity is computed.
+func deriveCandidate(control Candidate, technique technique, args []string, env map[string]string, request Request, adjust func(*Candidate)) (Candidate, error) {
 	encoded, err := json.Marshal(control)
 	if err != nil {
 		return Candidate{}, err
@@ -639,7 +812,7 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, e
 			features = append(features, feature)
 		}
 	}
-	candidate.Features = append(features, Feature{Name: "diagnosis_technique", State: technique.id, Source: request.Diagnosis.Endpoint})
+	candidate.Features = append(features, Feature{Name: "diagnosis_technique", State: technique.id, Source: featureSource(request)})
 	limitations := []string{}
 	for _, limitation := range candidate.Limitations {
 		if limitation != genericBaselineLimitation {
@@ -661,6 +834,12 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, e
 	if technique.changesKernels {
 		candidate.RequiredEvidence = append(candidate.RequiredEvidence, "answer quality check against the starting setup because this setup swaps the GPU kernels that compute each layer")
 	}
+	if technique.changesAnswers() {
+		candidate.RequiredEvidence = append(candidate.RequiredEvidence, TaskScoreEvidence)
+	}
+	if adjust != nil {
+		adjust(&candidate)
+	}
 	identity, err := json.Marshal(struct {
 		Source     SourceInfo      `json:"source"`
 		Deployment DeploymentDraft `json:"deployment"`
@@ -675,4 +854,42 @@ func diagnosisCandidate(control Candidate, technique technique, args []string, e
 	sum := sha256.Sum256(identity)
 	candidate.ID = hex.EncodeToString(sum[:])
 	return candidate, nil
+}
+
+// precisionOf says whether a starting setup already serves quantized weights
+// (by the model's name or a --quantization flag) or an FP8 KV cache.
+func precisionOf(model string, args []string) (weights, cache bool) {
+	weights = quantizedModelName(model)
+	for index, arg := range args {
+		flag, value, inline := strings.Cut(arg, "=")
+		if !inline && index+1 < len(args) {
+			value = args[index+1]
+		}
+		switch flag {
+		case "--quantization":
+			weights = weights || value != ""
+		case "--kv-cache-dtype":
+			cache = cache || strings.HasPrefix(strings.ToLower(value), "fp8")
+		}
+	}
+	return weights, cache
+}
+
+// otherPart names the part of a combined change that is not `part`.
+func otherPart(technique technique, part string) string {
+	for _, other := range technique.parts {
+		if other != part {
+			return strings.ToLower(techniques[other].label)
+		}
+	}
+	return ""
+}
+
+// featureSource names where a planned change came from: the diagnosed
+// endpoint, or the request itself for a technique no diagnosis chose.
+func featureSource(request Request) string {
+	if request.Diagnosis != nil {
+		return request.Diagnosis.Endpoint
+	}
+	return "request"
 }

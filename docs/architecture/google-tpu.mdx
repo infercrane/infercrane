@@ -1,0 +1,219 @@
+---
+title: Google Cloud TPU (not qualified)
+description: How InferCrane recognizes Google Cloud TPUs, refuses them until a measured run, and what serving, optimizing, and qualifying vLLM on TPU v5e, v5p, v6e, and TPU7x would take.
+---
+
+# Google Cloud TPU
+
+InferCrane recognizes Google Cloud TPUs by name and refuses every spec, plan, and setup that names
+one. Nothing can select a TPU until a measured run on its generation qualifies it. This page is the
+design for that run and for what follows it: the images to pin, how a TPU deployment is provisioned,
+which optimizations carry over from GPUs, and what a first run costs.
+
+<Warning>
+No model has been served or measured on a TPU through InferCrane. TPU speed, cost, and answer
+quality are unknown. Every fact below was read on 2026-11-26 from the source linked next to it;
+prices change, so read them again before a run.
+</Warning>
+
+## What InferCrane does today
+
+A TPU name resolves to its own platform, so it is never mistaken for a CUDA GPU and never started on
+a CUDA image. That platform has no selectable image and no placement, so:
+
+- `spec` loading, revision storage, planning, and the deployment workflow refuse it with
+  `… is on the tpu-v6e platform, which is not qualified`;
+- the Kubernetes adapter refuses it again even on a cluster whose device plugin exposes
+  `google.com/tpu`;
+- a SkyPilot TPU name such as `tpu-v6e-8` is refused instead of being sent to a CUDA image;
+- the optimizer finds no reviewed engine setting, image, or recipe for it.
+
+`GET /api/v1/catalog/accelerators` lists TPUs under `not_qualified`, apart from the accelerators a
+spec may select, with the candidate images below. The data lives in
+`internal/provideridentity/accelerator_not_qualified.go` and `internal/support/not_qualified.go`.
+
+## Platform identity
+
+| Name | Spellings recognized | Platform | Target | Memory per chip | Device resource |
+|---|---|---|---|---|---|
+| TPU v5e | `v5e`, `v5litepod-8`, `tpu-v5litepod-4`, `tpu-v5-lite-podslice` | `tpu-v5e` | `v5e` | 16 GiB | `google.com/tpu` |
+| TPU v5p | `v5p`, `v5p-8`, `tpu-v5p-slice` | `tpu-v5p` | `v5p` | 95 GiB | `google.com/tpu` |
+| TPU v6e (Trillium) | `v6e`, `Trillium`, `tpu-v6e-8`, `tpu-v6e-slice` | `tpu-v6e` | `v6e` | 32 GB | `google.com/tpu` |
+| TPU7x (Ironwood) | `tpu7x`, `v7x`, `Ironwood`, `tpu7x-16` | `tpu-v7x` | `v7x` | 192 GiB | `google.com/tpu` |
+
+Memory comes from Google's pages for [v5e](https://docs.cloud.google.com/tpu/docs/v5e),
+[v5p](https://docs.cloud.google.com/tpu/docs/v5p), [v6e](https://docs.cloud.google.com/tpu/docs/v6e),
+and [TPU7x](https://docs.cloud.google.com/tpu/docs/tpu7x). On v6e, 31.25 GiB of the 32 GB is usable;
+v5p lists 95 of 96 GiB. Spellings include the Cloud TPU accelerator type, SkyPilot's name with its
+slice size, and GKE's `cloud.google.com/gke-tpu-accelerator` label value
+([plan TPUs in GKE](https://docs.cloud.google.com/kubernetes-engine/docs/concepts/plan-tpus)). Older
+generations (v2 to v4) are not recognized: like any unreviewed name, they keep the CUDA default.
+
+Each generation is its own platform, as each AMD compiler target is: a run on v6e qualifies v6e
+only.
+
+## Runtime images and how to pin them
+
+Two vLLM plugins serve TPUs. Both are Apache-2.0, both run `vllm serve` with the same OpenAI API,
+`/health`, `/v1/models`, and `/metrics` paths, and both publish amd64-only release images.
+
+| Plugin | Serves | Image (digest read from registry-1.docker.io) | Built on | Generations |
+|---|---|---|---|---|
+| [vLLM JAX](https://github.com/vllm-project/tpu-inference) (formerly tpu-inference) v0.34.0, 2026-11-24 | JAX model implementations, and vLLM's PyTorch ones through torchax | `vllm/vllm-tpu:v0.34.0@sha256:450e37c04b8bf4dd2568e38672dcd94d0f22f131510962725d577eb249839440` | vLLM main commit `5ec99956ad` (not the v0.34.0 tag), JAX 0.11.2, torchax 0.0.13, libtpu 0.0.48 | Recommended v7x, v5e, v6e; experimental v5p |
+| [vLLM TorchTPU](https://github.com/vllm-project/vllm-torchtpu) v0.33.0, 2026-11-17 | PyTorch model definitions through `torch_tpu` | `vllm/vllm-torchtpu:v0.33.0@sha256:95e38744cf05e337a47901518a70fc3308639a11f0c9a87066f0840ebb00f020` | vLLM v0.33.0, torch 2.13.0, torch_tpu 0.2.0, libtpu 0.0.50, Python 3.12 | v7x validated in CI; v6e supported without CI; v5e, v5p experimental |
+
+Both are recorded as `not-qualified` images for every TPU platform. To pin one when a run qualifies
+it:
+
+1. Read the tag's manifest digest from the registry and pin `repository@sha256:…`, as for every
+   other image. A tag can move; the digest cannot.
+2. Move the image into `runtimeImages` in `internal/support/matrix.go` for the platforms the run
+   measured, and only those.
+3. Record its engine version and defaults from its own source. The vLLM JAX image is built from a
+   vLLM main commit, not a release tag, so the defaults InferCrane records for vLLM 0.34.0
+   (batch tiers, block size, extensible KV cache) do not carry over until read from that build.
+4. Flip the generation's accelerators to `serving` and add the Kubernetes placement in `V1()`.
+
+The two plugins give the same runtime (`vllm`) two images for one platform. The catalog allows one
+image per runtime, release, and platform, so qualifying both needs a second runtime name or a rule
+for choosing between them. That choice belongs to the first run: vLLM JAX recommends v6e, and vLLM
+TorchTPU validates only v7x in CI.
+
+## How a TPU deployment is provisioned
+
+TPUs run through the existing Kubernetes adapter on a GKE TPU node pool. Nothing TPU-specific
+branches in the lifecycle; what differs is data.
+
+```bash
+gcloud container node-pools create tpu-v6e-1 --cluster CLUSTER --location us-east5 \
+  --node-locations us-east5-b --machine-type ct6e-standard-1t --num-nodes 1
+export INFERCRANE_KUBERNETES_GPU_RESOURCE='google.com/tpu'
+export INFERCRANE_KUBERNETES_GPU_PRODUCT_LABEL='cloud.google.com/gke-tpu-accelerator'
+```
+
+The spec then names the label value as its GPU (`resources: {gpu: tpu-v6e-slice}`), and the pod
+asks for `google.com/tpu` chips. Machine types per generation are `ct5lp-hightpu-1t/4t/8t` (v5e),
+`ct5p-hightpu-4t` (v5p), `ct6e-standard-1t/4t/8t` (v6e), and `tpu7x-standard-4t` (TPU7x, GKE
+1.34.0-gke.2201000 or later). Spot node pools take `--spot` at creation and use their own quota.
+
+What the adapter does not do yet, and a TPU run needs:
+
+- **Topology.** GKE's TPU pod spec selects both `cloud.google.com/gke-tpu-accelerator` and
+  `cloud.google.com/gke-tpu-topology` (for example `1x1` for one v6e chip, `2x4` for eight). The
+  adapter writes one node selector. The topology would be data per generation and chip count.
+  TPU7x also needs `cloud.google.com/placement-policy-name`.
+- **Compile cache.** Both plugins compile the model with XLA at start. vLLM TorchTPU's README says
+  the first start "can take several minutes"; its notes report 20 minutes cold against under 2
+  cached for DeepSeek-V4-Pro on v7x-16. `VLLM_XLA_CACHE_PATH` on a volume shared across starts
+  avoids recompiling; Google's tutorial warns that replicas sharing one path can fail. The cache
+  volume and the control plane's wait for a ready replica must both be set from measured compile
+  times.
+- **Engine variables.** TPU variables such as `VLLM_XLA_CACHE_PATH`, `MODEL_IMPL_TYPE` (vLLM JAX),
+  and `TPU_TOKEN_BUCKET_*` (vLLM TorchTPU) are not reviewed. A run adds each one it needs to the
+  reviewed engine environment for the TPU platform, with its values and default from source.
+- **One device resource per control plane.** As for AMD, a control plane configured for
+  `google.com/tpu` refuses GPUs, so a mixed fleet needs one control plane per resource.
+
+RunPod, AWS, and Azure offer no TPUs. The GCP Compute adapter starts GPU VMs only, and SkyPilot
+reaches its nodes over SSH with CUDA images, so neither is a TPU path.
+
+## Engine options and techniques
+
+The optimizer's rules read the diagnosis, not the vendor, but most of its levers are engine flags
+whose meaning differs on TPU.
+
+| Technique or option | On TPU | Why |
+|---|---|---|
+| Batch size and batched tokens (`--max-num-seqs`, `--max-num-batched-tokens`) | Applies, measured | Both plugins pad to compiled buckets, so each value changes what is compiled and how long start-up takes. |
+| Prefix caching, chunked prefill | Applies | Supported by both plugins. vLLM JAX turns prefix caching off for hybrid models with speculative decoding. |
+| Tensor, data, expert parallelism | Applies | Both plugins; TorchTPU documents TP, DP, and EP on every CI recipe. |
+| Speculative decoding: n-gram, EAGLE-3 | Applies | Both plugins (vLLM JAX: Eagle3, Ngram, DFlash passing; TorchTPU: eagle3, mtp, dflash, dspark, ngram, suffix). |
+| Speculative decoding: MTP | TorchTPU only | Not in vLLM JAX's support matrix. |
+| Trained draft models (InferCrane's) | Unknown | Applies only where the plugin loads the draft's format; neither lists a generic draft-model method. |
+| Load-adaptive speculation | Unknown | Needs the switch image built for TPU. |
+| FP8 weights or KV cache | TPU7x only, as a speed lever | Google lists FP8 peak equal to BF16 peak on v5p (459 TFLOPs) and v6e (918), and twice BF16 only on TPU7x (4,614). vLLM TorchTPU's docs say FP8 doubles matrix throughput on v6e, which Google's table does not show, so it stays unknown until measured. FP8 still halves memory on every generation. |
+| INT8 W8A8, AWQ INT4 | Listed for v5e and v6e by vLLM JAX | Its quantization table is marked untested and covers checkpoint loading only. |
+| LoRA | TorchTPU: dense text models on one chip, no parallelism or speculation | vLLM TorchTPU v0.33.0 notes. |
+| CUDA graphs, capture sizes | Does not apply | No static graph mode on TPU; TorchTPU never expands `cudagraph_capture_sizes`. |
+| Attention backends (FlashInfer, FlashAttention, Triton) | Do not apply | Both plugins map `FLASH_ATTN`, `CUSTOM`, and `FLASH_ATTN_MLA` to their own Pallas kernels and replace any other with `FLASH_ATTN`. |
+| Tuned fused-MoE kernel configs, Marlin, AITER | Do not apply | Triton, CUDA, and ROCm kernels. TPU kernels are Pallas; the kernel planner lists JAX Pallas and XLA custom calls as TPU backends, metadata only. |
+| GPU profiling (PyTorch profiler, Nsight) | Does not apply | TPU traces come from XProf; no TPU capture is built. |
+
+So a TPU run starts from the engine's own setup and measures batch, parallelism, and speculation
+settings. Kernel tuning on TPU is a separate project.
+
+## Judge, quality checks, and KL check
+
+These run through the OpenAI API, not the engine, so they work on TPU as on GPU as long as the
+server answers the same requests:
+
+- **Answer check.** Chat requests at `temperature 0`, `top_p 1`, seed 17, `max_tokens`, and
+  `chat_template_kwargs`, scored against the reference's answers by token F1. Nothing TPU-specific.
+  Greedy decoding on TPU need not match a GPU's token for token; the check reads a drop in score,
+  never byte equality.
+- **KL check (divergence).** Needs `continue_final_message` and `prompt_logprobs: 16`, vLLM
+  extensions. vLLM JAX v0.34.0 computes prompt log probabilities in its runner, and vLLM TorchTPU
+  ships a prompt-logprobs module with tests, so both should answer; the first run confirms it.
+  Where a server returns none, divergence is absent and a precision change cannot be judged.
+- **Judge per load band.** Reads AIPerf results and engine metrics by name. TorchTPU says `/metrics`
+  keeps vLLM's metric names and adds `vllm:prompt_tokens_cached_by_source`; Google's GKE tutorial
+  autoscales vLLM JAX on `vllm:num_requests_waiting`. That every family the control plane reads is
+  present is unknown until the first run lists them.
+- **Comparing with a GPU.** A TPU result is a separate setup on a separate machine: it is compared
+  with a GPU baseline as two measured options at the same load, never as a candidate against a GPU
+  control. The machine-variance floor must be measured on the TPU itself.
+
+## What a first qualification run costs
+
+Prices per chip-hour, read 2026-11-26 from [Cloud TPU pricing](https://cloud.google.com/tpu/pricing)
+(on-demand, DWS Flex-start) and [Spot VM pricing](https://cloud.google.com/spot-vms/pricing) (Spot,
+which Google says can change up to once every 30 days):
+
+| TPU | Region | On-demand | Spot | Flex-start |
+|---|---|---|---|---|
+| v5e | us-central1 | $1.20 | $0.377295 | $0.60 |
+| v5e | europe-west4 | $1.56 | $0.750253 | $0.60 |
+| v6e | us-east1 | $2.70 | $0.635963 | $1.35 |
+| v6e | us-east5 | $2.70 | $1.62 | $1.35 |
+| v6e | europe-west4 | $2.97 | $1.782 | $1.35 |
+| v5p | us-east5 | $4.20 | $1.202254 | $2.10 |
+| TPU7x | us-central1 | $12.00 | $4.1154 | $6.00 |
+
+GKE charges $0.10 per cluster-hour, and a billing account's free tier covers $74.40 a month
+([GKE pricing](https://cloud.google.com/kubernetes-engine/pricing), read 2026-11-26). The CPU node
+that runs the cluster's system pods, disks, and network were not priced.
+
+**Proposed first run:** `Qwen/Qwen3-4B` (BF16, listed as passing in vLLM JAX's support matrix) on
+one v6e chip (`ct6e-standard-1t`, topology `1x1`) in us-east1, both plugins, about two hours each:
+start and compile, readiness, `/v1/models` identity, the metric families, the answer and KL checks
+against a GPU reference, and AIPerf at the built-in profiles. Four chip-hours cost $10.80 on-demand
+or about $2.54 on Spot at the prices above, plus the unpriced CPU node. A TPU7x run starts at four
+chips ($48 an hour on-demand).
+
+**Accounts it needs** (none created): a GCP project with billing enabled. Cloud TPU's default quota
+for v5e and v6e is 512 on-demand and 1,536 preemptible cores per zone, but a v6e increase is
+reviewed by hand, and GKE node pools draw on Compute Engine quota, whose TPU default Google does not
+state ([TPU quota](https://docs.cloud.google.com/tpu/docs/quota)). A free-trial account cannot
+request a quota increase.
+
+## Licences
+
+| Component | Licence |
+|---|---|
+| vLLM, vLLM JAX (tpu-inference), vLLM TorchTPU, JAX, torch_tpu, torchax | Apache-2.0 |
+| libtpu (inside both images) | Google Cloud Platform Terms of Service ([PyPI](https://pypi.org/project/libtpu/)); a closed runtime binary |
+
+libtpu is not Apache-2.0. It ships inside the plugins' own images, which InferCrane runs by digest
+and never rebuilds or re-hosts, so the core takes no dependency on it. It stays named here and
+optional: nothing in the core needs a TPU.
+
+## Unknown until the first run
+
+- Compile time per model and bucket set, and so the ready-wait and cache design.
+- Which plugin serves a given model better on a given generation.
+- Whether every engine metric family the control plane reads is present.
+- Whether FP8 is faster than BF16 on v6e.
+- The GKE (Compute Engine) TPU quota of a new project.
+
+Next: [Compatibility and qualification](/compatibility) explains how a platform becomes qualified.
+[Intel Gaudi and Intel GPUs](/architecture/intel-gaudi-and-gpus) is the same design for Intel.

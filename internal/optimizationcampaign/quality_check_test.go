@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/infercrane/infercrane/internal/qualityevidence"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -358,5 +360,202 @@ func TestCoordinatorEndsCandidateInconclusiveWhenAnswersCannotBeCompared(t *test
 	result, err := coordinator.Step(t.Context(), "tenant", "campaign", "candidate-a")
 	if err != nil || result.To != CandidateInconclusive || repository.campaign.Candidates[0].FailureCode != FailureQualityReferenceUnavailable {
 		t.Fatalf("result = %+v err=%v candidate=%+v", result, err, repository.campaign.Candidates[0])
+	}
+}
+
+// forcedCompleter also reads forced sequences: the candidate's distribution
+// moves on the answer's positions by shift.
+type forcedCompleter struct {
+	*answerCompleter
+	shift  float64
+	forced int
+}
+
+func (c *forcedCompleter) Forced(_ context.Context, target qualitycheck.Target, _ qualitycheck.EvalSet, _ qualitycheck.Prompt, _ string, _ int) (qualitycheck.Forced, error) {
+	c.mu.Lock()
+	c.forced++
+	c.mu.Unlock()
+	positions := make([]map[string]float64, 0, 6)
+	for index := 1; index <= 6; index++ {
+		p := 0.8
+		if index >= 3 && target.Endpoint == "http://fast" {
+			p -= c.shift
+		}
+		positions = append(positions, map[string]float64{"7": math.Log(p), "8": math.Log(0.1)})
+	}
+	return qualitycheck.Forced{PrefixTokens: 3, Positions: positions}, nil
+}
+
+func withArgs(t *testing.T, run *qualityCampaign, args ...string) {
+	t.Helper()
+	var draft optimizer.DeploymentDraft
+	if err := json.Unmarshal([]byte(run.candidate.DeploymentSpecJSON), &draft); err != nil {
+		t.Fatal(err)
+	}
+	draft.Runtime.Args = args
+	encoded, _ := json.Marshal(draft)
+	run.candidate.DeploymentSpecJSON = string(encoded)
+	run.composite.campaign.Candidates[1] = run.candidate
+}
+
+// A candidate that changes numeric precision also records how far its
+// next-token distribution moved on the reference's own answers; one that
+// changes nothing else is not read that way.
+func TestBuiltinQualityCheckRecordsTheDivergenceOfAPrecisionChange(t *testing.T) {
+	for name, test := range map[string]struct {
+		args []string
+		want bool
+	}{
+		"fp8-kv-cache": {args: []string{"--kv-cache-dtype", "fp8"}, want: true},
+		"copy":         {args: []string{"--seed", "1"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := newQualityCampaign(t, optimizer.Request{})
+			withArgs(t, &run, test.args...)
+			completer := &forcedCompleter{answerCompleter: run.completer, shift: 0.3}
+			check := run.driver.Quality.(BuiltinQualityCheck)
+			check.Completer = completer
+			run.driver.Quality = check
+			validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+			if err != nil || !validated.Passed {
+				t.Fatalf("validation = %+v err=%v", validated, err)
+			}
+			row := run.store.evidence["qwen-opt-fast"][0]
+			var distribution qualityevidence.Distribution
+			if err = json.Unmarshal([]byte(row.DistributionJSON), &distribution); err != nil {
+				t.Fatal(err)
+			}
+			if !test.want {
+				if distribution.Divergence != nil || completer.forced != 0 {
+					t.Fatalf("a change of no precision was read: %+v forced=%d", distribution.Divergence, completer.forced)
+				}
+				return
+			}
+			divergence := distribution.Divergence
+			if divergence == nil || divergence.Method != qualityevidence.DivergenceMethod || divergence.PrefillMeanKL != 0 || divergence.GenerationMeanKL <= 0 || divergence.Prompts == 0 {
+				t.Fatalf("divergence = %+v", divergence)
+			}
+			// The reference's own row carries none.
+			var reference qualityevidence.Distribution
+			_ = json.Unmarshal([]byte(run.store.evidence["qwen-opt-control"][0].DistributionJSON), &reference)
+			if reference.Divergence != nil {
+				t.Fatalf("reference row divergence = %+v", reference.Divergence)
+			}
+		})
+	}
+}
+
+// withModels gives the control and the candidate their own model and
+// revision, as a published checkpoint candidate has.
+func withModels(t *testing.T, run *qualityCampaign, control, candidate [2]string) {
+	t.Helper()
+	set := func(row *domain.OptimizationCandidateRun, model [2]string) {
+		var draft optimizer.DeploymentDraft
+		if err := json.Unmarshal([]byte(row.DeploymentSpecJSON), &draft); err != nil {
+			t.Fatal(err)
+		}
+		draft.Model.ID, draft.Model.Revision = model[0], model[1]
+		encoded, _ := json.Marshal(draft)
+		row.DeploymentSpecJSON = string(encoded)
+	}
+	set(&run.control, control)
+	set(&run.candidate, candidate)
+	run.composite.campaign.Candidates[0], run.composite.campaign.Candidates[1] = run.control, run.candidate
+}
+
+// A candidate serving another repository is read for divergence only when
+// the proposal recorded both models' tokenizer digests and they are equal;
+// otherwise the divergence is unknown, no server is asked for it, and the
+// answers still decide.
+func TestBuiltinQualityCheckReadsDivergenceAcrossModelsOnlyWithTheSameTokenizer(t *testing.T) {
+	base := [2]string{"Qwen/Qwen3-8B", strings.Repeat("a", 40)}
+	checkpoint := [2]string{"Qwen/Qwen3-8B-FP8", strings.Repeat("b", 40)}
+	digest := func(fill string) string { return "sha256:" + strings.Repeat(fill, 64) }
+	key := func(model [2]string) string { return optimizer.TokenizerKey(model[0], model[1]) }
+	for name, test := range map[string]struct {
+		tokenizers map[string]string
+		want       bool
+	}{
+		"the same tokenizer files":   {map[string]string{key(base): digest("c"), key(checkpoint): digest("c")}, true},
+		"another tokenizer":          {map[string]string{key(base): digest("c"), key(checkpoint): digest("d")}, false},
+		"the checkpoint's not known": {map[string]string{key(base): digest("c")}, false},
+		"nothing recorded":           {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := newQualityCampaign(t, optimizer.Request{ModelTokenizers: test.tokenizers})
+			withModels(t, &run, base, checkpoint)
+			completer := &forcedCompleter{answerCompleter: run.completer, shift: 0.3}
+			check := run.driver.Quality.(BuiltinQualityCheck)
+			check.Completer = completer
+			run.driver.Quality = check
+			validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+			if err != nil || !validated.Passed {
+				t.Fatalf("validation = %+v err=%v", validated, err)
+			}
+			var distribution qualityevidence.Distribution
+			if err = json.Unmarshal([]byte(run.store.evidence["qwen-opt-fast"][0].DistributionJSON), &distribution); err != nil {
+				t.Fatal(err)
+			}
+			if test.want != (distribution.Divergence != nil) || test.want != (completer.forced > 0) {
+				t.Fatalf("divergence = %+v forced = %d, want read = %v", distribution.Divergence, completer.forced, test.want)
+			}
+		})
+	}
+}
+
+// A setup that changes answers must show them held within a point on the
+// task set; the same answers from a setup that changes nothing pass by the
+// ±3-point rule. Not shown to hold ends the setup inconclusive, never
+// qualified, and its evidence says why.
+func TestASetupThatChangesAnswersIsHeldBackWhenItCannotShowThemHeld(t *testing.T) {
+	prompts := make([]map[string]any, 0, 1000)
+	control, candidate := map[string]string{}, map[string]string{}
+	for index := range 1000 {
+		id, gold := fmt.Sprintf("gsm8k.test.%d", index), fmt.Sprint(index+1)
+		prompts = append(prompts, map[string]any{"id": id, "prompt": "item with gold " + gold, "expected": []string{gold}})
+		control[id], candidate[id] = "Some working.\nAnswer: "+gold, "Some working.\nAnswer: "+gold
+		if index < 30 {
+			control[id] = "Some working.\nAnswer: 999"
+		}
+		// One point lost: ten items gained, twenty lost.
+		if (index >= 10 && index < 30) || (index >= 100 && index < 120) {
+			candidate[id] = "Some working.\nAnswer: 999"
+		}
+	}
+	body, err := json.Marshal(map[string]any{"schema": qualitycheck.EvalSetSchemaV1, "name": "task-set", "version": "1", "max_tokens": 1024, "grading": qualitycheck.GradingAnswerLine, "prompts": prompts})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := qualitycheck.Digest(body)
+	for name, test := range map[string]struct {
+		args         []string
+		passed       bool
+		inconclusive bool
+		code         string
+	}{
+		"FP8 KV cache": {args: []string{"--kv-cache-dtype", "fp8"}, inconclusive: true, code: FailureQualityAnswersNotShownHeld},
+		"a copy":       {args: []string{"--seed", "1"}, passed: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := newQualityCampaign(t, optimizer.Request{QualityEvalSet: digest})
+			run.store.evalSets = map[string]domain.QualityEvalSet{digest: {Digest: digest, Body: string(body)}}
+			run.completer.answers = map[string]map[string]string{"http://control": control, "http://fast": candidate}
+			withArgs(t, &run, test.args...)
+			validated, err := run.driver.Validate(t.Context(), run.candidate.ID, run.candidate)
+			if err != nil || validated.Passed != test.passed || validated.Inconclusive != test.inconclusive || validated.FailureCode != test.code {
+				t.Fatalf("validation = %+v err=%v", validated, err)
+			}
+			var distribution qualityevidence.Distribution
+			if err = json.Unmarshal([]byte(run.store.evidence["qwen-opt-fast"][0].DistributionJSON), &distribution); err != nil {
+				t.Fatal(err)
+			}
+			wantRule := qualitycheck.RuleWithinMargin
+			if test.inconclusive {
+				wantRule = qualitycheck.RuleHeld
+			}
+			if distribution.TaskRule != wantRule || distribution.TaskServers != 1 || distribution.ItemsAtOnce != 32 {
+				t.Fatalf("distribution = %+v", distribution)
+			}
+		})
 	}
 }

@@ -55,6 +55,61 @@ type Distribution struct {
 	// ToolCalls is set only by InferCrane's built-in answer check, for eval
 	// sets with cases that declare function tools.
 	ToolCalls *ToolCallScores `json:"tool_calls,omitempty"`
+	// Divergence is set only by InferCrane's built-in answer check, for a
+	// candidate that changes numeric precision: how far its next-token
+	// distribution moved from the reference's on the reference's own answers.
+	Divergence *Divergence `json:"divergence,omitempty"`
+	// ItemsAtOnce is set only by InferCrane's built-in check on a task set: how
+	// many items it asked each server at once. The reference and the candidate
+	// are asked at the same concurrency, so batching treats both alike.
+	ItemsAtOnce int `json:"items_at_once,omitempty"`
+	// TaskVerdict, TaskRule and TaskServers are set only on a candidate's row
+	// of the built-in check on a task set: the verdict's code, how the
+	// interval was read, and how many servers of each setup answered.
+	TaskVerdict string `json:"task_verdict,omitempty"`
+	TaskRule    string `json:"task_rule,omitempty"`
+	TaskServers int    `json:"task_servers,omitempty"`
+	// TaskPoolRefused says why answers other servers gave earlier were not
+	// pooled into the verdict, which then rests on the servers asked last.
+	TaskPoolRefused string `json:"task_pool_refused,omitempty"`
+}
+
+// DivergenceMethod names how Divergence is computed: both servers read the
+// reference's prompt and answer as one forced sequence, and each position's
+// KL divergence of the candidate from the reference is taken over the
+// reference's top tokens plus one bucket for the rest of the vocabulary.
+const DivergenceMethod = "forced-decoding-kl-top-k-v1"
+
+// Divergence is the mean KL divergence per token, kept apart for the prompt's
+// tokens (prefill) and the answer's (generation), with the largest single
+// position of the answer. It is evidence; it passes or blocks nothing.
+type Divergence struct {
+	Method           string  `json:"method"`
+	TopK             int     `json:"top_k"`
+	Prompts          int     `json:"prompts"`
+	PrefillTokens    int     `json:"prefill_tokens"`
+	PrefillMeanKL    float64 `json:"prefill_mean_kl"`
+	GenerationTokens int     `json:"generation_tokens"`
+	GenerationMeanKL float64 `json:"generation_mean_kl"`
+	GenerationMaxKL  float64 `json:"generation_max_kl"`
+	// PromptSet and PromptSetVersion name the prompts read (version@digest),
+	// and MaxAnswerTokens caps each reference answer. A reading names them
+	// since the check reads a task set's items or long-answer prompts, which
+	// may differ from the prompts the answers were scored on.
+	PromptSet        string `json:"prompt_set,omitempty"`
+	PromptSetVersion string `json:"prompt_set_version,omitempty"`
+	MaxAnswerTokens  int    `json:"max_answer_tokens,omitempty"`
+}
+
+// maxDivergencePrompts bounds a reading's prompts.
+const maxDivergencePrompts = 64
+
+func (d Divergence) valid() bool {
+	finite := func(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 }
+	return d.Method == DivergenceMethod && d.TopK >= 1 && d.TopK <= 64 && d.Prompts >= 1 && d.Prompts <= maxDivergencePrompts &&
+		len(d.PromptSet) <= 128 && len(d.PromptSetVersion) <= 256 && d.MaxAnswerTokens >= 0 && d.MaxAnswerTokens <= 4096 &&
+		d.PrefillTokens >= 0 && d.GenerationTokens >= 1 && d.PrefillTokens <= 100_000_000 && d.GenerationTokens <= 100_000_000 &&
+		finite(d.PrefillMeanKL) && finite(d.GenerationMeanKL) && finite(d.GenerationMaxKL) && d.GenerationMaxKL >= d.GenerationMeanKL
 }
 
 // ToolCallScores is the built-in check's score over the cases that declare
@@ -240,6 +295,9 @@ func (p Payload) Validate() error {
 			if calls.Cases < 1 || calls.Cases > p.SampleCount || math.IsNaN(calls.Score) || calls.Score < 0 || calls.Score > 1 || calls.Broken < 0 || calls.Broken > calls.Cases || calls.ReferenceInvalid < 0 || calls.ReferenceInvalid > calls.Cases || !calls.Candidate.within(calls.Cases) || !calls.Reference.within(calls.Cases) || calls.Reference.MissingCall+calls.Reference.ExtraCalls+calls.Reference.UnexpectedCall > 0 {
 				return errors.New("quality distribution tool_calls must count 1 to sample_count cases, at most that many of each kind, with a score between 0 and 1; the reference has no missing, extra, or unexpected calls")
 			}
+		}
+		if divergence := p.Distribution.Divergence; divergence != nil && !divergence.valid() {
+			return fmt.Errorf("quality distribution divergence must use method %q, top_k 1 to 64, 1 to 64 prompts, an answer cap of at most 4096 tokens, at least one answer token, and finite non-negative KL values with the maximum at or above the mean", DivergenceMethod)
 		}
 	}
 	if !sha256Pattern.MatchString(p.ArtifactDigest) {

@@ -1,0 +1,61 @@
+{
+ "note": "The prior gym's runs (internal/resultprior TestPriorGym). INFERCRANE_PRIOR_GYM_DATA names a directory with its own datasets.json to score other runs.",
+ "datasets": [
+  {
+   "name": "H100, hybrid model (synthetic map)",
+   "file": "map-hybrid.json",
+   "currents": [
+    "plain",
+    "three-drafts",
+    "one-draft"
+   ],
+   "rules": "rules-map-hybrid.json",
+   "rules_built_from": "synthetic: some cells are marked as the rules' source",
+   "options": {
+    "architecture": "hybrid",
+    "params_b": 27,
+    "checkpoint": "fp8",
+    "recorded_at": "2001-01-02T03:00:00Z",
+    "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56",
+    "basis": "separate-servers",
+    "commit": "01234567",
+    "set": "synthetic-map"
+   }
+  },
+  {
+   "name": "L4, dense model (synthetic screen)",
+   "file": "screen-dense.json",
+   "currents": [
+    "defaults"
+   ],
+   "rules": "rules-screen-dense.json",
+   "rules_built_from": "synthetic: every cell is marked as the rules' source",
+   "options": {
+    "architecture": "dense",
+    "params_b": 8.2,
+    "checkpoint": "bf16",
+    "recorded_at": "2001-01-03T03:00:00Z",
+    "image_digest": "sha256:ffac6943776c05cfa37503fcb12aec8d4b05310eb8b3245271a40c860901af56",
+    "basis": "same-machine",
+    "set": "synthetic-screen"
+   }
+  },
+  {
+   "name": "L4, dense model (synthetic confirmation)",
+   "file": "confirm-dense.json",
+   "currents": [
+    "defaults"
+   ],
+   "rules": "rules-screen-dense.json",
+   "rules_built_from": "synthetic: the screen's cells"
+  },
+  {
+   "name": "H200, hybrid model on two engines (synthetic)",
+   "file": "two-engines-hybrid.json",
+   "currents": [
+    "vllm-plain"
+   ],
+   "rules_built_from": "not asked: the gym cannot express a change of engine"
+  }
+ ]
+}

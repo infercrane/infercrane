@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/admission"
@@ -47,19 +48,59 @@ func (m *memoryStore) makeAgentManaged(endpoint string) {
 func (m *memoryStore) AgentDataPlaneBindings(_ context.Context, tenant, agentID string) ([]domain.AgentDataPlaneBinding, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	rollouts := map[string]bool{}
+	for _, server := range m.servers {
+		if server.Rollout {
+			rollouts[server.EndpointName] = true
+		}
+	}
 	out := []domain.AgentDataPlaneBinding{}
 	for slot, server := range m.servers {
 		if server.AgentID != agentID || server.OwnershipMode != "agent-managed" || m.dp().residency[server.EndpointName] != "customer-cloud" {
 			continue
 		}
+		// An endpoint with a rollout server routes to it first, its own
+		// server as the fallback, as a rollout's switched plan does.
+		policy, priority := "manual", 0
+		if rollouts[server.EndpointName] {
+			policy, priority = "primary-fallback", 1
+			if server.Rollout {
+				priority = 0
+			}
+		}
 		out = append(out, domain.AgentDataPlaneBinding{
 			EndpointID: server.EndpointID, EndpointName: server.EndpointName, LogicalModelID: server.LogicalModelID, EnvironmentID: server.EnvironmentID,
-			ServingPlanID: server.ServingPlanID, RoutingPolicy: "manual", BindingID: server.BindingID, TargetID: server.TargetID,
-			ServerKey: server.Key, UpstreamModel: server.UpstreamModel, Runtime: server.Runtime, Health: m.health[slot], Priority: 0, Weight: 100,
+			ServingPlanID: server.ServingPlanID, RoutingPolicy: policy, BindingID: server.BindingID, TargetID: server.TargetID,
+			ServerKey: server.Key, UpstreamModel: server.UpstreamModel, Runtime: server.Runtime, Health: m.health[slot], Priority: priority, Weight: 100, Rollout: server.Rollout,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].EndpointName != out[j].EndpointName {
+			return out[i].EndpointName < out[j].EndpointName
+		}
+		return out[i].Priority < out[j].Priority
+	})
 	_ = tenant
 	return out, nil
+}
+
+// makeRollout turns the server registered as fromEndpoint into a rollout
+// server of endpoint, as a rollout's registration and switch leave it.
+func (m *memoryStore) makeRollout(fromEndpoint, endpoint string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var target *domain.AgentServer
+	for _, server := range m.servers {
+		if server.EndpointName == endpoint {
+			target = server
+		}
+	}
+	for _, server := range m.servers {
+		if server.EndpointName == fromEndpoint && target != nil {
+			server.EndpointName, server.EndpointID, server.LogicalModelID, server.EnvironmentID, server.ServingPlanID = endpoint, target.EndpointID, target.LogicalModelID, target.EnvironmentID, target.ServingPlanID
+			server.OwnershipMode, server.Rollout = "agent-managed", true
+		}
+	}
 }
 
 func (m *memoryStore) AgentDataPlaneCredentials(_ context.Context, tenant string) ([]domain.CredentialRecord, error) {
@@ -90,6 +131,9 @@ func (m *memoryStore) AdmissionPoliciesForTenant(_ context.Context, tenant strin
 }
 
 func (m *memoryStore) RequestQuotaLimit(context.Context, string) (int, bool, error) {
+	if m.noQuota {
+		return 0, false, nil
+	}
 	return 600, true, nil
 }
 
@@ -109,6 +153,11 @@ func (m *memoryStore) quotaLeases() int {
 func (m *memoryStore) EnqueueAgentCommand(_ context.Context, command domain.AgentCommand) (domain.AgentCommand, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, existing := range m.dp().commands {
+		if command.IdempotencyKey != "" && existing.IdempotencyKey == command.IdempotencyKey && existing.TenantID == command.TenantID {
+			return *existing, nil
+		}
+	}
 	command.ID = fmt.Sprintf("command-%08d", len(m.dp().commands)+1)
 	command.State, command.CreatedAt, command.UpdatedAt = "queued", time.Now().UTC(), time.Now().UTC()
 	m.dp().commands[command.ID] = &command
@@ -195,4 +244,19 @@ func (m *memoryStore) command(id string) domain.AgentCommand {
 		return *command
 	}
 	return domain.AgentCommand{}
+}
+
+// agentTenant is the workspace an agent belongs to.
+func (m *memoryStore) agentTenant(agentID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if agent, ok := m.agents[agentID]; ok {
+		return agent.TenantID
+	}
+	for _, agent := range m.agents {
+		if agent.ID == agentID {
+			return agent.TenantID
+		}
+	}
+	return ""
 }

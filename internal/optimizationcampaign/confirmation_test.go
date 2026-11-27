@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/optimizer"
 )
@@ -127,9 +128,53 @@ func TestAGainThatDoesNotHoldOnFreshServersIsNotConfirmed(t *testing.T) {
 	}
 }
 
-func TestAWinWithoutAConfirmationIsNotConfirmed(t *testing.T) {
+// A fresh server can serve its first measured run slower than the rest, and
+// that can make the control drift past its limit. An invalid window measured
+// nothing, so it is measured once more on the same servers: a valid second
+// try decides, and the invalid one is kept for audit. Invalid twice, whether
+// the gain holds stays unknown, never "did not hold".
+func TestAnInvalidWindowOnFreshServersIsMeasuredOnceMore(t *testing.T) {
+	const warm = 1.0
+	firstControl := []float64{warm, 100, 101, 100, 101, 100}
+	firstCandidate := []float64{warm, 125, 126, 125, 126}
+	drifting, drifted := []float64{warm, 80, 99, 100, 99, 100}, []float64{warm, 110, 111, 110, 111}
+	for name, test := range map[string]struct {
+		control, candidate []float64
+		decision           string
+		says               string
+	}{
+		"invalid, then valid": {control: append(append(append([]float64{}, firstControl...), drifting...), warm, 100, 101, 100, 101, 100),
+			candidate: append(append(append([]float64{}, firstCandidate...), drifted...), warm, 120, 121, 120, 121), decision: DecisionImproved, says: "measured once more"},
+		"invalid twice": {control: append(append(append([]float64{}, firstControl...), drifting...), drifting...),
+			candidate: append(append(append([]float64{}, firstCandidate...), drifted...), drifted...), decision: controlDecisionUnknown, says: "again when measured once more"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixture, sink := confirmationFixture(t, "throughput", map[string][]float64{controlEndpoint: test.control, candidateEndpoint: test.candidate})
+			expectRetirement(t, &fixture, sink, ArmCandidate, "replica-candidate")
+			expectRetirement(t, &fixture, sink, ArmControl, "replica-control")
+			_, workload := fixture.run(t)
+			evidence := measuredEvidence(t, workload)
+			first := evidence.Comparison["output_token_throughput"]
+			confirmation := evidence.Confirmation
+			if first.Decision != DecisionImproved || confirmation == nil || confirmation.Discarded == nil || confirmation.Discarded.Control.Role != ControlRoleInvalid || len(confirmation.Discarded.Runs) != 9 || len(confirmation.Runs) != 9 {
+				t.Fatalf("first=%+v confirmation=%+v", first, confirmation)
+			}
+			decision, _, reason := confirmedDecision(&evidence, first, "output_token_throughput", "throughput", false, 1)
+			if decision != test.decision || !strings.Contains(reason, test.says) || strings.Contains(reason, "did not hold") {
+				t.Fatalf("decision=%s reason=%q", decision, reason)
+			}
+		})
+	}
+}
+
+func TestAWinWithoutAJudgedSecondWindowIsUnknown(t *testing.T) {
 	first := MetricComparison{Delta: 0.2, NoiseFloor: 0.01, Decision: DecisionImproved}
-	if decision, _, reason := confirmedDecision(&MeasuredEvidence{Method: MeasurementMethod}, first, "output_token_throughput", "throughput", false, 1); decision != DecisionNotConfirmed || !strings.Contains(reason, "not measured again") {
+	if decision, _, reason := confirmedDecision(&MeasuredEvidence{Method: MeasurementMethod}, first, "output_token_throughput", "throughput", false, 1); decision != controlDecisionUnknown || !strings.Contains(reason, "not measured again") || !strings.Contains(reason, "unknown") {
+		t.Fatalf("decision=%s reason=%q", decision, reason)
+	}
+	bracketed := ControlEvidence{Role: ControlRoleBracketed}
+	withoutObjective := &MeasuredEvidence{Method: MeasurementMethod, Confirmation: &ConfirmationEvidence{Control: bracketed, Comparison: map[string]MetricComparison{"ttft_p95_ms": first}}}
+	if decision, _, reason := confirmedDecision(withoutObjective, first, "output_token_throughput", "throughput", false, 1); decision != controlDecisionUnknown || !strings.Contains(reason, "not comparable on fresh servers") {
 		t.Fatalf("decision=%s reason=%q", decision, reason)
 	}
 	// Evidence measured before confirmations existed keeps its decision.
@@ -160,31 +205,69 @@ func TestConfirmationNeedsAServingControl(t *testing.T) {
 
 // A candidate that won its first window but not again on fresh servers keeps
 // the control, with its own code; one that won both is selected and reports
-// the second window's change.
+// the second window's change. One whose fresh window was invalid keeps the
+// control too, as not compared reliably: nothing measured its gain failing.
 func TestRankingSelectsOnlyAConfirmedGain(t *testing.T) {
 	won := MetricComparison{ControlMean: 220, CandidateMean: 140, Delta: -80.0 / 220, NoiseFloor: 0.04, Decision: DecisionImproved}
+	drifted := ControlEvidence{Role: ControlRoleInvalid, CandidateID: "candidate-a", Runs: 5, Reason: "control output throughput drifted 20.0% between adjacent runs, above the 15% limit", MaxDrift: 0.2, DriftLimit: maxControlDrift}
 	for name, test := range map[string]struct {
 		second   MetricComparison
+		invalid  bool
 		decision string
 		code     string
+		says     string
 	}{
-		"held":         {second: MetricComparison{ControlMean: 222, CandidateMean: 150, Delta: -72.0 / 222, NoiseFloor: 0.05, Decision: DecisionImproved}, decision: RankSelect},
-		"did-not-hold": {second: MetricComparison{ControlMean: 222, CandidateMean: 219, Delta: -3.0 / 222, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}, decision: RankSupersede, code: FailureNotConfirmed},
+		"held":         {second: MetricComparison{ControlMean: 222, CandidateMean: 150, Delta: -72.0 / 222, NoiseFloor: 0.05, Decision: DecisionImproved}, decision: RankSelect, says: "measurably better"},
+		"did-not-hold": {second: MetricComparison{ControlMean: 222, CandidateMean: 219, Delta: -3.0 / 222, NoiseFloor: 0.05, Decision: DecisionNoMeasurableDifference}, decision: RankSupersede, code: FailureNotConfirmed, says: "did not hold"},
+		"invalid":      {invalid: true, decision: RankSupersede, code: FailureComparisonUnavailable, says: "whether the gain holds is unknown"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			campaign, benchmarks := rankingFixture(t, "interactive", nil)
 			control := ControlEvidence{Role: ControlRoleBracketed, CandidateID: "candidate-a", Runs: 5}
+			confirmation := &ConfirmationEvidence{Control: control, Comparison: map[string]MetricComparison{"ttft_p95_ms": test.second}, FreshCandidate: true, FreshControl: true}
+			if test.invalid {
+				confirmation = &ConfirmationEvidence{Control: drifted, FreshCandidate: true, FreshControl: true}
+			}
 			benchmarks[1].WorkloadJSON = measuredWorkload(t, `{"profile":"interactive","request_count":100,"random_seed":17}`, MeasuredEvidence{
-				Method: MeasurementMethod, Control: control, Comparison: map[string]MetricComparison{"ttft_p95_ms": won},
-				Confirmation: &ConfirmationEvidence{Control: control, Comparison: map[string]MetricComparison{"ttft_p95_ms": test.second}, FreshCandidate: true, FreshControl: true},
+				Method: MeasurementMethod, Control: control, Comparison: map[string]MetricComparison{"ttft_p95_ms": won}, Confirmation: confirmation,
 			}, nil)
 			result, err := RankMeasuredCampaign(campaign, benchmarks)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Decisions["candidate-b"] != test.decision || result.FailureCodes["candidate-b"] != test.code || !strings.Contains(result.Reasons["candidate-b"], "fresh servers") {
+			reason := result.Reasons["candidate-b"]
+			if result.Decisions["candidate-b"] != test.decision || result.FailureCodes["candidate-b"] != test.code || !strings.Contains(reason, "fresh servers") || !strings.Contains(reason, test.says) {
 				t.Fatalf("decisions=%v codes=%v reasons=%v", result.Decisions, result.FailureCodes, result.Reasons)
 			}
+			if test.invalid && strings.Contains(reason, "did not hold") {
+				t.Fatalf("an invalid window cannot show the gain failing: %q", reason)
+			}
 		})
+	}
+}
+
+// A window is measured again only while the approval leaves as long as the
+// invalid try took, and only once.
+func TestAWindowIsMeasuredAgainOnlyWithTimeLeftAndOnce(t *testing.T) {
+	now := time.Date(2026, 11, 26, 6, 0, 0, 0, time.UTC)
+	ended := now.Add(-time.Minute)
+	invalid := measurement{evidence: MeasuredEvidence{Confirmation: &ConfirmationEvidence{Control: ControlEvidence{Role: ControlRoleInvalid}}}}
+	session := func(deadline time.Time) *measurementSession {
+		state := &MeasurementCheckpoint{Confirmation: &ConfirmationState{Phase: ConfirmMeasure}, Segments: []MeasurementSegment{{StartedAt: ended.Add(-12 * time.Minute), EndedAt: &ended, Confirmation: true}}}
+		return &measurementSession{state: state, now: func() time.Time { return now }, deadline: deadline}
+	}
+	if short := session(now.Add(5 * time.Minute)); short.measureAgain(invalid) || short.state.Confirmation.Attempt != 0 {
+		t.Fatal("measured again with less time left than the try took")
+	}
+	roomy := session(now.Add(time.Hour))
+	if !roomy.measureAgain(invalid) || roomy.state.Confirmation.Attempt != 1 || roomy.state.Order[len(roomy.state.Order)-1] != "measure-again" {
+		t.Fatalf("state = %+v", roomy.state)
+	}
+	if roomy.measureAgain(invalid) {
+		t.Fatal("measured again twice")
+	}
+	valid := measurement{evidence: MeasuredEvidence{Confirmation: &ConfirmationEvidence{Control: ControlEvidence{Role: ControlRoleBracketed}}}}
+	if session(time.Time{}).measureAgain(valid) {
+		t.Fatal("a valid window was measured again")
 	}
 }

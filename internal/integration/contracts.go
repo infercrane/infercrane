@@ -114,21 +114,36 @@ type RuntimeProfile struct {
 	Images []support.RuntimeImage `json:"images,omitempty"`
 }
 
-// WorkloadFor is the contract a replica on this GPU serves: the default
-// workload with the image pinned for the GPU's accelerator platform. A runtime
-// without per-platform images serves its default workload on every GPU.
-func (p RuntimeProfile) WorkloadFor(gpu string) (runtimecontract.Workload, error) {
+// WorkloadFor is the contract a replica of one engine release on this GPU
+// serves: the default workload with the image pinned for that release and the
+// GPU's accelerator platform. An empty version is the profile's current
+// engine release. A runtime without per-platform images serves its default
+// workload on every GPU. A release without an image for the platform is
+// refused: serving another release's image would record a version the
+// replica does not run.
+func (p RuntimeProfile) WorkloadFor(gpu, version string) (runtimecontract.Workload, error) {
 	if len(p.Images) == 0 {
 		return p.DefaultWorkload, nil
 	}
 	platform := provideridentity.AcceleratorPlatform(gpu)
+	if version = support.NormalizeRuntimeVersion(version); version == "" {
+		version = p.EngineVersion
+	}
+	var others []string
 	for _, image := range p.Images {
-		if image.Platform == platform {
+		if image.Platform != platform {
+			continue
+		}
+		if version == "" || image.EngineVersion == version {
 			workload := p.DefaultWorkload
 			workload.Command = append([]string(nil), workload.Command...)
 			workload.Image = image.Image
 			return workload, nil
 		}
+		others = append(others, image.EngineVersion)
+	}
+	if len(others) > 0 {
+		return runtimecontract.Workload{}, fmt.Errorf("runtime %q %s has no pinned image for %s (platform %s); pinned there: %s", p.Runtime, version, gpu, platform, strings.Join(others, ", "))
 	}
 	return runtimecontract.Workload{}, fmt.Errorf("runtime %q has no pinned image for %s (platform %s)", p.Runtime, gpu, platform)
 }
@@ -482,25 +497,34 @@ func (p RuntimeProfile) Validate() error {
 			return fmt.Errorf("runtime %q default workload: %w", p.Runtime, err)
 		}
 	}
+	// Images of the profile's engine release are current; an image of another
+	// release must be marked legacy, so a revision that records it keeps its
+	// engine and a new setup never gets it.
 	seen := map[string]struct{}{}
+	current := map[string]struct{}{}
 	for _, image := range p.Images {
 		if p.DefaultWorkload.Empty() {
 			return fmt.Errorf("runtime %q declares images without a default workload", p.Runtime)
 		}
-		if image.Runtime != p.Runtime || image.EngineVersion != p.EngineVersion || image.Platform == "" {
+		release := image.EngineVersion == p.EngineVersion && image.Status == support.ImageCurrent || image.EngineVersion != p.EngineVersion && image.Status == support.ImageLegacy
+		if image.Runtime != p.Runtime || image.EngineVersion == "" || !release || image.Platform == "" {
 			return fmt.Errorf("runtime %q image for platform %q does not match the runtime and engine version", p.Runtime, image.Platform)
 		}
-		if _, duplicate := seen[image.Platform]; duplicate {
-			return fmt.Errorf("runtime %q declares platform %q more than once", p.Runtime, image.Platform)
+		key := image.EngineVersion + "/" + image.Platform
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("runtime %q declares platform %q more than once for engine %s", p.Runtime, image.Platform, image.EngineVersion)
 		}
-		seen[image.Platform] = struct{}{}
+		seen[key] = struct{}{}
+		if image.Status == support.ImageCurrent {
+			current[image.Platform] = struct{}{}
+		}
 		if err := runtimecontract.ValidateImage(image.Image); err != nil {
 			return fmt.Errorf("runtime %q image for platform %q: %w", p.Runtime, image.Platform, err)
 		}
 	}
 	if len(p.Images) > 0 {
-		if _, ok := seen[provideridentity.PlatformCUDA]; !ok || p.DefaultWorkload.Image != p.Images[0].Image {
-			return fmt.Errorf("runtime %q default workload must be its first, CUDA image", p.Runtime)
+		if _, ok := current[provideridentity.PlatformCUDA]; !ok || p.Images[0].Status != support.ImageCurrent || p.DefaultWorkload.Image != p.Images[0].Image {
+			return fmt.Errorf("runtime %q default workload must be its first, current CUDA image", p.Runtime)
 		}
 	}
 	return validateEvidence(p.Runtime, p.Capabilities, p.Qualification)

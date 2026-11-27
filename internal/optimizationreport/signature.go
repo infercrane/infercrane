@@ -3,8 +3,6 @@ package optimizationreport
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,8 +21,6 @@ const (
 const (
 	// VerifyCommand checks a report saved with --output json.
 	VerifyCommand = "infercrane optimize report verify FILE"
-	digestMember  = `,"report_digest":`
-	emptiedDigest = `,"report_digest":""}`
 )
 
 // Signature is the Ed25519 signature of a finished run's report. Digest is the
@@ -135,23 +131,11 @@ func Verify(saved []byte, trusted ed25519.PublicKey) (Verified, error) {
 }
 
 // contentDigest recomputes report_digest from the report's JSON bytes: the
-// SHA-256 of the compact report with report_digest emptied. It works on the
-// bytes, not on a decoded Report, so a field this build does not know, a
-// renamed key, or a duplicate key all change the digest. report_digest is the
-// last field of a report, as json.Marshal writes it.
+// SHA-256 of the compact report with report_digest emptied
+// (passport.TrailingDigest). report_digest is the last field of a report, as
+// json.Marshal writes it.
 func contentDigest(raw json.RawMessage) (computed, stated string, err error) {
-	var compact bytes.Buffer
-	if err = json.Compact(&compact, raw); err != nil {
-		return "", "", fmt.Errorf("read report: %w", err)
-	}
-	body := compact.Bytes()
-	at := bytes.LastIndex(body, []byte(digestMember))
-	if at < 0 || !bytes.HasSuffix(body, []byte("}")) || json.Unmarshal(body[at+len(digestMember):len(body)-1], &stated) != nil {
-		return "", "", errors.New("the report does not end with its report_digest, so its digest cannot be recomputed")
-	}
-	canonical := append(append([]byte{}, body[:at]...), emptiedDigest...)
-	sum := sha256.Sum256(canonical)
-	return "sha256:" + hex.EncodeToString(sum[:]), stated, nil
+	return passport.TrailingDigest(raw, "report_digest")
 }
 
 // UnsignedText says in words why a report carries no signature.

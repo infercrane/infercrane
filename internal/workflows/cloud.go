@@ -11,8 +11,10 @@ import (
 
 	"github.com/infercrane/infercrane/internal/domain"
 	"github.com/infercrane/infercrane/internal/integration"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/modelimport"
 	"github.com/infercrane/infercrane/internal/operations"
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/router"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -98,6 +100,7 @@ type CloudRequest struct {
 	RevisionID             string                   `json:"revision_id,omitempty"`
 	RuntimeArgs            []string                 `json:"runtime_args,omitempty"`
 	RuntimeEnv             map[string]string        `json:"runtime_env,omitempty"`
+	KernelConfigs          *domain.KernelConfigSet  `json:"kernel_configs,omitempty"`
 	Port                   int                      `json:"port,omitempty"`
 	MinReplicas            int                      `json:"min_replicas,omitempty"`
 	MaxReplicas            int                      `json:"max_replicas,omitempty"`
@@ -137,14 +140,18 @@ func (r *CloudRequest) Validate() error {
 	if r.Runtime == "" {
 		r.Runtime = support.DefaultRuntime
 	}
-	if r.RuntimeVersion == "" {
-		if r.Runtime == support.DefaultRuntime {
-			r.RuntimeVersion = support.DefaultRuntimeVersion
-		} else if r.Runtime == "sglang" {
-			r.RuntimeVersion = support.SGLangRuntimeVersion
+	// A built-in runtime's release reads as its image catalog writes it
+	// ("v0.34.0" is "0.34.0"); another runtime's version is kept as given.
+	if current := support.CurrentRuntimeVersion(r.Runtime); current != "" {
+		if r.RuntimeVersion = support.NormalizeRuntimeVersion(r.RuntimeVersion); r.RuntimeVersion == "" {
+			r.RuntimeVersion = current
 		}
 	}
-	r.Workload = support.NormalizeWorkload(r.Runtime, r.GPU, r.Workload)
+	pinnedImage := r.Workload.Empty()
+	r.Workload = support.NormalizeWorkload(r.Runtime, r.RuntimeVersion, r.GPU, r.Workload)
+	// An SGLang server takes the worker key through its configuration file;
+	// a stored revision gets it the next time it is provisioned.
+	r.Workload = support.WithEngineKey(r.Runtime, r.Workload)
 	if !r.Workload.Empty() {
 		if providedPort != 0 && providedPort != r.Workload.Port {
 			return errors.New("port conflicts with workload.port")
@@ -236,14 +243,48 @@ func (r *CloudRequest) Validate() error {
 	if err := support.ValidateRuntimeEnv(r.Runtime, r.RuntimeVersion, r.GPU, r.Workload, r.RuntimeEnv); err != nil {
 		return err
 	}
+	if err := kerneltuning.ValidateForDeployment(r.KernelConfigs, r.Runtime, r.RuntimeVersion, r.GPU, r.Workload.Empty()); err != nil {
+		return fmt.Errorf("kernel configs: %w", err)
+	}
 	if err := modelimport.ValidateDeployment(r.Model, r.ModelRevision, r.Runtime, r.ComputeMode, r.ModelAdapters, r.RuntimeArgs); err != nil {
+		return err
+	}
+	// Extra engine arguments are a reviewed set on a built-in runtime's own
+	// image; a few flags are refused whatever the runtime or image.
+	if pinnedImage {
+		if err := optimizationcapability.ValidateEngineArgs(r.Runtime, r.RuntimeArgs); err != nil {
+			return err
+		}
+	} else if err := optimizationcapability.RefuseUnsafeEngineArgs(r.RuntimeArgs); err != nil {
 		return err
 	}
 	// An operator-declared SkyPilot cloud is admitted only by its exact adapter identity.
 	if err := support.V1().ValidateProvider(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter); err != nil {
 		return err
 	}
-	return support.V1().ValidateAccelerator(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter, r.GPU)
+	if err := support.V1().ValidateAccelerator(r.Runtime, r.Cloud, r.ComputeMode, r.ProviderAdapter, r.GPU); err != nil {
+		return err
+	}
+	// A built-in runtime release must have its own pinned image: a revision on
+	// another release would otherwise run the current image while recording a
+	// version it does not run. A custom workload brings its own image, a
+	// serverless worker runs the operator's template image, and a Dynamo
+	// serving graph runs the operator's Dynamo image and version.
+	if pinnedImage && r.ComputeMode != "serverless" && r.Serving.Empty() {
+		return support.ValidateRuntimeVersion(r.Runtime, r.RuntimeVersion, r.GPU)
+	}
+	return nil
+}
+
+// imageRelease is the engine release whose pinned image provisioning fills
+// in. A serverless worker runs the operator's template image whatever the
+// revision records, so its filled workload only carries the contract's paths
+// and port, taken from the current release.
+func (r CloudRequest) imageRelease() string {
+	if r.ComputeMode == "serverless" {
+		return ""
+	}
+	return r.RuntimeVersion
 }
 
 type DeleteRequest struct {
@@ -526,7 +567,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("runtime_backend_unavailable", err)
 		}
 		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
-			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU)
+			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU, request.imageRelease())
 			if workloadErr != nil {
 				return "", operations.Permanent("runtime_platform_unsupported", workloadErr)
 			}
@@ -773,7 +814,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 		if err != nil {
 			return "", operations.Permanent("deployment_missing", err)
 		}
-		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, ModelAdapters: spec.ModelAdapters, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
+		request := CloudRequest{DeploymentID: resolved.Deployment.ID, Name: rollout.Name, Model: spec.Model, ModelRevision: spec.ModelRevision, ModelSecretReferenceID: spec.ModelSecretReferenceID, ModelAdapters: spec.ModelAdapters, RevisionID: revision.ID, Cloud: spec.Cloud, ProviderAdapter: spec.ProviderAdapter, ComputeConnectionID: spec.ComputeConnectionID, GPU: spec.GPU, GPUCount: spec.GPUCount, Region: spec.Region, Runtime: spec.Runtime, RuntimeVersion: spec.RuntimeVersion, RuntimeArgs: spec.RuntimeArgs, RuntimeEnv: spec.RuntimeEnv, KernelConfigs: spec.KernelConfigs, Port: spec.Port, Workload: spec.Workload, Serving: spec.Serving, MinReplicas: spec.MinReplicas, MaxReplicas: spec.MaxReplicas, DesiredReplicas: spec.MinReplicas, TenantID: rollout.TenantID, Actor: rollout.Actor, Candidate: true}
 		request.Runtime = spec.Runtime
 		if request.Runtime == "" {
 			request.Runtime = support.DefaultRuntime
@@ -790,7 +831,7 @@ func CloudHandlersWithBackendsAndDrain(store CloudStore, backends ReplicaBackend
 			return "", operations.Permanent("runtime_backend_unavailable", runtimeErr)
 		}
 		if request.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
-			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU)
+			workload, workloadErr := runtimeBackend.Profile.WorkloadFor(request.GPU, request.imageRelease())
 			if workloadErr != nil {
 				return "", operations.Permanent("runtime_platform_unsupported", workloadErr)
 			}
@@ -1225,7 +1266,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 		if request.ImmutableModelRevision != "" {
 			modelIdentity = request.Model + "@" + request.ImmutableModelRevision
 		}
-		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgsDigest: support.RuntimeArgsDigest(request.RuntimeArgs, request.RuntimeEnv), ModelIdentity: modelIdentity, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StageDurationsJSON: stageDurationsJSON, StartedAt: started})
+		_, _ = evidenceStore.RecordCapacityOperation(context.WithoutCancel(ctx), domain.CapacityOperation{TenantID: request.TenantID, Provider: backend.Name, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgsDigest: runtimeDigest(request), ModelIdentity: modelIdentity, ComputeMode: request.ComputeMode, Region: request.Region, GPU: request.GPU, GPUCount: request.GPUCount, Operation: "replica.ensure", ResourceKey: externalKey, Outcome: outcome, ErrorCode: errorCode, StageDurationsJSON: stageDurationsJSON, StartedAt: started})
 	}()
 	replica, _, err := store.EnsureReplicaIntent(ctx, domain.Replica{TenantID: request.TenantID, DeploymentID: request.DeploymentID, RevisionID: request.RevisionID, Ordinal: ordinal, ExternalKey: externalKey, Provider: backend.Name})
 	if err != nil {
@@ -1276,7 +1317,7 @@ func ensureCloudReplica(ctx context.Context, store CloudStore, backend ReplicaBa
 			}
 		}
 	}
-	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, RuntimeEnv: request.RuntimeEnv, Port: request.Port, Workload: request.Workload, Serving: request.Serving, ModelCredential: request.modelInputs.credential, ModelObjects: request.modelInputs.objects, Adapters: request.modelInputs.adapters})
+	ensured, err := provider.EnsureReplica(ctx, provision.ReplicaSpec{TenantID: request.TenantID, DeploymentID: request.DeploymentID, ComputeConnectionID: request.ComputeConnectionID, ExternalKey: externalKey, RequestID: replica.ProviderRequestID, Name: fmt.Sprintf("%s-r%d", request.Name, ordinal), Model: request.Model, ModelRevision: request.ImmutableModelRevision, Cloud: request.Cloud, GPU: request.GPU, GPUCount: request.GPUCount, Region: request.Region, Runtime: request.Runtime, RuntimeVersion: request.RuntimeVersion, RuntimeArgs: request.RuntimeArgs, RuntimeEnv: request.RuntimeEnv, KernelConfigs: request.KernelConfigs, Port: request.Port, Workload: request.Workload, Serving: request.Serving, ModelCredential: request.modelInputs.credential, ModelObjects: request.modelInputs.objects, Adapters: request.modelInputs.adapters})
 	if err != nil {
 		if errors.Is(err, provision.ErrProviderAuthorization) {
 			return "", "", "", operations.Permanent("provider_authorization_failed", err)
@@ -1482,7 +1523,7 @@ func removeLostReplica(ctx context.Context, store CloudStore, backends ReplicaBa
 		port = spec.Workload.Port
 	}
 	if port == 0 && spec.Workload.Empty() && !runtimeBackend.Profile.DefaultWorkload.Empty() {
-		if workload, workloadErr := runtimeBackend.Profile.WorkloadFor(spec.GPU); workloadErr == nil {
+		if workload, workloadErr := runtimeBackend.Profile.WorkloadFor(spec.GPU, spec.RuntimeVersion); workloadErr == nil {
 			port = workload.Port
 		}
 	}
@@ -1693,6 +1734,21 @@ func collectProviderFields(value any, fields map[string]string) {
 			collectProviderFields(item, fields)
 		}
 	}
+}
+
+// runtimeDigest identifies what a replica's engine runs for capacity
+// evidence: its arguments, its engine environment and, when it has one, its
+// tuned kernel set, so tuned and untuned replicas never share evidence.
+func runtimeDigest(request CloudRequest) string {
+	env := request.RuntimeEnv
+	if request.KernelConfigs != nil {
+		env = make(map[string]string, len(request.RuntimeEnv))
+		for name, value := range request.RuntimeEnv {
+			env[name] = value
+		}
+		env["kernel_configs"] = request.KernelConfigs.Digest
+	}
+	return support.RuntimeArgsDigest(request.RuntimeArgs, env)
 }
 
 // refuseUnpassedRuntimeEnv stops a revision that sets engine environment

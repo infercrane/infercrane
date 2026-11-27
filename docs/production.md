@@ -166,7 +166,7 @@ credit, and the evidence boundary for capacity-derived pricing.
 For a single-host first installation, copy `.env.production.example` to a private path, replace
 every example secret and URL, then render and start the maintained production stack:
 
-The example pins the published `v2.0.2` image. Hosted documentation follows `main`, which may
+The example pins the published `v2.1.0` image. Hosted documentation follows `main`, which may
 describe work scheduled for the next release. Do not combine a release image with a newer schema
 or configuration contract without following [upgrade and compatibility](/upgrade).
 
@@ -285,10 +285,14 @@ Health and telemetry endpoints:
 - `/livez`: process liveness; it does not depend on downstream services.
 - `/readyz`: PostgreSQL connectivity with a bounded timeout.
 - `/metrics`: Prometheus-format gateway request, failure, active request, byte, duration histogram,
-  and operation claim, completion, failure, retry, and cancellation counters.
+  and operation claim, completion, failure, retry, and cancellation counters. It needs no
+  credential and names no deployment, endpoint, or workspace.
+- `/api/v1/metrics`: one workspace's Release Guard verdicts, rollbacks, canary traffic shares, and
+  optimization results, for an API key with read permission. See
+  [Grafana and Prometheus](/integrations/grafana).
 
 Import the baseline rules at `deploy/prometheus-rules.yaml` from the repository, then tune thresholds
-from real model latency and traffic. Follow the [compatibility policy](compatibility.md) and perform
+from real model latency and traffic. The dashboard is `deploy/grafana/infercrane-dashboard.json`. Follow the [compatibility policy](compatibility.md) and perform
 the [backup/restore drill](runbooks/backup-restore.md) for every release containing migrations.
 
 Use a disruption budget, topology spread constraints, anti-affinity across failure domains, and

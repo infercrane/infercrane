@@ -47,6 +47,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.image.digest -}}
 {{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- /* Release images are tagged with the git tag, "v" + the version. */ -}}
+{{- printf "%s:%s" .Values.image.repository (default (printf "v%s" .Chart.AppVersion) .Values.image.tag) -}}
+{{- end -}}
+{{- end -}}
+
+{{- /* Sources that may reach candidate pods: by default this release's agent
+pods, in the release namespace, so the policy holds when candidates start in
+another namespace. */ -}}
+{{- define "infercrane-agent.engineIngress" -}}
+{{- if .Values.executor.engineIngress -}}
+{{- .Values.executor.engineIngress -}}
+{{- else -}}
+{{- printf "namespace:kubernetes.io/metadata.name=%s;pods:app.kubernetes.io/name=%s+app.kubernetes.io/instance=%s" .Release.Namespace (include "infercrane-agent.name" .) .Release.Name -}}
 {{- end -}}
 {{- end -}}

@@ -124,7 +124,7 @@ region, and namespace as the deployment:
     ```bash
     kubectl --context "$INFERCRANE_KUBERNETES_CONTEXT" \
       --namespace "$INFERCRANE_KUBERNETES_NAMESPACE" \
-      get deployment,service \
+      get deployment,service,networkpolicy \
       -l app.kubernetes.io/managed-by=infercrane -o json |
       jq -S '[.items[] | {
         kind,uid:.metadata.uid,name:.metadata.name,

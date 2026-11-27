@@ -11,6 +11,7 @@ import (
 	"reflect"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/kerneltuning"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -45,7 +46,7 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 			normalized.RuntimeVersion = support.SGLangRuntimeVersion
 		}
 	}
-	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.GPU, normalized.Workload)
+	normalized.Workload = support.NormalizeWorkload(normalized.Runtime, normalized.RuntimeVersion, normalized.GPU, normalized.Workload)
 	normalized.Serving = normalized.Serving.Normalize()
 	if normalized.ComputeMode == "" {
 		if normalized.Cloud != "" || normalized.GPU != "" {
@@ -94,6 +95,12 @@ func (s *Store) EnsureCandidateRevision(ctx context.Context, tenant, deploymentN
 	}
 	if err := support.ValidateRuntimeEnv(normalized.Runtime, normalized.RuntimeVersion, normalized.GPU, normalized.Workload, normalized.RuntimeEnv); err != nil {
 		return domain.DeploymentRevision{}, fmt.Errorf("runtime env: %w", err)
+	}
+	if normalized.KernelConfigs != nil && normalized.ComputeMode == "existing" {
+		return domain.DeploymentRevision{}, errors.New("kernel configs need provisioned compute; an existing endpoint's engine is not InferCrane's to change")
+	}
+	if err := kerneltuning.ValidateForDeployment(normalized.KernelConfigs, normalized.Runtime, normalized.RuntimeVersion, normalized.GPU, normalized.Workload.Empty()); err != nil {
+		return domain.DeploymentRevision{}, fmt.Errorf("kernel configs: %w", err)
 	}
 	if normalized.RoutingStrategy == "" {
 		normalized.RoutingStrategy = "round-robin"

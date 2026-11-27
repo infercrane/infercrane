@@ -1,0 +1,42 @@
+# Alertmanager routes that page on the InferCrane result alerts in
+# deploy/prometheus-rules.yaml (group infercrane-results). Critical alerts
+# (a BLOCK quality verdict, a rollback) page through PagerDuty or Opsgenie;
+# warnings go to chat. Keep only the receiver you use.
+route:
+  receiver: team-chat
+  group_by: [alertname, deployment, endpoint]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: pagerduty
+      matchers:
+        - alertname =~ "InferCraneReleaseGuardBlocked|InferCraneRolledBack"
+        - severity = "critical"
+      continue: true
+    - receiver: opsgenie
+      matchers:
+        - alertname =~ "InferCraneReleaseGuardBlocked|InferCraneRolledBack"
+        - severity = "critical"
+    - receiver: team-chat
+      matchers:
+        - alertname =~ "InferCrane.*"
+
+receivers:
+  - name: pagerduty
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
+        severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
+  - name: opsgenie
+    opsgenie_configs:
+      - api_key_file: /etc/alertmanager/secrets/opsgenie-api-key
+        priority: P1
+        message: '{{ .CommonAnnotations.summary }}'
+        description: '{{ .CommonAnnotations.description }}'
+  - name: team-chat
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: "#inference"
+        title: '{{ .CommonAnnotations.summary }}'
+        text: '{{ .CommonAnnotations.description }}'

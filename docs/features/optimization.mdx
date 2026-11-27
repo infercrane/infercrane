@@ -137,7 +137,7 @@ infercrane optimize propose acme/novel-open-model \
 ```
 
 Pass `--model-config config.json` instead to stay offline. Either one turns on these added setups;
-`--search recipes` is still accepted by scripts that pass it. Without either, setups that need a
+`--search setups`, or its earlier name, is still accepted by scripts that pass it. Without either, setups that need a
 declared model feature, such as speculative decoding, are skipped and the proposal says why. With
 `--source aiconfigurator`, `--allow-model-metadata-network` only feeds the estimator. API
 clients send `search`, `model_features`, and `model_config_digest` on
@@ -201,7 +201,18 @@ API clients send `diagnosis_endpoint` on `POST /api/v1/optimization/proposals`. 
   trace could not measure is left out. A call-stack-only capture, or an analysis version the
   planner was not written against, carries the kernel shares alone.
 
-A client cannot send a diagnosis itself. The server records it in the proposal's
+The server also reads what the endpoint runs now: the active revision of the one deployment it
+routes to. The plan starts from that setup (`input.starting_setup`: deployment, revision, engine,
+version, flags, environment, GPU) instead of an untuned server, so its changes are the endpoint's
+own flags with one change, such as one draft token instead of three. The starting setup takes the
+endpoint's engine version and flags only when the engine and the GPU match the plan's; otherwise the
+plan starts from its own setup and a warning says why. An endpoint that routes to several
+deployments, or to none with an active revision, has no single setup, and the plan starts from its
+own. On an engine version whose defaults InferCrane has not recorded, a change to a flag with an
+unknown default is not planned. vLLM 0.34.0, the current pin, and 0.22.1, kept for revisions that
+record it, both have their defaults recorded (see below).
+
+A client cannot send a diagnosis or a starting setup itself. The server records it in the proposal's
 `input.diagnosis`, so the input digest binds the choice of setups to the evidence that made it. A
 missing signal stays missing: no rule fires on it, and a GPU profile that was not recorded is left
 out rather than inferred. With `--diagnosis-endpoint`, the CLI asks the control plane for the
@@ -228,16 +239,20 @@ way one request plans from the same kind of server for every `--profile`.
 
 | Diagnosis | Tried, in order | vLLM flags (SGLang) |
 |---|---|---|
-| KV cache full and evicting requests (`kv_cache.preemption`) | FP8 KV cache, then fewer requests at once | `--kv-cache-dtype fp8` (`fp8_e4m3`); `--max-num-seqs` at about 75% of the observed running requests, rounded down to a multiple of 8 (`--max-running-requests`) |
-| KV cache nearly full while requests wait (`kv_cache.saturation`) | FP8 KV cache, then fewer requests at once | as above |
-| Requests waiting in line (`queue.engine_wait` or a queueing bottleneck) | Larger batches | under 70 GB of GPU memory, and on A100: `--max-num-seqs 512 --max-num-batched-tokens 8192`; 70 GB or more: `--max-num-seqs 2048 --max-num-batched-tokens 16384` |
+| KV cache full and evicting requests (`kv_cache.preemption`) | FP8 KV cache, then fewer requests at once; with the [model's memory](#precision-and-cache-room), FP8 weights and the FP8 KV cache ordered by the room each is predicted to make, and both together first; fewer requests at once only when the full cache is mostly [recurrent state](#speculation-and-cache-room). Not when the evictions came from a [burst that is over](#plan-for-the-present-load) | `--kv-cache-dtype fp8` (`fp8_e4m3`); `--max-num-seqs` at about 75% of the observed running requests, rounded down to a multiple of 8 (`--max-running-requests`) |
+| Evictions over the window while the cache has room now and nobody waits (`kv_cache.past_burst`) | Fewer requests at once, behind every change the present load chose; the reason names a second replica as the other answer | as above |
+| KV cache nearly full while requests wait (`kv_cache.saturation`) | as above | as above |
+| A server speculating with more than one draft token has no cache room left, on a model with recurrent-state layers (`kv_cache.speculation_capacity`) | Speculation with one draft token | vLLM only: `--speculative-config {"method":"mtp","num_speculative_tokens":1}` |
+| The same, for a `useful-output` goal, when one draft token would still leave requests waiting and no speculation would fit them all (`kv_cache.speculation_capacity`) | No speculation, then one draft token | removes the starting setup's speculation flags; needs the [endpoint's setup](#choose-setups-from-the-endpoint-diagnosis) as the starting setup |
+| A server running three draft tokens or one, on a model with recurrent-state layers, whose load is past the room three draft tokens leave (`kv_cache.speculation_bands`) | [Speculation that changes with load](/features/adaptive-speculation), after the fixed choice for this load | listed, not measured: one engine per draft length behind `infercrane-specswitch`, whose serving image is not published yet |
+| Requests waiting in line (`queue.engine_wait` or a queueing bottleneck). Not when the engine's waiting gauge shows nobody waiting: see [plan for the present load](#plan-for-the-present-load) | Larger batches | under 70 GB of GPU memory, and on A100: `--max-num-seqs 512 --max-num-batched-tokens 8192`; 70 GB or more: `--max-num-seqs 2048 --max-num-batched-tokens 16384`. `--max-num-seqs` never above the cache blocks the engine reports per server, rounded down to a multiple of 8; when that is not above the setup's own limit, no larger batch is planned |
 | GPU idle while requests wait (`gpu.host_bound`) | More API server processes, then streaming tokens in small groups, then CUDA graphs sized to your batches | `--api-server-count 2`; `--stream-interval 2`; CUDA graphs as in the trace rows below |
 | Long prompts (`prefill.long_input`, or a first-token bottleneck with prompts of 1,024 tokens or more) | Bigger prompt chunks | `--max-num-batched-tokens 16384` (`--chunked-prefill-size 16384`) |
 | Shared system prompts reused poorly (`prefix.low_reuse`) | Prefix caching if the starting setup turned it off; prefix-aware scheduling | removes `--no-enable-prefix-caching` (`--disable-radix-cache`); SGLang only: `--schedule-policy lpm` |
 | Tensor cores busy (`gpu.compute_bound`) | FP8 weights | `--quantization fp8` |
-| Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights | `--speculative-config {"method":"mtp","num_speculative_tokens":1}` (NEXTN with one step); `--quantization fp8` |
+| Few requests running per server (`decode.low_concurrency`) | Speculation with the model's own prediction head, then FP8 weights; an FP8 KV cache when the running requests' cache is 10% or more of the bytes a step reads with FP8 weights ([model's memory](#precision-and-cache-room) needed), and then both together first | `--speculative-config {"method":"mtp","num_speculative_tokens":3}` (NEXTN with two steps and three draft tokens); `--quantization fp8` |
 | Memory busy, tensor cores idle (`gpu.memory_bandwidth_bound`) | FP8 weights; FP8 KV cache on contexts of 7,000 tokens or more | as above |
-| Writing answers with many requests running per server | FP8 KV cache on contexts of 7,000 tokens or more; larger batches for a throughput or cost goal; FP8 weights | as above |
+| Writing answers with more than four requests running per server | Speculation with the model's own prediction head, with the draft length the cache has [room](#speculation-and-cache-room) for: first while it fits the load, measured after the FP8 KV cache when it does not or when room is not known; FP8 KV cache on contexts of 7,000 tokens or more, or when the running requests' cache is 10% or more of the bytes a step reads with FP8 weights; larger batches for a throughput or cost goal, unless the engine's waiting gauge shows nobody waiting; FP8 weights; FP8 weights and an FP8 KV cache together first when both are chosen and the [model's memory](#precision-and-cache-room) is known | as above; one draft token as in the row above; both flags together |
 | Attention kernels ≥ 40% of profiled GPU time, on contexts of 7,000 tokens or more, in a capture without a trace analysis | FP8 KV cache | as above |
 | Matrix-multiply kernels ≥ 50% of profiled GPU time | FP8 weights | as above |
 | Trace: GPU idle waiting on host launches ≥ 10% of the time (`gpu.idle_host_bound`) | CUDA graphs sized to your batches, then preparing the next step while the GPU runs this one | removes `--enforce-eager` (`--disable-cuda-graph`); vLLM only: `--max-cudagraph-capture-size` a quarter above the running requests per server, when they exceed what vLLM captures by default; removes `--no-async-scheduling` (`--disable-overlap-schedule`) |
@@ -250,15 +265,173 @@ way one request plans from the same kind of server for every `--profile`.
 
 Each rule chooses at most two changes a setup can carry, so a win can be attributed to one change.
 When several rules choose the same change, it keeps its strongest priority plus a small bonus for
-each rule that agrees. Speculation is chosen only at low concurrency, where it pays, and never with
-n-gram drafts, which need repeated text and turn vLLM's async scheduling off. An FP8 KV cache is
+each rule that agrees. Speculation is chosen whenever writing answers is the bottleneck, with three
+drafted tokens while the cache has room for them and one when only one fits (see below). It is
+never planned with n-gram drafts, which need repeated text and turn vLLM's async scheduling off. A run's traffic must carry real text for its result to mean
+anything: see [real text from a prompt corpus](#how-a-campaign-measures-candidates). An FP8 KV cache is
 chosen only when the KV cache limits the server or contexts are long: below about 7,000 tokens BF16
 KV has measured slightly better token latency.
 
+#### Published FP8 checkpoints
+
+When a rule chooses FP8 weights, the plan quantizes the starting setup's weights when the server
+loads them (`--quantization fp8`). When the [reviewed checkpoint catalog](#seed-candidates-from-publisher-checkpoints)
+also holds a publisher's FP8 checkpoint of the exact model, the plan measures it beside that, as
+technique `fp8-checkpoint` (rule `weights.published_checkpoint`): the starting setup with only its
+weights replaced, the same flags, one setup per checkpoint. A publisher's calibration may keep
+answers closer, so each setup needs its own task score.
+
+"Exact" means the catalog entry's base is the starting setup's model at the starting setup's
+revision. That is either the revision the publisher declares, or, for a build the publisher names
+only by repository, the base revision the catalog screened it against (`base_screening_revision` in
+the candidate's `artifact_seed`). The catalog's hardware and engine gates apply, so no checkpoint is
+proposed for a GPU or engine release the catalog has not reviewed it for. Other builds that serve
+different files, such as 4-bit checkpoints, are still left out of a diagnosis.
+
+#### Plan for the present load
+
+The readiness assessment covers the last hour, and two of its readings are totals over that hour:
+the engine's queue time and its evictions per completed request. A burst at the start of the hour
+leaves both high after it has drained. The planner plans for the load the server holds when the
+diagnosis is read, so it reads the bottleneck again when the present readings contradict it:
+
+- **A queue that is gone.** The engine's queue time is long, but its waiting gauge shows no request
+  waiting and the gateway shows no queue.
+- **A burst that is over.** The engine evicted requests, but the cache is below 90% full and no
+  request is known to wait.
+
+The planner then takes the stage that holds the larger share of p95 request time: writing answers or
+first tokens. First-token times over the hour hold the same past wait, so neither share alone decides.
+Past evictions still add fewer requests at once (`kv_cache.past_burst`), behind every change the
+present load chose, and never a cache format. The plan's `summary` opens with what was read again and
+why, and its `primary_bottleneck` is the stage the plan was made for. The recorded diagnosis stays in
+the proposal's input. Without a waiting reading or a cache reading, nothing is known about the
+present load, and the recorded bottleneck stands.
+
+#### Speculation and cache room
+
+Each request a server runs holds cache blocks, and a server runs as many requests at once as its
+blocks allow; the others wait. On a model with recurrent-state layers (Mamba or linear attention),
+each draft token keeps another copy of that state, so a speculating server can run out of blocks at
+a much lower load than the same server without speculation. Since rule set
+`diagnosis-technique-rules-v6` the planner reads the room from the engine's own metrics rather than assuming a
+number of requests:
+
+- blocks per running request: the highest cache use times the engine's blocks, divided by the
+  running requests;
+- room: the engine's blocks divided by the blocks per running request;
+- load to plan for: running plus waiting requests per server.
+
+To predict another draft length, the planner splits a running request's blocks into the blocks its
+tokens need (mean prompt plus answer length in blocks of the engine's block size, at least one) and
+the rest, which is the state held once plus once per draft token. Three draft tokens come first
+while the load is below their room. One draft token comes first while only it fits. Above the room
+of both, one draft token is measured behind other changes for a throughput or cost goal and last for
+an interactive goal, because requests would wait for their first token. While a speculation setup
+fits, no FP8 KV cache ranks ahead of it. When the server already speculates with more than one
+draft token and requests wait for room, `kv_cache.speculation_capacity` proposes one draft token
+first. The draft length a server runs with is read from its engine
+(`runtime_spec_decode_draft_length`), else from the starting setup's flags.
+
+On a model with recurrent-state layers, the engine sizes each cache block to one page of the state.
+An FP8 KV cache then makes each block hold more tokens but does not add blocks in proportion. When
+at least half the blocks a running request holds are state, the cache rules propose fewer requests
+at once and say why the FP8 KV cache is left out. An FP8 KV cache can still be chosen on long
+contexts for the bytes attention reads.
+
+The plan records the test's numbers in `diagnosis.cache_room`, and `optimize propose` prints them:
+the load the server is asked to hold (running plus waiting requests per server), the cache use, the
+engine's blocks, and for each draft length from 0 to 3 the blocks a request would hold, the room, and
+whether the room is above the load. Each room says how it was found:
+
+| `basis` | Meaning |
+|---|---|
+| `measured` | The server's own draft length: blocks divided by the blocks a running request holds now |
+| `predicted` | Another draft length, from the same server's blocks |
+| `upper_bound` | A draft length predicted from a server without a prediction head; loading one takes memory the cache then lacks |
+| `lower_bound` | No speculation predicted from a server with a prediction head; removing it frees memory |
+
+`cache_room.bands` turns the rooms into a setup per load band: three draft tokens up to their room,
+one draft token up to its room, and no speculation above both. The bands come from one window's
+readings and are predictions; a run that measures each band is still what proves them. Two draft
+tokens are listed for comparison only: no technique proposes them yet. Since rule set `diagnosis-technique-rules-v11` a plan past the room three draft tokens leave
+also lists [speculation that changes with load](/features/adaptive-speculation), which serves those
+bands from one server; the engines' own per-batch draft schedules keep the cache reserved for the
+longest draft length, so they cannot. Since rule set `diagnosis-technique-rules-v12`, when the
+patched engine image of its [one-engine form](/features/adaptive-speculation#one-engine-prefix-caching-off)
+is available, the plan measures that form instead, for useful output within one second only, on
+traffic that barely uses the prefix cache.
+
+What the test cannot know:
+
+- The block count of a setup that is not running. A prediction from a server without speculation
+  uses that server's blocks, but a prediction head takes memory, so the room it predicts is an upper
+  bound.
+- Traffic other than the diagnosed window's. Longer prompts take more blocks per request and leave
+  room for fewer.
+- Room on an engine that does not report its cache layout (SGLang and llama.cpp server here). Without
+  the cache use, the running requests, or the layout, room is unknown and speculation is measured
+  after an FP8 KV cache on long contexts. On a model without recurrent-state layers, draft tokens
+  hold no state, so the room for speculation is the room the server has, and one draft token is not
+  proposed.
+
+#### Drafts named in the plan
+
+Since rule set `diagnosis-technique-rules-v11` a plan can also measure speculative drafts the request
+names in `speculative_drafts`: a draft trained on your own traffic in your own account, and a
+published draft for the same model and commit. Each becomes a setup measured beside the model's own
+prediction head and, when the starting setup speculates, no speculation, so the judge ranks the
+drafts against each other on your traffic. See [drafts trained on your traffic](/features/trained-drafts).
+
+#### Precision and cache room
+
+Since rule set `diagnosis-technique-rules-v9` the planner can also predict what a precision change
+does to the cache and to each step's reads, from the engine's blocks and the model's memory. When the
+control plane checks a model outside the reviewed catalog (`INFERCRANE_HUGGING_FACE_METADATA_ENABLED`),
+it adds two facts to the proposal's diagnosis, both recorded in `input.diagnosis.signals`:
+`model_weights_bytes` (the served weights, from Hugging Face's safetensors summary) and
+`kv_cache_bytes_per_token` (from `config.json`). Without them the rules work as before.
+
+- **Room with an FP8 KV cache:** about twice the engine's blocks, since a block's tokens take half
+  the bytes. This needs only the engine's blocks.
+- **Room with FP8 weights:** the engine's blocks plus half the weights' bytes in blocks of the
+  engine's block size at `kv_cache_bytes_per_token` each.
+- **Room with both:** the room with FP8 weights, doubled.
+- **The share of a step's reads that is cache:** each running request reads its KV cache, on average
+  its prompt and half its answer, and all of them share one read of the weights. The share is taken
+  as it would be with FP8 weights.
+
+Every predicted room is an upper bound (`basis: upper_bound`): the embeddings and some layers stay
+at 16 bits, and the engine sizes its own buffers anew. On Qwen3-8B in BF16 on one L4 (vLLM 0.34.0,
+`--max-model-len 8192`), the engine reported 408 blocks with its defaults; the predictions were at
+most 816 with an FP8 KV cache, 1,276 with FP8 weights and 2,551 with both, and the engine reported
+640, 1,104 and 2,032.
+
+How the rules use them:
+
+- A full cache with requests waiting (`kv_cache.saturation`, `kv_cache.preemption`) puts first the
+  precision change predicted to make more room, the other five points below, and gives both rooms.
+- On a server that is busy writing answers, an FP8 KV cache is chosen when the running requests'
+  cache is 10% or more of the bytes a step reads with FP8 weights: halving it then saves at least 5%
+  of each step's reads. Contexts of 7,000 tokens or more still choose it as before.
+- When the rules choose both FP8 weights and an FP8 KV cache and the model's memory is known, the
+  plan adds the two together (`fp8-weights-kv-cache`, `--quantization fp8 --kv-cache-dtype fp8`) one
+  point above the stronger of them. They change different bytes, so neither undoes the other, and
+  one task set checks the precision of both. Each is still measured alone after the pair, so a gain
+  can be told apart. The pair is not planned when the starting setup already runs either half, or
+  when the model's weights already look quantized.
+
+`diagnosis.cache_room.precision` lists each predicted room, its blocks, and whether it is above the
+load; `optimize propose` prints it.
+
 Every flag is checked against the engine's resolved default before a setup is added. Defaults were
-read from the source of vLLM 0.22.1 and SGLang 0.5.12. vLLM's batch defaults depend on GPU memory:
-2,048 batched tokens and 256 sequences under 70 GB and on A100, and 8,192 and 1,024 from 70 GB up. A
-flag equal to its default is dropped, and a setup left with no change is not added. When a default
+read from the source of vLLM 0.34.0, vLLM 0.22.1, SGLang 0.5.23, and SGLang 0.5.12. vLLM's batch defaults depend on
+GPU memory: 2,048 batched tokens and 256 sequences under 70 GB and on A100, 8,192 and 1,024 from
+70 GB up, and on vLLM 0.34.0 16,384 and 1,024 from 160 GiB up (B200, B300, MI300X and newer AMD).
+The larger-batch and bigger-prompt-chunk setups double that top tier (32,768 tokens). vLLM 0.34.0
+runs one API server per data-parallel rank, and its Rust front end
+(`VLLM_USE_RUST_FRONTEND=1`) always one, so more API servers are not planned on it. A flag equal to
+its default is dropped, and a setup left with no change is not added. When a default
 is unknown, the setup is not added either. This covers an accelerator whose memory InferCrane does
 not know, the batch sizes SGLang derives from GPU memory at start, and any other engine version.
 
@@ -270,11 +443,13 @@ the analysis' own measured value and threshold, so a candidate's `evidence` show
 replaces the kernel-share attention row, and a measured communication overlap replaces the
 kernel-share communication rule: communication hidden under compute costs nothing.
 
-- **Launch overhead.** vLLM 0.22.1 and SGLang 0.5.12 already run CUDA graphs and schedule the next
-  step while the GPU runs the current one. A setup is added only when the starting setup turned one
-  off, or, on vLLM, when more requests run per server than the largest batch vLLM captures a graph
-  for: `min(max_num_seqs × 2, 512)`, capped at the per-step token budget, which is 512 with the
-  default limits on any GPU. The new capture size covers the running requests plus a quarter, on
+- **Launch overhead.** vLLM 0.34.0, vLLM 0.22.1, SGLang 0.5.23, and SGLang 0.5.12 already run CUDA graphs and
+  schedule the next step while the GPU runs the current one. A setup is added only when the starting
+  setup turned one off, or, on vLLM, when more requests run per server than the largest batch vLLM
+  captures a graph for: `min(max_num_seqs × 2, 512)`, capped at the per-step token budget, which is
+  512 with the default limits. On B200 and B300, vLLM 0.34.0 raises the ceiling to 1,024 and
+  captures a decode graph for every batch up to `max_num_seqs` (within 8,192 tokens), so no larger
+  capture is planned there; setting `--max-cudagraph-capture-size` turns that off. The new capture size covers the running requests plus a quarter, on
   vLLM's capture grid, and never exceeds the setup's own request or token limit. With the defaults
   and up to 512 requests running, both changes are skipped as no-ops. SGLang sizes its largest graph
   from GPU memory at start, so no SGLang capture size is planned. Async scheduling is not planned
@@ -298,10 +473,12 @@ A chosen change is skipped, and the proposal records why, when:
   MI300X, MI325X, MI350X, or MI355X; see [AMD Instinct GPUs](/integrations/amd-instinct#how-the-optimizer-plans-on-amd)),
   for FP8 weights and the FP8 KV cache;
 - the model's pinned config was not read or declares no native prediction head, for speculation
-  (pass `--model-config config.json` to declare it);
+  (pass `--allow-model-metadata-network` to read the pinned `config.json` from Hugging Face, or
+  `--model-config config.json` to stay offline);
 - the change needs a draft model or a 4-bit publisher checkpoint. No draft model is paired with a
-  model yet. A [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves different
-  model files, and a run cannot yet rank setups that serve different files, so it is left out;
+  model yet. A 4-bit [publisher checkpoint](#seed-candidates-from-publisher-checkpoints) serves
+  different model files and is left out; only a published FP8 checkpoint of the exact model is
+  measured, beside FP8 at load ([published FP8 checkpoints](#published-fp8-checkpoints));
 - the model's weights already look quantized, for FP8 weights;
 - the change is already in the starting setup, equals the engine default, or has an unknown default.
   An engine switch is checked the same way, against the starting setup's `runtime.env` or else the
@@ -309,8 +486,29 @@ A chosen change is skipped, and the proposal records why, when:
 - it changes the GPU, the GPUs per server, or the endpoint's routing. Right-sizing is flagged when
   few requests run at once, and is planned as a separate run.
 
-Every proposed setup carries a `reason`: its `role` (`control` or `diagnosis`), the `technique`, a
-`priority` from 0 to 100, an `expected_benefit` of `high`, `medium`, or `low`, the `rules` that
+#### Setups that test the plan
+
+A diagnosis ranks single changes, and a ranking of single changes cannot see what it did not choose.
+Speculation that pays at a light load can cost at a heavy one, a draft length predicted from the cache
+room can be one step off, and a pair of changes can beat each change alone. So when the diagnosis
+chose at least one change, the list also carries setups that test the plan. None of
+them names a technique or carries a priority. Their `expected_benefit` is `check`.
+
+| Setup | `role` | Placed | When |
+|---|---|---|---|
+| The starting setup without its speculation | `reference` | Right after the first choice | The starting setup speculates. When it is the publisher's command with its documented option, this is the publisher's plain command |
+| A copy of the starting setup, with only `--seed 1` added | `copy` | Right after the first choice | The starting setup runs a built-in engine with no pinned image and sets no seed. It differs from the starting setup only by its machine; see [the machine difference measured in the run](#the-machine-difference-measured-in-the-run) |
+| The draft length next to the chosen one | `reference` | After the last diagnosed choice | The diagnosis chose speculation with a `num_speculative_tokens`. The length between the starting setup's and the chosen one comes first, else the shorter. It is left out when it equals the starting setup's length, or when `cache_room` predicts it holds fewer requests than the server runs now |
+| The chosen speculation with the chosen precision change | `reference` | After the last diagnosed choice | The diagnosis chose both. Lower precision changes which speculation wins and how much room the cache has |
+
+They count against `max_candidates`, so a small limit cuts the lower diagnosed choices and these
+checks in the order above. A copy is marked with the feature `plan_check`, not
+`diagnosis_technique`, and the plan's `techniques` link only diagnosed setups. A setup that removes
+speculation can change answers, so it needs a task score like the speculation it replaces.
+
+Every proposed setup carries a `reason`: its `role` (`control`, `diagnosis`, `reference`, or `copy`),
+the `technique` (diagnosis only), a `priority` from 0 to 100, an `expected_benefit` of `high`,
+`medium`, `low`, `baseline` (the control), or `check` (a reference or the copy), the `rules` that
 chose it, a one-sentence `summary` that cites the measured value, and the `evidence` behind it. The
 proposal's `diagnosis` records the plan `state`, a `summary`, every chosen technique with the setups
 that apply it or the reason it was `skipped`, and `needed_evidence`. Reads of a run return the same
@@ -514,7 +712,8 @@ and the last characters of the path. To rotate the secret, delete the destinatio
 result, and every destination shows its last delivery. A failed delivery is retried after 30
 seconds, then four times longer each time up to an hour, at most six attempts; a 4xx response other
 than 429 is final. A workspace can have ten destinations. Destinations need
-`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY` on the control plane; without it the routes return
+`INFERCRANE_CREDENTIAL_ENCRYPTION_KEY`, and with it `INFERCRANE_WORKER_CREDENTIAL_KEY`, on the
+control plane; without the encryption key the routes return
 `503 capability_unavailable`. Listing needs read access; changing and testing need an admin.
 
 `infercrane inbox` lists the same waiting runs with the next command to run.
@@ -559,6 +758,17 @@ mean output tokens of a successful request (`output_tokens_per_request`), from i
 `null` when the runs did not record it. A setup that failed more requests or answered shorter than
 your current setup lists why under `guards`, and the report adds a line to `warnings`, shown under
 the headline.
+
+Every setup also carries its own `answer_check`, so a setup the run did not choose still says
+whether its answers held: `PASS`, `WATCH`, `BLOCK`, or `UNKNOWN`, with the score, how far its answers
+moved from the reference's, the watch and block thresholds, and broken tool calls. It applies the
+same rules the run used when it gated the setup. The setup whose answers are the reference passes
+with `reference: true`. A setup measured better in its own window also carries `confirmation`: the
+same comparison measured again on fresh servers (see
+[A gain is measured again on fresh servers](#a-gain-is-measured-again-on-fresh-servers)). Both are
+absent until the setup reaches that step. The
+[proof gate](/integrations/github-actions#gate-a-pull-request-on-the-proof) reads them to decide a
+pull request's verdict from the signed report alone.
 
 The answer-quality outcome is named after the check that produced it: `Answer quality · InferCrane
 answer check` for the built-in check, or `Answer quality · ` and the eval suite's name for your own
@@ -685,6 +895,16 @@ create a candidate revision against the named deployment, compare it with active
 Release Guard, and wait for you to roll it out. InferCrane never invents a baseline for a new
 endpoint and never lets an evolution bypass Release Guard.
 
+An `evolve_endpoint` run can also name an endpoint an InferCrane agent serves in your own cluster
+(`target_endpoint` in the API) instead of a deployment. The agent then measures every setup there,
+against the endpoint's own server, and only numbers come back; prompts and answers stay in your
+cluster. The control plane judges them by the same rules as above: interleaved runs, the second
+window on a new server for a gain, the answer check with the 1-point rule for setups that change
+answers, the ranking, and Release Guard. Rolling the winner out is a guarded rollout on the
+agent's data plane, with an automatic rollback window, when the agent serves the endpoint's
+traffic. What such a run can and cannot measure, and how the rollout works, is in
+[the agent page](/architecture/agent#optimization-runs-on-an-agent%E2%80%99s-endpoint).
+
 Rolling out with `optimize activate` is itself a durable, idempotent operation. A new-endpoint run
 can roll out only a `qualified` setup. It atomically publishes the endpoint name from the immutable
 proposal and binds it to the selected setup's isolated deployment; an existing alias is never
@@ -805,6 +1025,9 @@ workloads, or incomplete metrics produce `inconclusive`; explicit SLO or cost vi
 active-versus-candidate Release Guard and wait for human promotion. The persisted campaign links
 benchmark, quality, Lab, and, where a real baseline exists, Release Guard evidence separately.
 
+To put several finished runs side by side, one workload and one load at a time, with the saving
+stated only when it is verified, see the [Proof Report](/features/proof-report).
+
 ### How a campaign checks answers
 
 A faster setup is no use if its answers changed. After a candidate is measured, the worker checks its
@@ -875,7 +1098,10 @@ your current setup. It can win a campaign when its answers hold and it is measur
 - **Its answers pass the same check as every other setup.** A precision change changes the model's
   numbers, so there is no exemption: the built-in check compares its answers with the control's, or
   your signed evaluation decides. A quantized setup the check blocks ends `rejected` with
-  `quality_gate_rejected` and is never ranked, however fast it measured.
+  `quality_gate_rejected` and is never ranked, however fast it measured. A setup that changes answers by design (other
+  weights or precision) and cannot show its answers held within 1 point on the task set ends
+  inconclusive with `quality_answers_not_shown_held`, and is never ranked either
+  ([Task sets](/features/semantic-quality#task-sets)).
 - **It beats the control by more than the measurement noise** on the same workload, like any other
   setup.
 
@@ -939,9 +1165,62 @@ synthetic profile.
 The rendering records what it preserved and what it did not in the workload's `replay` identity.
 Prompt content is synthetic because Replay never stores it, so MoE expert routing and speculative
 acceptance on customer content remain unknown. Arrival timing is not replayed: load is closed-loop at
-the profile concurrency. Replay records which requests share system messages but not how long those
+the run's load (the proposal's `target_concurrency`, or the profile concurrency). Replay records which requests share system messages but not how long those
 messages are, so one shared block is assumed. Tool pauses, parent-session links, and reuse of earlier
 assistant output are not modeled.
+
+**Real text from a prompt corpus.** By default AIPerf fills each prompt block with a random slice of
+its built-in text. That is enough to compare batching, caching, and precision, and it cannot measure a
+setup whose speed depends on what the model writes: speculative decoding is fast only when its
+drafted tokens are accepted, and a model answering a random slice of text does not write what it
+writes for a real task. An operator can therefore give the control plane a prompt corpus, a file of
+real passages with questions about them and standalone prompts:
+
+```bash
+export INFERCRANE_REPLAY_PROMPT_CORPUS_FILE=/etc/infercrane/prompt-corpus.json
+```
+
+```json
+{
+  "schema_version": "infercrane.prompt-corpus/v1",
+  "name": "support articles, public",
+  "license": "CC-BY-4.0",
+  "source": "https://example.com/datasets/support-articles at revision 4f2a9c1",
+  "tokenizer": "Qwen/Qwen3.8-27B-FP8",
+  "passages": [
+    {"tokens": 412, "text": "A whole passage...",
+     "questions": [{"tokens": 19, "text": "A question this passage answers"}]}
+  ],
+  "prompts": [{"tokens": 37, "text": "A standalone prompt that needs no context"}]
+}
+```
+
+With a corpus, every campaign bound to a Replay digest composes its requests from it. Each request
+is a system message of whole passages and one user message with a question about one of those
+passages. A request too short for a passage sends the standalone prompt nearest in length. The
+structure of the trace stays: request order, output lengths, which requests share a leading block,
+and which session turns resend their history. A block two requests share holds the same passages in
+both, so the shared prefix is the same text. Passages are never cut, so a request's length follows its
+recorded length to the nearest passage, under the token counts the file states for its `tokenizer`;
+the control plane has no tokenizer of its own. Passages repeat across requests, so each request opens
+with a short line derived from the run and its first block. Requests that share that block share the
+line; no other two requests start alike, in one run or across runs, so a server's prefix cache reuses
+only what the trace recorded.
+
+The workload's `replay` identity then carries `prompt_text`: the source `operator_corpus`, the
+corpus's SHA-256 digest, name, license, source, and tokenizer, the mean prompt length it planned, and
+how many requests sent a standalone prompt. `input_token_lengths` becomes
+`input_token_lengths_to_the_nearest_passage`. The corpus is part of the workload identity, so results
+on corpus text are never ranked against results on synthetic text or on another corpus. Its text
+appears in no stored evidence.
+
+The corpus is the operator's file and holds only what the operator put in it. It is not built from
+traffic: the gateway still records token counts and timing and never prompts or answers, and prompt
+content from customer traffic remains `not_preserved`. Use text you may send to every candidate
+server, state its license, and count `tokens` with the served model's tokenizer. A file that is set
+but unreadable, malformed, or without a license, tokenizer, passages, questions, or standalone
+prompts stops the control plane at start instead of falling back to synthetic text. The file may hold
+up to 64 MiB and 20,000 passages. Without the setting nothing changes.
 
 **Runs.** Each server receives warmup requests (twice the concurrency, between 16 and 256) before
 measurement, and each candidate runs four independent AIPerf invocations. Every invocation gets its own
@@ -990,6 +1269,43 @@ have none. Measurements made before this
 method (`campaign-interleaved-control-v1`) keep their stored comparison, which used the larger of the
 control-to-control spread and the candidate's own interval.
 
+#### The machine difference measured in the run
+
+The 0.75% allowance was measured with long prompts, where the GPU sets the pace. With short prompts
+at high load, servers of one setup have differed by 3% to 15%. So a run measures the spread where it
+can:
+
+The allowance used in every decision is the largest of three: the 0.75% floor, a copy's measured
+difference, and the machine difference a setup measured twice implies. When it is above an
+interval's own machine term, the interval is widened by it and the decision taken again. The
+statistical part of the interval stays, and the machine part uses the measured difference. A gain
+that does not clear the wider interval becomes no measurable difference, and its `reason` names
+where the allowance came from.
+
+- **A copy of the control.** A candidate whose setup is the control's with only `--seed` added is a
+  copy: it differs from the control only by its machine, so its measured change is a machine
+  difference. Every [plan carries one](#setups-that-test-the-plan) when the starting setup allows it.
+- **A setup measured twice.** A candidate measured again on fresh servers was compared with the
+  same control setup on two pairs of machines, so the two windows can differ only by the machines
+  and run noise. Two independent machine differences differ by about √2 times one. So the gap
+  between the two windows' changes (in log terms) divided by √2 is a measured machine difference.
+  Run noise is in it too, which errs toward a wider interval. Only valid second windows count.
+- **A server whose GPU was less busy.** When a run's server exports the DCGM gauge
+  `DCGM_FI_DEV_GPU_UTIL`, the report compares the GPU busy share of the control's and the
+  candidate's servers in each window, and warns when one was 5 points or more below the other under
+  the same load: a slower machine may explain part of the difference. On a test run of nine
+  servers, the slowest server of each setup at each load was that far below the busiest one. Without
+  the gauge nothing is known and nothing is said.
+- **A server that served each token slower.** Without GPU telemetry, the report compares each
+  setup's runs on its own servers, for every measured setup, not only the chosen one: its server in
+  the first window against its server in the window on fresh servers, by the median p95 time per
+  output token, when the engine's running-request gauge (`vllm:num_requests_running`) shows about
+  the same number of requests running (within 10%). A server 10% or more slower per token is named,
+  with both times and both loads. A single run that took 25% or more longer per token than the same
+  server's other runs in its window is named too, since such a run makes a window drift. Time per
+  token is measured by the benchmark, so it includes the network path to the server. These are
+  warnings: the judge's decisions do not change.
+
 #### What the judge can and cannot tell
 
 `TestJudgeCalibration` in `internal/optimizationcampaign` runs this exact decision code on simulated
@@ -1018,6 +1334,28 @@ The ranking then reports the second window's change, which is free of the first 
 and the reason names both, for example `p95 time to first token changed -36.4% (noise ±4.0%), then
 -32.4% (noise ±5.0%) measured again on fresh servers`. A gain that does not hold is superseded with
 `measured_gain_not_confirmed`.
+
+A setup that changes answers, in a run that checks answers on a task set, answers that task set on
+its first servers before the candidate's is retired. The answer check after the fresh window pools
+both pairs of servers, so its interval narrows and its evidence records `task_servers` 2 (see
+semantic quality). The checkpoint keeps the first pair's per-item scores in
+`confirmation.first_answers`; if they could not be read, `confirmation.first_answers_skipped` says
+why and the check rests on the fresh pair alone.
+
+An invalid second window measured nothing. A fresh server's slow first run is a usual cause: it can
+make the control's throughput drift past its limit between adjacent runs. So an invalid window is
+measured once more on the same fresh servers. It runs only while the approval leaves at least as
+long as the invalid try took; those servers are already covered by the approved cap until then. A
+valid second try decides, and its reason says the first try was invalid. The invalid try stays in
+`measured.confirmation.discarded` (its control check and runs) and decides nothing.
+
+Only a valid second window can show that a gain did not hold. When the second window is still
+invalid, when it did not compare the objective, or when the setup was not measured again, whether
+the gain holds is unknown. The setup is not selected and is superseded with
+`measured_comparison_unavailable`. The reason names the first window's change and why the second
+window could not judge it, for example `output_token_throughput changed +12.0% against a 2.0% noise
+floor in interleaved runs; the measurement on fresh servers was invalid (control output throughput drifted
+20.0% between adjacent runs, above the 15% limit), so whether the gain holds is unknown`.
 
 - The control of a run that evolves a live endpoint serves production traffic, so its server is
   kept and only the candidate's is retired. A serverless provider places workers itself; its
@@ -1103,6 +1441,23 @@ the same one:
 | `interactive`, `latency` | p95 time to first token, lower is better | p95 request latency, lower is better |
 | `throughput` | Output tokens per second | Output tokens per second |
 | `cost-efficiency` | Output tokens per second per sourced hourly cost | Output tokens per second per sourced hourly cost |
+| `useful-output` | Output tokens per second of requests whose first token came within the limit | not available: a buffered run measures no first token |
+
+**Useful output.** Throughput counts every token, also those of a request that waited seconds for
+its first one. `useful-output` counts only the output of requests that met every limit the run set:
+`--max-ttft-p95-ms` read as a limit on each request's first token, and `--max-tpot-p95-ms` on each
+request's time per token. Without a first-token limit it holds each request to one second. Every
+run that sets a limit also records useful output beside the other outcomes
+(`useful_output_throughput` in each run's comparison), and the report shows it as
+`useful_output_tokens_per_second`. A benchmark row does not store it, so the report knows it only
+from the interleaved comparison. The planner plans a `useful-output` goal like an interactive one:
+a speculation setup that would leave requests waiting for cache room is listed and not measured,
+with the reason. Throughput stays in the report as its own row.
+
+The report also warns when the chosen setup got slower to its first token at p95 in either window,
+the first one or the one on fresh servers, unless the run ranked on first-token time itself. The
+warning names both changes and their noise, for example `+31% on fresh servers (judged slower,
+noise ±12%)`.
 
 A buffered run receives each answer whole, so AIPerf measures no first token. The wait a buffered
 client sees is the whole request, so latency objectives rank on p95 request latency there.
@@ -1126,8 +1481,8 @@ and `optimize create` stop with an error naming the limit before anything is sen
 HTTP 422: `invalid_optimization_request` from `POST /api/v1/optimization/proposals` and
 `invalid_optimization_proposal` from `POST /api/v1/optimization/campaigns`, before anything is
 stored or provisioned. Use a streaming profile such as `interactive`, or drop the limit. Without `--profile`,
-the profile comes from the objective: `interactive` for `interactive` and `latency`, `throughput`
-for `throughput` and `cost-efficiency`, both streaming.
+the profile comes from the objective: `interactive` for `interactive`, `latency` and
+`useful-output`, `throughput` for `throughput` and `cost-efficiency`, all streaming.
 
 **Ranking.** Inference Lab still orders the exact-workload candidates that meet the constraints. The
 campaign selects the best of them that measurably beats the control on the objective metric and
@@ -1140,8 +1495,8 @@ a code that says why:
 | `measured_output_length_regression` | Answered more than 5% shorter than the control, for example `answered 18% shorter than the current setup; a speed or cost gain may come from shorter answers` |
 | `measured_candidate_regressed` | Worse than the control by more than the noise floor on the objective, or on throughput, p95 time to first token, or p95 latency in its own window |
 | `measured_no_measurable_difference` | Inside the noise floor on the objective and not measurably worse on any of those outcomes |
-| `measured_gain_not_confirmed` | Measurably better than the control in its first window, but not again on fresh servers. The reason names both changes |
-| `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted, and not shown worse |
+| `measured_gain_not_confirmed` | Measurably better than the control in its first window, but not again in a valid window on fresh servers. The reason names both changes |
+| `measured_comparison_unavailable` | Not compared reliably with the control on the objective, for example because the control drifted in the first window, or in the window on fresh servers after a first-window gain, and not shown worse |
 | `measured_candidate_superseded` | Measurably better than the control, but another candidate ranked higher |
 
 A window the control invalidated only by drifting still holds complete, clean runs of both setups.
@@ -1169,6 +1524,97 @@ measured runs) instead of one, and a candidate that gains is measured again on t
 eleven more. Measurement takes several times longer than a single benchmark. The approval window must cover it. Campaign ranking does not use the
 [multi-lane Pareto evaluator](#multi-lane-optimization-evidence): that evaluator needs TTFT and ITL
 limits and several concurrency lanes, and a campaign measures one lane and may declare no SLO.
+
+### A verdict per load band
+
+A setup that wins at a light load can lose at a heavy one: speculation pays when few requests run at
+once and can cost when many do. So a screen measures setups at two or more loads, and the verdict is
+given per load band. A screen measures setups in turn on one machine, with the current setup first
+and last, so the difference between two machines cancels.
+
+```bash
+infercrane optimize band-verdict --file screen.json
+infercrane optimize band-verdict --file screen.json --output json
+```
+
+The input is a content-free summary
+([`schemas/band-screen-v1.schema.json`](https://github.com/infercrane/infercrane/blob/main/schemas/band-screen-v1.schema.json),
+`infercrane.dev/band-screen/v1`). It holds:
+
+- the current setup's ID, and the ID of a copy of it when the screen ran one;
+- per band (`kind` and `load` in requests at once), the current setup's runs in order (first and
+  last) and every other setup's runs, each as output tokens per second and useful output (output of
+  requests whose first token came within `limit_ms`);
+- the rules written before the screen ran: `max_current_spread`, how far the current setup's first
+  and last runs may differ for the machine to count as steady, and `min_noise_floor`, a guard
+  against two runs that agree by chance.
+
+The command reads one local file and calls nothing, so it works on results from any server or
+harness.
+
+Each band is judged on useful output by default (`"metric": "output"` judges all output):
+
+| Decision | When |
+|---|---|
+| `winner` | A setup beat the current setup by more than the band's noise floor. The largest gain wins. |
+| `keep_current` | No setup did. |
+| `no_decision` | The copy changed more than the current setup's own repeat difference: this band cannot separate setups. |
+| `unknown` | The current setup ran fewer than twice, has no value on the metric, or its first and last runs differ by more than `max_current_spread`. |
+
+The noise floor is the largest of three: the current setup's repeat difference, the copy's change,
+and `min_noise_floor`. It comes from the screen, never from a constant. The copy and any setup
+`held_back` (for example by a worse task score) never win. Across bands, the summary is
+`one_setup` when every band decided the same way, `setup_per_band` when bands decided differently,
+and `incomplete` when a band has no verdict. A deployment serves one setup unless a per-server switch
+serves several, so a `setup_per_band` result names each band's setup and leaves the choice to you.
+A screen's verdict is not a proof: its finalists are measured again on fresh servers.
+
+When every band decided and the bands are one kind of traffic, the verdict also gives the band table
+a per-server switch serves from, in `switch_bands`. Each row is a band's largest load in requests at
+once (`up_to`; `0` marks the last band, above every other) and the setup (`engine`) that serves it:
+the winner, or the current setup where it was kept. Neighbouring bands served by the same setup are
+merged. A load between two measured bands takes the higher band's setup, because nothing between
+them was measured and the higher band's setup was measured under more load.
+
+```json title="A band table"
+{"switch_bands": [{"up_to": 16, "engine": "fp8-weights-kv"}, {"engine": "fp8-weights"}]}
+```
+
+#### A band study of finished runs
+
+A screen is one machine and one window per band. For proof, run one campaign per load, with the
+same model, current setup, and objective, and read them together as a band study. A run measures at
+the load its proposal names with `--target-concurrency` (rounded up to whole requests, 1 to 512),
+warm-up included, and at its benchmark profile's concurrency when none is named, so the runs can
+share one profile:
+
+```bash
+infercrane optimize create MODEL ... --profile throughput --target-concurrency 16
+infercrane optimize create MODEL ... --profile throughput --target-concurrency 64
+infercrane optimize bands RUN_ID_AT_16 RUN_ID_AT_64
+infercrane optimize bands RUN_ID_AT_16 RUN_ID_AT_64 --output json
+```
+
+`GET /api/v1/optimization/band-study?campaigns=ID,ID` takes 2 to 8 of your workspace's runs. Each
+run is read inside your workspace, so a run you cannot see is not found.
+
+Each run's decision is its load band's verdict:
+
+- **`winner`:** the run selected a setup, which its judge confirmed on fresh servers.
+- **`keep_current`:** the run kept the current setup.
+- **`unknown`:** the run is still running, was cancelled, or recorded no load.
+
+A band's gains are each setup's change on the objective in its own interleaved window. Its noise
+floor is the largest of the judge's noise floors in that run. The study then gives the same summary
+and band table as a screen.
+
+Setups are matched across runs by what they serve: the model and revision, engine and version,
+flags, environment, and GPUs. A run's candidate IDs differ between loads, because the workload is
+part of a candidate's identity, so the study keys each setup as `setup-` plus 12 hex characters and
+lists it under `setups`, with its label, engine, flags, and environment.
+
+The study refuses (`422 band_study_mismatch`) runs that serve another model, start from another
+setup, rank on another objective, or measure the same load twice.
 
 ### When a measured server is lost
 
@@ -1282,8 +1728,8 @@ measured, rejected, or dismissed on this endpoint in the last `rejection_memory_
 at most `maximum_candidates_per_campaign` that fit `maximum_experiment_cost_usd`. If one is left, it
 creates a run proposal. Each proposal records:
 
-- **reason:** one sentence naming every trigger, for example "vllm 0.22.1 is the new pinned engine
-  release; this endpoint runs 0.21.0";
+- **reason:** one sentence naming every trigger, for example "vllm 0.34.0 is the new pinned engine
+  release; this endpoint runs 0.22.1";
 - **expected change:** the range of cost-per-token changes earlier runs on this endpoint measured
   for their winner, or `unknown` when there are none. The run measures its own;
 - **run cost:** the spend cap that covers every setup for one hour at today's sourced prices
@@ -1364,11 +1810,18 @@ Serving containers run offline on an internal Docker network, with a read-only m
 credentials. Only the model download step has internet access. A candidate arm must prove the
 generated kernel was called, because otherwise the result would measure the unmodified runtime.
 
+Before writing a kernel, tune the ones the engine already has: on a GPU where vLLM runs its
+default MoE tile settings, [kernels tuned for your shapes](/features/kernel-tuning) deliver
+measured settings as data, with the engine's own kernel as the fallback.
+
 Each operator pack names the exact runtime versions its serving integration was reviewed against,
 and the adapter refuses any other version before it spends on generation or GPU time. The
-residual-RMSNorm pack supports vLLM 0.22.1 only. It plugs into vLLM IR, which vLLM has deprecated,
-and vLLM 0.34.0 removes the setting it uses, so a vLLM 0.34 or later pin needs a new
-CustomOp-based integration first.
+residual-RMSNorm pack supports vLLM 0.22.1 only, now the legacy release. It plugs into vLLM IR,
+which vLLM has deprecated, and vLLM 0.34.0 removes the setting it uses. A CustomOp-based plugin
+for vLLM 0.34 exists in the pack and is tested against a stub of that API; until it is qualified
+on a GPU the pack does not list vLLM 0.34 ([details](/features/kernel-tuning)), so an endpoint
+moved to 0.34.0 runs without it (see
+[Custom kernels and engine changes](#custom-kernels-and-engine-changes)).
 
 Set `max_candidates` to at least 2. The planner ranks by device time, and the largest hotspot is
 usually GEMM, which has no reviewed pack yet and is reported as a failed generation.
@@ -1550,8 +2003,9 @@ A catalog entry seeds a proposal candidate only when every condition holds:
 - The pinned engine version meets every requirement in the model card. The planner compares the
   card with the pinned image of each reviewed runtime on the build's platform, CUDA or
   [ROCm](/integrations/amd-instinct#pinned-runtime-images). When no runtime's image is new enough, the entry stays catalog-only with that
-  reason, for example `no reviewed runtime fits the pinned images: vllm needs 0.28.0 or newer,
-  pinned 0.22.1`. A card that needs an unmerged engine pull request keeps the build off that
+  reason, for example `no reviewed runtime fits the pinned images: vllm needs 0.35.0 or newer,
+  pinned 0.34.0`. After a pin moves, `go run ./tools/checkpoint-catalog-sync regate --write` applies
+  the gates again to the committed catalog without a new snapshot. A card that needs an unmerged engine pull request keeps the build off that
   engine until a reviewer records the release that contains the change.
 - For `exact` lineage, the campaign pins the stated base revision.
 
@@ -1561,7 +2015,9 @@ model.
 
 The catalog records the blockers for every other entry. `GET /api/v1/catalog/hugging-face/models`
 lists each base model's publisher builds under `publisher_builds`, including Intel builds marked
-`unsupported_hardware`, but proposes none of them.
+`unsupported_hardware`, but proposes none of them. Its model-level `optimization` names no GPU, so
+it is drawn only from candidates for NVIDIA GPUs; a candidate for an AMD target is listed in
+`publisher_builds` and proposed only on a GPU with one of its targets.
 
 ### Refresh the catalog
 
@@ -1647,7 +2103,7 @@ InferCrane will reuse upstream execution and optimization work behind replaceabl
 | Upstream | InferCrane boundary | Current status |
 |---|---|---|
 | vLLM | Runtime execution, continuous batching, attention, prefix caching, and qualified engine flags | Active runtime; reviewed starting profiles are locally qualified |
-| SGLang | Alternative runtime and prefix-aware execution | The pinned 0.5.12 runtime passed real AWS L40S lifecycle checks with Qwen3-8B and five-request AIPerf samples; that is not performance qualification. Qwen3-0.6B on SGLang 0.5.10.post1 on H100 is separate negative compatibility evidence. SGLang 0.5.20 candidates for any pinned model stay unmeasured until a campaign measures them |
+| SGLang | Alternative runtime and prefix-aware execution | The 0.5.12 runtime, now legacy, passed real AWS L40S lifecycle checks with Qwen3-8B and five-request AIPerf samples; that is not performance qualification. Qwen3-0.6B on SGLang 0.5.10.post1 on H100 is separate negative compatibility evidence. SGLang 0.5.20 candidates for any pinned model stay unmeasured until a campaign measures them |
 | AIConfigurator | GPU-free modeled candidate reduction | Active optional adapter pinned to `0.11.0` plus `plotext 5.3.2`; Linux x86_64 real-package contract verified |
 | AISimulate | GPU-free simulation and recommendation source | Not integrated; adoption requires a stable package, schema, support, parity, and rollback contract |
 | LLM Compressor / ModelOpt | Produce immutable quantized artifacts | Replaceable external-builder plans and provenance are local-qualified; transformation and GPU compatibility remain external qualification |

@@ -14,12 +14,14 @@ import (
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
+	"github.com/infercrane/infercrane/internal/support"
 )
 
 // KubernetesExecutor runs candidate runs in the agent's own cluster. It
 // starts the candidate with the same namespaced Kubernetes provider the
 // control plane uses (provision.Kubernetes: one Deployment and one Service,
-// applied server-side), measures the current setup, the candidate, and the
+// plus the engine NetworkPolicy when ingress sources are set, applied
+// server-side), measures the current setup, the candidate, and the
 // current setup again with AIPerf, runs the answer check on both, and
 // deletes the candidate. Prompts, answers, and engine logs never leave the
 // cluster; only the numbers in the result do.
@@ -43,6 +45,9 @@ type KubernetesExecutor struct {
 	// Benchmark and Completer are replaced in tests.
 	Benchmark func(context.Context, benchmark.Config) (benchmark.Result, error)
 	Completer qualitycheck.Completer
+	// NodeKey keys the digests that name the nodes a window's servers ran
+	// on (the agent's local hashing key). Without it nodes are unknown.
+	NodeKey []byte
 	// ReadyTimeout bounds how long a candidate may take to become ready;
 	// zero means half the run's timeout.
 	ReadyTimeout time.Duration
@@ -119,30 +124,18 @@ func (e KubernetesExecutor) RunCandidate(ctx context.Context, run CandidateRun, 
 	if setErr != nil {
 		return result, setErr
 	}
-	replica := provision.ReplicaSpec{
-		ExternalKey: "agent-candidate-" + strings.ToLower(run.ID), Name: "candidate", Model: spec.Model, ModelRevision: spec.ModelRevision,
-		Cloud: "kubernetes", GPU: spec.Accelerator, GPUCount: spec.GPUCount, Runtime: "custom-oci", RuntimeArgs: spec.RuntimeArgs,
-		Port: spec.Workload.Port, Workload: spec.Workload,
-	}
-	progress("launching")
-	started := e.now()
-	handle, err := e.Provider.EnsureReplica(ctx, replica)
+	setup := agentprotocol.CandidateSetup{Model: spec.Model, ModelRevision: spec.ModelRevision, Workload: spec.Workload, RuntimeArgs: spec.RuntimeArgs, Accelerator: spec.Accelerator, GPUCount: spec.GPUCount}
+	launched, err := e.start(ctx, candidateKey(run.ID), setup, spec.TimeoutSecs, progress)
+	defer launched.cleanup(ctx, &result.CleanedUp)
 	if err != nil {
-		code := "launch_failed"
-		if errors.Is(err, provision.ErrInvalidReplicaSpec) {
-			code = "invalid_candidate"
+		var failure *CandidateError
+		if errors.As(err, &failure) {
+			failure.Result = &result
 		}
-		e.cleanup(ctx, e.Provider.Handle(replica.ExternalKey), &result)
-		return result, &CandidateError{Code: code, Detail: err.Error(), Result: &result}
-	}
-	defer e.cleanup(ctx, handle, &result)
-	progress("waiting_ready")
-	endpoint, err := e.waitReady(ctx, handle, spec.Workload.Port, spec)
-	if err != nil {
 		return result, err
 	}
-	result.ReadySeconds = roundMS(e.now().Sub(started).Seconds())
-	candidate := ControlServer{Endpoint: "candidate", BaseURL: endpoint, Model: spec.Model, Token: e.WorkerKey}
+	result.ReadySeconds = launched.readySeconds
+	candidate := launched.server
 
 	progress("measuring_control")
 	if result.Control, err = e.measure(ctx, run.Control, spec); err != nil {
@@ -189,6 +182,14 @@ func (e KubernetesExecutor) evalSet(quality agentprotocol.CandidateQuality) (qua
 	if quality.EvalSet == "default" {
 		return qualitycheck.Default(), nil
 	}
+	if strings.HasPrefix(quality.EvalSet, "sha256:") {
+		for _, set := range e.EvalSets {
+			if set.Digest == quality.EvalSet {
+				return set, nil
+			}
+		}
+		return qualitycheck.EvalSet{}, candidateFailure("eval_set_unknown", "this agent keeps no local eval set with digest %s", quality.EvalSet)
+	}
 	name := strings.TrimPrefix(quality.EvalSet, "local:")
 	set, ok := e.EvalSets[name]
 	if !ok {
@@ -197,10 +198,63 @@ func (e KubernetesExecutor) evalSet(quality agentprotocol.CandidateQuality) (qua
 	return set, nil
 }
 
-func (e KubernetesExecutor) waitReady(ctx context.Context, handle provision.ProviderHandle, port int, spec agentprotocol.CandidateRunSpec) (string, error) {
+// launched is a started candidate: its server and how to remove it.
+type launched struct {
+	executor     KubernetesExecutor
+	handle       provision.ProviderHandle
+	server       ControlServer
+	readySeconds float64
+}
+
+// cleanup deletes the candidate, also when the run failed or was cancelled,
+// and records whether it is gone. A candidate that never reached the provider
+// has nothing to delete.
+func (l launched) cleanup(ctx context.Context, cleaned *bool) {
+	if l.handle == (provision.ProviderHandle{}) {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	*cleaned = l.executor.Provider.DeleteReplica(cleanupCtx, l.handle) == nil
+}
+
+// start applies one candidate with the namespaced provider and waits until it
+// is ready. The caller always defers cleanup on what start returns.
+func (e KubernetesExecutor) start(ctx context.Context, externalKey string, setup agentprotocol.CandidateSetup, timeoutSecs int, progress func(string)) (launched, error) {
+	// A candidate whose command starts the SGLang server gets the key
+	// launcher a built-in SGLang runtime gets, so it requires the worker key
+	// like every other engine; any other command is unchanged.
+	replica := provision.ReplicaSpec{
+		ExternalKey: externalKey, Name: "candidate", Model: setup.Model, ModelRevision: setup.ModelRevision,
+		Cloud: "kubernetes", GPU: setup.Accelerator, GPUCount: setup.GPUCount, Runtime: "custom-oci", RuntimeArgs: setup.RuntimeArgs,
+		Port: setup.Workload.Port, Workload: support.WithEngineKey("sglang", setup.Workload),
+	}
+	progress("launching")
+	started := e.now()
+	handle, err := e.Provider.EnsureReplica(ctx, replica)
+	if err != nil {
+		code := "launch_failed"
+		if errors.Is(err, provision.ErrInvalidReplicaSpec) {
+			code = "invalid_candidate"
+		}
+		// Whatever was applied before the failure is removed.
+		return launched{executor: e, handle: e.Provider.Handle(replica.ExternalKey)}, &CandidateError{Code: code, Detail: err.Error()}
+	}
+	out := launched{executor: e, handle: handle}
+	progress("waiting_ready")
+	endpoint, err := e.waitReady(ctx, handle, setup.Workload.Port, timeoutSecs)
+	if err != nil {
+		return out, err
+	}
+	out.readySeconds = roundMS(e.now().Sub(started).Seconds())
+	out.server = ControlServer{Endpoint: "candidate", BaseURL: endpoint, Model: setup.Model, Token: e.WorkerKey}
+	return out, nil
+}
+
+func (e KubernetesExecutor) waitReady(ctx context.Context, handle provision.ProviderHandle, port int, timeoutSecs int) (string, error) {
 	timeout := e.ReadyTimeout
 	if timeout <= 0 {
-		timeout = time.Duration(spec.TimeoutSecs) * time.Second / 2
+		timeout = time.Duration(timeoutSecs) * time.Second / 2
 	}
 	interval := e.PollInterval
 	if interval <= 0 {
@@ -249,15 +303,6 @@ func (e KubernetesExecutor) measure(ctx context.Context, server ControlServer, s
 		TTFTP50MS: measured.TTFTP50MS, TTFTP95MS: measured.TTFTP95MS, TPOTP50MS: measured.TPOTP50MS, TPOTP95MS: measured.TPOTP95MS,
 		LatencyP50MS: measured.LatencyP50MS, LatencyP95MS: measured.LatencyP95MS,
 	}, nil
-}
-
-// cleanup deletes the candidate even when the run was cancelled.
-func (e KubernetesExecutor) cleanup(ctx context.Context, handle provision.ProviderHandle, result *agentprotocol.CandidateRunResult) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
-	defer cancel()
-	if err := e.Provider.DeleteReplica(cleanupCtx, handle); err == nil {
-		result.CleanedUp = true
-	}
 }
 
 func localTransport() *http.Transport {
@@ -318,3 +363,7 @@ current-context: in-cluster
 	}
 	return path, nil
 }
+
+// candidateKey is the external key of a measured setup, deleted when its
+// run or window ends.
+func candidateKey(id string) string { return "agent-candidate-" + strings.ToLower(id) }
