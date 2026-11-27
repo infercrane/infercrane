@@ -83,7 +83,9 @@ run_phase() {
   state_set GPU_PRODUCT "$product"
 
   step "0b. The customer's own model server (namespace $NAMESPACE_MODELS): $MODEL on $product"
-  secret_file "$STATE_DIR/server-token" openssl rand -hex 24
+  # No trailing newline: the token goes into an HTTP header, where a newline
+  # cannot travel, so the agent's probe of the server failed (27 Nov).
+  secret_file "$STATE_DIR/server-token" sh -c 'openssl rand -hex 24 | tr -d "\n"'
   ensure_namespace "$NAMESPACE_MODELS"
   apply_secret "$NAMESPACE_MODELS" model-server-token "token=$STATE_DIR/server-token"
   render "$TOOL_DIR/manifests/models.yaml" | kc apply --dry-run=server -f - >/dev/null
