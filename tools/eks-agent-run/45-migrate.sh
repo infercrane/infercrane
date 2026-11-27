@@ -129,7 +129,7 @@ print(found[0] if found else "")' "$RUN_DIR/capture.json")
     state_set MIG_EVAL "$eval_digest"
   fi
   eval_digest=$(state_get MIG_EVAL)
-  check eval_set_uploaded pass "graded eval set $eval_digest (40 prompts, exact_match)"
+  check eval_set_uploaded pass "graded eval set $eval_digest ($(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("%d prompts, %s" % (len(d["prompts"]), d["grading"]))' "$EVAL_SET"))"
 
   step "3. The migration campaign"
   local campaign
