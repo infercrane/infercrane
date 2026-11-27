@@ -24,7 +24,7 @@ steps:
   - uses: actions/checkout@v7
     with:
       fetch-depth: 0
-  - uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+  - uses: infercrane/infercrane/actions/infercrane@v2.1.0
     with:
       mode: proof-gate
       spec: deploy/infercrane.yaml
