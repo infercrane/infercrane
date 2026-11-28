@@ -354,6 +354,14 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			http.Error(w, "remote GPU server unreachable", http.StatusBadGateway)
 		},
 	}
+	// A server may answer before it has read the whole request: it streams,
+	// or it rejects the request early. Without full duplex, Go's HTTP/1
+	// server consumes and closes the unread request body before the response
+	// begins. A request still arriving then holds the response back, and a
+	// forwarding read already in flight fails, closes the remote connection
+	// and cuts the response mid-stream. HTTP/2 is always full duplex, so the
+	// error it returns is expected.
+	_ = http.NewResponseController(w).EnableFullDuplex()
 	reverse.ServeHTTP(w, request)
 }
 
