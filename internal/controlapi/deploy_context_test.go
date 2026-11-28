@@ -103,12 +103,43 @@ func TestDeployWithEngineArgumentsKeepsThem(t *testing.T) {
 	}
 }
 
-// Without metadata access the deploy goes ahead as before, and the response
-// says the context could not be sized.
-func TestDeployWithoutMetadataAccessLeavesTheContextAndSaysWhy(t *testing.T) {
-	_, submitted, fit := submitDeploy(t, nil, `{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`)
-	if len(submitted.RuntimeArgs) != 0 || fit == nil || fit.SetBy != contextSetByRuntime || fit.Tokens != nil || !strings.Contains(fit.Reason, "metadata access is off") {
-		t.Fatalf("args=%v context=%+v", submitted.RuntimeArgs, fit)
+// Without metadata access a reviewed model is sized from the sizes the
+// catalog records for its pinned commit, so a default install bounds it too.
+func TestDeployWithoutMetadataAccessSizesAReviewedModel(t *testing.T) {
+	for _, body := range []string{
+		`{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+		`{"name":"qwen","model":"Qwen/Qwen3-8B","model_revision":"b968826d9c46dd6066d109eabc6255188de91218","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+	} {
+		_, submitted, fit := submitDeploy(t, nil, body)
+		if !slices.Equal(submitted.RuntimeArgs, []string{"--max-model-len", "8192"}) || fit == nil || fit.SetBy != contextSetByInferCrane || fit.Tokens == nil || *fit.Tokens != 8192 || fit.ModelTokens == nil || *fit.ModelTokens != 40960 || !strings.Contains(fit.Reason, "the reviewed catalog records") {
+			t.Fatalf("%s: args=%v context=%+v", body, submitted.RuntimeArgs, fit)
+		}
+	}
+	_, submitted, fit := submitDeploy(t, nil, `{"name":"bge","model":"BAAI/bge-m3","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`)
+	if len(submitted.RuntimeArgs) != 0 || fit == nil || fit.SetBy != contextSetByRuntime || !strings.Contains(fit.Reason, "Embedding models") {
+		t.Fatalf("embedding model: args=%v context=%+v", submitted.RuntimeArgs, fit)
+	}
+}
+
+// Without metadata access a model outside the reviewed catalog, a gated
+// reviewed model with no recorded sizes, or a reviewed model at another
+// commit goes ahead as before, and the response says the context could not
+// be sized and how to bound it.
+func TestDeployWithoutMetadataAccessLeavesAnUnreviewedContextAndSaysWhy(t *testing.T) {
+	for _, body := range []string{
+		`{"name":"phi","model":"microsoft/phi-4","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+		`{"name":"llama","model":"meta-llama/Llama-3.1-8B-Instruct","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+		`{"name":"qwen","model":"Qwen/Qwen3-8B","model_revision":"` + strings.Repeat("a", 40) + `","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+		`{"name":"qwen","model":"Qwen/Qwen3-8B","runtime":"sglang","model_revision":"` + strings.Repeat("a", 40) + `","cloud":"kubernetes","gpu":"NVIDIA-A10G"}`,
+	} {
+		_, submitted, fit := submitDeploy(t, nil, body)
+		flag := "--max-model-len"
+		if strings.Contains(body, "sglang") {
+			flag = "--context-length"
+		}
+		if len(submitted.RuntimeArgs) != 0 || fit == nil || fit.SetBy != contextSetByRuntime || fit.Tokens != nil || !strings.Contains(fit.Reason, "metadata access is off") || !strings.Contains(fit.Reason, "set "+flag+" to bound it") {
+			t.Fatalf("%s: args=%v context=%+v", body, submitted.RuntimeArgs, fit)
+		}
 	}
 }
 

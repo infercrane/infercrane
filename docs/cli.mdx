@@ -806,8 +806,9 @@ infercrane deploy Qwen/Qwen3-8B --compute-connection my-runpod --gpu L40S
 
 Without `--max-model-len`, the control plane checks whether one request at the model's own maximum
 context fits the GPU next to the weights. If it does not, InferCrane sets 8192 tokens, and the
-output's `Context` line and the note below it say so. This needs Hugging Face metadata access on the
-control plane; see [Context length at deploy](/features/model-catalog#context-length-at-deploy).
+output's `Context` line and the note below it say so. Reviewed catalog models are sized from numbers
+InferCrane records; any other model needs Hugging Face metadata access on the control plane. See
+[Context length at deploy](/features/model-catalog#context-length-at-deploy).
 
 A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
 Custom OCI uses the YAML form because its runtime contract is part of the immutable revision.

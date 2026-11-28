@@ -76,7 +76,9 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
    from the price catalog already in memory, and returns. For a deployment it sizes one request on
    the chosen GPU instead and, when the model's own maximum context does not fit, adds a context
    length to the deployment's engine arguments before the deployment is persisted. A failed read
-   never fails the deployment; it keeps the model's own context and says why. For a proposal
+   never fails the deployment; it keeps the model's own context and says why. With metadata access
+   off, a deployment of a reviewed catalog model is sized from the numbers `internal/modelcheck`
+   records for its pinned commit, with no network read. For a proposal
    planned from an endpoint diagnosis, it also adds the served weights' bytes and the KV cache bytes
    per token to that diagnosis, from which the planner predicts the cache room of precision changes.
    The planner itself never reads the network.
