@@ -314,7 +314,9 @@ func TestAgentCommandReleaseUndoesALeaseTheAgentNeverGot(t *testing.T) {
 	if err = s.ReleaseAgentCommand(ctx, "tenant-a", agent.ID, command.ID, 2); err != nil {
 		t.Fatal(err)
 	}
-	if released := read(); released.State != "running" || released.Attempts != 1 || released.LeaseExpiresAt == nil || released.LeaseExpiresAt.After(later) {
+	// The lease now ends at the time it was taken. PostgreSQL keeps microseconds
+	// and rounds, so the stored end may sit up to half a microsecond past later.
+	if released := read(); released.State != "running" || released.Attempts != 1 || released.LeaseExpiresAt == nil || released.LeaseExpiresAt.After(later.Add(time.Millisecond)) {
 		t.Fatalf("a released repeated lease: %#v", released)
 	}
 	lease(later.Add(time.Second), 2)
