@@ -35,10 +35,12 @@ type contextLength struct {
 // the weights, which is when vLLM and SGLang refuse to start. It reuses the
 // automatic model check's memory estimate and its default request length,
 // on the model read from Hugging Face or, when the control plane does not
-// read it, on the sizes the reviewed catalog records. A deploy that sets its
-// own engine arguments, a custom image, or a serving graph keeps what it
-// says. It never fails the deploy: when the model cannot be sized, the
-// context is left to the runtime and the reason says why.
+// read it, on the sizes the reviewed catalog records, across the GPUs the
+// arguments' tensor parallelism spans. A deploy whose engine arguments set
+// the context length, a custom image, or a serving graph keeps what it says;
+// other engine arguments keep theirs, and the bound is added after them. It
+// never fails the deploy: when the model cannot be sized, the context is
+// left to the runtime and the reason says why.
 func (a API) fitContextLength(ctx context.Context, tenant string, request *workflows.CloudRequest, builtInImage bool) *contextLength {
 	if value, set := optimizationcapability.ContextLength(request.RuntimeArgs); set {
 		result := &contextLength{SetBy: contextSetByRequest, Reason: "The deployment's engine arguments set the context length."}
@@ -54,11 +56,12 @@ func (a API) fitContextLength(ctx context.Context, tenant string, request *workf
 	unbounded := func(modelTokens *int, reason string) *contextLength {
 		return &contextLength{ModelTokens: modelTokens, SetBy: contextSetByRuntime, Reason: reason + " The runtime takes the model's own maximum context; set " + flag + " to bound it."}
 	}
-	switch {
-	case len(request.RuntimeArgs) > 0:
-		return unbounded(nil, "The deployment sets its own engine arguments, so InferCrane adds no context length to them.")
-	case !modelcheck.ValidRepository(request.Model):
+	if !modelcheck.ValidRepository(request.Model) {
 		return unbounded(nil, "InferCrane sizes the context from Hugging Face metadata, and this model is not a Hugging Face repository.")
+	}
+	parallel, readable := optimizationcapability.TensorParallelSize(request.Runtime, request.RuntimeArgs)
+	if !readable {
+		return unbounded(nil, "InferCrane could not read the tensor parallel size in the engine arguments, so it cannot size the context.")
 	}
 	memory, known := provideridentity.AcceleratorMemoryGiB(request.GPU)
 	if !known {
@@ -68,16 +71,20 @@ func (a API) fitContextLength(ctx context.Context, tenant string, request *workf
 	if failure != "" {
 		return unbounded(nil, failure)
 	}
-	// One request on one GPU: the plain deploy sets no tensor parallelism,
-	// and the runtimes refuse to start when a single request at the context
-	// length cannot fit the KV cache left beside the weights.
+	// One request across the GPUs tensor parallelism spans (one unless the
+	// arguments set it): the runtimes refuse to start when a single request
+	// at the context length cannot fit the KV cache left beside the weights.
 	now := time.Now().UTC()
 	gpus := []modelcheck.GPU{{Name: request.GPU, MemoryGiB: memory}}
 	fit := func(contextTokens int) modelcheck.Report {
 		return modelcheck.Evaluate(model, modelcheck.EvaluateOptions{ContextTokens: contextTokens, Concurrency: 1, GPUs: gpus, Registries: registries, Now: now})
 	}
 	fits := func(report modelcheck.Report) bool {
-		return report.Memory.State == modelcheck.Fits && report.Memory.GPUCount != nil && *report.Memory.GPUCount == 1
+		return report.Memory.State == modelcheck.Fits && report.Memory.GPUCount != nil && *report.Memory.GPUCount <= parallel
+	}
+	gpuLabel := "one " + request.GPU
+	if parallel > 1 {
+		gpuLabel = fmt.Sprintf("%d × %s", parallel, request.GPU)
 	}
 	full := fit(modelcheck.MaxContextTokens)
 	switch {
@@ -92,15 +99,15 @@ func (a API) fitContextLength(ctx context.Context, tenant string, request *workf
 	}
 	modelTokens := *full.Config.ContextLength
 	if fits(full) {
-		return &contextLength{ModelTokens: &modelTokens, SetBy: contextSetByRuntime, Reason: fmt.Sprintf("%s, one request at the model's own maximum of %d tokens fits one %s next to the weights, so the runtime keeps it.", estimate, modelTokens, request.GPU)}
+		return &contextLength{ModelTokens: &modelTokens, SetBy: contextSetByRuntime, Reason: fmt.Sprintf("%s, one request at the model's own maximum of %d tokens fits %s next to the weights, so the runtime keeps it.", estimate, modelTokens, gpuLabel)}
 	}
 	bounded := fit(0)
 	if !fits(bounded) {
-		return &contextLength{ModelTokens: &modelTokens, SetBy: contextSetByRuntime, Reason: fmt.Sprintf("%s, even one request of %d tokens does not fit one %s next to the weights, so the runtime may not start. Choose a GPU with more memory.", estimate, bounded.Memory.ContextTokens, request.GPU)}
+		return &contextLength{ModelTokens: &modelTokens, SetBy: contextSetByRuntime, Reason: fmt.Sprintf("%s, even one request of %d tokens does not fit %s next to the weights, so the runtime may not start. Choose a GPU with more memory.", estimate, bounded.Memory.ContextTokens, gpuLabel)}
 	}
 	tokens := bounded.Memory.ContextTokens
 	request.RuntimeArgs = append(request.RuntimeArgs, flag, strconv.Itoa(tokens))
-	return &contextLength{Tokens: &tokens, ModelTokens: &modelTokens, SetBy: contextSetByInferCrane, Reason: fmt.Sprintf("%s, one request at the model's own maximum of %d tokens does not fit one %s next to the weights, and the runtime would not start. InferCrane set %s %d, the request length its model check sizes GPUs for. Set your own context length to change it.", estimate, modelTokens, request.GPU, flag, tokens)}
+	return &contextLength{Tokens: &tokens, ModelTokens: &modelTokens, SetBy: contextSetByInferCrane, Reason: fmt.Sprintf("%s, one request at the model's own maximum of %d tokens does not fit %s next to the weights, and the runtime would not start. InferCrane set %s %d, the request length its model check sizes GPUs for. Set your own context length to change it.", estimate, modelTokens, gpuLabel, flag, tokens)}
 }
 
 // contextModel reads the model a deploy's context is sized from: from

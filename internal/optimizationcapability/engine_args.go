@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -102,6 +103,37 @@ func ContextLength(args []string) (string, bool) {
 		return strings.TrimSpace(value), true
 	}
 	return "", false
+}
+
+// tensorParallelFlags are the reviewed flags that set each built-in runtime's
+// tensor parallel size.
+var tensorParallelFlags = map[string][]string{"vllm": {"--tensor-parallel-size", "-tp"}, "sglang": {"--tp-size", "--tp"}}
+
+// TensorParallelSize returns the tensor parallel size an argument list gives
+// a built-in runtime, as "--tensor-parallel-size 2" or "--tp-size=2", or 1
+// when it sets none. The last setting wins, as in the runtimes' own parsers.
+// It reports false when a value is not a whole number of at least 1.
+func TensorParallelSize(runtime string, args []string) (int, bool) {
+	flags, size := tensorParallelFlags[strings.ToLower(strings.TrimSpace(runtime))], 1
+	for index := 0; index < len(args); index++ {
+		name, value, inline := strings.Cut(strings.TrimSpace(args[index]), "=")
+		if !slices.Contains(flags, name) {
+			continue
+		}
+		if !inline {
+			if index+1 >= len(args) {
+				return 0, false
+			}
+			index++
+			value = args[index]
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || parsed < 1 {
+			return 0, false
+		}
+		size = parsed
+	}
+	return size, true
 }
 
 // negativeNumber is a value such as -1 (SGLang disables chunked prefill

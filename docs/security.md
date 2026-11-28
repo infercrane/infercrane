@@ -288,7 +288,7 @@ and nothing else changes. See [Search Hugging Face](/features/model-catalog#sear
 When the operator sets `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`, the control plane also reads
 model info, `config.json`, and the safetensors summary from `huggingface.co` to check a model outside
 the reviewed catalog (planning, `GET /api/v1/catalog/hugging-face/check`, and optimization
-proposals), and to size the context length of a deployment created without engine arguments
+proposals), and to size the context length of a deployment whose engine arguments set none
 (`POST /api/v1/deployments`). It is off by default. For a gated or private model, the workspace's saved Hugging Face
 token is resolved at that read and sent only as an `Authorization` header to the same host:
 redirects to another host are refused, and the token is never logged, cached, stored, or returned.

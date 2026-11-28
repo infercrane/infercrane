@@ -74,7 +74,7 @@ are all operational.
 To let the dashboard and CLI deploy and optimize open Hugging Face models outside the reviewed
 catalog, set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. The control plane then needs outbound
 HTTPS to `huggingface.co` and reads model metadata only when someone plans, checks, or proposes such
-a model, or deploys a Hugging Face model without engine arguments (to size its context length). Leave it unset to keep planning to reviewed models; see
+a model, or deploys a Hugging Face model whose engine arguments set no context length (to size it). Leave it unset to keep planning to reviewed models; see
 [Check any model automatically](/features/model-catalog#check-any-model-automatically).
 
 Give the control plane a stable signing key so built-in quality evidence keeps one key ID across

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/modelcheck"
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/workflows"
 )
 
@@ -86,20 +87,73 @@ func TestPlainDeploySaysWhenEvenTheBoundedContextDoesNotFit(t *testing.T) {
 	}
 }
 
-// The deployment's own engine arguments stand: InferCrane neither reads the
-// model nor adds a context length to them.
-func TestDeployWithEngineArgumentsKeepsThem(t *testing.T) {
+// A context length in the deployment's engine arguments stands, in either
+// form and on either runtime: InferCrane neither reads the model nor adds one.
+func TestDeployWhoseArgumentsSetTheContextKeepsThem(t *testing.T) {
 	resolver, calls := recordedHub(t)
-	_, submitted, fit := submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"NVIDIA-A10G","runtime_args":["--max-model-len","4096"]}`)
-	if !slices.Equal(submitted.RuntimeArgs, []string{"--max-model-len", "4096"}) || fit == nil || fit.SetBy != contextSetByRequest || fit.Tokens == nil || *fit.Tokens != 4096 {
-		t.Fatalf("args=%v context=%+v", submitted.RuntimeArgs, fit)
-	}
-	_, submitted, fit = submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"NVIDIA-A10G","runtime_args":["--enable-prefix-caching"]}`)
-	if !slices.Equal(submitted.RuntimeArgs, []string{"--enable-prefix-caching"}) || fit == nil || fit.SetBy != contextSetByRuntime || fit.Tokens != nil || !strings.Contains(fit.Reason, "own engine arguments") || !strings.Contains(fit.Reason, "--max-model-len") {
-		t.Fatalf("args=%v context=%+v", submitted.RuntimeArgs, fit)
+	for _, test := range []struct {
+		runtime string
+		args    []string
+	}{
+		{"vllm", []string{"--max-model-len", "4096"}},
+		{"vllm", []string{"--enable-prefix-caching", "--max-model-len=4096"}},
+		{"sglang", []string{"--context-length", "4096"}},
+		{"sglang", []string{"--context-length=4096", "--tp-size", "1"}},
+	} {
+		args, _ := json.Marshal(test.args)
+		_, submitted, fit := submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","runtime":"`+test.runtime+`","cloud":"kubernetes","gpu":"NVIDIA-A10G","runtime_args":`+string(args)+`}`)
+		if !slices.Equal(submitted.RuntimeArgs, test.args) || fit == nil || fit.SetBy != contextSetByRequest || fit.Tokens == nil || *fit.Tokens != 4096 {
+			t.Fatalf("%v: args=%v context=%+v", test.args, submitted.RuntimeArgs, fit)
+		}
 	}
 	if calls.Load() != 0 {
-		t.Fatalf("Hugging Face was read %d times for a deploy with its own arguments", calls.Load())
+		t.Fatalf("Hugging Face was read %d times for a deploy that set its own context", calls.Load())
+	}
+}
+
+// Other engine arguments, such as a reviewed profile's prefix caching, keep
+// their place, and the bound is added after them.
+func TestDeployWithOtherEngineArgumentsIsBounded(t *testing.T) {
+	resolver, _ := recordedHub(t)
+	for _, test := range []struct {
+		runtime  string
+		args     []string
+		resolver *modelcheck.Resolver
+	}{
+		{"vllm", []string{"--enable-prefix-caching"}, resolver},
+		{"vllm", []string{"--enable-prefix-caching", "--max-num-batched-tokens", "2048"}, nil},
+		{"sglang", []string{"--mem-fraction-static", "0.85"}, resolver},
+	} {
+		args, _ := json.Marshal(test.args)
+		_, submitted, fit := submitDeploy(t, test.resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","runtime":"`+test.runtime+`","cloud":"kubernetes","gpu":"NVIDIA-A10G","runtime_args":`+string(args)+`}`)
+		flag := optimizationcapability.ContextLengthFlag(test.runtime)
+		if !slices.Equal(submitted.RuntimeArgs, append(slices.Clone(test.args), flag, "8192")) || fit == nil || fit.SetBy != contextSetByInferCrane || fit.Tokens == nil || *fit.Tokens != 8192 {
+			t.Fatalf("%v: args=%v context=%+v", test.args, submitted.RuntimeArgs, fit)
+		}
+	}
+}
+
+// Tensor parallelism in the arguments spreads the weights and the KV cache
+// over its GPUs, so the context is sized across them.
+func TestDeploySizesTheContextAcrossTensorParallelGPUs(t *testing.T) {
+	resolver, _ := recordedHub(t)
+	for _, test := range []struct {
+		runtime string
+		args    []string
+	}{
+		{"vllm", []string{"--tensor-parallel-size", "2"}},
+		{"vllm", []string{"-tp=2", "--enable-prefix-caching"}},
+		{"sglang", []string{"--tp-size", "2"}},
+	} {
+		args, _ := json.Marshal(test.args)
+		_, submitted, fit := submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","runtime":"`+test.runtime+`","cloud":"kubernetes","gpu":"NVIDIA-A10G","gpu_count":2,"runtime_args":`+string(args)+`}`)
+		if !slices.Equal(submitted.RuntimeArgs, test.args) || fit == nil || fit.SetBy != contextSetByRuntime || fit.Tokens != nil || !strings.Contains(fit.Reason, "fits 2 × NVIDIA-A10G") {
+			t.Fatalf("%v: args=%v context=%+v", test.args, submitted.RuntimeArgs, fit)
+		}
+	}
+	_, submitted, fit := submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"NVIDIA-A10G","runtime_args":["--tensor-parallel-size","two"]}`)
+	if !slices.Equal(submitted.RuntimeArgs, []string{"--tensor-parallel-size", "two"}) || fit == nil || fit.SetBy != contextSetByRuntime || !strings.Contains(fit.Reason, "tensor parallel size") {
+		t.Fatalf("unreadable size: args=%v context=%+v", submitted.RuntimeArgs, fit)
 	}
 }
 

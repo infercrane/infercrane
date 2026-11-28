@@ -64,8 +64,8 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
 1. A planning request (`POST /api/v1/planning/intents`), a check (`GET
    /api/v1/catalog/hugging-face/check`), or an optimization proposal names a Hugging Face repository
    that is not a reviewed model; or a deployment (`POST /api/v1/deployments`) of any Hugging Face
-   repository on a built-in runtime sets no engine arguments, and InferCrane sizes its context
-   length.
+   repository on a built-in runtime sets no context length in its engine arguments, and InferCrane
+   sizes it.
 2. When a `model_secret_reference_id` is named, the control API loads that tenant's secret reference
    and resolves the token through the configured secret resolver.
 3. `internal/modelcheck` pins the revision to a commit with one model-info request, then reads
