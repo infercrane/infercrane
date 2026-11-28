@@ -95,7 +95,8 @@ footer p{margin:0 0 6px}
 {{end}}</tbody></table></div>{{end}}
 <div class="panel">
 <p><strong>Answer quality.</strong> {{.Quality}}</p>
-<p><span class="pill {{.ClaimTone}}">{{.Claim}}</span></p>
+<p><span class="pill {{.ClaimTone}}">{{.Claim}}</span></p>{{if .Disclosures}}
+<p><strong>Disclosed with this claim.</strong></p><ul class="disclosures">{{range .Disclosures}}<li>{{.}}</li>{{end}}</ul>{{end}}
 <p><span class="pill {{.Tone}}">{{.Saving}}</span></p>
 {{if .Reasons}}<ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
 </div>

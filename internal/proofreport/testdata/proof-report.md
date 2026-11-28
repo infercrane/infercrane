@@ -11,7 +11,7 @@ Prepared for Example Labs · runs measured 2026-11-02 to 2026-11-03 · InferCran
 | Verified saving a month | unknown: no workload has a verified saving with a recorded price and your traffic volume |
 | Output per GPU, verified workloads | at least +10.0% |
 
-**How to read this report.** A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup's task score. Anything less is "not shown". A number marked *unknown* was not measured or not comparable; nothing is estimated.
+**How to read this report.** A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup's task score. A technique's claim also carries every disclosure its technique requires, word for word. Anything less is "not shown". A number marked *unknown* was not measured or not comparable; nothing is estimated.
 
 ## Workload 1: Qwen/Qwen3-8B · chat
 
@@ -112,7 +112,11 @@ infercrane optimize report NEW_RUN --output json > new-run.json
 | Time to first token, p95 ≤ 1,000 ms | 420 ms · met | 400 ms · met |
 
 - **Answer quality:** Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval's pass or fail.
-- **Claim shown · output token throughput +18.0% against ±3.0% noise, the smaller of both windows.**
+- **Claim shown · technique adaptive-speculation-one-engine@0.1.0 · output token throughput +18.0% against ±3.0% noise, the smaller of both windows.**
+  - Disclosed with this claim: All output, not only output within one second of first token, was not shown to improve against the best fixed setup in the H100 lab runs.
+  - Disclosed with this claim: At 128 requests at once it served less output within one second of first token than the plain vLLM command on the same H100; the cause is not read.
+  - Disclosed with this claim: It runs a patched vLLM 0.34.0 image with prefix caching off, and is refused for traffic that takes more than 2% of its input from the prefix cache.
+  - Disclosed with this claim: The H100 lab runs used patch v2 and vLLM's Rust front end; the product runs patch v4 and vLLM's Python front end.
 - **Saving verified: output per GPU +20.0%, so the same traffic needs 16.7% fewer GPU hours; cost per 1M output tokens 16.7% lower; $97.33 a month at your captured traffic ($584 → $487); $1,168 a year at that rate (projection); 730 → 608 GPU hours a month. Basis: measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included.**
 
 Evidence:
@@ -270,6 +274,6 @@ infercrane optimize report NEW_RUN --output json > new-run.json
 
 ---
 
-Report digest `sha256:f6f9cb3fe5bb7d70dd330b4b929ac77c0509caa0fa108ed63b1d6cf9a3f24527`. Every number comes from the runs' persisted measurements.
+Report digest `sha256:2b937bae90250eb70a9afe1689b3457d4b4488a1c820f6cf7a434534f6362598`. Every number comes from the runs' persisted measurements.
 
 Signed by key sha256:3ab86a91c1e46782. Verify with infercrane report proof verify FILE, where FILE is this report saved with --output json.

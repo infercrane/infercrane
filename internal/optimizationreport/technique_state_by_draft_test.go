@@ -159,6 +159,30 @@ func TestTheProductCollectsTheOneEngineEvidenceItself(t *testing.T) {
 	}
 }
 
+// SetupResult, which the Proof Report reads, returns a technique's result with
+// the disclosures its setup carried, word for word, and judges it by the
+// manifest: a setup shown without one of them is "not shown".
+func TestSetupResultCarriesTheTechniqueDisclosures(t *testing.T) {
+	manifest, _ := optimizer.TechniqueManifest(optimizer.TechniqueAdaptiveSpeculationOneEngine)
+	task := &domain.QualityEvidence{ID: "q", Evaluator: qualitycheck.TaskEvaluator, Passed: true}
+	campaign, run := oneEngineCampaign(t, patchedImage, optimizer.StateByDraftCommand, manifest.Disclosures, oneEngineMeasured(patchedMetrics(48, 80, 12)))
+	result, _ := SetupResult(campaign, run, task)
+	if result == nil || !slices.Equal(result.Disclosures, manifest.Disclosures) {
+		t.Fatalf("result %+v", result)
+	}
+	// A test binary records no build commit; a release build does.
+	stamped := *result
+	stamped.Reproduction.Commit = "0123abc"
+	if claim := manifest.ClaimOf(stamped); claim != technique.ClaimShown {
+		t.Fatalf("claim %s, unknown %v", claim, stamped.Unknown())
+	}
+	campaign, run = oneEngineCampaign(t, patchedImage, optimizer.StateByDraftCommand, manifest.Disclosures[1:], oneEngineMeasured(patchedMetrics(48, 80, 12)))
+	result, claim := SetupResult(campaign, run, task)
+	if result == nil || claim != technique.ClaimNotShown || slices.Contains(result.Disclosures, manifest.Disclosures[0]) {
+		t.Fatalf("without a disclosure: claim %s, result %+v", claim, result)
+	}
+}
+
 // The record both items digest is the campaign's own: rebuilding it from the
 // stored measurement gives the same digest.
 func TestTheStateByDraftProofIsRebuiltFromTheStoredRun(t *testing.T) {

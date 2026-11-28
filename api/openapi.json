@@ -14031,6 +14031,13 @@
                             ],
                             "type": "string"
                           },
+                          "disclosures": {
+                            "description": "The sentences a technique's claim carries, word for word from its measured result; empty for a setup no technique made. Show them wherever the claim is shown.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
                           "metric": {
                             "type": "string"
                           },
@@ -14055,7 +14062,8 @@
                           "claim",
                           "change_percent",
                           "noise_floor_percent",
-                          "missing"
+                          "missing",
+                          "disclosures"
                         ],
                         "type": "object"
                       },

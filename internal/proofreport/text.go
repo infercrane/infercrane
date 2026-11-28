@@ -38,7 +38,11 @@ func Text(d Document) string {
 			for _, row := range run.Targets {
 				fmt.Fprintf(&b, "    %-28s before %s · after %s\n", row.Limit, row.Before, row.After)
 			}
-			fmt.Fprintf(&b, "    Answer quality: %s\n    %s\n    %s\n", run.Quality, run.Claim, run.Saving)
+			fmt.Fprintf(&b, "    Answer quality: %s\n    %s\n", run.Quality, run.Claim)
+			for _, disclosure := range run.Disclosures {
+				fmt.Fprintf(&b, "      Disclosed with this claim: %s\n", disclosure)
+			}
+			fmt.Fprintf(&b, "    %s\n", run.Saving)
 			for _, reason := range run.Reasons {
 				fmt.Fprintf(&b, "      - %s\n", reason)
 			}

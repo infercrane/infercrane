@@ -64,12 +64,14 @@ type RunView struct {
 	Quality   string
 	Claim     string
 	ClaimTone string
-	Saving    string
-	Tone      string
-	Reasons   []string
-	Evidence  []Pair
-	Rerun     []string
-	Warnings  []string
+	// Disclosures travel with the claim, word for word.
+	Disclosures []string
+	Saving      string
+	Tone        string
+	Reasons     []string
+	Evidence    []Pair
+	Rerun       []string
+	Warnings    []string
 }
 
 // SetupRow is one property of the setup before and after.
@@ -214,6 +216,7 @@ func runView(run Run) RunView {
 	}
 	out.Quality = qualityWords(run.Quality)
 	out.Claim, out.ClaimTone = claimWords(run.Claim), shownTone(run.Claim.Claim)
+	out.Disclosures = append([]string{}, run.Claim.Disclosures...)
 	out.Saving, out.Tone = savingWords(run.Saving)
 	out.Evidence = append(out.Evidence, Pair{"This run's signed report", run.Evidence.ReportDigest + " at " + run.Evidence.ReportPath}, Pair{"Check it", run.Evidence.Verify})
 	for _, record := range run.Evidence.Records {

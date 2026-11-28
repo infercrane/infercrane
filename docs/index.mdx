@@ -1,49 +1,90 @@
 ---
-title: Give InferCrane a model. Get a production endpoint.
-description: Deploy, operate, optimize, and safely evolve inference while your application keeps one stable interface.
+title: Same model. Less compute. Proven on your own traffic.
+description: InferCrane makes the open-weight models you already serve faster on your own GPUs, and proves every change on your traffic before your users see it.
 sidebarTitle: Introduction
 mode: wide
 ---
 
 <div className="ic-hero not-prose">
-  <div className="ic-kicker"><span className="ic-status-dot"></span> Open-source inference release system</div>
+  <div className="ic-kicker"><span className="ic-status-dot"></span> Open source · open-weight models</div>
   <div className="ic-actions">
-    <a className="ic-button ic-button-primary" href="/quickstart">Start the local tour <span aria-hidden="true">→</span></a>
-    <a className="ic-button ic-button-secondary" href="https://console.infercrane.com">Open the console <span aria-hidden="true">↗</span></a>
+    <a className="ic-button ic-button-primary" href="/integrations/kubernetes-install">Run it on your GPU cluster <span aria-hidden="true">→</span></a>
+    <a className="ic-button ic-button-secondary" href="/quickstart">Start the local tour <span aria-hidden="true">→</span></a>
   </div>
   <div className="ic-proof">
-    <span>Any compatible model</span>
-    <span>Safe releases</span>
-    <span>Explainable operations</span>
-    <span>No Kubernetes required</span>
+    <span>Measured against your current setup</span>
+    <span>Confirmed on fresh servers</span>
+    <span>Answers checked</span>
+    <span>Rolled out with a fallback</span>
   </div>
 </div>
 
-```bash Prove the release loop locally
-git clone https://github.com/infercrane/infercrane.git
-cd infercrane
-make demo
-```
+InferCrane refuses speedups that change your answers. It runs beside the vLLM or SGLang servers you
+already have, on a laptop, a Kubernetes cluster or a cloud account, and prompts and answers stay in
+your account.
 
-InferCrane turns a compatible model or immutable OCI workload into one OpenAI-compatible logical endpoint.
-Durable operations provision, reconcile, scale, and safely replace workers behind it. Already
-running inference? Connect it in observe-only mode without migrating or transferring ownership.
-
-<div className="ic-flow not-prose" aria-label="InferCrane request path">
-  <div className="ic-node"><span className="ic-node-label">request</span><strong>OpenAI client</strong></div>
+<div className="ic-flow not-prose" aria-label="How InferCrane proves a change">
+  <div className="ic-node"><span className="ic-node-label">your traffic</span><strong>current setup</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node ic-node-accent"><span className="ic-node-label">stable identity</span><strong>endpoint</strong></div>
+  <div className="ic-node"><span className="ic-node-label">side by side</span><strong>candidate</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label">atomic policy</span><strong>route snapshot</strong></div>
+  <div className="ic-node"><span className="ic-node-label">fresh servers</span><strong>confirmed</strong></div>
   <span className="ic-flow-arrow" aria-hidden="true">→</span>
-  <div className="ic-node"><span className="ic-node-label"><i className="ic-dot"></i> ready</span><strong>runtime binding</strong></div>
+  <div className="ic-node ic-node-accent"><span className="ic-node-label"><i className="ic-dot"></i> answers held</span><strong>rolled out</strong></div>
 </div>
+
+## Every change proven before it ships
+
+<Steps>
+  <Step title="Measured against your current setup">
+    Setups take turns under the same traffic, and a copy of your current setup is measured the same
+    way, so the run knows its own noise instead of assuming it. When setups run on separate servers,
+    every comparison also carries an allowance for the difference between machines.
+  </Step>
+  <Step title="Again on fresh servers">
+    A gain counts only when it holds on machines that didn't produce it.
+  </Step>
+  <Step title="Answers checked">
+    The candidate answers a graded task set. A setup that changes answers must hold within 1 point,
+    or it is refused, however fast it is.
+  </Step>
+  <Step title="Rolled out with a fallback">
+    A second server takes traffic first, your current server stays up as the fallback, and traffic
+    switches back automatically if the guard sees a regression.
+  </Step>
+</Steps>
+
+A result the evidence doesn't show is reported as "not shown", never as a win. See
+[how a run measures and confirms a gain](/features/optimization) and
+[how answers are checked](/features/semantic-quality).
+
+## Results and receipts
+
+Each result links to its receipt: the rules written before the run, the machines, and every server's
+results.
+
+| Result | Status |
+|---|---|
+| A speculation draft trained on chat traffic served **54% more output** at one request at a time and **13% more** at 32 at once on Qwen3-8B FP8, one NVIDIA H100, confirmed on a second, with answers held within 1 point. One model, one GPU type, chat traffic; read [the disclosures](/features/trained-drafts). | Lab-proven, coming to InferCrane |
+| On an NVIDIA L4 at 32 requests at once, both drafts were **slower** than no speculation, so speculation stays off there. ([receipt](/features/trained-drafts)) | Measured |
+| The publisher's documented speculation setting served **32.1% more output** on Qwen3.8-27B FP8 at 32 requests at once on one H100, and **33.1% more** on two fresh servers; p95 time to first token was 31.4% worse on the fresh servers. ([receipt](/testing/qwen38-27b-fp8-h100-campaign-2026-11-23)) | Measured; proposed, not activated |
+| FP8 weights with an FP8 KV cache served **62% to 159% more output** on Qwen3-8B on an NVIDIA L4, but lost 1.10 points on 1,000 graded tasks, so the change was **refused**. ([receipt](/testing/qwen3-8b-fp8-l4-confirmation-2026-11-26); [published FP8 checkpoints](/testing/qwen3-8b-fp8-checkpoints-l4-2026-11-26)) | Refused |
+| A September screen measured **1.72×** from one speculation setting on synthetic prompts. Re-run on real text with three fresh servers per setup, the same change ranged from 22% slower to 68% faster. ([receipt](/testing/qwen38-27b-fp8-h200-rerun-2026-11-23)) | **Withdrawn** and re-measured |
+
+The [benchmark index](/benchmarks) lists every receipt, including the dated September record.
 
 ## Choose your starting point
 
 <CardGroup cols={2}>
-  <Card title="Call a qualified Model API" icon="bolt" href="/model-apis">
-    Use the OpenAI-compatible contract when the catalog publishes a qualified managed offer.
+  <Card title="Speed up a model you already serve" icon="gauge" href="/integrations/kubernetes-install">
+    Run the agent beside your vLLM server, measure candidates on your traffic, and roll out with your
+    server kept as the fallback. Qualified on EKS with one NVIDIA A10G.
+  </Card>
+  <Card title="Prove the loop locally" icon="flask" href="/quickstart">
+    Run the GPU-free control and request path in under five minutes.
+  </Card>
+  <Card title="Gate serving changes in CI" icon="code-pull-request" href="/integrations/github-actions">
+    Prove a pull request's model or setting change against the base branch and fail the check on a regression.
   </Card>
   <Card title="Deploy a model" icon="server" href="/showcase/build-inference">
     Plan, review, and deploy a Hugging Face model or explicit serving plan into infrastructure you control.
@@ -51,64 +92,36 @@ running inference? Connect it in observe-only mode without migrating or transfer
   <Card title="Connect existing inference" icon="plug" href="/showcase/connect-existing">
     Discover vLLM, SGLang, LiteLLM, or another OpenAI-compatible endpoint before transferring ownership.
   </Card>
-  <Card title="Optimize a workload" icon="gauge" href="/features/optimization">
-    Search bounded candidates, compare exact workload evidence, and promote only a qualified winner.
-  </Card>
   <Card title="Run an agent sandbox" icon="terminal" href="/integrations/brezel-sandboxes">
     Give an agent a persistent workspace with commands, files, previews, sleep, resume, and scoped model access.
   </Card>
-  <Card title="Prove the loop locally" icon="flask" href="/quickstart">
-    Run the complete GPU-free control and request path in under five minutes.
-  </Card>
 </CardGroup>
 
-## Measured evidence
-
-A change InferCrane reports is measured on your traffic against your current setup, confirmed again
-on fresh servers, and, when it changes answers, checked on a scored task set. An early September
-screen on `Qwen/Qwen3.8-27B-FP8` did not meet that bar: it measured 1.72× from turning on the
-publisher's documented speculation option, using synthetic prompts that repeat one sentence. Run
-again on 23 November on real text with three fresh servers per setup, the same change gave 12% to 33%
-at 12 requests at once, and the publisher's documented setup on vLLM 0.34.0 was faster than
-September's setup in every case measured. The
-[re-run's receipt](/testing/qwen38-27b-fp8-h200-rerun-2026-11-23) has every number; the
-[benchmark index](/benchmarks) keeps September's receipts as a dated record.
-
-## The production operating loop
-
-<Steps>
-  <Step title="Deploy and converge">
-    Persist the desired model, runtime, infrastructure, and scale policy before provider work begins.
-  </Step>
-  <Step title="Observe the real request path">
-    Correlate endpoint, revision, replica, queueing, TTFT, generation, errors, and cost evidence.
-  </Step>
-  <Step title="Validate a candidate">
-    Compare active and candidate revisions with benchmark, replay, runtime, and optional signed task-quality evidence.
-  </Step>
-  <Step title="Promote, reject, or explain">
-    Apply deterministic Release Guard policy and preserve the decision for audit and recovery.
-  </Step>
-</Steps>
+InferCrane doesn't replace your engine. It runs [vLLM](https://github.com/vllm-project/vllm) and
+[SGLang](https://github.com/sgl-project/sglang) as they are, drives load with
+[AIPerf](https://github.com/ai-dynamo/aiperf), and trains drafts with
+[speculators](https://github.com/vllm-project/speculators).
 
 <Note>
-Provider and runtime capabilities are declared and conformance-tested, but each adapter has an
-independent qualification state. Review [compatibility and qualification](/compatibility) before relying on an
-exact provider, runtime, model, and accelerator combination.
+Each provider, runtime, model, and accelerator combination has its own qualification state. Review
+[compatibility and qualification](/compatibility) before relying on an exact combination.
 </Note>
 
 <CardGroup cols={3}>
+  <Card title="Call a qualified Model API" icon="bolt" href="/model-apis">
+    Use the OpenAI-compatible contract when the catalog publishes a qualified managed offer.
+  </Card>
   <Card title="See production patterns" icon="sparkles" href="/showcase/index">
     Follow real-life deployment, adoption, rollout, cost, and composition journeys.
+  </Card>
+  <Card title="Choose an operating model" icon="building" href="/editions">
+    Understand Community, the hosted Cloud direction, and the Enterprise boundary.
   </Card>
   <Card title="Understand the architecture" icon="diagram-project" href="/architecture/system">
     See the durable control plane, database-free request path, and replaceable adapter boundaries.
   </Card>
   <Card title="Inspect the CLI" icon="terminal" href="/cli">
     Browse current commands, durable operation behavior, and machine-readable output.
-  </Card>
-  <Card title="Choose an operating model" icon="building" href="/editions">
-    Understand Community, the hosted Cloud direction, and the Enterprise boundary.
   </Card>
   <Card title="Release and upgrade safely" icon="arrow-up-from-bracket" href="/upgrade">
     Qualify client, protocol, runtime, and control-plane changes with explicit restoration paths.
