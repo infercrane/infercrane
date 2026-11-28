@@ -1250,15 +1250,18 @@ func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Req
 // matchingCompatibility returns the entries a proposal may use: the request's
 // provider and runtimes, a qualified state (simulated only when asked), for an
 // entry narrowed to one qualified tuple the request's GPU and the runtime's
-// pinned version, and an adapter whose prerequisite is known to be there
-// (prerequisiteKnown). One entry per runtime, adapter, and mode remains.
+// pinned version, an adapter whose prerequisite is known to be there
+// (prerequisiteKnown), and for an agent's endpoint an adapter whose setups are
+// plain servers (agentEndpoint). One entry per runtime, adapter, and mode
+// remains.
 func matchingCompatibility(integrations integration.Snapshot, request Request) []integration.RuntimeCompatibility {
 	offered, _ := filterCompatibility(integrations, request)
 	return offered
 }
 
 // filterCompatibility also returns the entries that matched the request but
-// were withheld because their adapter's prerequisite is not known to be there.
+// were withheld: their adapter's prerequisite is not known to be there, or the
+// plan is for an agent's endpoint and their setups are not plain servers.
 func filterCompatibility(integrations integration.Snapshot, request Request) (offered, withheld []integration.RuntimeCompatibility) {
 	allowedRuntime := func(value string) bool {
 		if len(request.Runtimes) == 0 {
@@ -1285,7 +1288,7 @@ func filterCompatibility(integrations integration.Snapshot, request Request) (of
 		if !entry.Applies(request.GPU, runtimeVersion(integrations.Runtimes, entry.Runtime)) {
 			continue
 		}
-		if !prerequisiteKnown(integrations.Providers, entry, request) {
+		if !prerequisiteKnown(integrations.Providers, entry, request) || agentEndpoint(request) && !plainServerAdapter(integrations.Providers, entry.Adapter) {
 			withheld = append(withheld, entry)
 			continue
 		}
@@ -1307,10 +1310,31 @@ func prerequisiteKnown(providers []integration.ProviderProfile, entry integratio
 	return providerProfile(providers, entry.Adapter).PrerequisiteConfigured(entry.Runtime)
 }
 
+// agentEndpoint reports whether the plan is for an endpoint an InferCrane
+// agent serves: the control API recorded its starting setup as declared for
+// that endpoint. The agent measures every setup there and starts plain servers
+// only, so a setup it would start as something else is never offered.
+func agentEndpoint(request Request) bool {
+	return request.StartingSetup != nil && request.StartingSetup.Endpoint != ""
+}
+
+// plainServerAdapter reports, from the adapter's provider profile, whether a
+// setup on it is a plain server. An adapter without a profile is not known to
+// be one.
+func plainServerAdapter(providers []integration.ProviderProfile, adapter string) bool {
+	for _, profile := range providers {
+		if profile.Adapter == adapter {
+			return profile.PlainServer()
+		}
+	}
+	return false
+}
+
 // prerequisiteWarnings says, once per adapter, which setups the planner left
-// out because their adapter's prerequisite is not known to be there, and how
-// to plan them. A control plane that knows its own configuration names the
-// settings; the catalog can only say to name the adapter.
+// out and why: their adapter's prerequisite is not known to be there, and how
+// to plan them (a control plane that knows its own configuration names the
+// settings; the catalog can only say to name the adapter), or, for an agent's
+// endpoint, they are not plain servers.
 func prerequisiteWarnings(integrations integration.Snapshot, request Request) []string {
 	_, withheld := filterCompatibility(integrations, request)
 	runtimes := map[string][]string{}
@@ -1323,6 +1347,10 @@ func prerequisiteWarnings(integrations integration.Snapshot, request Request) []
 	for _, adapter := range slices.Sorted(maps.Keys(runtimes)) {
 		profile := providerProfile(integrations.Providers, adapter)
 		slices.Sort(runtimes[adapter])
+		if agentEndpoint(request) {
+			warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) were left out: the endpoint's InferCrane agent starts plain servers only, and they need %s.", adapter, strings.Join(runtimes[adapter], ", "), profile.Prerequisite.Name))
+			continue
+		}
 		leftOut := fmt.Sprintf("Setups on %s (%s) were left out: they need %s", adapter, strings.Join(runtimes[adapter], ", "), profile.Prerequisite.Name)
 		if gap := profile.PrerequisiteGap(runtimes[adapter]...); gap != "" {
 			warnings = append(warnings, fmt.Sprintf("%s, and %s.", leftOut, gap))

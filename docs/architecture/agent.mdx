@@ -452,6 +452,9 @@ plane has no profile for is refused too, because nothing says what it starts.
 - **In a run stored before this check**, the setup fails before its next window, so no GPU
   starts. Its failure code is `agent_setup_not_plain_server`, and reports and `optimize watch` say
   why in words. A winner measured that way is never rolled out.
+- **When the run is planned**, the proposal leaves such setups out if the endpoint's setup was
+  declared (`declared_setup`), with a warning that names them. Without a declaration the planner
+  cannot tell the endpoint is an agent's, so the refusal at creation is what stops them.
 
 ### The winner's guarded rollout
 

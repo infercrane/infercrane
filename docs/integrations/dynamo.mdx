@@ -149,7 +149,8 @@ the `kubernetes-dynamo` provider: the runtimes it runs Dynamo with (`configured_
 settings for each runtime (`settings`).
 
 An endpoint an InferCrane agent serves cannot measure a Dynamo setup: the agent starts plain servers
-only. A run on such an endpoint refuses one before any GPU starts
+only. A proposal for such an endpoint, with its setup declared, leaves Dynamo setups out with a
+warning, and a run on it refuses one before any GPU starts
 ([agent runs](/architecture/agent#optimization-runs-on-an-agent%E2%80%99s-endpoint)).
 
 ## Ownership matrix

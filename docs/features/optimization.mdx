@@ -237,7 +237,9 @@ adapter plans from the wrong kind of server. A provider that names only a cloud 
 adapters, such as `--provider runpod`, names none of them; between adapters with equal
 qualification evidence and equal reusable artifacts the plan then starts from the first in name
 order (`runpod-pods`). Either way one request plans from the same kind of server for every
-`--profile`.
+`--profile`. A plan for an endpoint an InferCrane agent serves, with its setup declared, never holds
+a Dynamo setup, even when the request names the adapter: the agent starts plain servers only. The
+proposal warns which setups it left out.
 
 | Diagnosis | Tried, in order | vLLM flags (SGLang) |
 |---|---|---|

@@ -2,6 +2,8 @@ package optimizer
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -202,5 +204,73 @@ func TestAControlPlaneWithoutDynamoNamesTheSettingsForTheSetupsItLeftOut(t *test
 	want := []string{"Setups on kubernetes-dynamo (sglang, vllm) were left out: they need NVIDIA Dynamo, and this control plane has no NVIDIA Dynamo image configured for sglang or vllm (set INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST, INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION, INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST, and INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION)."}
 	if got := dynamoWarnings(proposal); !slices.Equal(got, want) {
 		t.Fatalf("warnings=%q want %q", got, want)
+	}
+}
+
+// A plan for an endpoint an InferCrane agent serves offers only setups the
+// agent can start as they are named. It starts plain servers only, so Dynamo
+// setups are left out with a warning, even on a control plane that runs
+// Dynamo and when the request names the adapter; the same request for another
+// endpoint may still use them.
+func TestAnAgentEndpointsPlanLeavesOutSetupsThatAreNotPlainServers(t *testing.T) {
+	body, err := os.ReadFile("testdata/diagnosis/kv-cache-pressure-overload.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diagnosis Diagnosis
+	if err = json.Unmarshal(body, &diagnosis); err != nil {
+		t.Fatal(err)
+	}
+	declared, err := DeclaredSetup{Engine: "vllm", Version: "0.34.0", GPU: "H100", GPUCount: 1}.StartingSetup("support-bot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{ModelIdentity: "Qwen/Qwen3.8-27B-FP8", ModelRevision: "c3a462cc3d38cf351f3b26cbd763469eeb74ef81", Provider: "kubernetes", GPU: "H100",
+		Runtimes: []string{"vllm"}, Objective: "throughput", WorkloadProfile: "throughput", MaxCandidates: 6, IncludeSimulated: true,
+		ModelFeatures: []string{FeatureNativeMTP}, ModelConfigDigest: recipeTestDigest, Diagnosis: &diagnosis}
+	source := dynamoCatalogSource(t, "vllm")
+	offers := func(request Request) bool {
+		for _, entry := range matchingCompatibility(source.Integrations, request) {
+			if entry.Adapter == "kubernetes-dynamo" {
+				return true
+			}
+		}
+		return false
+	}
+	if !offers(request) {
+		t.Fatal("another endpoint's plan may use the Dynamo graph")
+	}
+	request.StartingSetup = &declared
+	if offers(request) {
+		t.Fatal("an agent endpoint's plan may use the Dynamo graph")
+	}
+	proposal, err := source.Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateProposal(proposal); err != nil {
+		t.Fatal(err)
+	}
+	adapters := adaptersOf(proposal)
+	if _, dynamo := adapters["kubernetes-dynamo"]; dynamo || len(adapters["kubernetes"]) < 2 {
+		t.Fatalf("want plain servers only, got %v", adapters)
+	}
+	for _, candidate := range proposal.Candidates {
+		if !candidate.Deployment.Serving.Empty() {
+			t.Fatalf("a setup carries a serving graph: %+v", candidate.Deployment)
+		}
+	}
+	const want = "Setups on kubernetes-dynamo (vllm) were left out: the endpoint's InferCrane agent starts plain servers only, and they need NVIDIA Dynamo."
+	if warning := dynamoWarning(proposal); warning != want {
+		t.Fatalf("warning %q; warnings=%v", warning, proposal.Warnings)
+	}
+
+	request.Provider = "kubernetes-dynamo"
+	proposal, err = source.Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.Candidates) != 0 || dynamoWarning(proposal) != want {
+		t.Fatalf("naming the adapter for an agent's endpoint: %v %v", adaptersOf(proposal), proposal.Warnings)
 	}
 }
