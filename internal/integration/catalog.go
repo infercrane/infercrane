@@ -477,6 +477,9 @@ func V1Catalog() (*Registry, error) {
 			{State: QualificationLocal, Environment: "hermetic-kubectl", Evidence: "go:test/internal/provision#TestKubernetesDynamoLifecycleIsReplaySafeAndOwnsOneParent"},
 			{State: QualificationDeferred, Environment: "real-dynamo-gpu-kubernetes", Reason: "Dynamo operator, GPU runtime, NIXL, cache, and performance semantics require real infrastructure"},
 		},
+		// A Kubernetes cluster does not run Dynamo by itself. The control
+		// plane configures it per runtime from its Dynamo image settings.
+		Prerequisite: Prerequisite{Name: "NVIDIA Dynamo"},
 	}
 	if err = registry.RegisterProvider(dynamo); err != nil {
 		return nil, err

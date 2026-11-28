@@ -492,6 +492,7 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 	proposal := Proposal{SchemaVersion: SchemaVersion, AlgorithmVersion: AlgorithmVersion, Input: request, InputDigest: hex.EncodeToString(sum[:]), Mutation: "none", SelectionBoundary: "configuration candidates only; benchmark, quality, cost, and Release Guard evidence are required before qualification"}
 	applyWorkloadBoundary(&proposal)
 	applyObjectiveMetric(&proposal)
+	proposal.Warnings = append(proposal.Warnings, prerequisiteWarnings(s.Integrations, request)...)
 	if request.Diagnosis != nil {
 		// Plan every candidate first so the diagnosis ranks the whole set
 		// before the requested bound cuts it.
@@ -530,7 +531,7 @@ func (s CatalogSource) proposeReviewed(proposal Proposal) (Proposal, error) {
 	if !ok {
 		return s.proposeGeneric(proposal)
 	}
-	compatibility := matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request)
+	compatibility := matchingCompatibility(s.Integrations, request)
 	if len(compatibility) == 0 {
 		proposal.Missing = []string{"qualified_provider_runtime_compatibility"}
 		return proposal, nil
@@ -871,7 +872,7 @@ func (s CatalogSource) proposeGeneric(proposal Proposal) (Proposal, error) {
 	if entry, found := findRecipe(s.Recipes, model); found {
 		model = entry.Model
 	}
-	compatibility := matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request)
+	compatibility := matchingCompatibility(s.Integrations, request)
 	if len(compatibility) == 0 {
 		proposal.Missing = []string{"qualified_provider_runtime_compatibility"}
 		return proposal, nil
@@ -995,7 +996,7 @@ func (s CatalogSource) expandCheckpointCandidates(baselines []Candidate, request
 			revision = entry.Revision
 		}
 	}
-	for _, compatible := range matchingCompatibility(s.Integrations.Compatibility, s.Integrations.Runtimes, request) {
+	for _, compatible := range matchingCompatibility(s.Integrations, request) {
 		if compatible.Runtime != "vllm" && compatible.Runtime != "sglang" {
 			continue
 		}
@@ -1246,10 +1247,18 @@ func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Req
 }
 
 // matchingCompatibility returns the entries a proposal may use: the request's
-// provider and runtimes, a qualified state (simulated only when asked), and,
-// for an entry narrowed to one qualified tuple, the request's GPU and the
-// runtime's pinned version. One entry per runtime, adapter, and mode remains.
-func matchingCompatibility(entries []integration.RuntimeCompatibility, runtimes []integration.RuntimeProfile, request Request) []integration.RuntimeCompatibility {
+// provider and runtimes, a qualified state (simulated only when asked), for an
+// entry narrowed to one qualified tuple the request's GPU and the runtime's
+// pinned version, and an adapter whose prerequisite is known to be there
+// (prerequisiteKnown). One entry per runtime, adapter, and mode remains.
+func matchingCompatibility(integrations integration.Snapshot, request Request) []integration.RuntimeCompatibility {
+	offered, _ := filterCompatibility(integrations, request)
+	return offered
+}
+
+// filterCompatibility also returns the entries that matched the request but
+// were withheld because their adapter's prerequisite is not known to be there.
+func filterCompatibility(integrations integration.Snapshot, request Request) (offered, withheld []integration.RuntimeCompatibility) {
 	allowedRuntime := func(value string) bool {
 		if len(request.Runtimes) == 0 {
 			return true
@@ -1262,7 +1271,7 @@ func matchingCompatibility(entries []integration.RuntimeCompatibility, runtimes 
 		return false
 	}
 	var out []integration.RuntimeCompatibility
-	for _, entry := range entries {
+	for _, entry := range integrations.Compatibility {
 		if request.Provider != entry.Cloud && request.Provider != entry.Adapter || !allowedRuntime(entry.Runtime) {
 			continue
 		}
@@ -1272,12 +1281,64 @@ func matchingCompatibility(entries []integration.RuntimeCompatibility, runtimes 
 		if entry.State != integration.QualificationLocal && entry.State != integration.QualificationReal && !(request.IncludeSimulated && entry.State == integration.QualificationSimulated) {
 			continue
 		}
-		if !entry.Applies(request.GPU, runtimeVersion(runtimes, entry.Runtime)) {
+		if !entry.Applies(request.GPU, runtimeVersion(integrations.Runtimes, entry.Runtime)) {
+			continue
+		}
+		if !prerequisiteKnown(integrations.Providers, entry, request) {
+			withheld = append(withheld, entry)
 			continue
 		}
 		out = append(out, entry)
 	}
-	return integration.Strongest(out)
+	return integration.Strongest(out), withheld
+}
+
+// prerequisiteKnown reports whether a setup on the entry's adapter can be
+// offered. An adapter that needs software beside its cloud, such as
+// kubernetes-dynamo with NVIDIA Dynamo, is offered only when the request names
+// the adapter, or the control plane is configured to run the entry's runtime
+// through that software. Asking for the cloud says nothing about what else
+// runs in it. The CLI plans from the catalog alone, which configures nothing.
+func prerequisiteKnown(providers []integration.ProviderProfile, entry integration.RuntimeCompatibility, request Request) bool {
+	if request.Provider == entry.Adapter || request.ProviderAdapter == entry.Adapter {
+		return true
+	}
+	for _, profile := range providers {
+		if profile.Adapter == entry.Adapter {
+			return profile.PrerequisiteConfigured(entry.Runtime)
+		}
+	}
+	return true
+}
+
+// prerequisiteWarnings says, once per adapter, which setups the planner left
+// out because their adapter's prerequisite is not known to be there, and how
+// to plan them.
+func prerequisiteWarnings(integrations integration.Snapshot, request Request) []string {
+	_, withheld := filterCompatibility(integrations, request)
+	runtimes := map[string][]string{}
+	for _, entry := range withheld {
+		if !slices.Contains(runtimes[entry.Adapter], entry.Runtime) {
+			runtimes[entry.Adapter] = append(runtimes[entry.Adapter], entry.Runtime)
+		}
+	}
+	adapters := make([]string, 0, len(runtimes))
+	for adapter := range runtimes {
+		adapters = append(adapters, adapter)
+	}
+	slices.Sort(adapters)
+	warnings := make([]string, 0, len(adapters))
+	for _, adapter := range adapters {
+		var name string
+		for _, profile := range integrations.Providers {
+			if profile.Adapter == adapter {
+				name = profile.Prerequisite.Name
+			}
+		}
+		slices.Sort(runtimes[adapter])
+		warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) were left out: they need %s, and InferCrane does not know it runs there. Name provider %s if it does.", adapter, strings.Join(runtimes[adapter], ", "), name, adapter))
+	}
+	return warnings
 }
 
 func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) []curatedrecipe.ServingProfile {

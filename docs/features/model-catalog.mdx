@@ -321,6 +321,32 @@ Face did not publish is `null`.
 The check never claims throughput, latency, answer quality, capacity, or price. Measure those with
 an [optimization run](/features/optimization).
 
+### Context length at deploy
+
+vLLM and SGLang refuse to start when one request at the model's own maximum context does not fit in
+the KV cache left beside the weights. `Qwen/Qwen3-8B` declares 40960 tokens; on a 24 GB GPU such as
+the L4 or A10G it does not start without a shorter bound.
+
+A deploy that sets no engine arguments gets one. InferCrane reads the model the same way the check
+does and uses the same estimate, for one request on the chosen GPU:
+
+1. If one request at the model's own maximum fits, the runtime keeps it.
+2. If not, and one request at the check's default length (8192 tokens, capped at the model's
+   maximum) fits, InferCrane adds `--max-model-len 8192` (`--context-length 8192` on SGLang).
+3. If even that does not fit, InferCrane adds nothing and says the runtime may not start.
+
+The response's `context_length` names the length, `set_by` (`request`, `infercrane`, or
+`runtime`), and the reason; `infercrane deploy` prints them, and the bound is recorded in the
+revision's `runtime_args`. For `Qwen/Qwen3-8B` on one `NVIDIA-A10G`, the estimate needs about
+22.9 GiB for one 40960-token request against 21.6 GiB usable, and about 18.4 GiB at 8192 tokens, so
+InferCrane sets `--max-model-len 8192`. On one L40S the full context fits and is kept.
+
+Your own length always wins: pass `infercrane deploy MODEL --max-model-len N`, or set it in
+`runtime.args`. A deploy with any engine arguments, a custom OCI image, or a serving graph gets no
+bound from InferCrane. Neither does an embedding model, a model outside Hugging Face, or any deploy
+when the control plane cannot read metadata (see **Turning it on**); the response then says why. The
+bound comes from an estimate, not a measurement.
+
 **Gated and private models.** Save a Hugging Face token as a sealed workspace secret under
 Settings › Connections (or `infercrane secret create NAME --sealed-from-env HF_TOKEN`), from an
 account that accepted the model's terms. Pass its ID as `model_secret_reference_id` (`--secret` in
@@ -330,11 +356,12 @@ read and tokenizer files are present. A deployment with the same ID delivers the
 through the provider's own secret store; see
 [model artifacts](/features/model-artifacts#private-and-gated-models).
 
-**Turning it on.** The control plane reads Hugging Face for checks only when the operator sets
+**Turning it on.** The control plane reads Hugging Face for checks, and for the context length of a
+deploy without engine arguments, only when the operator sets
 `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. It is off by default; planning then says that
-models outside the reviewed catalog cannot be checked, and the check route returns
-`metadata_access_disabled` (HTTP 501). The reads never happen on the inference request path and never
-touch PostgreSQL.
+models outside the reviewed catalog cannot be checked, the check route returns
+`metadata_access_disabled` (HTTP 501), and a deploy keeps the model's own context. The reads never
+happen on the inference request path and never touch PostgreSQL.
 
 **Limits.** Each check waits at most 8 seconds for Hugging Face, sends at most 8 requests at once, and
 follows redirects only on the same host. Results are cached in memory by commit, up to 512 per

@@ -76,6 +76,9 @@ export VLLM_API_KEY=...
 infercrane agent run --server http://127.0.0.1:8000 --token-env VLLM_API_KEY --as qwen-local
 ```
 
+If the server refuses the key, the agent prints one `unhealthy` line with the HTTP status (for
+example `HTTP 401`) and registers the server once its probe passes.
+
 ## See request timings
 
 The agent cannot see traffic that goes straight to the server, and it says so. To record request

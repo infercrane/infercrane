@@ -82,18 +82,20 @@ agent's health probe is skipped without a reason in the log.
 
 ## Deploy and serve
 
-On a 24 GB GPU, give the engine a context length it can hold; `infercrane deploy MODEL` sets none, and
-Qwen3-8B then does not start. Deploy from a spec file
-([example](/integrations/kubernetes#deploy)):
+On a 24 GB GPU, the engine needs a context length it can hold. InferCrane sets one when the control
+plane can read model metadata; otherwise pass `--max-model-len 8192`
+([details](/integrations/kubernetes#deploy)):
 
 ```bash
-infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+infercrane deploy Qwen/Qwen3-8B --name qwen-kubernetes --cloud kubernetes --gpu NVIDIA-A10G \
+  --max-model-len 8192 --idempotency-key qwen-kubernetes-initial
 curl https://YOUR-CONTROL-PLANE/v1/chat/completions -H "Authorization: Bearer $APP_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"qwen-kubernetes","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-If a deploy never becomes ready, `infercrane operation cancel OPERATION_ID` before you delete it.
+If a deploy never becomes ready, `infercrane delete qwen-kubernetes --yes` cancels it and removes
+what it started.
 
 ## Migrate an endpoint with a 5% canary
 
@@ -116,8 +118,9 @@ infercrane migrate rollback support-bot
 
 On the NVIDIA A10G with vLLM 0.34.0 the planner proposes the qualified Kubernetes setup directly.
 On any other GPU add `--include-simulated`, because the catalog marks that pair as simulated (the
-run still measures every setup), and `--max-candidates 1`, which keeps the plain Kubernetes setup
-ahead of a `kubernetes-dynamo` one that needs NVIDIA Dynamo. Grade a set the way your model answers:
+run still measures every setup). The setups are plain Kubernetes ones: a `kubernetes-dynamo` setup
+needs NVIDIA Dynamo, and InferCrane proposes one only when it knows Dynamo runs in the cluster
+([how](/integrations/dynamo#optimization-setups)). Grade a set the way your model answers:
 a model that explains its answer ("32 + 30 = 62.") scores 0 under `exact_match`; use `answer_line`.
 
 ## Remove it

@@ -73,6 +73,15 @@ model, its health, metrics, and traffic are refused for the old endpoint, which 
 with the reason, instead of landing on the wrong endpoint. If an agent's endpoint is deleted, the
 running agent registers the server again on its next pass.
 
+The agent's health probe is `GET /v1/models`, every 30 seconds. A server whose probe fails is
+reported unhealthy with the reason in its health detail, and is registered only once the probe
+passes. The agent logs one `unhealthy` line when the probe starts failing or fails for another
+reason, and one `healthy` line when it passes again, not one per pass. The line names the server
+key, the probe path, and an HTTP status (`HTTP 401`) or an error class (`timeout`,
+`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `not a model list`,
+`invalid Authorization header`), never a header or token. A token that ends in a newline is not a
+valid header value, so the agent sends nothing and says `invalid Authorization header`.
+
 ### The agent key
 
 An agent key is a principal of kind `agent`. It is minted in one of two ways and shown once:
@@ -158,7 +167,11 @@ Polling was chosen over a stream because it works through every corporate proxy,
 sessions across control-plane replicas, and survives restarts on either side. Each sync is
 stateless on the control plane (see the next section), so any replica can answer it. The command
 long poll holds one outbound request open for at most 25 seconds; a replica checks for new commands
-every 2 seconds and answers at once when a command is queued through it.
+every 2 seconds and answers at once when a command is queued through it. A command it hands out is
+leased for 10 minutes, and each progress report renews the lease. If the agent goes away before
+the answer is written, or the answer cannot be written, the commands are handed back at once: the
+next poll takes them, and the lost attempt is not counted. An answer that reached the connection
+and was lost after that waits out its lease.
 
 ### Relayed metrics are treated like scraped metrics
 
@@ -351,7 +364,9 @@ limits: the network plugin must enforce `NetworkPolicy`.
 Runs on one agent go one at a time, so two candidates never compete for the same accelerators.
 `GET /api/v1/agents/{id}/candidate-runs/{run}` shows the state, the current phase, and the result;
 `DELETE` cancels it, and the agent removes the candidate on its next report. A run whose agent
-stops reporting is handed out again (at most three times), and a run past its deadline expires.
+stops reporting is handed out again when its 10-minute lease ends (at most three times), and a run
+past its deadline expires. A run whose long-poll answer never reached the agent is handed out again
+at once, without counting the attempt.
 
 A candidate run on its own is stored with the run, not ranked against other candidates. An
 optimization run on the agent's endpoint ranks them: see the next section.

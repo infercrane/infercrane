@@ -3211,6 +3211,47 @@
         ],
         "type": "object"
       },
+      "ContextLength": {
+        "additionalProperties": false,
+        "description": "The context length a new deployment's built-in runtime serves, and why. Absent for a custom image or a serving graph.",
+        "properties": {
+          "model_tokens": {
+            "description": "The context length the model's config.json declares, when InferCrane read it.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "set_by": {
+            "description": "request: the deployment's engine arguments set it. infercrane: one request at the model's own maximum does not fit the chosen GPU next to the weights by InferCrane's estimate, so InferCrane bounded it. runtime: no bound is set.",
+            "enum": [
+              "request",
+              "infercrane",
+              "runtime"
+            ],
+            "type": "string"
+          },
+          "tokens": {
+            "description": "The bound in the engine arguments, or null when they set none and the runtime takes the model's own maximum.",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "tokens",
+          "model_tokens",
+          "set_by",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ContextPassportRequest": {
         "properties": {
           "cache_hints": {
@@ -3517,6 +3558,26 @@
         ],
         "type": "object"
       },
+      "DeploymentDeleteEnvelope": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OperationEnvelope"
+          },
+          {
+            "properties": {
+              "cancelled_operation": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Operation"
+                  }
+                ],
+                "description": "The deployment's unfinished deploy, cancelled in the same transaction that queued the deletion. Absent when there was none. Another unfinished operation, or a deploy a worker is running right now, refuses the deletion with unresolved_operation (HTTP 409)."
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
       "DeploymentList": {
         "properties": {
           "data": {
@@ -3538,6 +3599,9 @@
           },
           {
             "properties": {
+              "context_length": {
+                "$ref": "#/components/schemas/ContextLength"
+              },
               "deployment": {
                 "$ref": "#/components/schemas/Deployment"
               }
@@ -20477,7 +20541,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationEnvelope"
+                  "$ref": "#/components/schemas/DeploymentDeleteEnvelope"
                 }
               }
             },

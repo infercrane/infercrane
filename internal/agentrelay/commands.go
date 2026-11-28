@@ -18,6 +18,9 @@ type CommandStore interface {
 	AgentCommand(context.Context, string, string, string) (domain.AgentCommand, error)
 	AgentCommands(context.Context, string, string, int) ([]domain.AgentCommand, error)
 	LeaseAgentCommands(context.Context, string, string, time.Time, time.Duration, int) ([]domain.AgentCommand, error)
+	// ReleaseAgentCommand undoes one lease (tenant, agent, command, attempt)
+	// whose answer never reached the agent.
+	ReleaseAgentCommand(context.Context, string, string, string, int) error
 	UpdateAgentCommand(context.Context, string, string, string, domain.AgentCommandUpdate) (domain.AgentCommand, error)
 	CancelAgentCommand(context.Context, string, string, string) (domain.AgentCommand, error)
 }
@@ -297,12 +300,16 @@ func (s *Service) waiter(agentID string) <-chan struct{} {
 // commandPollInterval is how often one held long poll checks the database.
 const commandPollInterval = 2 * time.Second
 
-// Commands answers an agent's long poll: leased commands as soon as there are
-// any, or none after wait.
-func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Duration) (agentprotocol.CommandsResponse, error) {
+// Commands answers an agent's long poll. It leases commands as soon as there
+// are any, or none after wait, and hands the answer to deliver, which writes
+// it to the agent. Commands whose answer never reached the agent, because the
+// agent went away first or deliver failed, are released at once: the next
+// poll takes them instead of waiting out agentprotocol.CommandLease. An error
+// means deliver was not called.
+func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Duration, deliver func(agentprotocol.CommandsResponse) error) error {
 	store, ok := s.commandStore()
 	if !ok {
-		return agentprotocol.CommandsResponse{}, ErrUnavailable
+		return ErrUnavailable
 	}
 	if wait < 0 || wait > agentprotocol.MaxCommandWait {
 		wait = agentprotocol.MaxCommandWait
@@ -312,7 +319,7 @@ func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Du
 	for {
 		leased, err := store.LeaseAgentCommands(ctx, agent.TenantID, agent.ID, s.now(), agentprotocol.CommandLease, agentprotocol.MaxCommandsPerPoll)
 		if err != nil {
-			return agentprotocol.CommandsResponse{}, err
+			return err
 		}
 		if len(leased) > 0 || wait == 0 {
 			out := agentprotocol.CommandsResponse{Commands: make([]agentprotocol.Command, 0, len(leased))}
@@ -326,13 +333,22 @@ func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Du
 				}
 				out.Commands = append(out.Commands, wire)
 			}
-			return out, nil
+			if ctx.Err() != nil {
+				// The agent went away while its commands were being leased.
+				s.releaseCommands(ctx, store, agent, out.Commands)
+				out.Commands = []agentprotocol.Command{}
+			}
+			if deliver(out) != nil {
+				s.releaseCommands(ctx, store, agent, out.Commands)
+			}
+			return nil
 		}
 		check := time.NewTimer(commandPollInterval)
 		select {
 		case <-ctx.Done():
 			check.Stop()
-			return agentprotocol.CommandsResponse{Commands: []agentprotocol.Command{}}, nil
+			_ = deliver(agentprotocol.CommandsResponse{Commands: []agentprotocol.Command{}})
+			return nil
 		case <-deadline.C:
 			check.Stop()
 			wait = 0
@@ -340,6 +356,24 @@ func (s *Service) Commands(ctx context.Context, agent domain.Agent, wait time.Du
 			check.Stop()
 		case <-check.C:
 		}
+	}
+}
+
+// releaseTimeout bounds handing back an undelivered answer's commands.
+const releaseTimeout = 5 * time.Second
+
+// releaseCommands hands back the commands of an answer that never reached the
+// agent. The poll's context is usually done by now, so the release runs on its
+// own deadline. A command it cannot release is handed out again when its lease
+// ends, as before.
+func (s *Service) releaseCommands(ctx context.Context, store CommandStore, agent domain.Agent, commands []agentprotocol.Command) {
+	if len(commands) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseTimeout)
+	defer cancel()
+	for _, command := range commands {
+		_ = store.ReleaseAgentCommand(ctx, agent.TenantID, agent.ID, command.ID, command.Attempt)
 	}
 }
 

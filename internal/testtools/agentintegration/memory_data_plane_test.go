@@ -201,6 +201,20 @@ func (m *memoryStore) LeaseAgentCommands(_ context.Context, tenant, agentID stri
 	return out, nil
 }
 
+// ReleaseAgentCommand undoes a lease whose answer never reached the agent.
+// This store leases only queued commands, so the command goes back to the
+// queue.
+func (m *memoryStore) ReleaseAgentCommand(_ context.Context, tenant, agentID, id string, attempt int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	command, ok := m.dp().commands[id]
+	if !ok || command.TenantID != tenant || command.AgentID != agentID || command.State != "running" || command.Phase != "leased" || command.Attempts != attempt {
+		return nil
+	}
+	command.State, command.Phase, command.Attempts, command.LeaseExpiresAt = "queued", "", attempt-1, nil
+	return nil
+}
+
 func (m *memoryStore) UpdateAgentCommand(_ context.Context, tenant, agentID, id string, update domain.AgentCommandUpdate) (domain.AgentCommand, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

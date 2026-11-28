@@ -82,7 +82,7 @@ type Store interface {
 	RequestOperationCancel(context.Context, string) error
 	EnqueueOperation(context.Context, domain.Operation) (domain.Operation, bool, error)
 	SubmitCloudDeployment(context.Context, domain.Deployment, domain.Operation) (domain.Deployment, domain.Operation, bool, error)
-	SubmitDeploymentDelete(context.Context, string, string, string, domain.Operation) (domain.Operation, bool, error)
+	SubmitDeploymentDeleteCancelling(context.Context, string, string, string, domain.Operation, []string) (store.DeploymentDeletion, error)
 	ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error)
 	EventsForTenant(context.Context, string, string) ([]domain.Event, error)
 	RequestStats(context.Context, string, time.Duration) (domain.RequestStats, error)
@@ -5626,7 +5626,17 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	operation, created, err := a.Store.SubmitDeploymentDelete(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)})
+	// A serverless deploy cancelled before its endpoint registered a target
+	// still needs the serverless cleanup.
+	if open, openErr := a.Store.ActiveOperationForResource(r.Context(), principal.TenantID, "deployment", resolved.Deployment.Name); openErr == nil && open.Kind == workflows.ServerlessConvergeKind {
+		deleteKind = workflows.ServerlessDeleteKind
+	}
+	deletion, err := a.Store.SubmitDeploymentDeleteCancelling(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)}, deleteCancelsKinds)
+	var open *store.OpenOperationError
+	if errors.As(err, &open) {
+		writeError(w, http.StatusConflict, "unresolved_operation", unresolvedOperationMessage(open))
+		return
+	}
 	if errors.Is(err, domain.ErrConflict) {
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return
@@ -5635,8 +5645,31 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "deletion could not be submitted")
 		return
 	}
-	w.Header().Set("Location", "/api/v1/operations/"+operation.ID)
-	writeJSON(w, http.StatusAccepted, map[string]any{"operation": operationResponse(operation), "created": created})
+	response := map[string]any{"operation": operationResponse(deletion.Operation), "created": deletion.Created}
+	if cancelled := deletion.Cancelled; cancelled != nil {
+		// Recorded as operation cancel records it.
+		_ = a.Store.Audit(context.WithoutCancel(r.Context()), domain.AuditEvent{TenantID: principal.TenantID, Actor: principal.Name, Action: "operation.cancel", ResourceType: "operation", ResourceName: cancelled.ID, Outcome: "accepted", Payload: `{"cancelled_by":"deployment.delete"}`})
+		response["cancelled_operation"] = operationResponse(*cancelled)
+	}
+	w.Header().Set("Location", "/api/v1/operations/"+deletion.Operation.ID)
+	writeJSON(w, http.StatusAccepted, response)
+}
+
+// deleteCancelsKinds are the unfinished operations a deployment delete
+// cancels by itself: a deploy, whose own cancellation runs the same cleanup
+// the delete does. Any other unfinished operation refuses the delete.
+var deleteCancelsKinds = []string{workflows.ConvergeKind, workflows.ServerlessConvergeKind}
+
+// unresolvedOperationMessage says why a delete left the deployment's
+// unfinished operation alone, and what to do instead.
+func unresolvedOperationMessage(open *store.OpenOperationError) string {
+	switch {
+	case open.Running && open.Status == "cancelling":
+		return fmt.Sprintf("Operation %s (%s) is being cancelled, and a worker is running its cleanup now. Nothing was changed. Follow it with infercrane operation watch %s, and delete again if the deployment is still listed afterwards.", open.ID, open.Kind, open.ID)
+	case open.Running:
+		return fmt.Sprintf("Operation %s (%s) is running on a worker right now, so deleting now could race the provider calls it is making. Nothing was changed. Delete again when it waits between attempts, usually within a minute, or cancel it with infercrane operation cancel %s.", open.ID, open.Kind, open.ID)
+	}
+	return fmt.Sprintf("Operation %s (%s) is still %s. Delete cancels an unfinished deploy by itself, but not other changes to a deployment that may be serving traffic. Nothing was changed. Wait for it, or cancel it with infercrane operation cancel %s, then delete again.", open.ID, open.Kind, open.Status, open.ID)
 }
 
 func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
@@ -5691,6 +5724,9 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	} else if request.ProviderAdapter == "" {
 		request.ProviderAdapter = a.DefaultProviderAdapters[request.Cloud]
 	}
+	// Validation fills in a built-in runtime's own workload, so whether the
+	// request brought its own image is read before it.
+	builtInImage := request.Workload.Empty()
 	if err := request.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
@@ -5728,6 +5764,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	contextFit := a.fitContextLength(r.Context(), principal.TenantID, &request, builtInImage)
 	request.Actor, request.TenantID = principal.Name, principal.TenantID
 	if request.ComputeMode == "" {
 		request.ComputeMode = "elastic"
@@ -5788,6 +5825,9 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	response := map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created}
+	if contextFit != nil {
+		response["context_length"] = contextFit
+	}
 	if managedReservation.ID != "" {
 		response["billing"] = map[string]any{"funding_mode": "prepaid", "reservation": managedReservation, "reservation_is_charge": false}
 	}

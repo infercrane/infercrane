@@ -271,44 +271,29 @@ infercrane deploy Qwen/Qwen3-8B \
   --idempotency-key qwen-kubernetes-initial
 ```
 
-On a 24 GB GPU (L4, A10G) the command above cannot serve `Qwen/Qwen3-8B`: it sets no context length,
-so vLLM 0.34.0 reserves the model's 40960 tokens, needs 5.62 GiB of KV cache with 3.72 GiB free, and
-exits. `infercrane deploy` has no flag for engine arguments; deploy from a spec file instead
-([DeploymentSpec](/deployment-spec)):
-
-```yaml
-apiVersion: infercrane.dev/v1
-kind: Deployment
-name: qwen-kubernetes
-model:
-  id: Qwen/Qwen3-8B
-  revision: b968826d9c46dd6066d109eabc6255188de91218
-runtime:
-  engine: vllm
-  args: ["--max-model-len", "8192"]
-compute:
-  mode: elastic
-provider:
-  cloud: kubernetes
-resources:
-  gpu: NVIDIA-A10G
-  gpu_count: 1
-scaling:
-  min_replicas: 1
-  max_replicas: 1
-```
+On a 24 GB GPU (L4, A10G), `Qwen/Qwen3-8B`'s own 40960-token context does not fit next to its
+weights: vLLM 0.34.0 needs 5.62 GiB of KV cache for it, has 3.72 GiB free, and exits. When the
+control plane can read model metadata (`INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`), InferCrane
+sees this before it deploys and sets `--max-model-len 8192`. The deploy output names the length and
+why. Without metadata access, or to choose another length, pass it yourself:
 
 ```bash
-infercrane plan qwen-kubernetes.yaml
-infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+infercrane deploy Qwen/Qwen3-8B \
+  --name qwen-kubernetes \
+  --cloud kubernetes \
+  --gpu NVIDIA-A10G \
+  --max-model-len 8192 \
+  --idempotency-key qwen-kubernetes-initial
 ```
 
-A deploy that never becomes ready keeps its operation open, and `infercrane delete` is refused
-("unresolved lifecycle operation") until you cancel it:
+A [DeploymentSpec](/deployment-spec) sets the same bound with `runtime.args: ["--max-model-len",
+"8192"]`.
+
+A deploy that never becomes ready keeps its deploy operation open. `infercrane delete` cancels that
+operation and removes what it started, so no separate `operation cancel` is needed:
 
 ```bash
-infercrane operation list
-infercrane operation cancel OPERATION_ID
+infercrane delete qwen-kubernetes --yes --wait
 ```
 
 Provisioning uses strict server-side dry-run followed by server-side apply with the
@@ -350,9 +335,17 @@ The planner's catalog qualifies Kubernetes with vLLM 0.34.0 on a real cluster fo
 NVIDIA A10G (`--gpu NVIDIA-A10G`), and proposes setups for it directly. For every other GPU, a
 time-sliced label such as `NVIDIA-A10G-SHARED`, or another engine version, the pair is marked
 simulated, and `infercrane optimize propose --provider kubernetes` proposes no setup unless you add
-`--include-simulated`; the proof still measures every setup it runs. With that flag the planner may
-also propose a `kubernetes-dynamo` setup; leave it out unless NVIDIA Dynamo runs in the cluster. See
-[Migration](/features/migration) for the commands.
+`--include-simulated`; the proof still measures every setup it runs.
+
+A `kubernetes-dynamo` setup runs only where NVIDIA Dynamo runs, so InferCrane proposes one only when
+it knows Dynamo is there:
+
+- you name the adapter: `--provider kubernetes-dynamo`; or
+- the control plane that plans has a Dynamo image and version pair set for that runtime (see
+  [NVIDIA Dynamo](/integrations/dynamo#optimization-setups)).
+
+Otherwise `--provider kubernetes` proposes plain Kubernetes setups only, and the proposal's warnings
+say which Dynamo setups were left out. See [Migration](/features/migration) for the commands.
 
 ## Known limits
 
@@ -367,8 +360,9 @@ also propose a `kubernetes-dynamo` setup; leave it out unless NVIDIA Dynamo runs
   profiles, so it gets generic setups only.
 - There is no Helm chart for the control plane yet.
 - The engines' `NetworkPolicy` does nothing without a network plugin that enforces it.
-- The agent does not say why it leaves a server it found unregistered; a server that fails its
-  health probe (for example a wrong token) shows only "server is not registered with this agent".
+
+A server the agent found but did not register failed its health probe. The agent pod's log says
+why in one `unhealthy` line; see [Troubleshooting](/troubleshooting).
 
 ## Local conformance
 

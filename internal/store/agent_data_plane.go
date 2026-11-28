@@ -306,23 +306,34 @@ func (s *Store) LeaseAgentCommands(ctx context.Context, tenant, agentID string, 
 		return nil, err
 	}
 	until := stamp(at.Add(lease))
+	// Leased rows are read inside the transaction: a poll that fails before
+	// the commit leases nothing, so no command waits out a lease for an
+	// answer its agent never got.
+	out := make([]domain.AgentCommand, 0, len(ids))
 	for _, id := range ids {
-		if _, err = tx.ExecContext(ctx, `UPDATE agent_commands SET state='running',phase='leased',attempts=attempts+1,lease_expires_at=?,started_at=COALESCE(started_at,?),updated_at=? WHERE id=?`, until, current, current, id); err != nil {
-			return nil, err
+		item, scanErr := scanAgentCommand(tx.QueryRowContext(ctx, `UPDATE agent_commands SET state='running',phase='leased',attempts=attempts+1,lease_expires_at=?,started_at=COALESCE(started_at,?),updated_at=? WHERE id=? RETURNING `+agentCommandColumns, until, current, current, id))
+		if scanErr != nil {
+			return nil, scanErr
 		}
+		out = append(out, item)
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
-	out := make([]domain.AgentCommand, 0, len(ids))
-	for _, id := range ids {
-		item, readErr := s.AgentCommand(ctx, tenant, agentID, id)
-		if readErr != nil {
-			return nil, readErr
-		}
-		out = append(out, item)
-	}
 	return out, nil
+}
+
+// ReleaseAgentCommand hands back a command whose lease never reached its
+// agent: the long poll that leased it lost the agent before its answer was
+// written. The lease is undone: a first lease returns the command to the
+// queue, and a repeated one leaves it running with a lease that ends when it
+// began (updated_at still holds the lease's time). The attempt is not
+// counted, and the next poll leases it at once. A command leased again since,
+// or one its agent already reports on, is left alone.
+func (s *Store) ReleaseAgentCommand(ctx context.Context, tenant, agentID, id string, attempt int) error {
+	_, err := s.ExecContext(ctx, `UPDATE agent_commands SET state=CASE WHEN attempts=1 THEN 'queued' ELSE 'running' END,phase=CASE WHEN attempts=1 THEN NULL ELSE phase END,started_at=CASE WHEN attempts=1 THEN NULL ELSE started_at END,lease_expires_at=CASE WHEN attempts=1 THEN NULL ELSE updated_at END,attempts=attempts-1,updated_at=? WHERE tenant_id=? AND agent_id=? AND id=? AND state='running' AND phase='leased' AND attempts=?`,
+		now(), tenant, agentID, id, attempt)
+	return err
 }
 
 // UpdateAgentCommand applies an agent's report to a command it leased. A

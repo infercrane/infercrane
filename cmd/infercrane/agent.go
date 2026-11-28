@@ -577,6 +577,10 @@ func agentEventPrinter(human bool) func(agent.Event) {
 			}
 		case "server_skipped":
 			fmt.Fprintf(agentOutput, "%s skipped   %s: %s\n", stamp, event.Server.Address, event.Message)
+		case "server_probe_failed":
+			fmt.Fprintf(agentOutput, "%s unhealthy %s\n", stamp, event.Message)
+		case "server_probe_recovered":
+			fmt.Fprintf(agentOutput, "%s healthy   %s\n", stamp, event.Message)
 		case "gateway_listening":
 			fmt.Fprintf(agentOutput, "%s gateway   %s (forwards unchanged; records timings and token counts only)\n", stamp, event.Message)
 		case "data_plane_listening":

@@ -782,6 +782,7 @@ infercrane apply examples/infercrane.yaml \
 | `--provider-adapter` | selected from cloud/runtime | provisioned | Exact adapter identity; advanced escape hatch, normally inferred by `--backend` or YAML |
 | `--runtime` | `vllm` | provisioned | `vllm` or `sglang` where the selected adapter has compatible evidence |
 | `--gpu` | `L40S` on primary path | elastic/serverless | Requested GPU |
+| `--max-model-len` | fitted to the GPU | provisioned vLLM/SGLang | Context length in tokens, from 256 to 1048576; sent as `--max-model-len` (vLLM) or `--context-length` (SGLang) |
 | `--region` | provider-selected | provisioned | Provider region; required for AWS BYOC and ignored by the namespace-scoped Kubernetes adapter |
 | `--compute` | `elastic` | provisioned | `elastic` or `serverless` |
 | `--min` | `1`; serverless defaults to `0` | provisioned | Minimum replicas/workers |
@@ -802,6 +803,11 @@ The two self-serve destinations of a hosted workspace are `--infercrane-cloud` a
 infercrane deploy Qwen/Qwen3-8B --infercrane-cloud --stop-after 6h
 infercrane deploy Qwen/Qwen3-8B --compute-connection my-runpod --gpu L40S
 ```
+
+Without `--max-model-len`, the control plane checks whether one request at the model's own maximum
+context fits the GPU next to the weights. If it does not, InferCrane sets 8192 tokens, and the
+output's `Context` line and the note below it say so. This needs Hugging Face metadata access on the
+control plane; see [Context length at deploy](/features/model-catalog#context-length-at-deploy).
 
 A YAML path cannot be combined with deployment flags. See [DeploymentSpec](/deployment-spec).
 Custom OCI uses the YAML form because its runtime contract is part of the immutable revision.
@@ -1273,7 +1279,10 @@ infercrane orphans
 ```
 
 `--plan` is side-effect-free. `--yes` is required for mutation, except in a terminal, where
-`delete` without `--yes` shows the plan and asks you to type the deployment name instead. After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
+`delete` without `--yes` shows the plan and asks you to type the deployment name instead. A deploy
+that never finished does not block `delete`: it cancels that deploy first and says so. Another
+unfinished operation, or a deploy a worker is running at that moment, refuses the delete and names
+the operation. See [lifecycle](/features/lifecycle#delete-a-deploy-that-never-finished). After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
 
 ## Tenant administration
 

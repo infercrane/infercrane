@@ -245,3 +245,79 @@ func TestAgentCommandsLeaseOnceExpireAndCancel(t *testing.T) {
 		t.Fatalf("revoked agent took a command: %v", err)
 	}
 }
+
+// A lease whose answer never reached the agent is undone: the next poll takes
+// the command at once, and the lost attempt is not counted. A command leased
+// again since, or one its agent reports on, keeps its lease.
+func TestAgentCommandReleaseUndoesALeaseTheAgentNeverGot(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, ctx)
+	if err := s.CreateTenant(ctx, "tenant-a", "Tenant A"); err != nil {
+		t.Fatal(err)
+	}
+	agent, _, err := s.CreateAgent(ctx, "tenant-a", "cluster-a", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := s.EnqueueAgentCommand(ctx, domain.AgentCommand{TenantID: "tenant-a", AgentID: agent.ID, Kind: "run_candidate", SpecJSON: `{"run_candidate":{},"control":{}}`, CreatedBy: "owner", DeadlineAt: time.Now().Add(3 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := func(at time.Time, attempt int) {
+		t.Helper()
+		items, leaseErr := s.LeaseAgentCommands(ctx, "tenant-a", agent.ID, at, time.Minute, 4)
+		if leaseErr != nil || len(items) != 1 || items[0].ID != command.ID || items[0].Attempts != attempt || items[0].Phase != "leased" || items[0].LeaseExpiresAt == nil {
+			t.Fatalf("lease at attempt %d: %#v err=%v", attempt, items, leaseErr)
+		}
+	}
+	read := func() domain.AgentCommand {
+		t.Helper()
+		item, readErr := s.AgentCommand(ctx, "tenant-a", agent.ID, command.ID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return item
+	}
+	at := time.Now()
+	lease(at, 1)
+	if err = s.ReleaseAgentCommand(ctx, "tenant-a", agent.ID, command.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if queued := read(); queued.State != "queued" || queued.Attempts != 0 || queued.Phase != "" || queued.LeaseExpiresAt != nil || queued.StartedAt != nil {
+		t.Fatalf("a released first lease: %#v", queued)
+	}
+	// The next poll takes it at once, long before the lease would have ended.
+	lease(at.Add(time.Second), 1)
+
+	// A release for another attempt changes nothing.
+	if err = s.ReleaseAgentCommand(ctx, "tenant-a", agent.ID, command.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if held := read(); held.State != "running" || held.Attempts != 1 || held.LeaseExpiresAt == nil {
+		t.Fatalf("a stale release changed the lease: %#v", held)
+	}
+	// A command its agent reports on keeps its lease.
+	if _, err = s.UpdateAgentCommand(ctx, "tenant-a", agent.ID, command.ID, domain.AgentCommandUpdate{State: "running", Phase: "starting_candidate", Lease: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ReleaseAgentCommand(ctx, "tenant-a", agent.ID, command.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if reported := read(); reported.State != "running" || reported.Phase != "starting_candidate" || reported.Attempts != 1 {
+		t.Fatalf("a release took a reported command: %#v", reported)
+	}
+
+	// A repeated lease (the agent stopped reporting) is undone to running
+	// with its lease ended, and is taken again without counting the attempt.
+	later := at.Add(time.Hour)
+	lease(later, 2)
+	if err = s.ReleaseAgentCommand(ctx, "tenant-a", agent.ID, command.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	// The lease now ends at the time it was taken. PostgreSQL keeps microseconds
+	// and rounds, so the stored end may sit up to half a microsecond past later.
+	if released := read(); released.State != "running" || released.Attempts != 1 || released.LeaseExpiresAt == nil || released.LeaseExpiresAt.After(later.Add(time.Millisecond)) {
+		t.Fatalf("a released repeated lease: %#v", released)
+	}
+	lease(later.Add(time.Second), 2)
+}

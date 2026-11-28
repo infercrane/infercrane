@@ -9,6 +9,7 @@ package agent
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
@@ -33,6 +35,8 @@ var DefaultPorts = []int{8000, 30000, 8080, 11434, 1234}
 const (
 	probeTimeout  = 2 * time.Second
 	maxProbeBytes = 1 << 20
+	// healthPath is the request that decides a server's health.
+	healthPath = "/v1/models"
 )
 
 // ServerConfig is a server the user named explicitly.
@@ -52,6 +56,33 @@ type Detected struct {
 	// Exposition is the filtered metrics text from the probe, when the
 	// server exposes engine metrics.
 	Exposition string
+	// Failure says why the health probe failed; it is empty for a healthy
+	// server. It stays on this machine, for the agent's own log.
+	Failure ProbeFailure
+}
+
+// ProbeFailure is a failed health probe: the path probed and an HTTP status
+// or error class. It never holds a header or token value, so it is safe to
+// log.
+type ProbeFailure struct {
+	Path   string
+	Reason string
+}
+
+// probeError is a probe request that got no usable answer. reason is a short
+// class for the agent's log; Error is the detail reported as the server's
+// health. Neither carries a header value.
+type probeError struct{ reason, detail string }
+
+func (e *probeError) Error() string { return e.detail }
+
+// probeReason is the class of a probe error, for the agent's log.
+func probeReason(err error) string {
+	var probe *probeError
+	if errors.As(err, &probe) {
+		return probe.reason
+	}
+	return "request failed"
 }
 
 // Detector probes local servers. HTTP is a client that must not use a proxy:
@@ -155,26 +186,33 @@ func (d Detector) Probe(ctx context.Context, config ServerConfig, explicit bool)
 	out.Models = []string{}
 	out.Authenticated = config.AuthHeader != ""
 	models, status, err := d.models(ctx, base, config.AuthHeader)
-	if err != nil {
+	if err != nil && status == 0 {
 		if !explicit {
 			return Detected{}, false
 		}
 		out.Health, out.HealthDetail = agentprotocol.HealthUnhealthy, boundedDetail(err.Error())
+		out.Failure = ProbeFailure{Path: healthPath, Reason: probeReason(err)}
 		out.MetricsDetail = "the server did not answer"
 		return out, true
 	}
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		out.Health = agentprotocol.HealthUnhealthy
-		out.HealthDetail = fmt.Sprintf("GET /v1/models returned HTTP %d; pass the server's API key with --auth-header-env or --token-env", status)
+		out.HealthDetail = fmt.Sprintf("GET %s returned HTTP %d; pass the server's API key with --auth-header-env or --token-env", healthPath, status)
+		out.Failure = ProbeFailure{Path: healthPath, Reason: fmt.Sprintf("HTTP %d", status)}
 	case status != http.StatusOK:
 		if !explicit && status == http.StatusNotFound {
 			return Detected{}, false
 		}
 		out.Health = agentprotocol.HealthUnhealthy
-		out.HealthDetail = fmt.Sprintf("GET /v1/models returned HTTP %d", status)
+		out.HealthDetail = fmt.Sprintf("GET %s returned HTTP %d", healthPath, status)
+		out.Failure = ProbeFailure{Path: healthPath, Reason: fmt.Sprintf("HTTP %d", status)}
+	case err != nil:
+		out.Health, out.HealthDetail = agentprotocol.HealthUnhealthy, boundedDetail(err.Error())
+		out.Failure = ProbeFailure{Path: healthPath, Reason: probeReason(err)}
 	case len(models) == 0:
-		out.Health, out.HealthDetail = agentprotocol.HealthUnhealthy, "GET /v1/models listed no models"
+		out.Health, out.HealthDetail = agentprotocol.HealthUnhealthy, "GET "+healthPath+" listed no models"
+		out.Failure = ProbeFailure{Path: healthPath, Reason: "no models listed"}
 	default:
 		out.Health = agentprotocol.HealthHealthy
 		out.Models = models
@@ -191,25 +229,57 @@ func (d Detector) get(ctx context.Context, base, path, auth string) (int, []byte
 		return 0, nil, nil, err
 	}
 	if auth != "" {
+		// HTTP refuses such a header before anything is sent; saying why
+		// beats "could not reach", which points at the network.
+		if !validHeaderValue(auth) {
+			return 0, nil, nil, &probeError{reason: "invalid Authorization header", detail: "the Authorization header for " + base + " is not a valid HTTP header value; check the token for a trailing newline or another control character"}
+		}
 		request.Header.Set("Authorization", auth)
 	}
 	response, err := d.client().Do(request)
 	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			return 0, nil, nil, fmt.Errorf("%s did not answer within %s", base, probeTimeout)
-		}
-		return 0, nil, nil, fmt.Errorf("could not reach %s", base)
+		return 0, nil, nil, requestError(base, err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeBytes+1))
 	if err != nil {
-		return response.StatusCode, nil, response.Header, err
+		return response.StatusCode, nil, response.Header, &probeError{reason: "response cut off", detail: fmt.Sprintf("%s%s: the response could not be read", base, path)}
 	}
 	if len(body) > maxProbeBytes {
-		return response.StatusCode, nil, response.Header, fmt.Errorf("%s%s returned more than %d bytes", base, path, maxProbeBytes)
+		return response.StatusCode, nil, response.Header, &probeError{reason: "response too large", detail: fmt.Sprintf("%s%s returned more than %d bytes", base, path, maxProbeBytes)}
 	}
 	return response.StatusCode, body, response.Header, nil
+}
+
+// requestError names the class of a request that got no answer.
+func requestError(base string, err error) error {
+	var netErr net.Error
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	switch {
+	case errors.As(err, &netErr) && netErr.Timeout():
+		return &probeError{reason: "timeout", detail: fmt.Sprintf("%s did not answer within %s", base, probeTimeout)}
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return &probeError{reason: "connection refused", detail: "could not reach " + base + ": connection refused"}
+	case errors.As(err, &dnsErr):
+		return &probeError{reason: "DNS lookup failed", detail: "could not reach " + base + ": its host name did not resolve"}
+	case errors.As(err, &certErr):
+		return &probeError{reason: "TLS certificate not trusted", detail: "could not reach " + base + ": its TLS certificate is not trusted"}
+	case errors.Is(err, context.Canceled):
+		return &probeError{reason: "cancelled", detail: "the probe of " + base + " was cancelled"}
+	}
+	return &probeError{reason: "connection failed", detail: "could not reach " + base}
+}
+
+// validHeaderValue reports whether HTTP accepts value as a header value: no
+// control character except a tab.
+func validHeaderValue(value string) bool {
+	for index := 0; index < len(value); index++ {
+		if b := value[index]; (b < ' ' && b != '\t') || b == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func (d Detector) getIf(ctx context.Context, condition bool, base, path, auth string) (int, []byte, http.Header, error) {
@@ -220,7 +290,7 @@ func (d Detector) getIf(ctx context.Context, condition bool, base, path, auth st
 }
 
 func (d Detector) models(ctx context.Context, base, auth string) ([]string, int, error) {
-	status, body, _, err := d.get(ctx, base, "/v1/models", auth)
+	status, body, _, err := d.get(ctx, base, healthPath, auth)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -233,7 +303,8 @@ func (d Detector) models(ctx context.Context, base, auth string) ([]string, int,
 		} `json:"data"`
 	}
 	if json.Unmarshal(body, &payload) != nil {
-		return nil, http.StatusBadGateway, nil
+		// The server answered, so the status stays; its body is the fault.
+		return nil, status, &probeError{reason: "not a model list", detail: "GET " + healthPath + " did not return a model list"}
 	}
 	models := make([]string, 0, len(payload.Data))
 	for _, item := range payload.Data {

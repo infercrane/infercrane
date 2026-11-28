@@ -29,9 +29,10 @@ Use `infercrane integrations` rather than relying on this prose for the running 
 
 ## Exact selection
 
-Use an adapter only when a cloud/runtime pair has multiple installed implementations. This example
-deploys from a spec file because a 24 GB GPU such as the L4 can't hold the model's full context, so
-the spec caps it with `--max-model-len 8192`:
+Use an adapter only when a cloud/runtime pair has multiple installed implementations. A 24 GB GPU
+such as the L4 can't hold this model's full context, so the spec bounds it with
+`--max-model-len 8192`. Without that argument, InferCrane sets the same bound when the control plane
+can read model metadata ([context length](/features/model-catalog#context-length-at-deploy)):
 
 ```yaml
 apiVersion: infercrane.dev/v1

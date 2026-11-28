@@ -42,37 +42,10 @@ type modelCheckError struct {
 
 // runModelCheck reads one model from Hugging Face and evaluates it against
 // the pinned runtime registries and the GPUs this control plane can price.
-// A token, when named, is resolved here and never leaves this function.
 func (a API) runModelCheck(ctx context.Context, request modelCheckRequest) (*modelcheck.Report, *modelCheckError) {
-	if a.ModelCheck == nil {
-		return nil, &modelCheckError{Status: http.StatusNotImplemented, Code: codeMetadataAccessDisabled, Message: "Hugging Face metadata access is turned off on this control plane, so models outside the reviewed catalog cannot be checked."}
-	}
-	registries, err := modelcheck.Registries()
-	if err != nil {
-		return nil, &modelCheckError{Status: http.StatusInternalServerError, Code: "internal", Message: "runtime model registries could not be read"}
-	}
-	read := modelcheck.Request{Repository: request.Repository, Revision: request.Revision}
-	if request.ModelSecretReferenceID != "" {
-		token, failure := a.huggingFaceToken(ctx, request.Tenant, request.ModelSecretReferenceID)
-		if failure != nil {
-			return nil, failure
-		}
-		read.Token, read.Scope = token, request.Tenant+"/"+request.ModelSecretReferenceID
-	}
-	model, err := a.ModelCheck.Resolve(ctx, read)
-	if err != nil {
-		var checkErr *modelcheck.Error
-		if !errors.As(err, &checkErr) {
-			return nil, &modelCheckError{Status: http.StatusBadGateway, Code: modelcheck.CodeUnavailable, Message: "Hugging Face could not be read"}
-		}
-		status := map[string]int{modelcheck.CodeInvalidModel: http.StatusBadRequest, modelcheck.CodeModelNotFound: http.StatusNotFound, modelcheck.CodeRevisionNotFound: http.StatusNotFound, modelcheck.CodeTokenRejected: http.StatusUnprocessableEntity}[checkErr.Code]
-		if status == 0 {
-			status = http.StatusBadGateway
-			if checkErr.Timeout {
-				status = http.StatusGatewayTimeout
-			}
-		}
-		return nil, &modelCheckError{Status: status, Code: checkErr.Code, Message: checkErr.Message, Client: checkErr.Code == modelcheck.CodeInvalidModel}
+	model, registries, failure := a.readModel(ctx, request)
+	if failure != nil {
+		return nil, failure
 	}
 	now := time.Now().UTC()
 	var gpus []modelcheck.GPU
@@ -81,6 +54,43 @@ func (a API) runModelCheck(ctx context.Context, request modelCheckRequest) (*mod
 	}
 	report := modelcheck.Evaluate(model, modelcheck.EvaluateOptions{ContextTokens: request.ContextTokens, Concurrency: request.Concurrency, GPUs: gpus, Registries: registries, Now: now})
 	return &report, nil
+}
+
+// readModel reads one model from Hugging Face, with the pinned runtime
+// registries a check evaluates it against. A token, when named, is resolved
+// here and never leaves this function.
+func (a API) readModel(ctx context.Context, request modelCheckRequest) (modelcheck.Model, modelcheck.RegistrySnapshot, *modelCheckError) {
+	if a.ModelCheck == nil {
+		return modelcheck.Model{}, modelcheck.RegistrySnapshot{}, &modelCheckError{Status: http.StatusNotImplemented, Code: codeMetadataAccessDisabled, Message: "Hugging Face metadata access is turned off on this control plane, so models outside the reviewed catalog cannot be checked."}
+	}
+	registries, err := modelcheck.Registries()
+	if err != nil {
+		return modelcheck.Model{}, modelcheck.RegistrySnapshot{}, &modelCheckError{Status: http.StatusInternalServerError, Code: "internal", Message: "runtime model registries could not be read"}
+	}
+	read := modelcheck.Request{Repository: request.Repository, Revision: request.Revision}
+	if request.ModelSecretReferenceID != "" {
+		token, failure := a.huggingFaceToken(ctx, request.Tenant, request.ModelSecretReferenceID)
+		if failure != nil {
+			return modelcheck.Model{}, modelcheck.RegistrySnapshot{}, failure
+		}
+		read.Token, read.Scope = token, request.Tenant+"/"+request.ModelSecretReferenceID
+	}
+	model, err := a.ModelCheck.Resolve(ctx, read)
+	if err != nil {
+		var checkErr *modelcheck.Error
+		if !errors.As(err, &checkErr) {
+			return modelcheck.Model{}, modelcheck.RegistrySnapshot{}, &modelCheckError{Status: http.StatusBadGateway, Code: modelcheck.CodeUnavailable, Message: "Hugging Face could not be read"}
+		}
+		status := map[string]int{modelcheck.CodeInvalidModel: http.StatusBadRequest, modelcheck.CodeModelNotFound: http.StatusNotFound, modelcheck.CodeRevisionNotFound: http.StatusNotFound, modelcheck.CodeTokenRejected: http.StatusUnprocessableEntity}[checkErr.Code]
+		if status == 0 {
+			status = http.StatusBadGateway
+			if checkErr.Timeout {
+				status = http.StatusGatewayTimeout
+			}
+		}
+		return modelcheck.Model{}, modelcheck.RegistrySnapshot{}, &modelCheckError{Status: status, Code: checkErr.Code, Message: checkErr.Message, Client: checkErr.Code == modelcheck.CodeInvalidModel}
+	}
+	return model, registries, nil
 }
 
 // huggingFaceToken resolves the tenant's saved Hugging Face token reference.

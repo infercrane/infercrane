@@ -9,7 +9,9 @@ import (
 // The seven built-in load profiles. Before the adapter order, the content hash of
 // the two generic Kubernetes candidates decided which came first, and the hash
 // includes the profile: four of these seven started from the Dynamo serving
-// graph, where the plan refuses every engine-flag technique.
+// graph, where the plan refuses every engine-flag technique. Both adapters are
+// candidates only on a control plane configured for Dynamo, so these tests
+// plan with dynamoCatalogSource.
 var builtInLoadProfiles = []string{"interactive", "throughput", "long-context", "long-generation", "overload", "buffered", "balanced"}
 
 // Two models outside the reviewed catalog, so both plan from generic setups. The
@@ -32,7 +34,7 @@ func TestStartingSetupIsOnTheAdapterTheRequestNamesForEveryLoadProfile(t *testin
 	for model := range startingSetupModels {
 		for _, profile := range builtInLoadProfiles {
 			t.Run(model+"/"+profile, func(t *testing.T) {
-				proposal, err := catalogSource(t).Propose(context.Background(), kubernetesModelRequest(model, "kubernetes", profile, nil))
+				proposal, err := dynamoCatalogSource(t, "vllm").Propose(context.Background(), kubernetesModelRequest(model, "kubernetes", profile, nil))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -55,7 +57,7 @@ func TestStartingSetupIsOnTheAdapterTheRequestNamesForEveryLoadProfile(t *testin
 func TestDiagnosisBuildsSetupsFromThePlainServerForEveryLoadProfile(t *testing.T) {
 	for _, profile := range builtInLoadProfiles {
 		t.Run(profile, func(t *testing.T) {
-			proposal, err := catalogSource(t).Propose(context.Background(), kubernetesRequest("kubernetes", profile, preemptionDiagnosis()))
+			proposal, err := dynamoCatalogSource(t, "vllm").Propose(context.Background(), kubernetesRequest("kubernetes", profile, preemptionDiagnosis()))
 			if err != nil {
 				t.Fatal(err)
 			}

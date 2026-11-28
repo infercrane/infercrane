@@ -43,6 +43,19 @@ that qualified one exact tuple adds a narrowed entry beside the general one: the
 evidence rows take the best-qualified one, and the narrowed one on a tie; every other GPU and
 version keeps the general entry's state.
 
+## Prerequisites
+
+A provider profile may name a `prerequisite`: software an operator installs beside the cloud before
+the adapter can serve anything, such as NVIDIA Dynamo for `kubernetes-dynamo`. The catalog declares
+the name only, because it cannot know what a cluster runs. Composition records the runtimes the
+control plane is configured to run through it (`configured_runtimes`); for Dynamo these are the
+runtimes with a complete image and version pair, the same ones it registers Dynamo backends for.
+This is operator configuration, not qualification evidence.
+
+The planner offers a setup on such an adapter only when the request names the adapter, or the
+setup's runtime is configured. A request that names only the cloud does not say the software runs
+there, so the planner leaves those setups out and records a proposal warning that names them.
+
 ## Prohibited coupling
 
 Lifecycle core must not switch on provider name. Secrets must not enter persisted provider metadata.

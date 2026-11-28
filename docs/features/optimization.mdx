@@ -229,13 +229,15 @@ what to collect, such as serving-engine metrics, before planning again.
 
 The starting setup is on the provider adapter the request names, not on what the diagnosed
 endpoint runs: the plan does not read the endpoint's own setup. `--provider kubernetes` names the
-plain Kubernetes adapter, so the plan starts from a plain server, and the Dynamo serving graph the
-same cloud also offers comes after it. To plan for an endpoint served by a Dynamo serving graph,
-name it: `--provider kubernetes-dynamo`. A request that names the wrong adapter plans from the
-wrong kind of server. A provider that names only a cloud with several adapters, such as
-`--provider runpod`, names none of them; between adapters with equal qualification evidence and
-equal reusable artifacts the plan then starts from the first in name order (`runpod-pods`). Either
-way one request plans from the same kind of server for every `--profile`.
+plain Kubernetes adapter, so the plan starts from a plain server. A Dynamo serving graph on the
+same cloud comes after it, and only when the control plane runs
+[NVIDIA Dynamo](/integrations/dynamo#optimization-setups). To plan for an endpoint served by a
+Dynamo serving graph, name it: `--provider kubernetes-dynamo`. A request that names the wrong
+adapter plans from the wrong kind of server. A provider that names only a cloud with several
+adapters, such as `--provider runpod`, names none of them; between adapters with equal
+qualification evidence and equal reusable artifacts the plan then starts from the first in name
+order (`runpod-pods`). Either way one request plans from the same kind of server for every
+`--profile`.
 
 | Diagnosis | Tried, in order | vLLM flags (SGLang) |
 |---|---|---|

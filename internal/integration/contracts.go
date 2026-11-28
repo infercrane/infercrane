@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -97,6 +98,27 @@ type ProviderProfile struct {
 	Modes           []ComputeMode   `json:"modes"`
 	Capabilities    []Capability    `json:"capabilities"`
 	Qualification   []Qualification `json:"qualification"`
+	// Prerequisite is software the adapter needs beside its cloud. The zero
+	// value means the cloud alone is enough.
+	Prerequisite Prerequisite `json:"prerequisite,omitzero"`
+}
+
+// Prerequisite names software an operator installs beside a cloud before an
+// adapter can serve anything there, such as NVIDIA Dynamo in a Kubernetes
+// cluster. The catalog declares the name only, because it cannot know what a
+// cluster runs. ConfiguredRuntimes lists the runtimes the control plane is
+// configured to run through it (Registry.ConfigurePrerequisite). It is
+// operator configuration, not qualification evidence.
+type Prerequisite struct {
+	Name               string   `json:"name"`
+	ConfiguredRuntimes []string `json:"configured_runtimes,omitempty"`
+}
+
+// PrerequisiteConfigured reports whether the control plane runs the runtime
+// through the adapter's prerequisite. An adapter without one needs nothing
+// more than its cloud.
+func (p ProviderProfile) PrerequisiteConfigured(runtime string) bool {
+	return p.Prerequisite.Name == "" || slices.Contains(p.Prerequisite.ConfiguredRuntimes, runtime)
 }
 
 type RuntimeProfile struct {
@@ -476,6 +498,9 @@ func (r *Registry) RegisterProvider(profile ProviderProfile) error {
 	if err := profile.Validate(); err != nil {
 		return err
 	}
+	if len(profile.Prerequisite.ConfiguredRuntimes) > 0 {
+		return fmt.Errorf("provider %q is registered with a configured prerequisite; only composition configures one", profile.Adapter)
+	}
 	if _, exists := r.providers[profile.Adapter]; exists {
 		return fmt.Errorf("provider adapter %q is already registered", profile.Adapter)
 	}
@@ -510,6 +535,32 @@ func (r *Registry) RegisterComposition(profile CompositionProfile) error {
 		return fmt.Errorf("%s composition adapter %q is already registered", profile.Kind, profile.Adapter)
 	}
 	r.compositions[key] = profile
+	return nil
+}
+
+// ConfigurePrerequisite records that the control plane is configured to run
+// these runtimes through an adapter's declared prerequisite. Composition calls
+// it from operator settings; the catalog never does.
+func (r *Registry) ConfigurePrerequisite(adapter string, runtimes ...string) error {
+	profile, err := r.Provider(adapter)
+	if err != nil {
+		return err
+	}
+	if profile.Prerequisite.Name == "" {
+		return fmt.Errorf("provider adapter %q declares no prerequisite", adapter)
+	}
+	configured := slices.Clone(profile.Prerequisite.ConfiguredRuntimes)
+	for _, runtime := range runtimes {
+		if _, err = r.Runtime(runtime); err != nil {
+			return err
+		}
+		if !slices.Contains(configured, runtime) {
+			configured = append(configured, runtime)
+		}
+	}
+	slices.Sort(configured)
+	profile.Prerequisite.ConfiguredRuntimes = configured
+	r.providers[adapter] = profile
 	return nil
 }
 
@@ -590,6 +641,9 @@ func (p ProviderProfile) Validate() error {
 			return fmt.Errorf("provider %q declares compute mode %q more than once", p.Adapter, mode)
 		}
 		seen[mode] = struct{}{}
+	}
+	if p.Prerequisite.Name == "" && len(p.Prerequisite.ConfiguredRuntimes) > 0 {
+		return fmt.Errorf("provider %q configures runtimes for an unnamed prerequisite", p.Adapter)
 	}
 	return validateEvidence(p.Adapter, p.Capabilities, p.Qualification)
 }
@@ -677,6 +731,7 @@ func normalizeProvider(profile ProviderProfile) ProviderProfile {
 	profile.Cloud = strings.TrimSpace(profile.Cloud)
 	profile.ContractVersion = strings.TrimSpace(profile.ContractVersion)
 	profile.AdapterVersion = strings.TrimSpace(profile.AdapterVersion)
+	profile.Prerequisite.Name = strings.TrimSpace(profile.Prerequisite.Name)
 	profile.Modes = append([]ComputeMode(nil), profile.Modes...)
 	profile.Capabilities = append([]Capability(nil), profile.Capabilities...)
 	profile.Qualification = append([]Qualification(nil), profile.Qualification...)

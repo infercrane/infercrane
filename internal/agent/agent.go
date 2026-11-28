@@ -391,8 +391,12 @@ func (a *Agent) Probe(ctx context.Context) {
 			_ = a.windows.Observe(server.Key, server.Exposition, a.now())
 		}
 	}
+	if ctx.Err() != nil {
+		// A pass cut short by shutdown says nothing about the servers.
+		return
+	}
+	events := []Event{}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	for key, previous := range a.detected {
 		if _, still := found[key]; still {
 			continue
@@ -407,11 +411,12 @@ func (a *Agent) Probe(ctx context.Context) {
 		// A registered server that stopped answering is reported, not
 		// forgotten, so its endpoint shows it as unhealthy.
 		previous.Health, previous.HealthDetail = agentprotocol.HealthUnhealthy, "the server stopped answering on "+previous.Address
+		previous.Failure = ProbeFailure{Path: healthPath, Reason: "stopped answering"}
 		previous.MetricsAvailable, previous.Exposition = false, ""
 		found[key] = previous
 	}
 	for key, server := range found {
-		_, known := a.detected[key]
+		previous, known := a.detected[key]
 		a.detected[key] = server
 		status := a.status[key]
 		if status == nil {
@@ -419,11 +424,38 @@ func (a *Agent) Probe(ctx context.Context) {
 			a.status[key] = status
 		}
 		status.Server = server.Server
+		copy := *status
 		if !known {
-			copy := *status
-			a.emit(Event{Kind: "server_found", Server: &copy})
+			events = append(events, Event{Kind: "server_found", Server: &copy})
+		}
+		if event, changed := probeChange(key, previous.Failure, server.Failure, status.Registered); changed {
+			event.Server = &copy
+			events = append(events, event)
 		}
 	}
+	a.mu.Unlock()
+	for _, event := range events {
+		a.emit(event)
+	}
+}
+
+// probeChange is the log line for a change in a server's health probe: it
+// starts failing, fails for another reason, or passes again. A probe that
+// keeps failing the same way is logged once, and a server first seen healthy
+// needs no line of its own. The line names the server key, the probe path,
+// and the reason, never a header or token.
+func probeChange(key string, before, after ProbeFailure, registered bool) (Event, bool) {
+	switch {
+	case before == after:
+		return Event{}, false
+	case after.Reason == "":
+		return Event{Kind: "server_probe_recovered", Message: fmt.Sprintf("server %s: health probe GET %s passes again", key, before.Path)}, true
+	}
+	consequence := "the server is not registered until the probe passes"
+	if registered {
+		consequence = "its endpoint shows it as unhealthy"
+	}
+	return Event{Kind: "server_probe_failed", Message: fmt.Sprintf("server %s: health probe GET %s failed (%s); %s", key, after.Path, after.Reason, consequence)}, true
 }
 
 // register asks the control plane to observe every healthy server not yet

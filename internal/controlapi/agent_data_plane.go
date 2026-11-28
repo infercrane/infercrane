@@ -2,6 +2,7 @@ package controlapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -18,7 +19,7 @@ import (
 type agentDataPlaneService interface {
 	DataPlane(context.Context, domain.Agent, string) (agentprotocol.DataPlaneSnapshot, error)
 	LeaseQuota(context.Context, domain.Agent, agentprotocol.QuotaLeaseRequest) (agentprotocol.QuotaLeaseResponse, error)
-	Commands(context.Context, domain.Agent, time.Duration) (agentprotocol.CommandsResponse, error)
+	Commands(context.Context, domain.Agent, time.Duration, func(agentprotocol.CommandsResponse) error) error
 	UpdateCommand(context.Context, domain.Agent, string, agentprotocol.CommandUpdate) (agentprotocol.CommandUpdateResponse, error)
 	CreateCandidateRun(context.Context, string, string, string, agentprotocol.CandidateRunSpec) (domain.Agent, domain.AgentCommand, error)
 	CandidateRuns(context.Context, string, string) (domain.Agent, []domain.AgentCommand, error)
@@ -110,12 +111,29 @@ func (a API) agentCommands(w http.ResponseWriter, r *http.Request, agent domain.
 		}
 		wait = parsed
 	}
-	response, err := service.Commands(r.Context(), agent, wait)
+	// An answer that cannot be written hands its commands back at once.
+	err := service.Commands(r.Context(), agent, wait, func(response agentprotocol.CommandsResponse) error {
+		return writeDeliveredJSON(w, http.StatusOK, response)
+	})
 	if err != nil {
 		writeDataPlaneError(w, err)
-		return
 	}
-	writeJSON(w, http.StatusOK, response)
+}
+
+// writeDeliveredJSON writes and flushes a JSON answer, and returns an error
+// when it did not reach the connection. A writer that cannot flush counts as
+// delivered: its answer is sent when the handler returns, and nothing shows
+// that it failed.
+func writeDeliveredJSON(w http.ResponseWriter, status int, value any) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		return err
+	}
+	if err := http.NewResponseController(w).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
 }
 
 func (a API) agentCommandUpdate(w http.ResponseWriter, r *http.Request, agent domain.Agent) {
