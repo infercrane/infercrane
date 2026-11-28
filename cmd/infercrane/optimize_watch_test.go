@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 )
 
 func watchSpec(engine string, args ...string) json.RawMessage {
@@ -47,6 +49,10 @@ func TestWatchLabelAndStatusUsePlainWords(t *testing.T) {
 	status := watchStatus(watchCandidate{State: "rejected", FailureCode: "measured_no_measurable_difference"}, watchMeasurement{}, false, false)
 	if status != "rejected · no real difference from your current setup" {
 		t.Fatalf("status = %q", status)
+	}
+	refused := watchStatus(watchCandidate{State: "failed", FailureCode: optimizationcampaign.FailureAgentSetupNotPlainServer}, watchMeasurement{}, false, false)
+	if refused != "failed · the agent starts plain servers only, and this setup is another kind of server" {
+		t.Fatalf("refused by the agent = %q", refused)
 	}
 }
 

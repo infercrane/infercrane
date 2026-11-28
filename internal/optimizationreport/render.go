@@ -39,6 +39,8 @@ var reasonWords = map[string]string{
 	"release_guard_rejected":                 "failed the safety check",
 	"release_guard_inconclusive":             "safety check had too little evidence",
 	"approval_expired_before_activation":     "approval expired before rollout",
+	"agent_setup_not_plain_server":           "the agent starts plain servers only, and this setup is another kind of server",
+	"agent_setup_unsupported":                "the agent cannot start this setup yet",
 }
 
 var decisionWords = map[string]string{

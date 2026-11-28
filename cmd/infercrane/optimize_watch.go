@@ -50,6 +50,8 @@ var watchReasonWords = map[string]string{
 	"optimization_machine_replacement_failed":         "its server was lost and the replacement did not start",
 	"optimization_measurement_interrupted_repeatedly": "measuring stopped too often to finish",
 	"optimization_control_lost":                       "your current setup's server was lost, so nothing could be compared",
+	"agent_setup_not_plain_server":                    "the agent starts plain servers only, and this setup is another kind of server",
+	"agent_setup_unsupported":                         "the agent cannot start this setup yet",
 }
 
 var watchStages = []string{"proposed", "provisioning", "ready", "measuring", "validating", "ranked", "qualified"}

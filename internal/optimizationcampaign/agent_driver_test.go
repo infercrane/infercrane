@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,11 +12,13 @@ import (
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/qualitycheck"
 	"github.com/infercrane/infercrane/internal/qualityevidence"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -647,22 +650,170 @@ func TestAgentRunGuardAppliesReleaseGuard(t *testing.T) {
 	}
 }
 
-// A setup an agent cannot start yet is refused before any window.
+// A setup an agent cannot start yet is refused before any window. An agent
+// starts plain servers only, so a setup with a serving graph, or on an adapter
+// whose provider profile serves through software beside its cloud, is refused
+// as not a plain server, even where that software runs. The profile decides,
+// never the adapter's name, and an adapter without one is not guessed at.
 func TestAgentRunRefusesSetupsAnAgentCannotStart(t *testing.T) {
+	providers := dynamoProviders(t)
 	draft := optimizer.DeploymentDraft{Name: "support-bot"}
 	draft.Model.ID, draft.Model.Revision = "Qwen/Qwen3-8B", "b968826d9c46dd6066d109eabc6255188de91218"
 	draft.Runtime.Engine, draft.Runtime.Version = "vllm", support.DefaultRuntimeVersion
 	draft.Resources.GPU = "NVIDIA-L4"
-	if _, err := AgentSetup(draft); err != nil {
+	draft.Provider.Cloud, draft.Provider.Adapter = "kubernetes", "kubernetes"
+	if _, err := AgentSetup(draft, providers); err != nil {
 		t.Fatalf("a plain setup: %v", err)
 	}
 	withEnv := draft
 	withEnv.Runtime.Env = map[string]string{"VLLM_USE_RUST_FRONTEND": "1"}
-	if _, err := AgentSetup(withEnv); err == nil || !strings.Contains(err.Error(), "environment variables") {
+	if _, err := AgentSetup(withEnv, providers); err == nil || !strings.Contains(err.Error(), "environment variables") {
 		t.Fatalf("env: %v", err)
+	} else if code, _ := permanentCandidateFailure(agentSetupRefused(err)); code != FailureAgentSetupUnsupported {
+		t.Fatalf("env code %q", code)
+	}
+	other := integration.ProviderProfile{Adapter: "kubernetes-other", Cloud: "kubernetes", ContractVersion: integration.ProviderContractV1, AdapterVersion: "builtin-v1",
+		Modes: []integration.ComputeMode{integration.ElasticMode}, Prerequisite: integration.Prerequisite{Name: "Other Graph", ConfiguredRuntimes: []string{"vllm"}}}
+	for name, test := range map[string]struct {
+		adapter string
+		serving servingcontract.Topology
+		want    string
+	}{
+		"a Dynamo serving graph":           {"kubernetes-dynamo", dynamoGraph(), "this setup needs a serving graph on NVIDIA Dynamo"},
+		"a serving graph on a plain cloud": {"kubernetes", dynamoGraph(), "this setup needs a serving graph"},
+		"an adapter with a prerequisite":   {"kubernetes-dynamo", servingcontract.Topology{}, "this setup runs through NVIDIA Dynamo (provider adapter kubernetes-dynamo)"},
+		"any adapter with a prerequisite":  {"kubernetes-other", servingcontract.Topology{}, "this setup runs through Other Graph"},
+		"an adapter without a profile":     {"acme-graph", servingcontract.Topology{}, "no profile for, so what it starts is unknown"},
+	} {
+		value := draft
+		value.Provider.Adapter, value.Serving = test.adapter, test.serving
+		_, err := AgentSetup(value, append(slices.Clone(providers), other))
+		if !errors.Is(err, errNotPlainServer) || !strings.HasPrefix(err.Error(), "an agent starts plain servers only; ") || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if code, permanent := permanentCandidateFailure(agentSetupRefused(err)); !permanent || code != FailureAgentSetupNotPlainServer {
+			t.Fatalf("%s: code %q", name, code)
+		}
 	}
 	if got := agentCommand([]string{"python3", "-m", "sglang.launch_server", "--model-path", "${MODEL}"}); strings.Join(got, " ") != "sglang serve --model-path ${MODEL}" {
 		t.Fatalf("sglang command: %v", got)
+	}
+}
+
+// dynamoProviders are the catalog's provider profiles on a control plane that
+// runs vLLM through NVIDIA Dynamo.
+func dynamoProviders(t *testing.T) []integration.ProviderProfile {
+	t.Helper()
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", "vllm"); err != nil {
+		t.Fatal(err)
+	}
+	return registry.Snapshot().Providers
+}
+
+func dynamoGraph() servingcontract.Topology {
+	return servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
+}
+
+// steppedAgentStore lets a Coordinator move the run's candidates, so a test
+// follows a run as the campaign worker does.
+type steppedAgentStore struct{ *agentStore }
+
+func (s steppedAgentStore) TransitionOptimizationCandidate(_ context.Context, _, _, candidateID, from, to string, updates domain.OptimizationCandidateRun) (domain.OptimizationCandidateRun, error) {
+	if err := ValidateCandidateTransition(from, to); err != nil {
+		return domain.OptimizationCandidateRun{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.campaign.Candidates {
+		candidate := &s.campaign.Candidates[index]
+		if candidate.ID != candidateID {
+			continue
+		}
+		if candidate.State != from {
+			return *candidate, domain.ErrConflict
+		}
+		candidate.State = to
+		mergeCandidate(candidate, updates)
+		return *candidate, nil
+	}
+	return domain.OptimizationCandidateRun{}, domain.ErrNotFound
+}
+
+// A run on an agent's endpoint with a Dynamo serving graph among its setups
+// refuses that setup before any window, so no GPU starts, and the candidate
+// records why; the plain setup beside it still runs. A run stored before
+// agents refused such setups stops at its next window, and a winner measured
+// that way is never rolled out.
+func TestAgentRunRefusesAServingGraphBeforeAnyGPUStarts(t *testing.T) {
+	run := newAgentRun(t, "throughput", "--max-num-seqs", "256")
+	run.driver.Providers = dynamoProviders(t)
+	var draft optimizer.DeploymentDraft
+	if err := json.Unmarshal([]byte(run.setup.DeploymentSpecJSON), &draft); err != nil {
+		t.Fatal(err)
+	}
+	draft.Provider.Cloud, draft.Provider.Adapter, draft.Serving = "kubernetes", "kubernetes-dynamo", dynamoGraph()
+	encoded, _ := json.Marshal(draft)
+	var proposal optimizer.Proposal
+	if err := json.Unmarshal([]byte(run.store.campaign.ProposalJSON), &proposal); err != nil {
+		t.Fatal(err)
+	}
+	proposal.Candidates = append(proposal.Candidates, optimizer.Candidate{ID: "proposal-graph", BenchmarkProfile: "throughput"})
+	proposalJSON, _ := json.Marshal(proposal)
+	graph := domain.OptimizationCandidateRun{ID: "graph-1", TenantID: "tenant", CampaignID: "campaign-1", ProposalCandidateID: "proposal-graph", State: CandidateProposed, DeploymentSpecJSON: string(encoded)}
+	cost := 30.0
+	run.store.campaign.State, run.store.campaign.ApprovedMaxCostUSD, run.store.campaign.ProposalJSON = CampaignApproved, &cost, string(proposalJSON)
+	run.store.campaign.Candidates = append(run.store.campaign.Candidates, graph)
+	stepped := steppedAgentStore{run.store}
+	run.driver.Store = stepped
+	coordinator := Coordinator{Repository: stepped, Driver: run.driver, Now: run.driver.Now}
+	step := func(id string) StepResult {
+		t.Helper()
+		result, err := coordinator.Step(t.Context(), "tenant", "campaign-1", id)
+		if err != nil {
+			t.Fatalf("step %s: %v", id, err)
+		}
+		return result
+	}
+
+	if _, err := run.driver.Provision(t.Context(), graph.ID, graph, run.budget); err == nil || !strings.Contains(err.Error(), "an agent starts plain servers only; this setup needs a serving graph on NVIDIA Dynamo") {
+		t.Fatalf("provision says why: %v", err)
+	}
+	step(graph.ID)
+	if result := step(graph.ID); result.To != CandidateFailed {
+		t.Fatalf("the serving graph was not refused: %+v", result)
+	}
+	if refused := run.store.candidate(graph.ID); refused.FailureCode != FailureAgentSetupNotPlainServer || refused.RevisionID != "" {
+		t.Fatalf("candidate: %+v", refused)
+	}
+	if step(graph.ID); run.store.candidate(graph.ID).State != CandidateCleaned || len(run.agent.specs) != 0 {
+		t.Fatalf("state %s, %d windows: no GPU may start for a refused setup", run.store.candidate(graph.ID).State, len(run.agent.specs))
+	}
+
+	for range 3 {
+		step(run.setup.ID)
+	}
+	plain := run.store.candidate(run.setup.ID)
+	if plain.State != CandidateValidating || plain.BenchmarkID == "" || len(run.agent.specs) != 1 || run.agent.specs[0].Candidate == nil || AgentSetupID(*run.agent.specs[0].Candidate) != plain.RevisionID {
+		t.Fatalf("the plain setup did not run: %+v, %d windows", plain, len(run.agent.specs))
+	}
+
+	stale := graph
+	stale.ID, stale.State, stale.RevisionID = "graph-2", CandidateMeasuring, "agentsetup-"+strings.Repeat("0", 24)
+	run.store.campaign.Candidates = append(run.store.campaign.Candidates, stale)
+	_, err := run.measure(t, stale.ID)
+	if code, permanent := permanentCandidateFailure(err); !permanent || code != FailureAgentSetupNotPlainServer || len(run.agent.specs) != 1 {
+		t.Fatalf("a stored serving graph: %v, %d windows", err, len(run.agent.specs))
+	}
+	stale.State = CandidateGuardPassed
+	commands := &rolloutCommands{start: agentprotocol.CommandSucceeded}
+	campaign, _ := run.store.OptimizationCampaign(t.Context(), "tenant", "campaign-1")
+	_, err = AgentRollout{Store: &rolloutStore{}, Commands: commands, Providers: run.driver.Providers}.Activate(t.Context(), campaign, stale)
+	if code, permanent := permanentCandidateFailure(err); !permanent || code != FailureAgentSetupNotPlainServer || len(commands.queued) != 0 {
+		t.Fatalf("a measured serving graph was rolled out: %v %v", err, commands.queued)
 	}
 }
 

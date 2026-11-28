@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/servingcontract"
 	"github.com/infercrane/infercrane/internal/support"
 )
 
@@ -61,6 +63,35 @@ func TestAgentRunTargetRefusesRunsAnAgentCannotMeasure(t *testing.T) {
 		if _, refused := test.api.agentRunTarget(t.Context(), "tenant", "support-bot", test.proposal); !strings.Contains(refused, test.want) {
 			t.Errorf("%s: refused %q, want %q", name, refused, test.want)
 		}
+	}
+}
+
+// An agent starts plain servers only, so a run whose setups include a Dynamo
+// serving graph is refused before it is stored, and the refusal names the
+// setup and why. The same setups on the plain Kubernetes adapter are accepted.
+func TestAgentRunTargetRefusesASetupThatIsNotAPlainServer(t *testing.T) {
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := API{Store: agentEndpointFake{agent: domain.Agent{ID: "agent-1", State: "active"}}, Integrations: registry.Snapshot()}
+	setup := func(id, adapter string, serving servingcontract.Topology) optimizer.Candidate {
+		candidate := optimizer.Candidate{ID: id}
+		candidate.Deployment.Model.ID, candidate.Deployment.Model.Revision = "Qwen/Qwen3-8B", "b968826d9c46dd6066d109eabc6255188de91218"
+		candidate.Deployment.Runtime.Engine, candidate.Deployment.Runtime.Version = "vllm", support.DefaultRuntimeVersion
+		candidate.Deployment.Resources.GPU, candidate.Deployment.Resources.GPUCount = "NVIDIA-L4", 1
+		candidate.Deployment.Provider.Cloud, candidate.Deployment.Provider.Adapter, candidate.Deployment.Serving = "kubernetes", adapter, serving
+		return candidate
+	}
+	graph := servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
+	proposal := optimizer.Proposal{StartingPoint: &optimizer.StartingPoint{CandidateID: "current"},
+		Candidates: []optimizer.Candidate{{ID: "current"}, setup("plain", "kubernetes", servingcontract.Topology{}), setup("graph", "kubernetes-dynamo", graph)}}
+	if _, refused := api.agentRunTarget(t.Context(), "tenant", "support-bot", proposal); refused != "setup graph: an agent starts plain servers only; this setup needs a serving graph on NVIDIA Dynamo" {
+		t.Fatalf("refused %q", refused)
+	}
+	proposal.Candidates = proposal.Candidates[:2]
+	if agentID, refused := api.agentRunTarget(t.Context(), "tenant", "support-bot", proposal); refused != "" || agentID != "agent-1" {
+		t.Fatalf("a plain setup: %q %q", agentID, refused)
 	}
 }
 

@@ -129,3 +129,26 @@ func TestAKnownPrerequisiteNamesTheSettingsAMissingRuntimeNeeds(t *testing.T) {
 		t.Fatal("an adapter without a prerequisite misses nothing")
 	}
 }
+
+// A setup on an adapter that serves through software beside its cloud is not a
+// plain server, even where that software runs; every other adapter's is.
+func TestOnlyAnAdapterWithoutAPrerequisiteServesPlainServers(t *testing.T) {
+	registry, err := V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", dynamoSettings, "vllm"); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range registry.Snapshot().Providers {
+		if profile.PlainServer() != (profile.Prerequisite.Name == "") {
+			t.Fatalf("%s: plain=%v prerequisite=%+v", profile.Adapter, profile.PlainServer(), profile.Prerequisite)
+		}
+	}
+	for adapter, plain := range map[string]bool{"kubernetes": true, "runpod-pods": true, "kubernetes-dynamo": false} {
+		profile, providerErr := registry.Provider(adapter)
+		if providerErr != nil || profile.PlainServer() != plain {
+			t.Fatalf("%s: plain=%v err=%v", adapter, profile.PlainServer(), providerErr)
+		}
+	}
+}

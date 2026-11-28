@@ -67,6 +67,11 @@ prerequisite is known to be missing for the setup's runtime (`prerequisite_not_c
 check reads the provider profile, not the adapter's name. A run on an agent's endpoint is not
 checked: the agent starts its setups in its own cluster.
 
+A setup on an adapter with a prerequisite is not a plain server (`ProviderProfile.PlainServer`),
+wherever the software runs. An InferCrane agent starts plain servers only. A run on an agent's
+endpoint refuses such a setup, or one with a serving graph, before any GPU starts. The profile
+decides, never the adapter's name.
+
 ## Prohibited coupling
 
 Lifecycle core must not switch on provider name. Secrets must not enter persisted provider metadata.

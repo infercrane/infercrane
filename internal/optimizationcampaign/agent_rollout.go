@@ -8,6 +8,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/releaseguard"
 )
@@ -75,7 +76,10 @@ type AgentRolloutStore interface {
 type AgentRollout struct {
 	Store    AgentRolloutStore
 	Commands AgentServerCommands
-	Now      func() time.Time
+	// Providers are the control plane's provider profiles, as the run's
+	// AgentDriver reads them.
+	Providers []integration.ProviderProfile
+	Now       func() time.Time
 }
 
 func (r AgentRollout) now() time.Time {
@@ -112,8 +116,13 @@ func (r AgentRollout) Activate(ctx context.Context, campaign domain.Optimization
 	if err != nil {
 		return AgentRolloutResult{}, operations.Permanent("optimization_candidate_spec_invalid", err)
 	}
-	setup, err := AgentSetup(draft)
-	if err != nil || AgentSetupID(setup) != candidate.RevisionID {
+	// A setup the agent cannot start as it is named, such as a serving graph
+	// a run measured before agents refused them, is never rolled out.
+	setup, err := AgentSetup(draft, r.Providers)
+	if err != nil {
+		return AgentRolloutResult{}, agentSetupRefused(err)
+	}
+	if AgentSetupID(setup) != candidate.RevisionID {
 		return AgentRolloutResult{}, operations.Permanent("optimization_candidate_identity_mismatch", errors.New("the setup no longer matches the identity it was measured under"))
 	}
 	started, err := r.Commands.QueueServerCommand(ctx, campaign.TenantID, campaign.AgentID, childKey(candidate.ID, "rollout-start"), &agentprotocol.StartServerSpec{Endpoint: campaign.TargetEndpoint, Setup: setup, TimeoutSecs: int(agentRolloutStartTime / time.Second)}, nil)

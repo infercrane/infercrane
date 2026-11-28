@@ -178,6 +178,15 @@ func joinAnd(items []string) string {
 	return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
 }
 
+// PlainServer reports whether a setup on the adapter is a plain server: an
+// engine container from an image, with its arguments, on its GPUs, and nothing
+// beside the cloud. An adapter with a prerequisite serves through that software
+// instead, such as a Dynamo serving graph. An InferCrane agent starts plain
+// servers only, so it cannot reproduce a setup on such an adapter.
+func (p ProviderProfile) PlainServer() bool {
+	return p.Prerequisite.Name == ""
+}
+
 type RuntimeProfile struct {
 	Runtime         string                   `json:"runtime"`
 	ContractVersion string                   `json:"contract_version"`

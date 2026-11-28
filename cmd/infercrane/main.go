@@ -5137,7 +5137,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	composite := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s, PromptCorpus: promptCorpus}
 	// A run on an agent's endpoint is measured by its agent in the customer's
 	// cluster; the control plane only judges the numbers it reports.
-	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner}
+	providerProfiles := integrationRegistry.Snapshot().Providers
+	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner, Providers: providerProfiles}
 	driver := optimizationcampaign.SiteDriver{Repository: s, Control: composite, Agent: agentDriver}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
@@ -5145,7 +5146,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	// The winner of a run on an agent's endpoint is rolled out there: the
 	// agent starts it, the endpoint switches on Release Guard's PASS, and a
 	// watch window promotes it or rolls it back.
-	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}}
+	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}, Providers: providerProfiles}
 	for kind, handler := range optimizationcampaign.ActivationHandlersWith(s, rec.RefreshEndpoints, nil, agentRollout) {
 		handlers[kind] = handler
 	}
