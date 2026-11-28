@@ -122,3 +122,35 @@ func TestDeploymentSpecListsEveryReviewedEngineArgument(t *testing.T) {
 		}
 	}
 }
+
+func TestContextLengthFlagIsAReviewedFlagOfItsRuntime(t *testing.T) {
+	for _, runtime := range []string{"vllm", "sglang", " VLLM "} {
+		flag := ContextLengthFlag(runtime)
+		if flag == "" || ValidateEngineArgs(runtime, []string{flag, "8192"}) != nil {
+			t.Fatalf("%q: context flag %q is not reviewed", runtime, flag)
+		}
+	}
+	if flag := ContextLengthFlag("custom-oci"); flag != "" {
+		t.Fatalf("custom image got a context flag %q", flag)
+	}
+}
+
+func TestContextLengthReadsEitherRuntimesFlag(t *testing.T) {
+	for _, test := range []struct {
+		args  []string
+		value string
+		set   bool
+	}{
+		{nil, "", false},
+		{[]string{"--enable-prefix-caching", "--max-num-batched-tokens", "2048"}, "", false},
+		{[]string{"--enable-prefix-caching", "--max-model-len", "8192"}, "8192", true},
+		{[]string{"--max-model-len=16384"}, "16384", true},
+		{[]string{"--context-length", "32768", "--tp-size", "2"}, "32768", true},
+		{[]string{"--max-model-len"}, "", true},
+	} {
+		value, set := ContextLength(test.args)
+		if value != test.value || set != test.set {
+			t.Fatalf("%v: got (%q, %t), want (%q, %t)", test.args, value, set, test.value, test.set)
+		}
+	}
+}

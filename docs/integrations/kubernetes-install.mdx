@@ -82,12 +82,13 @@ agent's health probe is skipped without a reason in the log.
 
 ## Deploy and serve
 
-On a 24 GB GPU, give the engine a context length it can hold; `infercrane deploy MODEL` sets none, and
-Qwen3-8B then does not start. Deploy from a spec file
-([example](/integrations/kubernetes#deploy)):
+On a 24 GB GPU, the engine needs a context length it can hold. InferCrane sets one when the control
+plane can read model metadata; otherwise pass `--max-model-len 8192`
+([details](/integrations/kubernetes#deploy)):
 
 ```bash
-infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+infercrane deploy Qwen/Qwen3-8B --name qwen-kubernetes --cloud kubernetes --gpu NVIDIA-A10G \
+  --max-model-len 8192 --idempotency-key qwen-kubernetes-initial
 curl https://YOUR-CONTROL-PLANE/v1/chat/completions -H "Authorization: Bearer $APP_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"qwen-kubernetes","messages":[{"role":"user","content":"Hello"}]}'

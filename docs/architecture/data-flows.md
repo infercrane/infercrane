@@ -63,7 +63,9 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
 
 1. A planning request (`POST /api/v1/planning/intents`), a check (`GET
    /api/v1/catalog/hugging-face/check`), or an optimization proposal names a Hugging Face repository
-   that is not a reviewed model.
+   that is not a reviewed model; or a deployment (`POST /api/v1/deployments`) of any Hugging Face
+   repository on a built-in runtime sets no engine arguments, and InferCrane sizes its context
+   length.
 2. When a `model_secret_reference_id` is named, the control API loads that tenant's secret reference
    and resolves the token through the configured secret resolver.
 3. `internal/modelcheck` pins the revision to a commit with one model-info request, then reads
@@ -71,10 +73,13 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
    concurrency bound, redirects followed only on the same host. Results are cached in memory by
    commit; reads made with a token are cached under the tenant and credential.
 4. The check compares the architecture with the committed runtime registry snapshot, sizes the GPU
-   from the price catalog already in memory, and returns. For a proposal planned from an endpoint
-   diagnosis, it also adds the served weights' bytes and the KV cache bytes per token to that
-   diagnosis, from which the planner predicts the cache room of precision changes. The planner
-   itself never reads the network.
+   from the price catalog already in memory, and returns. For a deployment it sizes one request on
+   the chosen GPU instead and, when the model's own maximum context does not fit, adds a context
+   length to the deployment's engine arguments before the deployment is persisted. A failed read
+   never fails the deployment; it keeps the model's own context and says why. For a proposal
+   planned from an endpoint diagnosis, it also adds the served weights' bytes and the KV cache bytes
+   per token to that diagnosis, from which the planner predicts the cache room of precision changes.
+   The planner itself never reads the network.
 
 Nothing is written to PostgreSQL, and the inference request path is not involved.
 

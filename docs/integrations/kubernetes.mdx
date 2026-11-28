@@ -271,37 +271,23 @@ infercrane deploy Qwen/Qwen3-8B \
   --idempotency-key qwen-kubernetes-initial
 ```
 
-On a 24 GB GPU (L4, A10G) the command above cannot serve `Qwen/Qwen3-8B`: it sets no context length,
-so vLLM 0.34.0 reserves the model's 40960 tokens, needs 5.62 GiB of KV cache with 3.72 GiB free, and
-exits. `infercrane deploy` has no flag for engine arguments; deploy from a spec file instead
-([DeploymentSpec](/deployment-spec)):
-
-```yaml
-apiVersion: infercrane.dev/v1
-kind: Deployment
-name: qwen-kubernetes
-model:
-  id: Qwen/Qwen3-8B
-  revision: b968826d9c46dd6066d109eabc6255188de91218
-runtime:
-  engine: vllm
-  args: ["--max-model-len", "8192"]
-compute:
-  mode: elastic
-provider:
-  cloud: kubernetes
-resources:
-  gpu: NVIDIA-A10G
-  gpu_count: 1
-scaling:
-  min_replicas: 1
-  max_replicas: 1
-```
+On a 24 GB GPU (L4, A10G), `Qwen/Qwen3-8B`'s own 40960-token context does not fit next to its
+weights: vLLM 0.34.0 needs 5.62 GiB of KV cache for it, has 3.72 GiB free, and exits. When the
+control plane can read model metadata (`INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`), InferCrane
+sees this before it deploys and sets `--max-model-len 8192`. The deploy output names the length and
+why. Without metadata access, or to choose another length, pass it yourself:
 
 ```bash
-infercrane plan qwen-kubernetes.yaml
-infercrane deploy qwen-kubernetes.yaml --idempotency-key qwen-kubernetes-initial
+infercrane deploy Qwen/Qwen3-8B \
+  --name qwen-kubernetes \
+  --cloud kubernetes \
+  --gpu NVIDIA-A10G \
+  --max-model-len 8192 \
+  --idempotency-key qwen-kubernetes-initial
 ```
+
+A [DeploymentSpec](/deployment-spec) sets the same bound with `runtime.args: ["--max-model-len",
+"8192"]`.
 
 A deploy that never becomes ready keeps its operation open, and `infercrane delete` is refused
 ("unresolved lifecycle operation") until you cancel it:

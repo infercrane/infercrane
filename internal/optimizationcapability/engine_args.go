@@ -77,6 +77,33 @@ var reviewedEngineFlags = map[string][]string{
 	},
 }
 
+// contextLengthFlags is the reviewed flag that bounds each built-in
+// runtime's context length.
+var contextLengthFlags = map[string]string{"vllm": "--max-model-len", "sglang": "--context-length"}
+
+// ContextLengthFlag returns the reviewed flag that bounds a built-in
+// runtime's context length, or "" for any other runtime.
+func ContextLengthFlag(runtime string) string {
+	return contextLengthFlags[strings.ToLower(strings.TrimSpace(runtime))]
+}
+
+// ContextLength returns the value an argument list gives a built-in
+// runtime's context-length flag, as written ("--max-model-len 8192" or
+// "--context-length=8192"), and whether the list sets one at all.
+func ContextLength(args []string) (string, bool) {
+	for index := 0; index < len(args); index++ {
+		name, value, inline := strings.Cut(strings.TrimSpace(args[index]), "=")
+		if name != contextLengthFlags["vllm"] && name != contextLengthFlags["sglang"] {
+			continue
+		}
+		if !inline && index+1 < len(args) {
+			value = args[index+1]
+		}
+		return strings.TrimSpace(value), true
+	}
+	return "", false
+}
+
 // negativeNumber is a value such as -1 (SGLang disables chunked prefill
 // with --chunked-prefill-size -1), not a flag.
 var negativeNumber = regexp.MustCompile(`^-[0-9]+(\.[0-9]+)?$`)

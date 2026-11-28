@@ -58,7 +58,7 @@ Errors are stable JSON objects:
 | `GET /integrations` | viewer | Return versioned provider/runtime contracts, registered capabilities, and honest qualification evidence. |
 | `GET /compute/providers` | viewer | Return execution readiness per provider. `workspace_owned` is computed for the caller and is true only when it may deploy and optimize there without a compute connection. |
 | `POST /deployments/apply` | operator | Queue existing-target convergence; requires `Idempotency-Key`. |
-| `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. |
+| `POST /deployments` | operator | Atomically create desired cloud deployment and queue convergence; requires `Idempotency-Key`. Without engine arguments, may bound the context length; `context_length` in the response says which and why. |
 | `GET /deployments` | viewer | List tenant deployments. |
 | `GET /deployments/{name}` | viewer | Inspect deployment, targets, replicas, revisions, immutable model artifacts, active durable operation, and persisted request statistics. |
 | `GET /deployments/{name}/events` | viewer | List durable deployment events. |

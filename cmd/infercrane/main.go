@@ -66,6 +66,7 @@ import (
 	"github.com/infercrane/infercrane/internal/openrouterprovider"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 	"github.com/infercrane/infercrane/internal/passport"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
 	"github.com/infercrane/infercrane/internal/planning"
@@ -1984,6 +1985,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	backend := fs.String("backend", "", "serving backend; use dynamo for a managed Dynamo graph")
 	gpu := fs.String("gpu", "", "GPU")
 	gpuCount := fs.Int("gpu-count", 1, "GPUs allocated to each runtime replica")
+	maxModelLen := fs.Int("max-model-len", 0, "context length in tokens; by default InferCrane bounds it when the model's own maximum does not fit the GPU")
 	region := fs.String("region", "", "region")
 	runtimeFlag := fs.String("runtime", "vllm", "runtime engine: vllm or sglang")
 	computeMode := fs.String("compute", "elastic", "compute mode: elastic or serverless")
@@ -2032,13 +2034,15 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	if *waitTimeout < 0 || (*waitTimeout > 0 && !*wait) {
 		return errors.New("--wait-timeout must be non-negative and requires --wait")
 	}
-	minExplicit, gpuCountExplicit := false, false
+	minExplicit, gpuCountExplicit, maxModelLenExplicit := false, false, false
 	fs.Visit(func(item *flag.Flag) {
 		switch item.Name {
 		case "min":
 			minExplicit = true
 		case "gpu-count":
 			gpuCountExplicit = true
+		case "max-model-len":
+			maxModelLenExplicit = true
 		}
 	})
 	strategy := "round-robin"
@@ -2064,7 +2068,7 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		if err != nil {
 			return err
 		}
-		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || *region != "" || *runtimeFlag != "vllm" || *modelSecret != "" || *modelRevisionFlag != "" || *adapterFlag != "" {
+		if *name != "" || *endpointName != "" || *targets != "" || *cloud != "" || *backend != "" || *providerAdapter != "" || *gpu != "" || gpuCountExplicit || maxModelLenExplicit || *region != "" || *runtimeFlag != "vllm" || *modelSecret != "" || *modelRevisionFlag != "" || *adapterFlag != "" {
 			return errors.New("deployment YAML cannot be combined with deployment flags")
 		}
 		*name = file.Name
@@ -2101,6 +2105,18 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		}
 		*cloud, *providerAdapter, *minReplicas, *maxReplicas = "kubernetes", "kubernetes-dynamo", 1, 1
 		servingTopology = servingcontract.Topology{Backend: servingcontract.BackendDynamo, Profile: "baseline", Mode: servingcontract.ModeAggregated, Routing: servingcontract.RoutingDirect, Worker: servingcontract.Pool{Replicas: 1, TensorParallelism: 1}}
+	}
+	if maxModelLenExplicit {
+		contextFlag := optimizationcapability.ContextLengthFlag(runtimeEngine)
+		switch {
+		case *targets != "":
+			return errors.New("--max-model-len applies to provisioned capacity and cannot be combined with --targets")
+		case contextFlag == "":
+			return errors.New("--max-model-len applies to the vllm and sglang runtimes")
+		case *maxModelLen < modelcheck.MinContextTokens || *maxModelLen > modelcheck.MaxContextTokens:
+			return fmt.Errorf("--max-model-len must be between %d and %d tokens", modelcheck.MinContextTokens, modelcheck.MaxContextTokens)
+		}
+		runtimeArgs = append(runtimeArgs, contextFlag, strconv.Itoa(*maxModelLen))
 	}
 	if *name == "" {
 		*name = planning.DefaultName(model)
@@ -2152,7 +2168,8 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 		return errors.New("provide --targets or both --cloud and --gpu")
 	}
 	var response struct {
-		Operation domain.Operation `json:"operation"`
+		Operation     domain.Operation     `json:"operation"`
+		ContextLength *deployContextLength `json:"context_length"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodPost, path, *idempotencyKey, request, &response); err != nil {
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
@@ -2169,10 +2186,21 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	logicalEndpoint := strings.TrimRight(cfg.ControlURL, "/") + "/v1"
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": *name, "endpoint": *endpointName, "base_url": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
+		document := map[string]any{"deployment": *name, "endpoint": *endpointName, "base_url": logicalEndpoint, "model": model, "runtime": runtimeEngine, "provider": *cloud, "compute_mode": *computeMode, "idempotency_key": *idempotencyKey, "operation": response.Operation}
+		if response.ContextLength != nil {
+			document["context_length"] = response.ContextLength
+		}
+		encoded, _ := json.MarshalIndent(document, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
-		fmt.Printf("Deployment       %s\nStable endpoint  %s\nBase URL         %s\nModel            %s\nRuntime          %s\nProvider         %s\nCompute          %s\nOperation        %s\nStatus           %s\nRetry key        %s\n", *name, *endpointName, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), *idempotencyKey)
+		fmt.Printf("Deployment       %s\nStable endpoint  %s\nBase URL         %s\nModel            %s\nRuntime          %s\nProvider         %s\nCompute          %s\n", *name, *endpointName, logicalEndpoint, model, runtimeEngine, displayValue(*cloud, "existing targets"), *computeMode)
+		if response.ContextLength != nil {
+			fmt.Printf("Context          %s\n", response.ContextLength.label())
+		}
+		fmt.Printf("Operation        %s\nStatus           %s\nRetry key        %s\n", response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), *idempotencyKey)
+		if response.ContextLength != nil && response.ContextLength.SetBy != "request" && response.ContextLength.Reason != "" {
+			fmt.Printf("\n%s\n", response.ContextLength.Reason)
+		}
 		if response.Operation.Status == "succeeded" {
 			fmt.Printf("\nNext\n  infercrane request %s --message \"Hello\"\n  infercrane status %s\n", *endpointName, *name)
 		} else {
@@ -2182,6 +2210,27 @@ func deployAPICommand(ctx context.Context, cfg config.Config, operationKind stri
 	}
 	_ = operationKind // deploy/apply share API semantics; retained for command UX.
 	return nil
+}
+
+// deployContextLength is the context length the control plane reports for a
+// new deployment: the bound in its engine arguments and who set it.
+type deployContextLength struct {
+	Tokens      *int   `json:"tokens"`
+	ModelTokens *int   `json:"model_tokens"`
+	SetBy       string `json:"set_by"`
+	Reason      string `json:"reason"`
+}
+
+func (c deployContextLength) label() string {
+	switch {
+	case c.Tokens != nil && c.SetBy == "infercrane":
+		return fmt.Sprintf("%d tokens, set by InferCrane", *c.Tokens)
+	case c.Tokens != nil:
+		return fmt.Sprintf("%d tokens", *c.Tokens)
+	case c.ModelTokens != nil:
+		return fmt.Sprintf("model maximum, %d tokens", *c.ModelTokens)
+	}
+	return "model maximum"
 }
 
 func displayValue(value, fallback string) string {

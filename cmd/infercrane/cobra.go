@@ -806,7 +806,7 @@ func completionFor(command string) func(*cobra.Command, []string, string) ([]str
 		"workload":    {"--model", "--recipe", "--profile", "--name", "--runtime", "--cloud", "--gpu", "--region", "--tag", "--file", "--platform", "--push", "--force", "--wait", "--detach", "--port", "--output"},
 		"evaluation":  {"--file", "--result", "--key", "--suite", "--suite-version", "--evaluator", "--evaluator-version", "--score", "--passed", "--samples", "--artifact-digest", "--evaluated-at", "--attach", "--output"},
 		"artifact":    {"--provider", "--region", "--location", "--state", "--source", "--ttl", "--idempotency-key", "--output"},
-		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--model-secret", "--model-revision", "--adapter", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
+		"deploy":      {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--max-model-len", "--region", "--compute", "--min", "--max", "--model-secret", "--model-revision", "--adapter", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"apply":       {"--name", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--wait", "--wait-timeout", "--idempotency-key", "--output"},
 		"plan":        {"--name", "--targets", "--cloud", "--backend", "--provider-adapter", "--runtime", "--gpu", "--region", "--compute", "--min", "--max", "--output"},
 		"request":     {"--message", "--stream", "--output"},

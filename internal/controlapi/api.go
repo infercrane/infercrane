@@ -5691,6 +5691,9 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 	} else if request.ProviderAdapter == "" {
 		request.ProviderAdapter = a.DefaultProviderAdapters[request.Cloud]
 	}
+	// Validation fills in a built-in runtime's own workload, so whether the
+	// request brought its own image is read before it.
+	builtInImage := request.Workload.Empty()
 	if err := request.Validate(); err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		return
@@ -5728,6 +5731,7 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	contextFit := a.fitContextLength(r.Context(), principal.TenantID, &request, builtInImage)
 	request.Actor, request.TenantID = principal.Name, principal.TenantID
 	if request.ComputeMode == "" {
 		request.ComputeMode = "elastic"
@@ -5788,6 +5792,9 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	response := map[string]any{"deployment": deploymentResponse(deployment), "operation": operationResponse(operation), "created": created}
+	if contextFit != nil {
+		response["context_length"] = contextFit
+	}
 	if managedReservation.ID != "" {
 		response["billing"] = map[string]any{"funding_mode": "prepaid", "reservation": managedReservation, "reservation_is_charge": false}
 	}
