@@ -6,81 +6,97 @@
 </p>
 
 <p align="center">
-  <strong>Open models. Better execution.</strong>
+  <strong>Same model. Less compute. Proven on your own traffic.</strong>
 </p>
 
 <p align="center">
-  Write your application once. Run it on qualified open-weight Model APIs, your own cloud,<br>
-  or a measured serving configuration—without changing its OpenAI-compatible contract.
+  InferCrane makes the open-weight models you already serve faster on your own GPUs, and proves<br>
+  every change on your traffic before your users see it. It refuses speedups that change your answers.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-111111.svg"></a>
+  <a href="https://github.com/infercrane/infercrane/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/infercrane/infercrane?color=235ee7"></a>
   <a href="https://github.com/infercrane/infercrane/actions/workflows/quality.yml"><img alt="Quality checks" src="https://github.com/infercrane/infercrane/actions/workflows/quality.yml/badge.svg?branch=main"></a>
   <a href="https://docs.infercrane.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-infercrane.com-235ee7.svg"></a>
 </p>
 
 <p align="center">
-  <a href="https://console.infercrane.com"><strong>Open the console</strong></a>
-  · <a href="#choose-how-to-start">Choose how to start</a>
-  · <a href="#install">Install the CLI</a>
+  <a href="#results-and-receipts"><strong>Results and receipts</strong></a>
+  · <a href="#install">Install</a>
+  · <a href="docs/integrations/kubernetes-install.mdx">Run it on your GPU cluster</a>
   · <a href="https://docs.infercrane.com/quickstart">Documentation</a>
 </p>
 
 <p align="center">
   <img alt="InferCrane plans a model deployment and persists its durable operation" src="docs/images/product/github-product-demo.gif" width="960">
   <br>
-  <sub>Model APIs · BYOC deployments · workload optimization · agent sandboxes</sub>
+  <sub>Measure side by side · confirm on fresh servers · check the answers · roll out with a fallback</sub>
 </p>
 
-InferCrane is the open-source, evidence-gated release system for open-weight inference. Deploy or
-adopt vLLM and SGLang, measure serving changes against your workload, and promote only proven
-winners behind one stable API.
+## Every change proven before it ships
 
-```text
-Applications and agents
-          │
-          ▼
-One OpenAI-compatible InferCrane endpoint
-          │
-          ├── activate a qualified Model API when capacity is published
-          ├── deploy open weights into your cloud or Kubernetes
-          ├── optimize an existing workload
-          └── run agent tasks in a persistent sandbox
-          │
-          ▼
-vLLM · SGLang · custom OCI
-AWS · GCP · Kubernetes · RunPod · existing infrastructure
-```
+Every inference vendor says it's fast. InferCrane shows it on your traffic. It runs beside the vLLM
+or SGLang servers you already have, on a laptop, a Kubernetes cluster or a cloud account, and every
+change goes through the same four steps:
+
+1. **Measured against your current setup.** Setups take turns under the same traffic, and a copy of
+   your current setup is measured the same way, so the run knows its own noise instead of assuming
+   it. When setups run on separate servers, every comparison also carries an allowance for the
+   difference between machines.
+2. **Again on fresh servers.** A gain counts only when it holds on machines that didn't produce it.
+3. **Answers checked.** The candidate answers a graded task set. A setup that changes answers must
+   hold within 1 point, or it is refused, however fast it is.
+4. **Rolled out with a fallback.** A second server takes traffic first, your current server stays
+   up as the fallback, and traffic switches back automatically if the guard sees a regression.
+
+A result the evidence doesn't show is reported as "not shown", never as a win. Prompts and answers
+stay in your account.
+
+InferCrane doesn't replace your engine. It runs [vLLM](https://github.com/vllm-project/vllm) and
+[SGLang](https://github.com/sgl-project/sglang) as they are, drives load with
+[AIPerf](https://github.com/ai-dynamo/aiperf), and trains drafts with
+[speculators](https://github.com/vllm-project/speculators). See [how a run measures and confirms a gain](docs/features/optimization.mdx)
+and [how answers are checked](docs/features/semantic-quality.mdx).
+
+## Results and receipts
+
+Each number links to its receipt: the rules written before the run, the machines, and every
+server's results.
+
+| Result | Measured on | Status |
+|---|---|---|
+| A speculation draft trained on chat traffic served **54% more output** at one request at a time and **13% more** at 32 at once, with answers held within 1 point. The published community draft served 41% and 6% more. ([receipt](docs/features/trained-drafts.mdx)) | Qwen3-8B with FP8 weights on one NVIDIA H100, confirmed on a second H100; vLLM 0.34.0; 26 Nov 2026 | Lab-proven, coming to InferCrane. The trainer image and prompt capture aren't built yet |
+| On an NVIDIA L4 at 32 requests at once, both drafts were **slower** than no speculation (−3% and −7%), so speculation stays off there. ([receipt](docs/features/trained-drafts.mdx)) | Qwen3-8B FP8 on two L4s; vLLM 0.34.0 | Measured. This is why every result is per GPU and per load |
+| The model publisher's documented speculation setting served **32.1% more output** than its plain command at 32 requests at once, and **33.1% more** on two fresh servers. A copy of the current setup measured −0.1% and was rejected as no measurable difference. p95 time to first token was 31.4% worse on the fresh servers. ([receipt](docs/testing/qwen38-27b-fp8-h100-campaign-2026-11-23.md)) | Qwen3.8-27B FP8, one NVIDIA H100 per setup, short real-text chat; 23 Nov 2026 | Measured by the product's judge; proposed, not activated |
+| FP8 weights with an FP8 KV cache served **62% to 159% more output** than vLLM's defaults, but scored 85.07% against 86.17% on 1,000 graded tasks (−1.10 points, interval −2.20 to −0.002), so the change was **refused**. ([receipt](docs/testing/qwen3-8b-fp8-l4-confirmation-2026-11-26.md); published FP8 checkpoints: [receipt](docs/testing/qwen3-8b-fp8-checkpoints-l4-2026-11-26.md)) | Qwen3-8B on NVIDIA L4, three fresh servers per setup; vLLM 0.34.0; 26 Nov 2026 | Refused by the run's rules, written before it started; InferCrane's 1-point rule reads it the same way |
+| A September screen measured **1.72×** from one speculation setting, on synthetic prompts that repeat one sentence. Re-run on real text with three fresh servers per setup, the same change ranged from 22% slower to 68% faster, and the publisher's documented setup was faster than September's in every case. ([receipt](docs/testing/qwen38-27b-fp8-h200-rerun-2026-11-23.md)) | Qwen3.8-27B FP8 on NVIDIA H200; vLLM 0.34.0 and SGLang 0.5.20; 23 Nov 2026 | **Withdrawn** and re-measured |
+
+What the trained-draft result does and doesn't cover:
+- Each speedup is the smaller of two H100s' measurements, each beyond a measured noise floor under
+  2.5%. The comparison with the published draft (`RedHatAI/Qwen3-8B-speculator.eagle3`) was measured
+  on the first H100 only.
+- Answers: 85.5% correct without speculation and 86.4% with the trained draft on 500 GSM8K and MMLU
+  items, three servers per setup (95% interval of the difference −0.2 to +2.1 points). Greedy text
+  differs even without speculation on this GPU, so exact text isn't the test; the task score is.
+- One model, one GPU type, answers up to 256 tokens, 3 draft tokens. The prompts are OpenAssistant
+  chat (thinking off) standing in for a customer's traffic: trained on its training split, measured
+  on its held-out split. Other models, GPUs and kinds of traffic weren't measured.
 
 ## Choose how to start
 
 | What you need | Start here | What InferCrane does |
 |---|---|---|
-| Use managed capacity | [Model APIs](https://console.infercrane.com/model-apis) | Shows only currently qualified offers; an empty catalog never creates a false availability promise. |
+| Speed up a model you already serve | [Install on your GPU cluster](docs/integrations/kubernetes-install.mdx) | Runs an agent beside your vLLM server, measures candidates on your traffic, and rolls out with your server kept as the fallback. Qualified on EKS with one NVIDIA A10G. |
+| Improve a workload from the console | [Optimize](https://console.infercrane.com/optimization) | Profile traffic, measure candidates on exact hardware, and keep only proven wins. |
 | Deploy open weights | [Deploy a model](https://console.infercrane.com/build?mode=deploy) | Resolve the model, workload, runtime, accelerator, provider, scaling policy, and cost boundary before creating compute. |
-| Improve a workload | [Optimize](https://console.infercrane.com/optimization) | Profile traffic, search bounded candidates, measure on exact hardware, and keep only qualified wins. |
-| Isolate an agent | [Sandboxes](https://console.infercrane.com/sandboxes) | Persistent workspace, streaming commands, files, private previews, sleep/resume, and scoped model access. |
+| Gate model and setting changes in CI | [Proof gate GitHub Action](#the-regression-gate-for-model-and-setting-changes) | Proves a pull request's serving change against the base branch and fails the check on a regression. |
 | Keep existing inference | [Connect an endpoint](https://console.infercrane.com/onboarding/connect) | Adopt a compatible endpoint without transferring infrastructure ownership. |
+| Isolate an agent | [Sandboxes](https://console.infercrane.com/sandboxes) | Persistent workspace, streaming commands, files, private previews, sleep/resume, and scoped model access. |
+| Use managed capacity | [Model APIs](https://console.infercrane.com/model-apis) | Shows only currently qualified offers; an empty catalog never creates a false availability promise. |
 
 Nothing billable starts from a recommendation. Deployment and optimization stop at a review
 boundary; provider mutation or benchmark spend requires explicit approval.
-
-### Proof before a claim
-
-In September 2026, a one-run screen on one H200 measured 1.72× from turning on the speculation
-option the model's publisher documents, using synthetic prompts that repeat one sentence. Repeated
-text is unusually easy for speculation to predict. On 23 November 2026 the comparison was re-run on
-real text with three fresh servers per setup: the same change gave 12% to 33% at 12 requests at
-once, and the publisher's documented setup on vLLM 0.34.0 was faster than September's setup in
-every case measured. The [re-run's receipt](docs/testing/qwen38-27b-fp8-h200-rerun-2026-11-23.md) has every
-number; September's receipts stay in the [benchmark index](BENCHMARKS.md) as a dated record.
-
-That is the rule InferCrane applies to every change it reports: measured on your traffic against
-your current setup, a gain confirmed again on fresh servers, and answers checked on a scored task
-set before a setup that changes answers can win. See
-[how a run measures and confirms a gain](docs/features/optimization.mdx) and
-[how answers are checked](docs/features/semantic-quality.mdx).
 
 ## Install
 
@@ -158,7 +174,7 @@ on the pull request and fails the check on a regression. The bar is the noise me
 run, not a fixed latency threshold.
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+- uses: infercrane/infercrane/actions/infercrane@v2.1.0
   with:
     mode: proof-gate
     spec: deploy/qwen.yaml

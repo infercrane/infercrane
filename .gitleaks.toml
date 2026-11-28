@@ -28,3 +28,8 @@ regexes = ['''^PRIVATE-EVAL-ITEM-c41d$''']
 description = "Public fingerprint of the fixed test signing key in the proof-report goldens"
 regexTarget = "secret"
 regexes = ['''^3ab86a91c1e46782\.$''']
+
+[[allowlists]]
+description = "Public SHA-256 of Qwen/Qwen3-8B's tokenizer.json (Hugging Face LFS oid) in the L4 FP8 receipts"
+regexTarget = "secret"
+regexes = ['''^aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4$''']

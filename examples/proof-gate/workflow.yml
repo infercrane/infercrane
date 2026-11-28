@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
       # Pin a release tag or full commit SHA that includes mode: proof-gate.
       - id: gate
-        uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+        uses: infercrane/infercrane/actions/infercrane@v2.1.0
         with:
           mode: proof-gate
           spec: deploy/qwen.yaml

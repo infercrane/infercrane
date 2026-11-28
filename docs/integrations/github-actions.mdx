@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+      - uses: infercrane/infercrane/actions/infercrane@v2.1.0
         with:
           mode: proof-gate
           spec: deploy/qwen.yaml
@@ -133,7 +133,7 @@ Set `campaign` instead of `spec` to gate on a run that already exists, for examp
 the dashboard or by another job. Nothing is created, approved, or cancelled.
 
 ```yaml
-- uses: infercrane/infercrane/actions/infercrane@RELEASE_WITH_PROOF_GATE
+- uses: infercrane/infercrane/actions/infercrane@v2.1.0
   with:
     mode: proof-gate
     campaign: ${{ vars.PROOF_RUN_ID }}

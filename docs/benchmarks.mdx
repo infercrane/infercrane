@@ -53,6 +53,49 @@ The campaign preserved candidates that sounded attractive but lost under the tar
   saturation boundary.
 - The near-262K context run completed correctly but missed its latency SLO.
 
+## Qwen3.8-27B on H100: a speculation setting confirmed on fresh servers
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-11-23 |
+| Model | `Qwen/Qwen3.8-27B-FP8@c3a462cc3d38cf351f3b26cbd763469eeb74ef81` |
+| Runtime | vLLM 0.34.0 |
+| Accelerator | 1× NVIDIA H100 SXM5 80GB per setup |
+| Workload | The first 100 rows of the Mooncake trace, scaled to short chat, real text, 32 requests at once, reasoning on |
+| Confirmed | The publisher's documented speculation option: multi-token prediction, 3 draft tokens |
+
+InferCrane's campaign judge measured the speculation option against the publisher's plain vLLM
+command at +32.1% output tokens per second in its first window and +33.1% on two fresh H100s; a copy
+of the current setup came out −0.1% and was rejected as no measurable difference. Each setup had its
+own H100, taking turns with the current setup's. On the fresh servers p95 time to first token
+regressed by 31.4%. The answer check was a word-overlap guard on 24 short prompts, not a quality
+score. Read the [campaign's receipt](/testing/qwen38-27b-fp8-h100-campaign-2026-11-23).
+
+## Qwen3-8B on one L4: FP8 refused on answers
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-11-26 |
+| Model | `Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218` |
+| Runtime | vLLM 0.34.0 |
+| Accelerator | 1× NVIDIA L4 per server, three fresh servers per setup |
+| Workload | Short chat at 16 and 64, long context at 4 and 16, long output at 16; a 1,000-item task set (GSM8K and MMLU) |
+| Candidates | FP8 weights, and FP8 weights with an FP8 KV cache, both quantized at load |
+
+FP8 weights with an FP8 KV cache served 62.1% to 158.7% more output tokens per second than vLLM's
+defaults in every cell, and scored 1.10 points lower on the task set (interval −2.20 to −0.002);
+FP8 weights alone were 48.2% to 110.8% faster and 1.37 points lower. The run's rules, committed
+before any server, confirm a setup nowhere if it is worse on the task set, so neither was confirmed.
+Read the [run's receipt](/testing/qwen3-8b-fp8-l4-confirmation-2026-11-26).
+
+A second run checked two published FP8 checkpoints of the same model on answers only, three fresh
+L4s per setup. An FP8 checkpoint that also quantizes the KV cache scored 1.33 points lower than the
+original (interval −2.57 to −0.10). The model publisher's FP8 checkpoint scored the same, 85.77%
+against 85.77% (interval −1.03 to +1.03), which InferCrane's 1-point rule reads as not shown to hold
+within 1 point. Read the [checkpoints' receipt](/testing/qwen3-8b-fp8-checkpoints-l4-2026-11-26).
+
+## Reading the evidence
+
 InferCrane distinguishes modeled proposals, screening measurements, qualification evidence, and
 public repeated evidence. Only comparable measurements can be ranked. Missing identity, quality,
 cost, or workload evidence produces `WAIT` or `REJECT`; it is never converted into a release win.

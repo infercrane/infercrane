@@ -1,0 +1,902 @@
+{
+ "published": {
+  "note": "Published 2026-11-27 from the run's own files. Local paths are anonymised as <evidence> and <corpus>; answer texts, request rows and call ids are removed (see 'removed'). The harness (tools/fast-track-map) is on an unreleased branch, so this records what ran, not a reproduction script in this release.",
+  "original_file": "summary.json",
+  "original_sha256": "53236459006438cc4c9e87d019ede289e0f4f5786131565057b5025a1d8a68e3",
+  "removed": [
+   "each cell's cost per million output tokens at list price",
+   "source: a local path, anonymised as <evidence>"
+  ],
+  "rules": {
+   "file": "tools/fast-track-map/rules-l4-qwen3-8b-confirm-2026-11-25.md",
+   "sha256": "56ac29bfc2918847939adc1598ff48e0523e4cfb1fc667ae9cdf39e77316d6ca",
+   "commit": "f61466c8927b6feedcc5e088c35076da4880991b"
+  }
+ },
+ "schema": "infercrane.fast-track-l4-confirm-summary/v1",
+ "plan": "l4-qwen3-8b-confirm",
+ "rules": "rules-l4-qwen3-8b-confirm-2026-11-25.md",
+ "source": "<evidence>",
+ "servers": {
+  "l4-8b-defaults": [
+   1,
+   2,
+   3
+  ],
+  "l4-8b-fp8-weights": [
+   1,
+   2,
+   3
+  ],
+  "l4-8b-fp8-both": [
+   1,
+   2,
+   3
+  ]
+ },
+ "cells": {
+  "short/16": {
+   "window_seconds": 90.0,
+   "setups": {
+    "l4-8b-defaults": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 242.56,
+       "useful_output": 242.55928036716767,
+       "requests_in_window": 86,
+       "ttft_p95_ms": 218.1,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 242.8,
+       "useful_output": 242.79617332111098,
+       "requests_in_window": 85,
+       "ttft_p95_ms": 218.2,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 242.73,
+       "useful_output": 242.72519840512246,
+       "requests_in_window": 84,
+       "ttft_p95_ms": 216.61,
+       "errors": 0,
+       "driver": "620.70.06"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 242.6,
+      "median": 242.7,
+      "max": 242.8
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 242.6,
+      "median": 242.7,
+      "max": 242.8
+     }
+    },
+    "l4-8b-fp8-weights": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 399.16,
+       "useful_output": 399.1585685777358,
+       "requests_in_window": 134,
+       "ttft_p95_ms": 131.53,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 400.23,
+       "useful_output": 400.22899486537983,
+       "requests_in_window": 134,
+       "ttft_p95_ms": 129.8,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 397.72,
+       "useful_output": 397.71732706086243,
+       "requests_in_window": 133,
+       "ttft_p95_ms": 133.42,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 397.7,
+      "median": 399.2,
+      "max": 400.2
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 397.7,
+      "median": 399.2,
+      "max": 400.2
+     }
+    },
+    "l4-8b-fp8-both": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 404.97,
+       "useful_output": 404.9742359957253,
+       "requests_in_window": 136,
+       "ttft_p95_ms": 127.98,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 405.93,
+       "useful_output": 405.93305446111015,
+       "requests_in_window": 135,
+       "ttft_p95_ms": 128.73,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 403.31,
+       "useful_output": 403.3080784229101,
+       "requests_in_window": 136,
+       "ttft_p95_ms": 131.18,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 403.3,
+      "median": 405.0,
+      "max": 405.9
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 403.3,
+      "median": 405.0,
+      "max": 405.9
+     }
+    }
+   },
+   "current_ready": true,
+   "verdicts": {
+    "l4-8b-fp8-weights vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6448
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6448
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6687
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6687
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-fp8-weights": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.0145
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.0145
+     }
+    }
+   }
+  },
+  "short/64": {
+   "window_seconds": 90.0,
+   "setups": {
+    "l4-8b-defaults": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 791.17,
+       "useful_output": 791.1655532789856,
+       "requests_in_window": 262,
+       "ttft_p95_ms": 283.01,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 791.58,
+       "useful_output": 791.581446206975,
+       "requests_in_window": 263,
+       "ttft_p95_ms": 294.31,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 788.86,
+       "useful_output": 788.8576225839417,
+       "requests_in_window": 262,
+       "ttft_p95_ms": 286.9,
+       "errors": 0,
+       "driver": "620.70.06"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 788.9,
+      "median": 791.2,
+      "max": 791.6
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 788.9,
+      "median": 791.2,
+      "max": 791.6
+     }
+    },
+    "l4-8b-fp8-weights": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 1166.83,
+       "useful_output": 1166.8273538250317,
+       "requests_in_window": 389,
+       "ttft_p95_ms": 200.14,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 1178.0,
+       "useful_output": 1177.9979808952207,
+       "requests_in_window": 393,
+       "ttft_p95_ms": 202.9,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 1172.26,
+       "useful_output": 1172.255852411114,
+       "requests_in_window": 395,
+       "ttft_p95_ms": 206.1,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 1166.8,
+      "median": 1172.3,
+      "max": 1178.0
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 1166.8,
+      "median": 1172.3,
+      "max": 1178.0
+     }
+    },
+    "l4-8b-fp8-both": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 1295.47,
+       "useful_output": 1295.4655006442638,
+       "requests_in_window": 438,
+       "ttft_p95_ms": 174.02,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 1310.58,
+       "useful_output": 1310.583360979719,
+       "requests_in_window": 436,
+       "ttft_p95_ms": 173.2,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 1285.76,
+       "useful_output": 1285.760927910745,
+       "requests_in_window": 432,
+       "ttft_p95_ms": 175.88,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 1285.8,
+      "median": 1295.5,
+      "max": 1310.6
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 1285.8,
+      "median": 1295.5,
+      "max": 1310.6
+     }
+    }
+   },
+   "current_ready": true,
+   "verdicts": {
+    "l4-8b-fp8-weights vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.4817
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.4817
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6374
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6374
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-fp8-weights": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.1051
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.1051
+     }
+    }
+   }
+  },
+  "long/4": {
+   "window_seconds": 180.0,
+   "setups": {
+    "l4-8b-defaults": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 45.7,
+       "useful_output": 0.0,
+       "requests_in_window": 28,
+       "ttft_p95_ms": 1379.45,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 45.4,
+       "useful_output": 0.0,
+       "requests_in_window": 28,
+       "ttft_p95_ms": 1406.0,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 46.0,
+       "useful_output": 0.0,
+       "requests_in_window": 28,
+       "ttft_p95_ms": 1356.43,
+       "errors": 0,
+       "driver": "620.70.06"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 45.4,
+      "median": 45.7,
+      "max": 46.0
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 0.0,
+      "median": 0.0,
+      "max": 0.0
+     }
+    },
+    "l4-8b-fp8-weights": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 67.69,
+       "useful_output": 8.194444444444445,
+       "requests_in_window": 42,
+       "ttft_p95_ms": 1013.93,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 68.39,
+       "useful_output": 68.39296388882886,
+       "requests_in_window": 42,
+       "ttft_p95_ms": 985.64,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 68.33,
+       "useful_output": 68.32924921104176,
+       "requests_in_window": 42,
+       "ttft_p95_ms": 982.58,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 67.7,
+      "median": 68.3,
+      "max": 68.4
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 8.2,
+      "median": 68.3,
+      "max": 68.4
+     }
+    },
+    "l4-8b-fp8-both": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 74.08,
+       "useful_output": 74.07658884782903,
+       "requests_in_window": 45,
+       "ttft_p95_ms": 974.08,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 74.81,
+       "useful_output": 74.81287786740619,
+       "requests_in_window": 46,
+       "ttft_p95_ms": 937.42,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 73.61,
+       "useful_output": 73.6121829006902,
+       "requests_in_window": 45,
+       "ttft_p95_ms": 978.24,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 73.6,
+      "median": 74.1,
+      "max": 74.8
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 73.6,
+      "median": 74.1,
+      "max": 74.8
+     }
+    }
+   },
+   "current_ready": true,
+   "verdicts": {
+    "l4-8b-fp8-weights vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.4945
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": null
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6214
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": null
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-fp8-weights": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.0849
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.0849
+     }
+    }
+   }
+  },
+  "long/16": {
+   "window_seconds": 180.0,
+   "setups": {
+    "l4-8b-defaults": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 60.03,
+       "useful_output": 0.0,
+       "requests_in_window": 36,
+       "ttft_p95_ms": 52545.63,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 59.58,
+       "useful_output": 0.0,
+       "requests_in_window": 36,
+       "ttft_p95_ms": 58687.28,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 60.02,
+       "useful_output": 0.0,
+       "requests_in_window": 37,
+       "ttft_p95_ms": 52624.26,
+       "errors": 0,
+       "driver": "620.70.06"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 59.6,
+      "median": 60.0,
+      "max": 60.0
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 0.0,
+      "median": 0.0,
+      "max": 0.0
+     }
+    },
+    "l4-8b-fp8-weights": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 124.92,
+       "useful_output": 0.0,
+       "requests_in_window": 76,
+       "ttft_p95_ms": 2081.42,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 126.64,
+       "useful_output": 0.0,
+       "requests_in_window": 78,
+       "ttft_p95_ms": 2001.18,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 126.5,
+       "useful_output": 0.0,
+       "requests_in_window": 78,
+       "ttft_p95_ms": 2036.31,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 124.9,
+      "median": 126.5,
+      "max": 126.6
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 0.0,
+      "median": 0.0,
+      "max": 0.0
+     }
+    },
+    "l4-8b-fp8-both": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 155.19,
+       "useful_output": 0.5732913086001372,
+       "requests_in_window": 93,
+       "ttft_p95_ms": 1797.6,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 158.36,
+       "useful_output": 112.84506356115253,
+       "requests_in_window": 96,
+       "ttft_p95_ms": 1741.03,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 153.75,
+       "useful_output": 0.0,
+       "requests_in_window": 93,
+       "ttft_p95_ms": 1838.7,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 153.8,
+      "median": 155.2,
+      "max": 158.4
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 0.0,
+      "median": 0.6,
+      "max": 112.8
+     }
+    }
+   },
+   "current_ready": true,
+   "verdicts": {
+    "l4-8b-fp8-weights vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 1.1083
+     },
+     "useful_output": {
+      "verdict": "not separated",
+      "median_gain": null
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 1.5867
+     },
+     "useful_output": {
+      "verdict": "not separated",
+      "median_gain": null
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-fp8-weights": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.2269
+     },
+     "useful_output": {
+      "verdict": "not separated",
+      "median_gain": null
+     }
+    }
+   }
+  },
+  "output/16": {
+   "window_seconds": 180.0,
+   "setups": {
+    "l4-8b-defaults": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 199.99,
+       "useful_output": 169.43712136222624,
+       "requests_in_window": 29,
+       "ttft_p95_ms": 2027.16,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 199.43,
+       "useful_output": 166.66663945945146,
+       "requests_in_window": 29,
+       "ttft_p95_ms": 2074.82,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 199.78,
+       "useful_output": 169.28704490162562,
+       "requests_in_window": 29,
+       "ttft_p95_ms": 2032.66,
+       "errors": 0,
+       "driver": "620.70.06"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 199.4,
+      "median": 199.8,
+      "max": 200.0
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 166.7,
+      "median": 169.3,
+      "max": 169.4
+     }
+    },
+    "l4-8b-fp8-weights": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 297.66,
+       "useful_output": 286.07558989094025,
+       "requests_in_window": 43,
+       "ttft_p95_ms": 341.27,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 297.04,
+       "useful_output": 285.48614865028406,
+       "requests_in_window": 43,
+       "ttft_p95_ms": 464.13,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 298.64,
+       "useful_output": 287.1786585639847,
+       "requests_in_window": 43,
+       "ttft_p95_ms": 331.05,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 297.0,
+      "median": 297.7,
+      "max": 298.6
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 285.5,
+      "median": 286.1,
+      "max": 287.2
+     }
+    },
+    "l4-8b-fp8-both": {
+     "servers": [
+      {
+       "server": 1,
+       "output": 337.45,
+       "useful_output": 328.12962806564326,
+       "requests_in_window": 45,
+       "ttft_p95_ms": 308.84,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 2,
+       "output": 338.71,
+       "useful_output": 332.5499538160763,
+       "requests_in_window": 45,
+       "ttft_p95_ms": 302.5,
+       "errors": 0,
+       "driver": "610.57.04"
+      },
+      {
+       "server": 3,
+       "output": 335.99,
+       "useful_output": 326.54529172720027,
+       "requests_in_window": 45,
+       "ttft_p95_ms": 311.2,
+       "errors": 0,
+       "driver": "610.57.04"
+      }
+     ],
+     "output": {
+      "servers": 3,
+      "min": 336.0,
+      "median": 337.4,
+      "max": 338.7
+     },
+     "useful_output": {
+      "servers": 3,
+      "min": 326.5,
+      "median": 328.1,
+      "max": 332.5
+     }
+    }
+   },
+   "current_ready": true,
+   "verdicts": {
+    "l4-8b-fp8-weights vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.49
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6899
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-defaults": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.6887
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.938
+     }
+    },
+    "l4-8b-fp8-both vs l4-8b-fp8-weights": {
+     "output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.1334
+     },
+     "useful_output": {
+      "verdict": "clearly ahead",
+      "median_gain": 0.1468
+     }
+    }
+   }
+  }
+ },
+ "tasks": {
+  "l4-8b-fp8-weights": {
+   "baseline_score": 0.86167,
+   "setup_score": 0.848,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 60,
+   "items_only_setup_right": 36,
+   "difference": -0.01367,
+   "low": -0.02317,
+   "high": -0.00416,
+   "verdict": "worse",
+   "items": 1000
+  },
+  "l4-8b-fp8-both": {
+   "baseline_score": 0.86167,
+   "setup_score": 0.85067,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 64,
+   "items_only_setup_right": 39,
+   "difference": -0.011,
+   "low": -0.02198,
+   "high": -2e-05,
+   "verdict": "worse",
+   "items": 1000
+  }
+ }
+}

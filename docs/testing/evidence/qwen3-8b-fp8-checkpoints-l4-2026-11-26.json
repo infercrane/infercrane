@@ -1,0 +1,2359 @@
+{
+ "published": {
+  "note": "Published 2026-11-27 from the run's own files. Local paths are anonymised as <evidence> and <corpus>; answer texts, request rows and call ids are removed (see 'removed'). The harness (tools/fast-track-map) is on an unreleased branch, so this records what ran, not a reproduction script in this release.",
+  "original_files": [
+   {
+    "file": "<evidence>/l4-8b-defaults-s1.json",
+    "sha256": "218b74996b1e12544a698d0b3811ed3ba6facc6a5caf3c90ea2b8f164ed8684b"
+   },
+   {
+    "file": "<evidence>/l4-8b-defaults-s2.json",
+    "sha256": "c3c162bbc48173ee815602d898613dca7d7bb2c4092a2a046e9f85f8955401ef"
+   },
+   {
+    "file": "<evidence>/l4-8b-defaults-s3.json",
+    "sha256": "3da724596d5d3c02e83c771ab993102b7e6824ccc23aeb26b32264079a992758"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-fp8-kv-s1.json",
+    "sha256": "164a82ea63b5047ee1051a044ff02dae35379b2f1cb612d70d157e1661d9f99e"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-fp8-kv-s2.json",
+    "sha256": "b394b4a0a040bcc60b2f9e5a6614c26b66e434c83e5d75b85871452b3633b6c4"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-fp8-kv-s3.json",
+    "sha256": "5e1de3884a63360b8f5da6d5c247ced3c42139511251fadeb33f2fe677eba6d6"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-qwen-s1.json",
+    "sha256": "430bae4aab7ea0e77858aee7da6e63adec151a28cd46e294325f79b14b78fe05"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-qwen-s2.json",
+    "sha256": "24bc033e8687c3c414a831f1e1815438e219c0fe811c5cffaa56d2f7e2f4da0f"
+   },
+   {
+    "file": "<evidence>/l4-8b-fp8-ckpt-qwen-s3.json",
+    "sha256": "36d6a41b7e26da10b437d4e2df1f624f05ec5578d28ffd985393d5095830f05d"
+   },
+   {
+    "file": "<evidence>/summary.json",
+    "sha256": "bdaf6c646d4091fbe3289ef510729bfca6b4ad29c5df4e6d606bbe71122593d4",
+    "role": "confirm_report.py's output"
+   },
+   {
+    "file": "<corpus>/fast-track-quality-v1.json",
+    "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+    "role": "the task set, for the gold answers"
+   }
+  ],
+  "removed": [
+   "every answer text and every request row (each server's task answers are reduced to right or wrong per item, in the task set's order, as the 'marks' string; texts are compared only for the identical-item counts)",
+   "the containers' log lines, except those naming the KV cache size, FP8, Marlin or a KV cache scaling factor",
+   "Modal function-call ids, replaced by <modal-call-id>",
+   "per-server CPU thread readings and the rows of every cell",
+   "local paths, anonymised as <evidence> and <corpus>",
+   "the name of the third-party checkpoint's publisher: its Hugging Face repository id, its served model name, its label and its setup id (published as l4-8b-fp8-ckpt-fp8-kv). The revision and the weight files' hashes are kept",
+   "the task-set throughput of each server: this run measured answers only, and its rules do not read speed"
+  ],
+  "rules": {
+   "file": "tools/fast-track-map/rules-l4-qwen3-8b-fp8-ckpt-confirm-2026-11-26.md",
+   "sha256": "a5d9ad334902be7537381c90f3e65f2e34dc4e28e69b64a1b4f07a2d7526fb1b",
+   "commit": "c0af74e7048382c93e066021f330016d45484e28",
+   "versions": [
+    {
+     "commit": "a52ee962a66fead69b1b8557f04a4fa886f88660",
+     "sha256": "9916e776bf0c3f9aee68bb251a27fbec97068037221d5037d4d7a7429a6c80b2",
+     "what": "the rules, written 2026-11-26 09:04 CET and committed 09:06 CET, before any server"
+    },
+    {
+     "commit": "b9238bc52bf6eb8d18d97959948a8fda17360dd3",
+     "sha256": "9ac07be3f429d95f82f0bca3fcfcb19727b69ef880c56a0c3d33fed42a046584",
+     "what": "addendum written 10:17 CET before the relaunch of servers 2 and 3: keep batch 1, rerun servers 2 and 3"
+    },
+    {
+     "commit": "574634807ce36566e3cf09789f9cb272905b8144",
+     "sha256": "564496b1f7ea98f20fb73247dc93640247cd7fbb9bbfa6934ef75dca86bf1ff4",
+     "what": "10:22 CET, after the relaunch started: the relaunch's spend cap and its budget flag only"
+    },
+    {
+     "commit": "c0af74e7048382c93e066021f330016d45484e28",
+     "sha256": "a5d9ad334902be7537381c90f3e65f2e34dc4e28e69b64a1b4f07a2d7526fb1b",
+     "what": "addendum written 13:11 CET before the second relaunch of the three servers still missing"
+    }
+   ],
+   "note": "The decision rule (quality.py's paired comparison, three servers per setup, the 3-point margin) did not change between versions."
+  }
+ },
+ "schema": "infercrane.fast-track-l4-confirm-evidence/v1",
+ "plan": "l4-qwen3-8b-fp8-ckpt-confirm",
+ "run_ids": {
+  "l4-8b-fp8ckpt-confirm-1": "a52ee962a66fead69b1b8557f04a4fa886f88660",
+  "l4-8b-fp8ckpt-confirm-1-s23": "b9238bc52bf6eb8d18d97959948a8fda17360dd3",
+  "l4-8b-fp8ckpt-confirm-1-s3b": "c0af74e7048382c93e066021f330016d45484e28"
+ },
+ "model": {
+  "id": "Qwen/Qwen3-8B",
+  "revision": "b968826d9c46dd6066d109eabc6255188de91218",
+  "licence": "Apache-2.0"
+ },
+ "task_set": {
+  "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+  "schema": "infercrane.fast-track-quality/v1",
+  "seed": 20261125,
+  "sources": {
+   "gsm8k": {
+    "dataset": "openai/gsm8k",
+    "file": "main/test-00000-of-00001.parquet",
+    "licence": "MIT",
+    "revision": "740312add88f781978c0658806c59bc2815b9866",
+    "url": "https://huggingface.co/datasets/openai/gsm8k"
+   },
+   "mmlu": {
+    "dataset": "cais/mmlu",
+    "file": "all/test-00000-of-00001.parquet",
+    "licence": "MIT",
+    "revision": "c30699e8356da336a370243923dbaf21066bb9fe",
+    "url": "https://huggingface.co/datasets/cais/mmlu"
+   }
+  },
+  "items": 1000,
+  "by_source": {
+   "gsm8k": 500,
+   "mmlu": 500
+  },
+  "max_tokens_per_answer": [
+   1024
+  ],
+  "instructions": {
+   "gsm8k": "Solve this problem. Show your working, then give the final answer on the last line in the form \"Answer: <number>\".",
+   "mmlu": "Answer this multiple-choice question. Explain your reasoning briefly, then give the final answer on the last line in the form \"Answer: <letter>\"."
+  },
+  "item_ids_in_order": [
+   "gsm8k:test:33",
+   "mmlu:test:6770",
+   "mmlu:test:6005",
+   "mmlu:test:4531",
+   "gsm8k:test:1096",
+   "gsm8k:test:120",
+   "mmlu:test:11628",
+   "gsm8k:test:278",
+   "mmlu:test:1539",
+   "mmlu:test:1166",
+   "mmlu:test:12727",
+   "mmlu:test:8120",
+   "mmlu:test:13279",
+   "mmlu:test:3051",
+   "gsm8k:test:93",
+   "gsm8k:test:1239",
+   "gsm8k:test:809",
+   "mmlu:test:3280",
+   "mmlu:test:9744",
+   "gsm8k:test:274",
+   "mmlu:test:4113",
+   "mmlu:test:9043",
+   "gsm8k:test:943",
+   "mmlu:test:1714",
+   "gsm8k:test:471",
+   "mmlu:test:8734",
+   "mmlu:test:1419",
+   "gsm8k:test:1258",
+   "mmlu:test:11198",
+   "gsm8k:test:3",
+   "gsm8k:test:739",
+   "gsm8k:test:1132",
+   "gsm8k:test:1309",
+   "mmlu:test:3881",
+   "gsm8k:test:712",
+   "gsm8k:test:910",
+   "gsm8k:test:440",
+   "gsm8k:test:291",
+   "gsm8k:test:1185",
+   "mmlu:test:6991",
+   "gsm8k:test:560",
+   "mmlu:test:5240",
+   "mmlu:test:4865",
+   "mmlu:test:2487",
+   "mmlu:test:3327",
+   "gsm8k:test:128",
+   "gsm8k:test:732",
+   "gsm8k:test:670",
+   "gsm8k:test:867",
+   "gsm8k:test:665",
+   "mmlu:test:2613",
+   "gsm8k:test:255",
+   "mmlu:test:6393",
+   "mmlu:test:4657",
+   "mmlu:test:3793",
+   "mmlu:test:13274",
+   "gsm8k:test:646",
+   "mmlu:test:12503",
+   "gsm8k:test:644",
+   "mmlu:test:3855",
+   "mmlu:test:8226",
+   "mmlu:test:11973",
+   "gsm8k:test:563",
+   "mmlu:test:10628",
+   "gsm8k:test:400",
+   "mmlu:test:302",
+   "gsm8k:test:1168",
+   "gsm8k:test:1236",
+   "mmlu:test:10016",
+   "mmlu:test:10679",
+   "mmlu:test:8710",
+   "mmlu:test:9342",
+   "mmlu:test:7862",
+   "mmlu:test:6755",
+   "gsm8k:test:527",
+   "mmlu:test:1832",
+   "gsm8k:test:312",
+   "mmlu:test:8269",
+   "gsm8k:test:1047",
+   "gsm8k:test:126",
+   "mmlu:test:9084",
+   "gsm8k:test:1093",
+   "gsm8k:test:535",
+   "gsm8k:test:521",
+   "mmlu:test:3345",
+   "gsm8k:test:1190",
+   "gsm8k:test:624",
+   "gsm8k:test:10",
+   "mmlu:test:3048",
+   "mmlu:test:10239",
+   "mmlu:test:8446",
+   "gsm8k:test:1033",
+   "gsm8k:test:428",
+   "gsm8k:test:569",
+   "mmlu:test:8106",
+   "mmlu:test:13955",
+   "gsm8k:test:324",
+   "gsm8k:test:790",
+   "gsm8k:test:759",
+   "gsm8k:test:209",
+   "gsm8k:test:355",
+   "gsm8k:test:1198",
+   "gsm8k:test:853",
+   "gsm8k:test:417",
+   "mmlu:test:4207",
+   "gsm8k:test:1150",
+   "mmlu:test:11158",
+   "gsm8k:test:488",
+   "gsm8k:test:1027",
+   "gsm8k:test:285",
+   "mmlu:test:7275",
+   "mmlu:test:9381",
+   "gsm8k:test:1272",
+   "mmlu:test:8042",
+   "mmlu:test:13840",
+   "gsm8k:test:1048",
+   "mmlu:test:12435",
+   "gsm8k:test:1054",
+   "mmlu:test:9905",
+   "gsm8k:test:988",
+   "mmlu:test:3333",
+   "gsm8k:test:371",
+   "gsm8k:test:1052",
+   "gsm8k:test:899",
+   "mmlu:test:11844",
+   "mmlu:test:1244",
+   "gsm8k:test:1115",
+   "gsm8k:test:402",
+   "gsm8k:test:729",
+   "gsm8k:test:489",
+   "mmlu:test:3850",
+   "mmlu:test:12148",
+   "mmlu:test:5067",
+   "mmlu:test:5520",
+   "mmlu:test:2046",
+   "mmlu:test:11164",
+   "gsm8k:test:511",
+   "mmlu:test:6759",
+   "gsm8k:test:388",
+   "mmlu:test:9162",
+   "gsm8k:test:718",
+   "mmlu:test:6779",
+   "gsm8k:test:1049",
+   "gsm8k:test:1238",
+   "gsm8k:test:412",
+   "gsm8k:test:831",
+   "gsm8k:test:568",
+   "gsm8k:test:180",
+   "mmlu:test:11285",
+   "mmlu:test:3391",
+   "mmlu:test:11002",
+   "gsm8k:test:161",
+   "mmlu:test:6440",
+   "mmlu:test:3887",
+   "gsm8k:test:662",
+   "gsm8k:test:550",
+   "gsm8k:test:322",
+   "gsm8k:test:915",
+   "mmlu:test:7826",
+   "mmlu:test:1696",
+   "gsm8k:test:302",
+   "mmlu:test:1789",
+   "mmlu:test:6511",
+   "mmlu:test:9777",
+   "gsm8k:test:1073",
+   "mmlu:test:2349",
+   "mmlu:test:12708",
+   "mmlu:test:5394",
+   "mmlu:test:11717",
+   "mmlu:test:4901",
+   "gsm8k:test:630",
+   "gsm8k:test:858",
+   "gsm8k:test:38",
+   "mmlu:test:5129",
+   "gsm8k:test:163",
+   "mmlu:test:13776",
+   "gsm8k:test:72",
+   "gsm8k:test:116",
+   "mmlu:test:4212",
+   "gsm8k:test:774",
+   "gsm8k:test:539",
+   "mmlu:test:5397",
+   "mmlu:test:12745",
+   "mmlu:test:5586",
+   "gsm8k:test:498",
+   "mmlu:test:10687",
+   "gsm8k:test:1283",
+   "gsm8k:test:1145",
+   "gsm8k:test:898",
+   "gsm8k:test:232",
+   "mmlu:test:13213",
+   "gsm8k:test:651",
+   "gsm8k:test:957",
+   "mmlu:test:6446",
+   "gsm8k:test:100",
+   "mmlu:test:11097",
+   "mmlu:test:12667",
+   "mmlu:test:12468",
+   "gsm8k:test:794",
+   "gsm8k:test:848",
+   "gsm8k:test:866",
+   "gsm8k:test:347",
+   "gsm8k:test:298",
+   "gsm8k:test:1146",
+   "mmlu:test:14039",
+   "mmlu:test:5000",
+   "mmlu:test:9636",
+   "mmlu:test:8340",
+   "mmlu:test:13293",
+   "gsm8k:test:575",
+   "mmlu:test:625",
+   "mmlu:test:3939",
+   "mmlu:test:13413",
+   "mmlu:test:4124",
+   "gsm8k:test:905",
+   "mmlu:test:2827",
+   "gsm8k:test:778",
+   "mmlu:test:3933",
+   "gsm8k:test:309",
+   "mmlu:test:8377",
+   "mmlu:test:2945",
+   "mmlu:test:9289",
+   "mmlu:test:1008",
+   "gsm8k:test:704",
+   "gsm8k:test:1148",
+   "gsm8k:test:1112",
+   "mmlu:test:9267",
+   "gsm8k:test:740",
+   "gsm8k:test:213",
+   "mmlu:test:4514",
+   "mmlu:test:7703",
+   "gsm8k:test:48",
+   "gsm8k:test:248",
+   "gsm8k:test:715",
+   "mmlu:test:5138",
+   "gsm8k:test:628",
+   "gsm8k:test:372",
+   "mmlu:test:3686",
+   "gsm8k:test:1114",
+   "mmlu:test:7315",
+   "mmlu:test:11496",
+   "gsm8k:test:953",
+   "mmlu:test:9259",
+   "gsm8k:test:945",
+   "mmlu:test:14007",
+   "mmlu:test:6644",
+   "gsm8k:test:787",
+   "mmlu:test:4396",
+   "mmlu:test:11688",
+   "mmlu:test:1258",
+   "mmlu:test:2663",
+   "gsm8k:test:999",
+   "gsm8k:test:0",
+   "gsm8k:test:835",
+   "mmlu:test:1226",
+   "gsm8k:test:245",
+   "mmlu:test:10923",
+   "gsm8k:test:530",
+   "gsm8k:test:254",
+   "mmlu:test:1502",
+   "mmlu:test:6229",
+   "mmlu:test:5263",
+   "gsm8k:test:533",
+   "mmlu:test:422",
+   "mmlu:test:2407",
+   "gsm8k:test:754",
+   "gsm8k:test:416",
+   "gsm8k:test:165",
+   "gsm8k:test:518",
+   "gsm8k:test:1152",
+   "gsm8k:test:813",
+   "gsm8k:test:199",
+   "mmlu:test:9824",
+   "mmlu:test:5110",
+   "gsm8k:test:458",
+   "gsm8k:test:621",
+   "mmlu:test:4911",
+   "mmlu:test:5350",
+   "mmlu:test:12579",
+   "mmlu:test:3291",
+   "mmlu:test:4680",
+   "mmlu:test:3467",
+   "gsm8k:test:110",
+   "gsm8k:test:318",
+   "mmlu:test:12183",
+   "mmlu:test:7497",
+   "gsm8k:test:64",
+   "gsm8k:test:1167",
+   "gsm8k:test:202",
+   "mmlu:test:9886",
+   "gsm8k:test:545",
+   "mmlu:test:10312",
+   "gsm8k:test:542",
+   "mmlu:test:9743",
+   "mmlu:test:5848",
+   "gsm8k:test:859",
+   "gsm8k:test:31",
+   "mmlu:test:10534",
+   "gsm8k:test:105",
+   "mmlu:test:3796",
+   "gsm8k:test:1291",
+   "mmlu:test:8502",
+   "gsm8k:test:247",
+   "gsm8k:test:1292",
+   "mmlu:test:1355",
+   "mmlu:test:1395",
+   "gsm8k:test:711",
+   "gsm8k:test:342",
+   "mmlu:test:9870",
+   "mmlu:test:3942",
+   "gsm8k:test:1036",
+   "mmlu:test:11824",
+   "gsm8k:test:45",
+   "gsm8k:test:1251",
+   "gsm8k:test:268",
+   "mmlu:test:2529",
+   "gsm8k:test:771",
+   "mmlu:test:2214",
+   "gsm8k:test:229",
+   "mmlu:test:2661",
+   "mmlu:test:12395",
+   "gsm8k:test:1128",
+   "gsm8k:test:1243",
+   "mmlu:test:2681",
+   "gsm8k:test:142",
+   "gsm8k:test:551",
+   "gsm8k:test:407",
+   "mmlu:test:9166",
+   "gsm8k:test:1228",
+   "gsm8k:test:1029",
+   "mmlu:test:7533",
+   "gsm8k:test:60",
+   "gsm8k:test:481",
+   "gsm8k:test:890",
+   "mmlu:test:181",
+   "mmlu:test:11976",
+   "mmlu:test:5739",
+   "gsm8k:test:1113",
+   "gsm8k:test:967",
+   "mmlu:test:11470",
+   "gsm8k:test:457",
+   "gsm8k:test:30",
+   "mmlu:test:5127",
+   "gsm8k:test:1",
+   "mmlu:test:5267",
+   "mmlu:test:13162",
+   "mmlu:test:5451",
+   "gsm8k:test:1141",
+   "gsm8k:test:8",
+   "mmlu:test:12353",
+   "gsm8k:test:430",
+   "gsm8k:test:1278",
+   "gsm8k:test:610",
+   "mmlu:test:2599",
+   "gsm8k:test:1221",
+   "mmlu:test:5474",
+   "gsm8k:test:147",
+   "mmlu:test:12037",
+   "mmlu:test:3412",
+   "mmlu:test:4441",
+   "mmlu:test:7823",
+   "gsm8k:test:1310",
+   "mmlu:test:2242",
+   "mmlu:test:6228",
+   "mmlu:test:13846",
+   "gsm8k:test:676",
+   "gsm8k:test:633",
+   "gsm8k:test:1300",
+   "mmlu:test:8464",
+   "gsm8k:test:399",
+   "mmlu:test:4660",
+   "mmlu:test:4745",
+   "gsm8k:test:443",
+   "gsm8k:test:508",
+   "gsm8k:test:1311",
+   "gsm8k:test:748",
+   "gsm8k:test:730",
+   "mmlu:test:7025",
+   "gsm8k:test:631",
+   "gsm8k:test:522",
+   "mmlu:test:918",
+   "mmlu:test:2031",
+   "gsm8k:test:997",
+   "mmlu:test:13483",
+   "mmlu:test:2664",
+   "mmlu:test:6190",
+   "mmlu:test:5372",
+   "mmlu:test:1485",
+   "gsm8k:test:429",
+   "gsm8k:test:337",
+   "mmlu:test:8962",
+   "mmlu:test:11916",
+   "gsm8k:test:641",
+   "gsm8k:test:137",
+   "gsm8k:test:250",
+   "gsm8k:test:791",
+   "mmlu:test:3585",
+   "gsm8k:test:315",
+   "gsm8k:test:702",
+   "mmlu:test:3423",
+   "mmlu:test:906",
+   "gsm8k:test:925",
+   "mmlu:test:7594",
+   "gsm8k:test:98",
+   "mmlu:test:256",
+   "gsm8k:test:395",
+   "gsm8k:test:7",
+   "gsm8k:test:877",
+   "gsm8k:test:130",
+   "mmlu:test:6504",
+   "mmlu:test:1091",
+   "gsm8k:test:678",
+   "mmlu:test:11414",
+   "gsm8k:test:666",
+   "mmlu:test:5200",
+   "gsm8k:test:1304",
+   "gsm8k:test:326",
+   "gsm8k:test:14",
+   "mmlu:test:13956",
+   "mmlu:test:1359",
+   "gsm8k:test:206",
+   "mmlu:test:8036",
+   "gsm8k:test:171",
+   "gsm8k:test:970",
+   "mmlu:test:12767",
+   "mmlu:test:7036",
+   "gsm8k:test:826",
+   "mmlu:test:10746",
+   "mmlu:test:9694",
+   "mmlu:test:11985",
+   "mmlu:test:790",
+   "mmlu:test:10105",
+   "mmlu:test:11387",
+   "mmlu:test:13123",
+   "gsm8k:test:1199",
+   "gsm8k:test:1006",
+   "mmlu:test:4551",
+   "mmlu:test:4902",
+   "gsm8k:test:36",
+   "gsm8k:test:1233",
+   "gsm8k:test:478",
+   "mmlu:test:6679",
+   "gsm8k:test:295",
+   "mmlu:test:12879",
+   "gsm8k:test:1281",
+   "gsm8k:test:1065",
+   "mmlu:test:12843",
+   "mmlu:test:8069",
+   "mmlu:test:13557",
+   "gsm8k:test:88",
+   "mmlu:test:11071",
+   "mmlu:test:457",
+   "gsm8k:test:296",
+   "mmlu:test:6689",
+   "gsm8k:test:734",
+   "mmlu:test:6173",
+   "mmlu:test:9018",
+   "gsm8k:test:228",
+   "mmlu:test:9842",
+   "mmlu:test:8209",
+   "mmlu:test:11687",
+   "mmlu:test:11534",
+   "gsm8k:test:785",
+   "gsm8k:test:1154",
+   "mmlu:test:6833",
+   "mmlu:test:3187",
+   "gsm8k:test:837",
+   "gsm8k:test:799",
+   "gsm8k:test:89",
+   "mmlu:test:12326",
+   "gsm8k:test:812",
+   "gsm8k:test:1245",
+   "gsm8k:test:205",
+   "gsm8k:test:852",
+   "mmlu:test:6606",
+   "gsm8k:test:1202",
+   "gsm8k:test:1050",
+   "gsm8k:test:1020",
+   "mmlu:test:11244",
+   "gsm8k:test:721",
+   "gsm8k:test:892",
+   "gsm8k:test:452",
+   "gsm8k:test:782",
+   "gsm8k:test:703",
+   "gsm8k:test:68",
+   "mmlu:test:10149",
+   "mmlu:test:12896",
+   "mmlu:test:7662",
+   "mmlu:test:2750",
+   "mmlu:test:9541",
+   "mmlu:test:5760",
+   "mmlu:test:3516",
+   "gsm8k:test:236",
+   "mmlu:test:10694",
+   "gsm8k:test:172",
+   "gsm8k:test:1284",
+   "gsm8k:test:918",
+   "mmlu:test:7899",
+   "mmlu:test:11572",
+   "mmlu:test:9071",
+   "gsm8k:test:637",
+   "mmlu:test:1122",
+   "mmlu:test:11659",
+   "mmlu:test:12058",
+   "gsm8k:test:41",
+   "gsm8k:test:169",
+   "mmlu:test:4312",
+   "gsm8k:test:265",
+   "gsm8k:test:978",
+   "gsm8k:test:553",
+   "mmlu:test:10865",
+   "mmlu:test:10366",
+   "gsm8k:test:408",
+   "mmlu:test:11015",
+   "gsm8k:test:776",
+   "mmlu:test:5688",
+   "mmlu:test:3289",
+   "gsm8k:test:1189",
+   "gsm8k:test:44",
+   "mmlu:test:610",
+   "gsm8k:test:1169",
+   "gsm8k:test:35",
+   "mmlu:test:3596",
+   "mmlu:test:4907",
+   "mmlu:test:1590",
+   "gsm8k:test:263",
+   "mmlu:test:412",
+   "gsm8k:test:645",
+   "gsm8k:test:570",
+   "mmlu:test:9585",
+   "mmlu:test:11583",
+   "mmlu:test:6666",
+   "mmlu:test:10970",
+   "gsm8k:test:1041",
+   "mmlu:test:11401",
+   "mmlu:test:6993",
+   "gsm8k:test:185",
+   "mmlu:test:8795",
+   "gsm8k:test:916",
+   "gsm8k:test:941",
+   "gsm8k:test:564",
+   "gsm8k:test:1249",
+   "gsm8k:test:150",
+   "mmlu:test:12204",
+   "gsm8k:test:468",
+   "gsm8k:test:1095",
+   "gsm8k:test:179",
+   "gsm8k:test:881",
+   "gsm8k:test:121",
+   "mmlu:test:9456",
+   "gsm8k:test:287",
+   "mmlu:test:233",
+   "gsm8k:test:139",
+   "mmlu:test:8311",
+   "mmlu:test:4267",
+   "mmlu:test:3575",
+   "gsm8k:test:692",
+   "mmlu:test:13807",
+   "gsm8k:test:583",
+   "mmlu:test:3435",
+   "mmlu:test:4314",
+   "mmlu:test:11360",
+   "gsm8k:test:230",
+   "gsm8k:test:1062",
+   "gsm8k:test:140",
+   "mmlu:test:9782",
+   "mmlu:test:12818",
+   "gsm8k:test:1077",
+   "gsm8k:test:406",
+   "mmlu:test:13977",
+   "gsm8k:test:818",
+   "mmlu:test:3122",
+   "gsm8k:test:705",
+   "gsm8k:test:20",
+   "mmlu:test:9659",
+   "mmlu:test:10877",
+   "mmlu:test:1031",
+   "gsm8k:test:613",
+   "mmlu:test:11718",
+   "mmlu:test:5238",
+   "gsm8k:test:239",
+   "gsm8k:test:487",
+   "mmlu:test:3125",
+   "mmlu:test:3116",
+   "gsm8k:test:455",
+   "gsm8k:test:343",
+   "gsm8k:test:77",
+   "gsm8k:test:701",
+   "gsm8k:test:1034",
+   "gsm8k:test:1277",
+   "gsm8k:test:523",
+   "mmlu:test:893",
+   "gsm8k:test:380",
+   "gsm8k:test:965",
+   "gsm8k:test:419",
+   "gsm8k:test:1055",
+   "mmlu:test:7281",
+   "gsm8k:test:1232",
+   "mmlu:test:3107",
+   "mmlu:test:13779",
+   "mmlu:test:5050",
+   "mmlu:test:8039",
+   "mmlu:test:5822",
+   "mmlu:test:4338",
+   "mmlu:test:4548",
+   "gsm8k:test:687",
+   "gsm8k:test:1127",
+   "gsm8k:test:1021",
+   "mmlu:test:10713",
+   "mmlu:test:13966",
+   "mmlu:test:5373",
+   "mmlu:test:14",
+   "mmlu:test:12336",
+   "mmlu:test:2536",
+   "mmlu:test:818",
+   "mmlu:test:13114",
+   "mmlu:test:1953",
+   "gsm8k:test:1024",
+   "gsm8k:test:17",
+   "gsm8k:test:319",
+   "mmlu:test:4213",
+   "gsm8k:test:856",
+   "mmlu:test:3495",
+   "mmlu:test:3993",
+   "gsm8k:test:1066",
+   "mmlu:test:867",
+   "gsm8k:test:37",
+   "gsm8k:test:922",
+   "gsm8k:test:289",
+   "gsm8k:test:317",
+   "mmlu:test:9270",
+   "mmlu:test:7982",
+   "gsm8k:test:615",
+   "mmlu:test:3650",
+   "mmlu:test:11565",
+   "mmlu:test:10522",
+   "gsm8k:test:87",
+   "gsm8k:test:13",
+   "gsm8k:test:1137",
+   "mmlu:test:3441",
+   "mmlu:test:13143",
+   "mmlu:test:11842",
+   "gsm8k:test:1149",
+   "gsm8k:test:1298",
+   "gsm8k:test:595",
+   "gsm8k:test:817",
+   "gsm8k:test:277",
+   "gsm8k:test:901",
+   "mmlu:test:6842",
+   "gsm8k:test:450",
+   "mmlu:test:5507",
+   "gsm8k:test:1197",
+   "mmlu:test:4504",
+   "mmlu:test:2849",
+   "mmlu:test:7965",
+   "gsm8k:test:1259",
+   "gsm8k:test:696",
+   "mmlu:test:9772",
+   "gsm8k:test:598",
+   "mmlu:test:11176",
+   "mmlu:test:2328",
+   "mmlu:test:9711",
+   "gsm8k:test:29",
+   "mmlu:test:1561",
+   "mmlu:test:10509",
+   "gsm8k:test:477",
+   "mmlu:test:2262",
+   "gsm8k:test:190",
+   "gsm8k:test:332",
+   "mmlu:test:2241",
+   "mmlu:test:7736",
+   "mmlu:test:6657",
+   "gsm8k:test:655",
+   "gsm8k:test:1016",
+   "mmlu:test:2255",
+   "gsm8k:test:425",
+   "mmlu:test:655",
+   "gsm8k:test:939",
+   "gsm8k:test:346",
+   "gsm8k:test:902",
+   "gsm8k:test:744",
+   "mmlu:test:2645",
+   "gsm8k:test:772",
+   "mmlu:test:4738",
+   "mmlu:test:13432",
+   "gsm8k:test:1083",
+   "gsm8k:test:1305",
+   "mmlu:test:4205",
+   "mmlu:test:10399",
+   "gsm8k:test:410",
+   "mmlu:test:11398",
+   "mmlu:test:5773",
+   "gsm8k:test:237",
+   "gsm8k:test:608",
+   "mmlu:test:11239",
+   "gsm8k:test:695",
+   "gsm8k:test:600",
+   "mmlu:test:5529",
+   "gsm8k:test:432",
+   "gsm8k:test:73",
+   "gsm8k:test:693",
+   "mmlu:test:123",
+   "gsm8k:test:66",
+   "gsm8k:test:225",
+   "gsm8k:test:573",
+   "gsm8k:test:969",
+   "gsm8k:test:1139",
+   "gsm8k:test:201",
+   "mmlu:test:4080",
+   "gsm8k:test:806",
+   "gsm8k:test:494",
+   "mmlu:test:9776",
+   "gsm8k:test:32",
+   "gsm8k:test:1241",
+   "gsm8k:test:1011",
+   "mmlu:test:4746",
+   "mmlu:test:8894",
+   "gsm8k:test:262",
+   "gsm8k:test:113",
+   "gsm8k:test:378",
+   "mmlu:test:260",
+   "mmlu:test:7996",
+   "gsm8k:test:118",
+   "gsm8k:test:275",
+   "mmlu:test:11713",
+   "gsm8k:test:541",
+   "mmlu:test:4320",
+   "gsm8k:test:984",
+   "gsm8k:test:581",
+   "gsm8k:test:61",
+   "mmlu:test:9252",
+   "gsm8k:test:882",
+   "mmlu:test:5906",
+   "mmlu:test:13495",
+   "mmlu:test:8170",
+   "mmlu:test:13338",
+   "gsm8k:test:1072",
+   "gsm8k:test:189",
+   "gsm8k:test:107",
+   "gsm8k:test:307",
+   "gsm8k:test:862",
+   "mmlu:test:13013",
+   "mmlu:test:5057",
+   "mmlu:test:5333",
+   "gsm8k:test:1187",
+   "mmlu:test:11875",
+   "gsm8k:test:555",
+   "gsm8k:test:841",
+   "mmlu:test:9627",
+   "mmlu:test:5578",
+   "mmlu:test:1123",
+   "gsm8k:test:601",
+   "gsm8k:test:888",
+   "gsm8k:test:162",
+   "gsm8k:test:234",
+   "mmlu:test:5619",
+   "mmlu:test:384",
+   "mmlu:test:6031",
+   "gsm8k:test:1226",
+   "gsm8k:test:197",
+   "gsm8k:test:728",
+   "mmlu:test:1723",
+   "mmlu:test:1639",
+   "mmlu:test:6976",
+   "mmlu:test:9454",
+   "gsm8k:test:52",
+   "mmlu:test:5400",
+   "gsm8k:test:824",
+   "gsm8k:test:1200",
+   "gsm8k:test:1110",
+   "mmlu:test:2231",
+   "mmlu:test:8661",
+   "mmlu:test:11287",
+   "gsm8k:test:548",
+   "mmlu:test:8759",
+   "gsm8k:test:593",
+   "gsm8k:test:836",
+   "gsm8k:test:1204",
+   "mmlu:test:14022",
+   "mmlu:test:11603",
+   "mmlu:test:3635",
+   "mmlu:test:12826",
+   "mmlu:test:11174",
+   "mmlu:test:11327",
+   "gsm8k:test:576",
+   "gsm8k:test:1082",
+   "gsm8k:test:753",
+   "mmlu:test:7094",
+   "mmlu:test:8897",
+   "mmlu:test:3040",
+   "gsm8k:test:127",
+   "mmlu:test:7653",
+   "gsm8k:test:403",
+   "mmlu:test:5622",
+   "gsm8k:test:210",
+   "gsm8k:test:640",
+   "mmlu:test:2440",
+   "mmlu:test:13713",
+   "mmlu:test:13164",
+   "gsm8k:test:456",
+   "gsm8k:test:226",
+   "gsm8k:test:449",
+   "mmlu:test:9440",
+   "mmlu:test:9896",
+   "mmlu:test:6223",
+   "mmlu:test:10560",
+   "mmlu:test:3347",
+   "gsm8k:test:529",
+   "mmlu:test:4766",
+   "mmlu:test:1140",
+   "mmlu:test:1701",
+   "gsm8k:test:725",
+   "mmlu:test:11829",
+   "gsm8k:test:350",
+   "gsm8k:test:520",
+   "mmlu:test:3844",
+   "mmlu:test:13958",
+   "mmlu:test:5113",
+   "mmlu:test:7467",
+   "mmlu:test:11996",
+   "mmlu:test:12549",
+   "mmlu:test:10629",
+   "gsm8k:test:257",
+   "mmlu:test:1093",
+   "gsm8k:test:54",
+   "gsm8k:test:1173",
+   "mmlu:test:10219",
+   "mmlu:test:12654",
+   "gsm8k:test:462",
+   "gsm8k:test:1196",
+   "gsm8k:test:1179",
+   "gsm8k:test:524",
+   "gsm8k:test:675",
+   "gsm8k:test:1181",
+   "mmlu:test:3909",
+   "mmlu:test:1761",
+   "mmlu:test:11217",
+   "gsm8k:test:495",
+   "mmlu:test:7085",
+   "gsm8k:test:993",
+   "gsm8k:test:21",
+   "mmlu:test:8451",
+   "mmlu:test:10043",
+   "gsm8k:test:40",
+   "mmlu:test:774",
+   "mmlu:test:11869",
+   "mmlu:test:3134",
+   "gsm8k:test:1014",
+   "mmlu:test:3563",
+   "gsm8k:test:1107",
+   "mmlu:test:11366",
+   "gsm8k:test:74",
+   "gsm8k:test:1161",
+   "gsm8k:test:681",
+   "mmlu:test:8229",
+   "mmlu:test:11252",
+   "mmlu:test:4145",
+   "mmlu:test:12057",
+   "mmlu:test:13883",
+   "gsm8k:test:1195",
+   "mmlu:test:4216",
+   "gsm8k:test:424",
+   "gsm8k:test:706",
+   "mmlu:test:4862",
+   "mmlu:test:11146",
+   "mmlu:test:9641",
+   "mmlu:test:5401",
+   "mmlu:test:13491",
+   "mmlu:test:8050",
+   "gsm8k:test:1263",
+   "mmlu:test:6387",
+   "mmlu:test:13148",
+   "gsm8k:test:1071",
+   "mmlu:test:6849",
+   "gsm8k:test:1125",
+   "gsm8k:test:211",
+   "gsm8k:test:155",
+   "mmlu:test:4223",
+   "mmlu:test:1310",
+   "mmlu:test:9830",
+   "mmlu:test:2263",
+   "gsm8k:test:1074",
+   "mmlu:test:11579",
+   "gsm8k:test:1162",
+   "mmlu:test:7912",
+   "mmlu:test:9309",
+   "mmlu:test:8213",
+   "mmlu:test:11913",
+   "mmlu:test:7688",
+   "mmlu:test:5146",
+   "gsm8k:test:181",
+   "mmlu:test:2724",
+   "mmlu:test:1635",
+   "mmlu:test:5188",
+   "gsm8k:test:333",
+   "gsm8k:test:872",
+   "mmlu:test:5236",
+   "gsm8k:test:1301",
+   "gsm8k:test:1022",
+   "mmlu:test:3166",
+   "mmlu:test:2662",
+   "gsm8k:test:1117",
+   "mmlu:test:10664",
+   "mmlu:test:12124",
+   "gsm8k:test:344",
+   "gsm8k:test:764",
+   "mmlu:test:8801",
+   "mmlu:test:2268",
+   "gsm8k:test:305",
+   "mmlu:test:6158",
+   "mmlu:test:189",
+   "gsm8k:test:1030",
+   "mmlu:test:12087",
+   "mmlu:test:9707",
+   "mmlu:test:6620",
+   "gsm8k:test:1188",
+   "gsm8k:test:25",
+   "mmlu:test:6815",
+   "gsm8k:test:389",
+   "gsm8k:test:677",
+   "gsm8k:test:1193",
+   "gsm8k:test:267",
+   "gsm8k:test:141",
+   "gsm8k:test:436",
+   "gsm8k:test:934",
+   "gsm8k:test:486",
+   "gsm8k:test:367",
+   "mmlu:test:109",
+   "gsm8k:test:1219",
+   "mmlu:test:8534",
+   "mmlu:test:12511",
+   "mmlu:test:1136",
+   "mmlu:test:9978",
+   "mmlu:test:6508",
+   "gsm8k:test:752",
+   "mmlu:test:8099",
+   "mmlu:test:6117",
+   "gsm8k:test:442",
+   "mmlu:test:13596",
+   "gsm8k:test:415",
+   "mmlu:test:7779",
+   "mmlu:test:5120",
+   "gsm8k:test:562",
+   "mmlu:test:7233",
+   "gsm8k:test:775",
+   "gsm8k:test:186",
+   "gsm8k:test:1254",
+   "gsm8k:test:1248",
+   "mmlu:test:11694",
+   "mmlu:test:2768",
+   "gsm8k:test:276",
+   "mmlu:test:7410",
+   "gsm8k:test:1060",
+   "mmlu:test:2962",
+   "gsm8k:test:749",
+   "mmlu:test:6982",
+   "gsm8k:test:129",
+   "gsm8k:test:279",
+   "mmlu:test:13312",
+   "gsm8k:test:460",
+   "gsm8k:test:1142",
+   "gsm8k:test:497",
+   "gsm8k:test:755",
+   "gsm8k:test:1194",
+   "gsm8k:test:15",
+   "mmlu:test:241",
+   "mmlu:test:13317",
+   "mmlu:test:313",
+   "mmlu:test:4897",
+   "mmlu:test:8780",
+   "gsm8k:test:811",
+   "mmlu:test:2782",
+   "gsm8k:test:1158",
+   "gsm8k:test:546",
+   "mmlu:test:9697",
+   "gsm8k:test:690",
+   "mmlu:test:1550",
+   "mmlu:test:978",
+   "gsm8k:test:534",
+   "gsm8k:test:924",
+   "gsm8k:test:1009",
+   "gsm8k:test:632",
+   "gsm8k:test:883",
+   "mmlu:test:10666",
+   "mmlu:test:13780",
+   "gsm8k:test:340",
+   "mmlu:test:1866",
+   "gsm8k:test:919",
+   "mmlu:test:2686",
+   "mmlu:test:13571",
+   "gsm8k:test:153",
+   "mmlu:test:420",
+   "gsm8k:test:1144",
+   "gsm8k:test:584",
+   "gsm8k:test:1178",
+   "mmlu:test:8648",
+   "gsm8k:test:360",
+   "mmlu:test:12004",
+   "mmlu:test:12188",
+   "mmlu:test:1404"
+  ],
+  "grading": "quality.py at the rules commit: the number after the last 'Answer:' line (GSM8K) or the letter A to D standing alone after it (MMLU); a failed request is wrong"
+ },
+ "setups": {
+  "l4-8b-defaults": {
+   "number": 1,
+   "label": "vLLM 0.34.0 defaults (the current setup)",
+   "engine": "vllm",
+   "engine_version": "0.34.0",
+   "image": "vllm/vllm-openai@sha256:cf5b2fdd087eb4f6d261736967cc5cde974bd22ff4df50365f8fa419b6b4c484",
+   "command": [
+    "serve",
+    "/weights/qwen3-8b-b968826d9c46",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "env": {},
+   "added_args": [
+    "--max-model-len",
+    "8192"
+   ],
+   "added_because": "the model's own context (40,960 tokens) needs more KV cache than one L4 holds next to BF16 weights, and vLLM refuses to start then; the longest request of the plan is under 5,000 tokens",
+   "model": {
+    "id": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218"
+   }
+  },
+  "l4-8b-fp8-ckpt-fp8-kv": {
+   "number": 9,
+   "label": "A third-party published FP8 checkpoint of Qwen3-8B that also quantizes the KV cache",
+   "engine": "vllm",
+   "engine_version": "0.34.0",
+   "image": "vllm/vllm-openai@sha256:cf5b2fdd087eb4f6d261736967cc5cde974bd22ff4df50365f8fa419b6b4c484",
+   "command": [
+    "serve",
+    "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "<third-party-fp8-checkpoint>",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "env": {},
+   "added_args": [
+    "--max-model-len",
+    "8192"
+   ],
+   "added_because": "the model's own context (40,960 tokens) needs more KV cache than one L4 holds next to BF16 weights, and vLLM refuses to start then; the longest request of the plan is under 5,000 tokens",
+   "model": {
+    "id": "<third-party-fp8-checkpoint>",
+    "revision": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5"
+   }
+  },
+  "l4-8b-fp8-ckpt-qwen": {
+   "number": 8,
+   "label": "Qwen's published FP8 checkpoint",
+   "engine": "vllm",
+   "engine_version": "0.34.0",
+   "image": "vllm/vllm-openai@sha256:cf5b2fdd087eb4f6d261736967cc5cde974bd22ff4df50365f8fa419b6b4c484",
+   "command": [
+    "serve",
+    "/weights/qwen3-8b-fp8-220b46e3b218",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B-FP8",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "env": {},
+   "added_args": [
+    "--max-model-len",
+    "8192"
+   ],
+   "added_because": "the model's own context (40,960 tokens) needs more KV cache than one L4 holds next to BF16 weights, and vLLM refuses to start then; the longest request of the plan is under 5,000 tokens",
+   "model": {
+    "id": "Qwen/Qwen3-8B-FP8",
+    "revision": "220b46e3b2180893580a4454f21f22d3ebb187d3"
+   }
+  }
+ },
+ "servers": [
+  {
+   "setup": "l4-8b-defaults",
+   "server_index": 1,
+   "run_id": "l4-8b-fp8ckpt-confirm-1",
+   "harness_commit": "a52ee962a66fead69b1b8557f04a4fa886f88660",
+   "started_at": "2026-11-26T08:25:20Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1:l4-8b-defaults:1",
+    "queue_seconds": 660.9
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-5501ced0-891a-513a-e2a7-3360b4231c5d",
+    "pci.bus_id": "00000000:00:05.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "uk",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.1,
+     "region": "us-east"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-central"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-b968826d9c46",
+    "revision_marker": "b968826d9c46dd6066d109eabc6255188de91218",
+    "files": 13,
+    "bytes": 16397431733,
+    "config.json_sha256": "f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-b968826d9c46",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 190.2,
+   "container_seconds": 899.8,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) INFO 11-26 08:28:34 [kv_cache_utils.py:1168] GPU KV cache size: 26,112 tokens, Maximum concurrency for 8,192 tokens per request: 3.19x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 861,
+    "share_right": 0.861,
+    "finish_reasons": {
+     "stop": 996,
+     "length": 4
+    },
+    "without_answer_line": 4,
+    "at_once": 32,
+    "seconds": 697.13,
+    "marks": "1111110111011111111110111011111101111111111111111100111111100010111111101011111101111111001101101110111111111110110011111111011111111110111110111011111110111111111111111111111011110111111111011011111111001110110101111111111111111011111111111101111101111011111111110011111111111101111111111010111111111111111111111111111011111111111111111110111110011111101111101111011101111011111111011111111011111111011111111111011111111111111101110101111111111101011010111110011111110111111111111101100011110111111110111111110110101110111111110011111111111011111111111110111101111111011111110111111111111111011111001111111111011101111111111001111011011111101111100111010111111111111111111111111111111111111111011111101111111101111011111111111011111111111111101111111111101111111101111111010111111010111111100011110111110011111101111100011111101111011111111011111111110111101111110101101111111111111101111111111111111110111110110101111111111111111101111111111111111111110111111111111111111111101111111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-defaults",
+   "server_index": 2,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s23",
+   "harness_commit": "b9238bc52bf6eb8d18d97959948a8fda17360dd3",
+   "started_at": "2026-11-26T10:06:35Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s23:l4-8b-defaults:2",
+    "queue_seconds": 84.1
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-839082a9-63d0-c378-9a25-614e4de41356",
+    "pci.bus_id": "00000000:00:04.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "ap-northeast",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-west"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.4,
+     "region": "eu-west"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-b968826d9c46",
+    "revision_marker": "b968826d9c46dd6066d109eabc6255188de91218",
+    "files": 13,
+    "bytes": 16397431733,
+    "config.json_sha256": "f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-b968826d9c46",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 222.2,
+   "container_seconds": 949.2,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) INFO 11-26 10:10:20 [kv_cache_utils.py:1168] GPU KV cache size: 26,112 tokens, Maximum concurrency for 8,192 tokens per request: 3.19x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 852,
+    "share_right": 0.852,
+    "finish_reasons": {
+     "stop": 994,
+     "length": 6
+    },
+    "without_answer_line": 4,
+    "at_once": 32,
+    "seconds": 711.49,
+    "marks": "1101110111011111111110111111111101111111111011111100111011100110111110101011111101111111101101101110111101111110110011111111011111111110111110111011011110111111111111111111111011110111111111011011101111001110110101111111111111011111111111111101111101111011001111110011111111111101111111111010111111111111111111111111111011111111111111111110110110011111101111111111011101111011111111011111111011111111011111111011111111111111111101110101111111111101011010111110011111111111111111111101100011110111111110011111110110101110111111110111111111111011111111111111111101111111011111110111111111111111011111001111111111011101111111111001111011011111101111100011010111111111111111111111111111111111111111011111101111111101111011111111111011111111111111101111111011001111111101111111010111101010111101100011100111110011111101111100011111101111011111111111111111110111111111110101101011111111111101111111111111111110111110111111111111111111111100111111111011111111110111111111111111111111101111111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-defaults",
+   "server_index": 3,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s23",
+   "harness_commit": "b9238bc52bf6eb8d18d97959948a8fda17360dd3",
+   "started_at": "2026-11-26T11:12:01Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s23:l4-8b-defaults:3",
+    "queue_seconds": 619.4
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-9e79ed60-a908-9006-be23-ed0accda3819",
+    "pci.bus_id": "00000000:80:03.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "us-west",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.3,
+     "region": "uk"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-east"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B",
+    "revision": "b968826d9c46dd6066d109eabc6255188de91218"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-b968826d9c46",
+    "revision_marker": "b968826d9c46dd6066d109eabc6255188de91218",
+    "files": 13,
+    "bytes": 16397431733,
+    "config.json_sha256": "f7c4eadfbbf522470667b797a3c89be2524832d2d599797248dc304fff447c30",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-b968826d9c46",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 172.1,
+   "container_seconds": 879.7,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) INFO 11-26 11:14:49 [kv_cache_utils.py:1168] GPU KV cache size: 26,112 tokens, Maximum concurrency for 8,192 tokens per request: 3.19x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 860,
+    "share_right": 0.86,
+    "finish_reasons": {
+     "stop": 993,
+     "length": 7
+    },
+    "without_answer_line": 5,
+    "at_once": 32,
+    "seconds": 701.73,
+    "marks": "1101110110011111111110111111111101111111111011111100111011110010111111101011111101111111001101101110111111111110110011111111011111111110111110111011111110111111111111111111111011110111111111011011101111001110111101111111111111111011111111111101101101111011111111110011111110111101111111111010111111111111111111111111111011111111111111111110111110011111101111101111011101111111111111011111111001111111011111111111011111111111111101111101111111111101011010111110111111111111111111111101100011111111111110111111110110100110111111110011110111111011111111111110111111111111011111110111111111111111011111001111111111011101111111111011111011011111101111100111110111011111111111111111111111111111111111011111101111111101111011111111111011111111111111101111111111101111111101111111010111111010111111100011100111110011111101111100011111101111011111111111111111110111101111110101101011111111111101111111111111111110111110101111111111111111111100111111111111111111110111111111111111111111101111111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-fp8-kv",
+   "server_index": 1,
+   "run_id": "l4-8b-fp8ckpt-confirm-1",
+   "harness_commit": "a52ee962a66fead69b1b8557f04a4fa886f88660",
+   "started_at": "2026-11-26T08:18:58Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1:l4-8b-fp8-ckpt-fp8-kv:1",
+    "queue_seconds": 514.5
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-87b80334-beef-c86f-46da-065da263d730",
+    "pci.bus_id": "[Unknown Error]",
+    "driver_version": "610.57.04",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "ca",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.3,
+     "region": "us-west"
+    }
+   ],
+   "model": {
+    "id": "<third-party-fp8-checkpoint>",
+    "revision": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "revision_marker": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5",
+    "files": 14,
+    "bytes": 9451776318,
+    "config.json_sha256": "d2c9588779d49ab7805dc1054a471107a53df713a50583a7fc1ae6a708905fad",
+    "chat_template.jinja_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "<third-party-fp8-checkpoint>",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 186.1,
+   "container_seconds": 584.3,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 08:20:22 [kv_cache.py:141] Checkpoint does not provide a q scaling factor. Setting it to k_scale. This only matters for FP8 Attention backends (flash-attn or flashinfer).",
+    "(EngineCore pid=36) WARNING 11-26 08:20:22 [kv_cache.py:158] Using KV cache scaling factor 1.0 for fp8_e4m3. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.",
+    "(EngineCore pid=36) INFO 11-26 08:22:01 [kv_cache_utils.py:1168] GPU KV cache size: 134,144 tokens, Maximum concurrency for 8,192 tokens per request: 16.38x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 843,
+    "share_right": 0.843,
+    "finish_reasons": {
+     "stop": 994,
+     "length": 6
+    },
+    "without_answer_line": 6,
+    "at_once": 32,
+    "seconds": 394.14,
+    "marks": "1101110110011111111111111011111101111111111011111100111011100010111111101011111101111111101101101110111001111110110001111111011111101111111110111111110101111111111011111111111011110111111011011011101111001110111101111111111111011011111111111101111101111011111111110011111111111101111111111011111111111111011111111011111011111111111111111110110110011111111101101011011111111111101111011111111011111111011111011111111111111111111101110111111111111101010010111110111111111111111111111101100011111111111110101101111110101111111111110011111111111011111111111111101101111111011111110111111111111111011111001111111111011111111111011011111111000111101111110011110111111011111111111111111111111111011111011111101111101101111011111111111011011110111111101111111011101111101101111111010111101000101101100001100111110011111101111101011111101111011111111011110111110111111111110101111111111011111101111111111111110110111110101111111111111111111111111111111111111111110111111111111111111111101011111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-fp8-kv",
+   "server_index": 2,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s3b",
+   "harness_commit": "c0af74e7048382c93e066021f330016d45484e28",
+   "started_at": "2026-11-26T12:44:46Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s3b:l4-8b-fp8-ckpt-fp8-kv:2",
+    "queue_seconds": 535.2
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-9f157884-9e8d-087b-cb89-7bec559532c5",
+    "pci.bus_id": "00000000:80:01.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "ca-central",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-west"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "eu-west"
+    }
+   ],
+   "model": {
+    "id": "<third-party-fp8-checkpoint>",
+    "revision": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "revision_marker": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5",
+    "files": 14,
+    "bytes": 9451776318,
+    "config.json_sha256": "d2c9588779d49ab7805dc1054a471107a53df713a50583a7fc1ae6a708905fad",
+    "chat_template.jinja_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "<third-party-fp8-checkpoint>",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 182.1,
+   "container_seconds": 585.2,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 12:46:16 [kv_cache.py:141] Checkpoint does not provide a q scaling factor. Setting it to k_scale. This only matters for FP8 Attention backends (flash-attn or flashinfer).",
+    "(EngineCore pid=36) WARNING 11-26 12:46:16 [kv_cache.py:158] Using KV cache scaling factor 1.0 for fp8_e4m3. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.",
+    "(EngineCore pid=36) INFO 11-26 12:47:49 [kv_cache_utils.py:1168] GPU KV cache size: 134,144 tokens, Maximum concurrency for 8,192 tokens per request: 16.38x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 842,
+    "share_right": 0.842,
+    "finish_reasons": {
+     "stop": 994,
+     "length": 6
+    },
+    "without_answer_line": 6,
+    "at_once": 32,
+    "seconds": 395.59,
+    "marks": "1101110110011100111110111111111101111111111011111100111111110110111110101011111101111111001111101110111011111110110011111111011111111100111110111111110111111111111111111111111011110111111011011001111111011111111101111111111111011011111111111101111101111011001111110011111111111101111111111011111111111111011111111111111011111111111111101110110110011111101101101111011101111111111111011111111001111111011111011111111111111111111101100111111111111100010010111110011111111111101111111101100011110111111110101111110110101111111111110011111111111011111111111110111101111111011111110111111111111111011111001111111111011111111111111011111011010111101111100011010111111011011111111111111111111111111111011111101111111101111011111111111011111110111111101111111011001111101101111111010111101110101101100011110111110011111101111100011111101111111111111111111111110111111111110111111011111011111101100111111111110110111110111111111111111111111101111111111111110111110111111111111111111111100011111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-fp8-kv",
+   "server_index": 3,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s3b",
+   "harness_commit": "c0af74e7048382c93e066021f330016d45484e28",
+   "started_at": "2026-11-26T13:28:27Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s3b:l4-8b-fp8-ckpt-fp8-kv:3",
+    "queue_seconds": 707.3
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-771519c9-70b9-56f1-e0f4-03d790e62598",
+    "pci.bus_id": "00000000:00:07.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "uk",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.1,
+     "region": "ca"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "eu-west"
+    }
+   ],
+   "model": {
+    "id": "<third-party-fp8-checkpoint>",
+    "revision": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "revision_marker": "2cebc4c89e25abc17668c81b01dceaf3d8b914d5",
+    "files": 14,
+    "bytes": 9451776318,
+    "config.json_sha256": "d2c9588779d49ab7805dc1054a471107a53df713a50583a7fc1ae6a708905fad",
+    "chat_template.jinja_sha256": "a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-2cebc4c89e25",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "<third-party-fp8-checkpoint>",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 176.2,
+   "container_seconds": 578.5,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 13:29:47 [kv_cache.py:141] Checkpoint does not provide a q scaling factor. Setting it to k_scale. This only matters for FP8 Attention backends (flash-attn or flashinfer).",
+    "(EngineCore pid=36) WARNING 11-26 13:29:47 [kv_cache.py:158] Using KV cache scaling factor 1.0 for fp8_e4m3. If this is unintended, verify that k/v_scale scaling factors are properly set in the checkpoint.",
+    "(EngineCore pid=36) INFO 11-26 13:31:22 [kv_cache_utils.py:1168] GPU KV cache size: 134,144 tokens, Maximum concurrency for 8,192 tokens per request: 16.38x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 848,
+    "share_right": 0.848,
+    "finish_reasons": {
+     "stop": 996,
+     "length": 4
+    },
+    "without_answer_line": 4,
+    "at_once": 32,
+    "seconds": 394.47,
+    "marks": "1101110110011111111111111011111101111111111011111100111111110010111111101011111101111011101111101110111101111110110011111111011111111110111111111011110111111111111111111111111011110111111111011101101111011110111101111111111111011011111111111101111101111011111111110011111111111101111111111011111111111111011111111011111011111111111111101110111110011111101101101111011111110111111111001111111011111111011111111111111111111111111101100111111111111101010010110110011111111111111111111101100011110111111110111101111110101111111111110011111111111011111111111111101101111111011111110111111111111111011111001111111111011111111111111001111011011111101111100011010111101011111111111111111111111111011111011111101111111101111011111111111011011110111111101111111011101111101111111110010111111110101101100001110111110011111101111101011111101111011111111011110111110111111111110101111011111011111101101111111111110110111110111111111111111111111111111111111111110111110111111111111111111111101111101011101111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-qwen",
+   "server_index": 1,
+   "run_id": "l4-8b-fp8ckpt-confirm-1",
+   "harness_commit": "a52ee962a66fead69b1b8557f04a4fa886f88660",
+   "started_at": "2026-11-26T08:26:42Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1:l4-8b-fp8-ckpt-qwen:1",
+    "queue_seconds": 125.5
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-b9eec6c3-bfc5-bac4-3398-463cc454e384",
+    "pci.bus_id": "00000000:80:03.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "us-east",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-east"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.3,
+     "region": "eu-west"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B-FP8",
+    "revision": "220b46e3b2180893580a4454f21f22d3ebb187d3"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-220b46e3b218",
+    "revision_marker": "220b46e3b2180893580a4454f21f22d3ebb187d3",
+    "files": 10,
+    "bytes": 9452566852,
+    "config.json_sha256": "79e454d6cc36c41ab0e9418c8f78a033afa9ac88e5a58d67c1471de315c8d29a",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-220b46e3b218",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B-FP8",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 172.2,
+   "container_seconds": 601.2,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 08:28:12 [marlin_utils_fp8.py:98] Your GPU does not have native support for FP8 computation but FP8 quantization is being used. Weight-only FP8 compression will be used leveraging the Marlin kernel. This may degrade performance for compute-heavy workloads.",
+    "(EngineCore pid=36) INFO 11-26 08:29:34 [kv_cache_utils.py:1168] GPU KV cache size: 71,680 tokens, Maximum concurrency for 8,192 tokens per request: 8.75x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 858,
+    "share_right": 0.858,
+    "finish_reasons": {
+     "stop": 995,
+     "length": 5
+    },
+    "without_answer_line": 3,
+    "at_once": 32,
+    "seconds": 421.99,
+    "marks": "1111111111011111111111111111111101111111111011111100111111100010111111101011111101111011101101101110111111111110110011111111011111111100111110111011111100111111111011111111111011111111111111011011101111011110111101111111111111111111111111111101111101111011011111110011111111111101111111111010111111111111111111111011111011111111111111101110111110011111101111111111011101111011111111011111111001111111011111111111111111111111111101110101111111111101011010110110111111110111111111111101100011111111111110101111110110101110111111110011011111111011111111111111101111111111011111110111111111111111011111001111111111011101111111111001111011011111101111100011110111111011111111111111111111111111011111011111101111111101111011111111111011111111111111101111011111101111101101111111010111111000111111100011110111111011111101111100011111101111011111111011110111110111111111110101101111111111111101111111111111110110111110111111111111111111111111111111111111111111110111111111111111111111101111101011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-qwen",
+   "server_index": 2,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s23",
+   "harness_commit": "b9238bc52bf6eb8d18d97959948a8fda17360dd3",
+   "started_at": "2026-11-26T10:16:55Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s23:l4-8b-fp8-ckpt-qwen:2",
+    "queue_seconds": 637.0
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-771519c9-70b9-56f1-e0f4-03d790e62598",
+    "pci.bus_id": "00000000:00:07.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "uk",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.3,
+     "region": "us-west"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.3,
+     "region": "uk"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B-FP8",
+    "revision": "220b46e3b2180893580a4454f21f22d3ebb187d3"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-220b46e3b218",
+    "revision_marker": "220b46e3b2180893580a4454f21f22d3ebb187d3",
+    "files": 10,
+    "bytes": 9452566852,
+    "config.json_sha256": "79e454d6cc36c41ab0e9418c8f78a033afa9ac88e5a58d67c1471de315c8d29a",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-220b46e3b218",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B-FP8",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 174.1,
+   "container_seconds": 609.7,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 10:18:22 [marlin_utils_fp8.py:98] Your GPU does not have native support for FP8 computation but FP8 quantization is being used. Weight-only FP8 compression will be used leveraging the Marlin kernel. This may degrade performance for compute-heavy workloads.",
+    "(EngineCore pid=36) INFO 11-26 10:19:47 [kv_cache_utils.py:1168] GPU KV cache size: 71,680 tokens, Maximum concurrency for 8,192 tokens per request: 8.75x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 856,
+    "share_right": 0.856,
+    "finish_reasons": {
+     "stop": 994,
+     "length": 6
+    },
+    "without_answer_line": 4,
+    "at_once": 32,
+    "seconds": 430.25,
+    "marks": "1111110111011111111111111111111101111111111011111100111011101010111111101001111101111011101101101110111011111111110011111111011111111100111110111011111100111111111111111111111011110111111111011011101111011111111101111111111111011011111111111101111101111011011111110011111111111101111111111010111111111111111111111011111011111111111111101110111110011111101111111111011101111011111111111111111001111111010111111111111111111111111101110101111111111101011010110110111111110111111111111101100011110111111110101111110110101110111111110011010111111011111111111111111111111111011111110111111111111111011111001111111111011101111111111011111011010111101111110011010111111011111111111111111111111111111111011111101111111101111011111111111011111111111111101111111111101111101101111111010111111010111101100011110111111011111101111101011111101111011111111011110111110111101111110101101111111111111101111111111111111110111110110111111111111111101111111111111111111111110111111111111111111111101111111011111111101111"
+   }
+  },
+  {
+   "setup": "l4-8b-fp8-ckpt-qwen",
+   "server_index": 3,
+   "run_id": "l4-8b-fp8ckpt-confirm-1-s3b",
+   "harness_commit": "c0af74e7048382c93e066021f330016d45484e28",
+   "started_at": "2026-11-26T13:31:11Z",
+   "call": {
+    "id": "<modal-call-id>",
+    "tag": "l4-8b-fp8ckpt-confirm-1-s3b:l4-8b-fp8-ckpt-qwen:3",
+    "queue_seconds": 589.5
+   },
+   "machine": {
+    "gpu_count": 1,
+    "name": "NVIDIA L4",
+    "uuid": "GPU-3964d4ae-0005-2b34-f350-67dc150de734",
+    "pci.bus_id": "00000000:00:05.0",
+    "driver_version": "620.70.06",
+    "vbios_version": "95.04.29.00.07",
+    "memory.total": "23034 MiB",
+    "power.limit": "72.00 W",
+    "clocks.max.sm": "2040 MHz",
+    "cpu_model": "unknown",
+    "cpu_threads_visible": 20,
+    "modal_region": "ap-northeast",
+    "modal_cloud_provider": "CLOUD_PROVIDER_GCP"
+   },
+   "refused_hosts": [
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "us-central"
+    },
+    {
+     "driver": "620.70.06",
+     "container_seconds": 0.2,
+     "region": "eu-west"
+    }
+   ],
+   "model": {
+    "id": "Qwen/Qwen3-8B-FP8",
+    "revision": "220b46e3b2180893580a4454f21f22d3ebb187d3"
+   },
+   "weights": {
+    "dir": "/weights/qwen3-8b-fp8-220b46e3b218",
+    "revision_marker": "220b46e3b2180893580a4454f21f22d3ebb187d3",
+    "files": 10,
+    "bytes": 9452566852,
+    "config.json_sha256": "79e454d6cc36c41ab0e9418c8f78a033afa9ac88e5a58d67c1471de315c8d29a",
+    "tokenizer.json_sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+   },
+   "executed": [
+    "/usr/local/bin/vllm",
+    "serve",
+    "/weights/qwen3-8b-fp8-220b46e3b218",
+    "--max-model-len",
+    "8192",
+    "--served-model-name",
+    "Qwen/Qwen3-8B-FP8",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+   ],
+   "startup_seconds": 174.1,
+   "container_seconds": 609.8,
+   "error": null,
+   "prompt_files": {
+    "quality": {
+     "sha256": "83c3df7b82f8d8a3b9fa892f1fdcd81679f93646337c8b78d456a828101d72e4",
+     "bytes": 620555
+    }
+   },
+   "engine_log_excerpts": [
+    "(EngineCore pid=36) WARNING 11-26 13:32:37 [marlin_utils_fp8.py:98] Your GPU does not have native support for FP8 computation but FP8 quantization is being used. Weight-only FP8 compression will be used leveraging the Marlin kernel. This may degrade performance for compute-heavy workloads.",
+    "(EngineCore pid=36) INFO 11-26 13:34:05 [kv_cache_utils.py:1168] GPU KV cache size: 71,680 tokens, Maximum concurrency for 8,192 tokens per request: 8.75x"
+   ],
+   "cells": [],
+   "task_set": {
+    "items": 1000,
+    "answered": 1000,
+    "failed": 0,
+    "right": 859,
+    "share_right": 0.859,
+    "finish_reasons": {
+     "stop": 996,
+     "length": 4
+    },
+    "without_answer_line": 4,
+    "at_once": 32,
+    "seconds": 425.51,
+    "marks": "1111110111011111111111111111111101111111111011111100111011100010111111101011111101111011001101101110111101111110110011111111011111111100111110111011111100111111111011111111111011110111111111011011101111011110111101111111111111111111111111111101111101111011011111110011111111111101111111111110111111111111111111111011111011111111111111111110111110011111101111111111011101111111111111011111111001111111010111111111111111111111111101111101111111111101011010110110111111110111111111111101100011110111111110101111110110100110111111110011111111111011111111111111111111111111011111110111111111111111011111001111111111011101111111111001111011011111101111110011110111111011111111111111111111111111011111011111101111111101111011111111111011111111111111101111011111101111111101111111010111111010111101100011110111111011111101111101011111101111011111111011110111110111111111110101111011111111111101111111111111110110111110111111111111111111101111111111111111111111110111111111111111111111101111111011111111101111"
+   }
+  }
+ ],
+ "cut_attempts": [],
+ "tasks_recomputed": {
+  "l4-8b-fp8-ckpt-fp8-kv": {
+   "baseline_score": 0.85767,
+   "setup_score": 0.84433,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 71,
+   "items_only_setup_right": 48,
+   "difference": -0.01333,
+   "low": -0.02567,
+   "high": -0.00099,
+   "verdict": "worse",
+   "items": 1000
+  },
+  "l4-8b-fp8-ckpt-qwen": {
+   "baseline_score": 0.85767,
+   "setup_score": 0.85767,
+   "baseline_servers": 3,
+   "setup_servers": 3,
+   "items_only_baseline_right": 34,
+   "items_only_setup_right": 45,
+   "difference": 0.0,
+   "low": -0.01034,
+   "high": 0.01034,
+   "verdict": "no measurable difference",
+   "items": 1000
+  }
+ },
+ "identical_answer_texts": {
+  "l4-8b-defaults vs l4-8b-defaults": [
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-defaults s2"
+    ],
+    "identical_items": 324
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-defaults s3"
+    ],
+    "identical_items": 328
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-defaults s3"
+    ],
+    "identical_items": 333
+   }
+  ],
+  "l4-8b-defaults vs l4-8b-fp8-ckpt-fp8-kv": [
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-fp8-kv s1"
+    ],
+    "identical_items": 26
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-fp8-kv s2"
+    ],
+    "identical_items": 20
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-fp8-kv s3"
+    ],
+    "identical_items": 20
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-fp8-kv s1"
+    ],
+    "identical_items": 26
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-fp8-kv s2"
+    ],
+    "identical_items": 20
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-fp8-kv s3"
+    ],
+    "identical_items": 27
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-fp8-kv s1"
+    ],
+    "identical_items": 32
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-fp8-kv s2"
+    ],
+    "identical_items": 23
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-fp8-kv s3"
+    ],
+    "identical_items": 23
+   }
+  ],
+  "l4-8b-defaults vs l4-8b-fp8-ckpt-qwen": [
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 116
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 111
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s1",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 119
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 116
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 110
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s2",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 108
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 120
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 111
+   },
+   {
+    "servers": [
+     "l4-8b-defaults s3",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 115
+   }
+  ],
+  "l4-8b-fp8-ckpt-fp8-kv vs l4-8b-fp8-ckpt-fp8-kv": [
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s1",
+     "l4-8b-fp8-ckpt-fp8-kv s2"
+    ],
+    "identical_items": 85
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s1",
+     "l4-8b-fp8-ckpt-fp8-kv s3"
+    ],
+    "identical_items": 118
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s2",
+     "l4-8b-fp8-ckpt-fp8-kv s3"
+    ],
+    "identical_items": 77
+   }
+  ],
+  "l4-8b-fp8-ckpt-fp8-kv vs l4-8b-fp8-ckpt-qwen": [
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s1",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 24
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s1",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 25
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s1",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 26
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s2",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 14
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s2",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 13
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s2",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 14
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s3",
+     "l4-8b-fp8-ckpt-qwen s1"
+    ],
+    "identical_items": 19
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s3",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 19
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-fp8-kv s3",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 16
+   }
+  ],
+  "l4-8b-fp8-ckpt-qwen vs l4-8b-fp8-ckpt-qwen": [
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-qwen s1",
+     "l4-8b-fp8-ckpt-qwen s2"
+    ],
+    "identical_items": 312
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-qwen s1",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 312
+   },
+   {
+    "servers": [
+     "l4-8b-fp8-ckpt-qwen s2",
+     "l4-8b-fp8-ckpt-qwen s3"
+    ],
+    "identical_items": 315
+   }
+  ]
+ }
+}
