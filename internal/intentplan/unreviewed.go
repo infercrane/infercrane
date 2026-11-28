@@ -9,6 +9,7 @@ import (
 
 	"github.com/infercrane/infercrane/internal/curatedrecipe"
 	"github.com/infercrane/infercrane/internal/modelcheck"
+	"github.com/infercrane/infercrane/internal/optimizationcapability"
 )
 
 const (
@@ -168,11 +169,7 @@ func shortCommit(commit string) string {
 // checkedProfile is the runtime's own defaults, with the context bounded to
 // the length the GPU was sized for and tensor parallelism across the GPUs.
 func checkedProfile(report modelcheck.Report, runtime, version, gpu string, gpuCount int, layouts []modelcheck.Layout) curatedrecipe.ServingProfile {
-	contextTokens := strconv.Itoa(report.Memory.ContextTokens)
-	args := []string{"--max-model-len", contextTokens}
-	if runtime == "sglang" {
-		args = []string{"--context-length", contextTokens}
-	}
+	args := []string{optimizationcapability.ContextLengthFlag(runtime), strconv.Itoa(report.Memory.ContextTokens)}
 	if gpuCount > 1 {
 		if runtime == "sglang" {
 			args = append(args, "--tp-size", strconv.Itoa(gpuCount))

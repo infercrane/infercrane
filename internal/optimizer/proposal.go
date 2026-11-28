@@ -1234,11 +1234,7 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Request) []string {
 	args := []string{}
 	sglang := compatible.Runtime == "sglang"
-	if request.MaxModelLen > 0 {
-		flag := "--max-model-len"
-		if sglang {
-			flag = "--context-length"
-		}
+	if flag := optimizationcapability.ContextLengthFlag(compatible.Runtime); request.MaxModelLen > 0 && flag != "" {
 		args = append(args, flag, strconv.Itoa(request.MaxModelLen))
 	}
 	if request.GPUCount > 1 && compatible.Adapter != "kubernetes-dynamo" {
