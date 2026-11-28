@@ -708,7 +708,7 @@ func dynamoProviders(t *testing.T) []integration.ProviderProfile {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", "vllm"); err != nil {
+	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", map[string][]string{"vllm": {"INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION"}}, "vllm"); err != nil {
 		t.Fatal(err)
 	}
 	return registry.Snapshot().Providers
