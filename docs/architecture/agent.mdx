@@ -167,7 +167,11 @@ Polling was chosen over a stream because it works through every corporate proxy,
 sessions across control-plane replicas, and survives restarts on either side. Each sync is
 stateless on the control plane (see the next section), so any replica can answer it. The command
 long poll holds one outbound request open for at most 25 seconds; a replica checks for new commands
-every 2 seconds and answers at once when a command is queued through it.
+every 2 seconds and answers at once when a command is queued through it. A command it hands out is
+leased for 10 minutes, and each progress report renews the lease. If the agent goes away before
+the answer is written, or the answer cannot be written, the commands are handed back at once: the
+next poll takes them, and the lost attempt is not counted. An answer that reached the connection
+and was lost after that waits out its lease.
 
 ### Relayed metrics are treated like scraped metrics
 
@@ -360,7 +364,9 @@ limits: the network plugin must enforce `NetworkPolicy`.
 Runs on one agent go one at a time, so two candidates never compete for the same accelerators.
 `GET /api/v1/agents/{id}/candidate-runs/{run}` shows the state, the current phase, and the result;
 `DELETE` cancels it, and the agent removes the candidate on its next report. A run whose agent
-stops reporting is handed out again (at most three times), and a run past its deadline expires.
+stops reporting is handed out again when its 10-minute lease ends (at most three times), and a run
+past its deadline expires. A run whose long-poll answer never reached the agent is handed out again
+at once, without counting the attempt.
 
 A candidate run on its own is stored with the run, not ranked against other candidates. An
 optimization run on the agent's endpoint ranks them: see the next section.

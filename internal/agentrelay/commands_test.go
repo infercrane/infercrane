@@ -18,6 +18,7 @@ type fakeCommandStore struct {
 	mu       sync.Mutex
 	commands []domain.AgentCommand
 	updates  []domain.AgentCommandUpdate
+	released int
 }
 
 func (f *fakeCommandStore) AgentForTenant(_ context.Context, _, id string) (domain.Agent, error) {
@@ -43,17 +44,41 @@ func (f *fakeCommandStore) AgentCommands(context.Context, string, string, int) (
 	defer f.mu.Unlock()
 	return append([]domain.AgentCommand(nil), f.commands...), nil
 }
-func (f *fakeCommandStore) LeaseAgentCommands(_ context.Context, _, _ string, _ time.Time, _ time.Duration, _ int) ([]domain.AgentCommand, error) {
+func (f *fakeCommandStore) LeaseAgentCommands(_ context.Context, _, _ string, at time.Time, lease time.Duration, _ int) ([]domain.AgentCommand, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := []domain.AgentCommand{}
 	for index := range f.commands {
-		if f.commands[index].State == "queued" {
-			f.commands[index].State = "running"
-			out = append(out, f.commands[index])
+		if command := &f.commands[index]; command.State == "queued" {
+			until := at.Add(lease)
+			command.State, command.Phase, command.Attempts, command.LeaseExpiresAt = "running", "leased", command.Attempts+1, &until
+			out = append(out, *command)
 		}
 	}
 	return out, nil
+}
+
+// ReleaseAgentCommand undoes a first lease, as the store does.
+func (f *fakeCommandStore) ReleaseAgentCommand(_ context.Context, _, _, id string, attempt int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for index := range f.commands {
+		if command := &f.commands[index]; command.ID == id && command.State == "running" && command.Phase == "leased" && command.Attempts == attempt {
+			command.State, command.Phase, command.Attempts, command.LeaseExpiresAt = "queued", "", attempt-1, nil
+			f.released++
+		}
+	}
+	return nil
+}
+
+// poll is one long poll whose answer reaches the agent.
+func poll(ctx context.Context, service *Service, agent domain.Agent, wait time.Duration) (agentprotocol.CommandsResponse, error) {
+	var out agentprotocol.CommandsResponse
+	err := service.Commands(ctx, agent, wait, func(response agentprotocol.CommandsResponse) error {
+		out = response
+		return nil
+	})
+	return out, err
 }
 func (f *fakeCommandStore) UpdateAgentCommand(_ context.Context, _, _, _ string, update domain.AgentCommandUpdate) (domain.AgentCommand, error) {
 	f.mu.Lock()
@@ -88,7 +113,7 @@ func TestCandidateRunsReachTheAgentThroughItsLongPoll(t *testing.T) {
 	// A long poll held before the command is queued returns as soon as it is.
 	polled := make(chan agentprotocol.CommandsResponse, 1)
 	go func() {
-		response, _ := service.Commands(context.Background(), agent, 20*time.Second)
+		response, _ := poll(context.Background(), service, agent, 20*time.Second)
 		polled <- response
 	}()
 	time.Sleep(50 * time.Millisecond)
@@ -142,7 +167,7 @@ func TestCandidateRunsReachTheAgentThroughItsLongPoll(t *testing.T) {
 	}
 	// An immediate poll with nothing queued returns at once.
 	started = time.Now()
-	if response, pollErr := service.Commands(context.Background(), agent, 0); pollErr != nil || len(response.Commands) != 0 || time.Since(started) > time.Second {
+	if response, pollErr := poll(context.Background(), service, agent, 0); pollErr != nil || len(response.Commands) != 0 || time.Since(started) > time.Second {
 		t.Fatalf("empty poll=%+v err=%v", response, pollErr)
 	}
 }
@@ -173,7 +198,7 @@ func TestMeasuredWindowsReachTheAgentAndCarryTheirNumbersBack(t *testing.T) {
 		t.Fatalf("the same key queued a second window: %+v %v (%d commands)", again, err, len(store.commands))
 	}
 	agent := domain.Agent{ID: "agent-1", TenantID: "tenant-a", Name: "cluster-a"}
-	response, err := service.Commands(context.Background(), agent, 0)
+	response, err := poll(context.Background(), service, agent, 0)
 	if err != nil || len(response.Commands) != 1 || response.Commands[0].Kind != agentprotocol.CommandMeasureWindow || response.Commands[0].MeasureWindow == nil || response.Commands[0].RunCandidate != nil || response.Commands[0].Control.ServerKey != "vllm-8000" {
 		t.Fatalf("polled=%+v err=%v", response, err)
 	}
@@ -225,7 +250,7 @@ func TestRolloutServerCommandsReachTheAgent(t *testing.T) {
 	if again, _ := service.QueueServerCommand(context.Background(), "tenant-a", "agent-1", "optimization-campaign", "optimization:c1:start", start, nil); again.ID != queued.ID || len(store.commands) != 1 {
 		t.Fatalf("the same key queued twice: %+v", store.commands)
 	}
-	response, err := service.Commands(context.Background(), domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, 0)
+	response, err := poll(context.Background(), service, domain.Agent{ID: "agent-1", TenantID: "tenant-a"}, 0)
 	if err != nil || len(response.Commands) != 1 || response.Commands[0].StartServer == nil || response.Commands[0].Control != nil {
 		t.Fatalf("polled: %+v %v", response, err)
 	}

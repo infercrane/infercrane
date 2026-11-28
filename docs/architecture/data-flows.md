@@ -215,7 +215,9 @@ Both return a target that follows the same runtime and reconciliation path as an
 2. The agent's long poll (`GET /api/v1/agent/commands?wait=25s`) leases it with
    `FOR UPDATE SKIP LOCKED`; a replica checks every 2 seconds and answers at once when the command
    was queued through it. Commands past their deadline expire; a lease that lapses three times
-   fails the command.
+   fails the command. If the agent goes away before the answer is written, or the answer cannot be
+   written, the lease is undone at once: the next poll takes the command, and the lost attempt is
+   not counted.
 3. The agent checks the image and accelerator against its allowlists, applies one Deployment and
    one Service with `provision.Kubernetes` in its namespace, waits for readiness, runs AIPerf
    against the current setup, the candidate, and the current setup again, and runs the answer check
