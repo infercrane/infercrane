@@ -22,6 +22,28 @@
 | [Terraform Plugin Testing](https://github.com/hashicorp/terraform-plugin-testing) | Real protocol CRUD/import acceptance | MPL-2.0 | Development-only provider test dependency |
 | [Terraform CLI](https://github.com/hashicorp/terraform) | Protocol acceptance runner | BSL-1.1 for current releases | Downloaded, checksum-verified development tool; never linked, embedded, or redistributed |
 
+## Runtime image overrides
+
+The control-plane image pins its tools in the root `Dockerfile`. kubectl is `v1.37.3`, verified
+against the `.sha256` files Kubernetes publishes on `dl.k8s.io`. Three Python packages are replaced
+after pip resolves the pinned tools, because a pinned tool declares a range that only allows
+vulnerable versions:
+
+| Package | Installed | Resolver would install | Held back by | Drop the override when |
+|---|---|---|---|---|
+| Pillow | 13.0.0 | 12.2.0 | AIPerf 0.12.0 (`~=12.2.0`) and vastai (`==12.2.0` in every release) | AIPerf and vastai both allow 13.0 |
+| aiohttp | 3.14.5 | 3.13.5 | AIPerf 0.12.0 (`~=3.13.3`) | the AIPerf pin moves to 0.14 |
+| cryptography | 50.0.2 | 46.0.5 | vastai 1.3.0 (`==46.0.5`) and runpod 1.9.1 (`<47`), both held back by the aiohttp cap | pip picks 50.0 or later on its own |
+
+Known findings still in the image:
+
+- urllib3 2.6.3 in the AWS CLI environment. Every AWS CLI v2 release through 2.42.5 pins
+  `urllib3<=2.6.3`, and earlier urllib3 upgrades needed changes to the CLI's bundled botocore, so
+  the image does not replace it.
+- golang.org/x/net v0.57.0 inside kubectl. v1.37.3 is the newest stable kubectl; the fixed x/net is
+  only in the v1.38 pre-releases. Most of these HTTP/2 advisories affect servers; InferCrane runs
+  kubectl only as a client of the operator's API server and never as `kubectl proxy`.
+
 ## GPU profiling tools
 
 [GPU profiling](/features/gpu-profiling) reads the output of profilers the operator already runs. None of

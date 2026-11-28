@@ -55,23 +55,32 @@ ENV CLOUDSDK_PYTHON=/usr/local/bin/python3
 ARG GCLOUD_CLI_VERSION=577.0.0
 ARG GCLOUD_CLI_AMD64_SHA256=0b32d330446ce7b0f57f253e7efab4636c18fb1f87a3ac31c6c3f2a2a697525e
 ARG GCLOUD_CLI_ARM64_SHA256=dbac26bdf80d72b5d13538e3a215dcbfe2781edfd2d69723effbeef3839cffb8
-ARG KUBECTL_VERSION=v1.37.2
-ARG KUBECTL_AMD64_SHA256=c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4
-ARG KUBECTL_ARM64_SHA256=fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509
-# Two pinned tools hold vulnerable dependencies; replace them in place after the resolver runs.
-# AIPerf 0.12.0 pins Pillow 12.2 (critical advisories fixed in 13.0). AIPerf uses Pillow only to
-# synthesize image prompts, which InferCrane benchmarks never send. vastai 1.0.0 caps cryptography at
-# 46.0.4 (CVE-2026-39892, fixed in the 46.0.7 patch release). Drop each override when the AIPerf pin
-# moves to 0.14 or vastai-sdk resolves a newer vastai.
+ARG KUBECTL_VERSION=v1.37.3
+ARG KUBECTL_AMD64_SHA256=9a1b55af2795b25dd288dbef62387db9b5530087ab918d28c6ad067f2e3cb07c
+ARG KUBECTL_ARM64_SHA256=da160b41491cc5c5e575d78bb665810fb900f70fad666d834094b24ec56d304f
+# Pinned tools declare ranges that hold vulnerable dependencies; replace those packages in place
+# after the resolver runs.
+# AIPerf 0.12.0 and every vastai release pin Pillow 12.2 (critical advisories fixed in 13.0). AIPerf
+# uses Pillow only to synthesize image prompts, which InferCrane benchmarks never send.
+# AIPerf 0.12.0 also pins aiohttp ~=3.13.3 (high advisories fixed in 3.14.4). Upstream AIPerf raised
+# its aiohttp floor to 3.14.3 by changing only the pin (ai-dynamo/aiperf#1277), and its aiohttp
+# transport is unchanged since 0.12.0.
+# The aiohttp cap also holds vastai at 1.3.0, which pins cryptography==46.0.5, and that holds runpod
+# at 1.9.1, which caps cryptography below 47. Neither imports cryptography; runpod reaches it only
+# through paramiko, which has no upper bound. High advisories in cryptography 46.x are fixed only
+# in 48.0.1, 49.0.0 and 50.0.0.
+# Drop each override when the resolver itself picks a fixed version: aiohttp once the AIPerf pin
+# moves to 0.14, Pillow once vastai also drops its pin, cryptography once pip picks 50.0 or later.
 ARG PILLOW_VERSION=13.0.0
-ARG CRYPTOGRAPHY_VERSION=46.0.7
+ARG AIOHTTP_VERSION=3.14.5
+ARG CRYPTOGRAPHY_VERSION=50.0.2
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install --no-install-recommends -y build-essential ca-certificates curl git openssh-client rsync unzip \
 	&& python -m pip install --no-cache-dir --upgrade pip \
 	&& python -m pip install --no-cache-dir "vllm-router==${VLLM_ROUTER_VERSION}" "skypilot[${SKYPILOT_EXTRAS}]==${SKYPILOT_VERSION}" "fastapi<0.145" "vastai-sdk>=1.0,<2" "aiperf==${AIPERF_VERSION}" \
-	&& python -m pip install --no-cache-dir --no-deps "pillow==${PILLOW_VERSION}" "cryptography==${CRYPTOGRAPHY_VERSION}" \
-	&& python -c "import sky, cryptography, PIL" \
+	&& python -m pip install --no-cache-dir --no-deps "pillow==${PILLOW_VERSION}" "aiohttp==${AIOHTTP_VERSION}" "cryptography==${CRYPTOGRAPHY_VERSION}" \
+	&& python -c "import sky, aiohttp, cryptography, PIL, paramiko" \
 	&& aiperf --version \
 	&& python -m venv /opt/infercrane-huggingface \
 	&& /opt/infercrane-huggingface/bin/pip install --no-cache-dir "huggingface_hub[hf_xet]==${HUGGINGFACE_HUB_VERSION}"

@@ -27,7 +27,8 @@ ignore:
   - vulnerability: CVE-2026-8926
     package: {name: libcurl3t64-gnutls, type: deb}
   # golang.org/x/net in the upstream kubectl binary: an HTTP/2 server flow-control bug. The image
-  # runs kubectl only as a client, never as a server, and kubectl v1.37.2 is the newest release.
+  # runs kubectl only as a client, never as a server. kubectl v1.37.3 is the newest stable release
+  # and still vendors x/net v0.57.0; the fix (0.60.0) is only in the v1.38 pre-releases.
   - vulnerability: GO-2026-6612
     package:
       name: golang.org/x/net
