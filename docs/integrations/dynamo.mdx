@@ -119,6 +119,22 @@ infercrane plan infercrane.yaml
 infercrane deploy infercrane.yaml --idempotency-key llama-disaggregated-r1
 ```
 
+## Optimization setups
+
+A `kubernetes-dynamo` setup runs only where Dynamo runs. InferCrane proposes one only when it knows
+Dynamo is there:
+
+- The request names the adapter: `infercrane optimize propose MODEL --provider kubernetes-dynamo`.
+- The control plane that plans has the image and version pair above set for that runtime. Its
+  proposals for `provider kubernetes`, such as one with `--diagnosis-endpoint`, then hold Dynamo
+  setups for those runtimes after the plain Kubernetes ones.
+
+Otherwise a proposal for `provider kubernetes` holds plain Kubernetes setups only, and a warning
+names the Dynamo setups it left out. `infercrane optimize propose` without `--diagnosis-endpoint`
+plans on your machine and does not read the control plane's settings, so name the adapter there.
+`infercrane integrations --output json` lists the runtimes the control plane runs Dynamo with, under
+`prerequisite.configured_runtimes` of the `kubernetes-dynamo` provider.
+
 ## Ownership matrix
 
 | Concern | Owner |

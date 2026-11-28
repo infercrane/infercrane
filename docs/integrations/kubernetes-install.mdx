@@ -116,8 +116,9 @@ infercrane migrate rollback support-bot
 
 On the NVIDIA A10G with vLLM 0.34.0 the planner proposes the qualified Kubernetes setup directly.
 On any other GPU add `--include-simulated`, because the catalog marks that pair as simulated (the
-run still measures every setup), and `--max-candidates 1`, which keeps the plain Kubernetes setup
-ahead of a `kubernetes-dynamo` one that needs NVIDIA Dynamo. Grade a set the way your model answers:
+run still measures every setup). The setups are plain Kubernetes ones: a `kubernetes-dynamo` setup
+needs NVIDIA Dynamo, and InferCrane proposes one only when it knows Dynamo runs in the cluster
+([how](/integrations/dynamo#optimization-setups)). Grade a set the way your model answers:
 a model that explains its answer ("32 + 30 = 62.") scores 0 under `exact_match`; use `answer_line`.
 
 ## Remove it

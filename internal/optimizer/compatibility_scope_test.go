@@ -47,7 +47,9 @@ func TestKubernetesProposalUsesTheQualifiedA10GTupleOnly(t *testing.T) {
 		}
 		states[candidate.Deployment.Provider.Adapter] = candidate.CompatibilityState
 	}
-	if states["kubernetes"] != string(integration.QualificationReal) || states["kubernetes-dynamo"] != string(integration.QualificationSimulated) {
+	// The cluster ran no NVIDIA Dynamo, and asking for the cloud does not say
+	// it does, so no kubernetes-dynamo setup joins the simulated ones.
+	if _, dynamo := states["kubernetes-dynamo"]; states["kubernetes"] != string(integration.QualificationReal) || dynamo {
 		t.Fatalf("with simulated setups: %v", states)
 	}
 }

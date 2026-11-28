@@ -13,7 +13,8 @@ import (
 // A planner run once refused every technique with "The starting setup is a
 // Dynamo serving graph": the overload profile let the Dynamo graph come first
 // by content hash (fixed by c425fcf6). The diagnosis is synthetic
-// (testdata/diagnosis) and trips the same kv_cache.saturation rule.
+// (testdata/diagnosis) and trips the same kv_cache.saturation rule. The
+// control plane is configured for Dynamo, so the graph is still a candidate.
 func TestAFullKVCacheUnderOverloadYieldsARunnableOneDraftSetup(t *testing.T) {
 	body, err := os.ReadFile("testdata/diagnosis/kv-cache-pressure-overload.json")
 	if err != nil {
@@ -27,7 +28,7 @@ func TestAFullKVCacheUnderOverloadYieldsARunnableOneDraftSetup(t *testing.T) {
 		request := Request{ModelIdentity: "Qwen/Qwen3.8-27B-FP8", ModelRevision: "c3a462cc3d38cf351f3b26cbd763469eeb74ef81", Provider: "kubernetes", GPU: "H100",
 			Runtimes: []string{"vllm"}, Objective: "throughput", WorkloadProfile: profile, MaxCandidates: 6, IncludeSimulated: true,
 			ModelFeatures: []string{FeatureNativeMTP}, ModelConfigDigest: recipeTestDigest, Diagnosis: &diagnosis}
-		proposal, err := catalogSource(t).Propose(context.Background(), request)
+		proposal, err := dynamoCatalogSource(t, "vllm").Propose(context.Background(), request)
 		if err != nil {
 			t.Fatalf("%s: %v", profile, err)
 		}

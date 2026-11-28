@@ -150,6 +150,33 @@ func registerSkyPilotPlanningCandidates(registry *integration.Registry, manifest
 	return nil
 }
 
+// configuredDynamoRuntimes are the runtimes this control plane runs Dynamo
+// graphs with: each one with a complete image digest and version pair.
+func configuredDynamoRuntimes(cfg config.Config) []string {
+	var runtimes []string
+	for _, runtimeName := range []string{"vllm", "sglang"} {
+		if cfg.DynamoRuntimeEnabled(runtimeName) {
+			runtimes = append(runtimes, runtimeName)
+		}
+	}
+	return runtimes
+}
+
+// configureDynamoPlanning tells the planner which runtimes this control plane
+// runs Dynamo graphs with, the same ones it registers Dynamo backends for. A
+// proposal for provider kubernetes then offers a kubernetes-dynamo setup only
+// where one can run.
+func configureDynamoPlanning(registry *integration.Registry, cfg config.Config) error {
+	runtimes := configuredDynamoRuntimes(cfg)
+	if len(runtimes) == 0 {
+		return nil
+	}
+	if err := registry.ConfigurePrerequisite("kubernetes-dynamo", runtimes...); err != nil {
+		return fmt.Errorf("configure Dynamo planning: %w", err)
+	}
+	return nil
+}
+
 func computeProviderInventory(cfg config.Config, configuredSkyPilotProviders []config.SkyPilotProvider) []controlapi.ComputeProvider {
 	providers := []controlapi.ComputeProvider{
 		{ID: "runpod", Label: "RunPod", Mode: "control-plane", State: readinessState(cfg.RunPodAPIKey != ""), Reason: readinessReason(cfg.RunPodAPIKey != "", "RUNPOD_API_KEY is not configured")},
@@ -4405,6 +4432,9 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	if err = registerSkyPilotPlanningCandidates(integrationRegistry, cfg.SkyPilotProviders); err != nil {
 		return err
 	}
+	if err = configureDynamoPlanning(integrationRegistry, cfg); err != nil {
+		return err
+	}
 	directory := routes.New()
 	contextPassports := contextpassport.New()
 	if err := refreshContextPassports(ctx, s, contextPassports); err != nil {
@@ -4999,10 +5029,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 			ModelSecretName: cfg.DynamoModelSecretName, GPUResource: cfg.KubernetesGPUResource,
 			GPUProductLabel: cfg.KubernetesGPUProductLabel,
 		}
-		for _, runtimeName := range []string{"vllm", "sglang"} {
-			if !cfg.DynamoRuntimeEnabled(runtimeName) {
-				continue
-			}
+		for _, runtimeName := range configuredDynamoRuntimes(cfg) {
 			elasticBackends = append(elasticBackends, workflows.ReplicaBackend{Name: "kubernetes-dynamo", Cloud: "kubernetes", Runtime: runtimeName, Profile: dynamoProfile, Provider: dynamoProvider})
 		}
 	}

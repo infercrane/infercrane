@@ -350,9 +350,17 @@ The planner's catalog qualifies Kubernetes with vLLM 0.34.0 on a real cluster fo
 NVIDIA A10G (`--gpu NVIDIA-A10G`), and proposes setups for it directly. For every other GPU, a
 time-sliced label such as `NVIDIA-A10G-SHARED`, or another engine version, the pair is marked
 simulated, and `infercrane optimize propose --provider kubernetes` proposes no setup unless you add
-`--include-simulated`; the proof still measures every setup it runs. With that flag the planner may
-also propose a `kubernetes-dynamo` setup; leave it out unless NVIDIA Dynamo runs in the cluster. See
-[Migration](/features/migration) for the commands.
+`--include-simulated`; the proof still measures every setup it runs.
+
+A `kubernetes-dynamo` setup runs only where NVIDIA Dynamo runs, so InferCrane proposes one only when
+it knows Dynamo is there:
+
+- you name the adapter: `--provider kubernetes-dynamo`; or
+- the control plane that plans has a Dynamo image and version pair set for that runtime (see
+  [NVIDIA Dynamo](/integrations/dynamo#optimization-setups)).
+
+Otherwise `--provider kubernetes` proposes plain Kubernetes setups only, and the proposal's warnings
+say which Dynamo setups were left out. See [Migration](/features/migration) for the commands.
 
 ## Known limits
 
