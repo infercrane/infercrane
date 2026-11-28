@@ -21,7 +21,7 @@ import (
 // and plain for scripts, pipes, NO_COLOR, and coding agents.
 
 const (
-	rootTagline = "Run open models in your own cloud at the lowest cost that still meets\nyour speed and quality targets."
+	rootTagline = "Same model. Less compute. Proven on your own traffic.\nInferCrane proves every serving change on your traffic before it ships."
 	cliDocsURL  = "https://docs.infercrane.com/cli"
 )
 
