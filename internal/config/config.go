@@ -17,6 +17,7 @@ import (
 	"github.com/infercrane/infercrane/internal/engineingress"
 	"github.com/infercrane/infercrane/internal/managedbilling"
 	"github.com/infercrane/infercrane/internal/pricing"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
 )
 
@@ -70,7 +71,10 @@ type Config struct {
 	// KubernetesObjectStoreSecret optionally names a Secret whose keys become
 	// the environment of the container that fetches imported S3 or GCS files;
 	// the fetch images override the pinned AWS and Google Cloud CLI images.
-	KubernetesObjectStoreSecret, KubernetesS3FetchImage, KubernetesGCSFetchImage                         string
+	KubernetesObjectStoreSecret, KubernetesS3FetchImage, KubernetesGCSFetchImage string
+	// KubernetesTolerations optionally let model server pods schedule onto
+	// tainted nodes, such as a GPU node pool tainted nvidia.com/gpu:NoSchedule.
+	KubernetesTolerations                                                                                []provision.KubernetesToleration
 	DynamoVLLMImageDigest, DynamoVLLMRuntimeVersion, DynamoSGLangImageDigest, DynamoSGLangRuntimeVersion string
 	DynamoModelSecretName                                                                                string
 	Port, RouterStartPort, DatabaseMaxOpen, DatabaseMaxIdle                                              int
@@ -444,6 +448,10 @@ func load(requireAPIKey bool) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	kubernetesTolerations, err := provision.ParseKubernetesTolerations(os.Getenv("INFERCRANE_KUBERNETES_TOLERATIONS_JSON"))
+	if err != nil {
+		return Config{}, fmt.Errorf("INFERCRANE_KUBERNETES_TOLERATIONS_JSON: %w", err)
+	}
 	optimizationPrices, err := envOptimizationPrices("INFERCRANE_OPTIMIZATION_PRICES_JSON")
 	if err != nil {
 		return Config{}, err
@@ -661,6 +669,7 @@ func load(requireAPIKey bool) (Config, error) {
 		KubernetesObjectStoreSecret:         env("INFERCRANE_KUBERNETES_OBJECT_STORE_SECRET", ""),
 		KubernetesS3FetchImage:              env("INFERCRANE_KUBERNETES_S3_FETCH_IMAGE", ""),
 		KubernetesGCSFetchImage:             env("INFERCRANE_KUBERNETES_GCS_FETCH_IMAGE", ""),
+		KubernetesTolerations:               kubernetesTolerations,
 		DynamoVLLMImageDigest:               env("INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", ""),
 		DynamoVLLMRuntimeVersion:            env("INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION", ""),
 		DynamoSGLangImageDigest:             env("INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", ""),
@@ -1249,7 +1258,7 @@ func validateServerTLS(config Config) error {
 }
 
 func validateKubernetes(config Config) error {
-	configured := config.KubernetesContext != "" || config.KubernetesImageDigest != "" || len(config.KubernetesArtifactPVCs) > 0 || config.KubernetesArtifactCachePolicy == "required"
+	configured := config.KubernetesContext != "" || config.KubernetesImageDigest != "" || len(config.KubernetesArtifactPVCs) > 0 || config.KubernetesArtifactCachePolicy == "required" || len(config.KubernetesTolerations) > 0
 	if !configured {
 		return nil
 	}

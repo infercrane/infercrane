@@ -613,6 +613,7 @@ func addHelpFlags(command *cobra.Command, name string) {
 		stringFlag("engine-ingress", "", "the only sources that may reach test setup pods: pods:KEY=VALUE, namespace:KEY=VALUE, address ranges, or none (default: $INFERCRANE_KUBERNETES_ENGINE_INGRESS)")
 		stringFlag("gpu-resource", "nvidia.com/gpu", "device-plugin resource test setups request")
 		stringFlag("gpu-product-label", "nvidia.com/gpu.product", "node label that names the accelerator")
+		stringFlag("tolerations", "", `taints test setup pods tolerate, as JSON: [{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]`)
 		stringFlag("allow-image", "", "image repository test setups may use (repeatable); nothing else runs")
 		stringFlag("allow-accelerator", "", "accelerator test setups may request (repeatable); default any")
 		stringFlag("eval-set", "", "a local eval set NAME=PATH for the answer check (repeatable); it never leaves this cluster")

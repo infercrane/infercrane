@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/agent"
 	"github.com/infercrane/infercrane/internal/config"
+	"github.com/infercrane/infercrane/internal/engineingress"
+	"github.com/infercrane/infercrane/internal/provision"
 	"github.com/infercrane/infercrane/internal/testtools/fakeengine"
 )
 
@@ -133,6 +136,43 @@ func TestAgentRunOnceRefusesPlainHTTPToARemoteControlPlane(t *testing.T) {
 	err := agentCommand(context.Background(), []string{"run", "--once", "--no-detect", "--server", "http://127.0.0.1:1"})
 	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
 		t.Fatalf("plain HTTP control plane: %v", err)
+	}
+}
+
+func TestAgentRunTolerationsAreParsedStrictlyAndReachTestSetupPods(t *testing.T) {
+	const gpuTaint = `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]`
+	want := []provision.KubernetesToleration{{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "NoSchedule"}}
+	flags, err := parseAgentFlags("agent run", []string{"--executor", "kubernetes", "--kubernetes-namespace", "models", "--tolerations", gpuTaint}, true)
+	if err != nil || !reflect.DeepEqual(flags.tolerations, want) {
+		t.Fatalf("tolerations=%#v err=%v", flags.tolerations, err)
+	}
+	agentPods := []engineingress.Peer{{PodLabels: map[string]string{"app.kubernetes.io/name": "infercrane-agent"}}}
+	provider := flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key", agentPods)
+	if !reflect.DeepEqual(provider.Tolerations, want) || !reflect.DeepEqual(provider.EngineIngress, agentPods) || provider.Context != "in-cluster" || provider.Namespace != "models" || provider.WorkloadAPI != "deployment" ||
+		provider.ServiceAccount != "infercrane-runtime" || provider.WorkerSecretName != "infercrane-worker" || provider.WorkerSecretKey != "api-key" ||
+		provider.GPUResource != "nvidia.com/gpu" || provider.GPUProductLabel != "nvidia.com/gpu.product" || provider.ArtifactCachePolicy != "disabled" {
+		t.Fatalf("provider=%#v", provider)
+	}
+	// Without the flag, test setup pods get no tolerations, as before.
+	flags, err = parseAgentFlags("agent run", []string{"--executor", "kubernetes", "--kubernetes-namespace", "models"}, true)
+	if err != nil || flags.tolerations != nil || flags.kubernetesProvider("in-cluster", "infercrane-worker", "api-key", agentPods).Tolerations != nil {
+		t.Fatalf("tolerations without the flag: %#v err=%v", flags.tolerations, err)
+	}
+	for _, args := range [][]string{
+		{"--executor", "kubernetes", "--tolerations", "nvidia.com/gpu:NoSchedule"},
+		{"--executor", "kubernetes", "--tolerations", `[{"key":"nvidia.com/gpu","effect":"NoSchedule"}]`},
+		{"--executor", "kubernetes", "--tolerations", `[{"operator":"Exists","effect":"NoSchedule"}]`},
+		{"--executor", "kubernetes", "--tolerations", `[{"key":"nvidia.com/gpu","operator":"Exists"}]`},
+		{"--executor", "kubernetes", "--tolerations", `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoExecute","tolerationSeconds":60}]`},
+		// The flag changes test setup pods only, so it needs the executor.
+		{"--tolerations", gpuTaint},
+	} {
+		if _, err = parseAgentFlags("agent run", args, true); err == nil || !strings.Contains(err.Error(), "--tolerations") {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if _, err = parseAgentFlags("agent detect", []string{"--tolerations", gpuTaint}, false); err == nil {
+		t.Fatal("agent detect accepted --tolerations")
 	}
 }
 

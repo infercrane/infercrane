@@ -82,6 +82,16 @@ executor:
   # Device-plugin resource and node label of your accelerators.
   gpuResource: nvidia.com/gpu
   gpuProductLabel: nvidia.com/gpu.product
+  # Taints on your accelerator nodes that candidate pods tolerate. Set this
+  # when the nodes are tainted (kubectl describe node shows Taints); a
+  # candidate pod stays Pending on a tainted node without it. Each entry needs
+  # key, operator (Exists or Equal) and effect, and takes a value only with
+  # Equal. Anything else is refused. The agent's own pod uses the top-level
+  # tolerations below, not these.
+  tolerations: []
+  #  - key: nvidia.com/gpu
+  #    operator: Exists
+  #    effect: NoSchedule
   # Image repositories candidates may use. Required: nothing else runs.
   allowedImages: []
   #  - vllm/vllm-openai

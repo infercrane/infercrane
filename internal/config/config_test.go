@@ -3,9 +3,12 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/infercrane/infercrane/internal/provision"
 )
 
 func TestLoadOptimizationPricesRequiresExactSourcedEvidence(t *testing.T) {
@@ -660,6 +663,42 @@ func TestKubernetesConfigurationIsExplicitCompleteAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_KUBERNETES_WORKLOAD_API", "operator")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "deployment or kserve") {
 		t.Fatalf("expected bounded workload API failure, got %v", err)
+	}
+}
+
+func TestKubernetesTolerationsAreOptionalAndStrict(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "production")
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "pods:app.kubernetes.io/name=infercrane")
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	cfg, err := Load()
+	if err != nil || cfg.KubernetesTolerations != nil {
+		t.Fatalf("tolerations without the setting: %#v err=%v", cfg.KubernetesTolerations, err)
+	}
+	const gpuTaint = `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]`
+	t.Setenv("INFERCRANE_KUBERNETES_TOLERATIONS_JSON", gpuTaint)
+	cfg, err = Load()
+	want := []provision.KubernetesToleration{{Key: "nvidia.com/gpu", Operator: "Exists", Effect: "NoSchedule"}}
+	if err != nil || !reflect.DeepEqual(cfg.KubernetesTolerations, want) {
+		t.Fatalf("tolerations=%#v err=%v", cfg.KubernetesTolerations, err)
+	}
+	for _, invalid := range []string{
+		`nvidia.com/gpu:NoSchedule`,
+		`[{"key":"nvidia.com/gpu","effect":"NoSchedule"}]`,
+		`[{"operator":"Exists","effect":"NoSchedule"}]`,
+		`[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoExecute","tolerationSeconds":60}]`,
+	} {
+		t.Setenv("INFERCRANE_KUBERNETES_TOLERATIONS_JSON", invalid)
+		if _, err = Load(); err == nil || !strings.Contains(err.Error(), "INFERCRANE_KUBERNETES_TOLERATIONS_JSON") {
+			t.Fatalf("%s was accepted: %v", invalid, err)
+		}
+	}
+	// Tolerations belong to a complete Kubernetes configuration.
+	t.Setenv("INFERCRANE_KUBERNETES_TOLERATIONS_JSON", gpuTaint)
+	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "")
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "partial") {
+		t.Fatalf("tolerations without a Kubernetes configuration: %v", err)
 	}
 }
 

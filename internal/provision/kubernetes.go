@@ -47,7 +47,12 @@ type Kubernetes struct {
 	ObjectStoreSecretName string
 	// S3FetchImage and GCSFetchImage override the pinned fetch images.
 	S3FetchImage, GCSFetchImage string
-	Runner                      CommandRunner
+	// Tolerations optionally let model server pods schedule onto tainted
+	// nodes, for example a GPU node pool tainted nvidia.com/gpu:NoSchedule.
+	// Without them the pod spec has no tolerations and such a pod stays
+	// Pending. InferCrane never changes a node's taints.
+	Tolerations []KubernetesToleration
+	Runner      CommandRunner
 }
 
 // Pinned object store fetch images (multi-architecture indexes): the AWS CLI
@@ -421,6 +426,10 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 		container["args"] = command[1:]
 	}
 	podSpec := map[string]any{"serviceAccountName": k.ServiceAccount, "terminationGracePeriodSeconds": shutdown, "containers": []any{container}, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}}
+	tolerations := k.podTolerations()
+	if len(tolerations) > 0 {
+		podSpec["tolerations"] = tolerations
+	}
 	var volumes, mounts []any
 	if artifactClaim != "" {
 		mounts = append(mounts, map[string]any{"name": "model-cache", "mountPath": "/models", "readOnly": true})
@@ -449,6 +458,9 @@ func (k Kubernetes) manifest(spec ReplicaSpec, artifactClaim string) ([]byte, er
 	if k.WorkloadAPI == "kserve" {
 		metadata["annotations"].(map[string]any)["serving.kserve.io/deploymentMode"] = "Standard"
 		predictor := map[string]any{"minReplicas": 1, "maxReplicas": 1, "serviceAccountName": k.ServiceAccount, "nodeSelector": map[string]any{k.GPUProductLabel: spec.GPU}, "containers": []any{container}}
+		if len(tolerations) > 0 {
+			predictor["tolerations"] = tolerations
+		}
 		if volumes, ok := podSpec["volumes"]; ok {
 			predictor["volumes"] = volumes
 		}
@@ -654,7 +666,7 @@ func (k Kubernetes) validateConfig() error {
 	if !validKubernetesSecretKey(k.WorkerSecretKey) {
 		return fmt.Errorf("invalid Kubernetes Secret key %q", k.WorkerSecretKey)
 	}
-	return nil
+	return ValidateKubernetesTolerations(k.Tolerations)
 }
 
 func (k Kubernetes) imagePolicy() string {
@@ -826,7 +838,11 @@ func (k Kubernetes) intentHash(spec ReplicaSpec) (string, error) {
 		// so intent hashes of existing replicas hold.
 		ObjectStoreSecret string `json:",omitempty"`
 		FetchImage        string `json:",omitempty"`
-	}{Spec: spec, Namespace: k.Namespace, WorkloadAPI: k.WorkloadAPI, ServiceAccount: k.ServiceAccount, WorkerSecret: k.WorkerSecretName, WorkerKey: k.WorkerSecretKey, ImageDigest: k.ImageDigest, GPUResource: k.GPUResource, GPULabel: k.GPUProductLabel, ImagePolicy: k.imagePolicy()}
+		// Tolerations change the pod spec, so they are part of the intent.
+		// They are left out when none are configured, so intent hashes of
+		// clusters that do not set them hold.
+		Tolerations []KubernetesToleration `json:",omitempty"`
+	}{Spec: spec, Namespace: k.Namespace, WorkloadAPI: k.WorkloadAPI, ServiceAccount: k.ServiceAccount, WorkerSecret: k.WorkerSecretName, WorkerKey: k.WorkerSecretKey, ImageDigest: k.ImageDigest, GPUResource: k.GPUResource, GPULabel: k.GPUProductLabel, ImagePolicy: k.imagePolicy(), Tolerations: k.podTolerations()}
 	if modelInputs(spec).Objects {
 		value.ObjectStoreSecret = k.ObjectStoreSecretName
 		value.FetchImage = k.objectFetchContainer(spec)["image"].(string)

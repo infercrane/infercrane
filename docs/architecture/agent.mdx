@@ -332,7 +332,8 @@ The agent then, in its own namespace:
    (`provision.Kubernetes`: one Deployment, one Service and one engine NetworkPolicy, server-side
    apply, no cluster-scoped permission) and waits for it to be ready. The candidate requires the
    worker key like every engine; a candidate whose command starts SGLang gets it through the same
-   configuration-file launcher as a deployment;
+   configuration-file launcher as a deployment. Tainted GPU nodes need the operator's tolerations
+   (`--tolerations`, Helm `executor.tolerations`; see [Tainted GPU nodes](#tainted-gpu-nodes));
 3. measures the current setup, the candidate, and the current setup again with AIPerf, so the
    result carries a same-setup noise figure;
 4. runs the answer check on both: the built-in public suite (`default`), or an eval set the
@@ -481,6 +482,29 @@ publishes, unless `image.tag` or `image.digest` names another one.
 
 `scripts/test-agent-data-plane-kind.sh` installs the chart on a kind cluster and proves the data
 path end to end (see [Proof](#proof)).
+
+### Tainted GPU nodes
+
+Candidate pods get no tolerations by default. If your GPU nodes are tainted
+(`kubectl describe node NODE | grep Taints`, commonly `nvidia.com/gpu:NoSchedule`), a candidate pod
+stays `Pending` and its run ends `candidate_not_ready`. Name the taints candidate pods tolerate:
+
+```yaml
+executor:
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+```
+
+The chart passes the list to the agent as `--tolerations` (a JSON array with the same fields), and
+the agent renders it into each candidate's pod spec through the same provider setting the control
+plane has ([Kubernetes](/integrations/kubernetes#tainted-gpu-nodes)). Every entry needs `key`,
+`operator` (`Exists` or `Equal`), and `effect` (`NoSchedule`, `PreferNoSchedule`, or `NoExecute`),
+and takes a `value` only with `Equal`; at most 16 entries. Anything else is refused: `helm install`
+fails on a missing or unknown field, and the agent does not start with a list it cannot accept, so
+nothing is applied. The top-level `tolerations` value of the chart is for the agent's own pod, not
+for candidates. InferCrane never changes a node's taints.
 
 ## What leaves your cloud
 
