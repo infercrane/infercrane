@@ -349,11 +349,19 @@ outside the catalog still needs metadata access; without it, the response says s
 runtime's default memory share, a 16-bit KV cache, and the checkpoint's own precision, whatever
 `--gpu-memory-utilization`, `--kv-cache-dtype`, or `--quantization` say.
 
+The runtimes take their memory share from the total the GPU's driver reports, which is below the
+nominal size: ECC and the driver reserve keep some. So the estimate uses that total, from published
+`nvidia-smi` and ROCm readings: 22.5 GiB for the 24 GB A10G, 22.5 GiB for the L4, 45 GiB for the
+L40S, 79.6 GiB for the H100. InferCrane records it for the T4, L4, A10, A10G, RTX 4090, A40, L40S,
+A100, H100, H200, B200, and MI300X. On any other GPU it does not size the context, and the response
+names the flag to set.
+
 The response's `context_length` names the length, `set_by` (`request`, `infercrane`, or
 `runtime`), and the reason; `infercrane deploy` prints them, and the bound is recorded in the
 revision's `runtime_args`. For `Qwen/Qwen3-8B` on one `NVIDIA-A10G`, the estimate needs about
-22.9 GiB for one 40960-token request against 21.6 GiB usable, and about 18.4 GiB at 8192 tokens, so
-InferCrane sets `--max-model-len 8192`. On one L40S the full context fits and is kept.
+22.9 GiB for one 40960-token request against 20.2 GiB usable (90% of the 22.5 GiB the driver
+reports), and about 18.4 GiB at 8192 tokens, so InferCrane sets `--max-model-len 8192`. On one L40S
+the full context fits and is kept.
 
 Your own length always wins: pass `infercrane deploy MODEL --max-model-len N`, or set
 `--max-model-len` (vLLM) or `--context-length` (SGLang) in `runtime.args`, as `--flag N` or

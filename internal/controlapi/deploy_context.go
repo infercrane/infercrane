@@ -63,9 +63,9 @@ func (a API) fitContextLength(ctx context.Context, tenant string, request *workf
 	if !readable {
 		return unbounded(nil, "InferCrane could not read the tensor parallel size in the engine arguments, so it cannot size the context.")
 	}
-	memory, known := provideridentity.AcceleratorMemoryGiB(request.GPU)
+	usable, known := provideridentity.AcceleratorUsableMemoryMiB(request.GPU)
 	if !known {
-		return unbounded(nil, "InferCrane does not know how much memory "+request.GPU+" has, so it cannot size the context.")
+		return unbounded(nil, "InferCrane has no published figure for the memory "+request.GPU+" reports to the runtime, so it cannot size the context.")
 	}
 	model, registries, estimate, failure := a.contextModel(ctx, tenant, request)
 	if failure != "" {
@@ -75,7 +75,9 @@ func (a API) fitContextLength(ctx context.Context, tenant string, request *workf
 	// arguments set it): the runtimes refuse to start when a single request
 	// at the context length cannot fit the KV cache left beside the weights.
 	now := time.Now().UTC()
-	gpus := []modelcheck.GPU{{Name: request.GPU, MemoryGiB: memory}}
+	// The runtimes take their share of the memory the driver reports, not
+	// of the GPU's nominal size.
+	gpus := []modelcheck.GPU{{Name: request.GPU, UsableMiB: usable}}
 	fit := func(contextTokens int) modelcheck.Report {
 		return modelcheck.Evaluate(model, modelcheck.EvaluateOptions{ContextTokens: contextTokens, Concurrency: 1, GPUs: gpus, Registries: registries, Now: now})
 	}

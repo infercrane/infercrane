@@ -207,3 +207,17 @@ func TestCustomImageDeployGetsNoContextLength(t *testing.T) {
 		t.Fatalf("args=%v context=%+v calls=%d", submitted.RuntimeArgs, fit, calls.Load())
 	}
 }
+
+// A GPU whose driver-reported memory has no published reading is not sized
+// from its nominal size: the context is left to the runtime, with the flag
+// that bounds it.
+func TestDeployOnAGPUWithoutAPublishedMemoryReadingSaysWhy(t *testing.T) {
+	resolver, calls := recordedHub(t)
+	_, submitted, fit := submitDeploy(t, resolver, `{"name":"qwen","model":"Qwen/Qwen3-8B","cloud":"kubernetes","gpu":"RTX 5090"}`)
+	if len(submitted.RuntimeArgs) != 0 || fit == nil || fit.SetBy != contextSetByRuntime || !strings.Contains(fit.Reason, "no published figure for the memory RTX 5090 reports") || !strings.Contains(fit.Reason, "set --max-model-len to bound it") {
+		t.Fatalf("args=%v context=%+v", submitted.RuntimeArgs, fit)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("Hugging Face was read %d times for a GPU InferCrane cannot size", calls.Load())
+	}
+}

@@ -97,3 +97,21 @@ func TestReviewedModelNeedsItsCommit(t *testing.T) {
 		t.Fatal("a caller changed the recorded sizes")
 	}
 }
+
+// A GPU's usable memory, when known, sizes the fit instead of its nominal
+// size: one 24576-token Qwen3-8B request fits 90% of a nominal 24 GiB L4 but
+// not 90% of the 23034 MiB its driver reports.
+func TestUsableMemorySizesTheFit(t *testing.T) {
+	model, _ := ReviewedModel("Qwen/Qwen3-8B", "")
+	registries, err := Registries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fit := func(gpu GPU) MemoryFit {
+		return Evaluate(model, EvaluateOptions{ContextTokens: 24576, Concurrency: 1, GPUs: []GPU{gpu}, Registries: registries}).Memory
+	}
+	nominal, usable := fit(GPU{Name: "L4", MemoryGiB: 24}), fit(GPU{Name: "L4", MemoryGiB: 24, UsableMiB: 23034})
+	if nominal.State != Fits || *nominal.GPUCount != 1 || usable.State != Fits || *usable.GPUCount != 2 {
+		t.Fatalf("nominal %+v, usable %+v", nominal, usable)
+	}
+}
