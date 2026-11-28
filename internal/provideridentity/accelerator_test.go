@@ -8,6 +8,16 @@ func TestAcceleratorMemoryGiB(t *testing.T) {
 			t.Fatalf("AcceleratorMemoryGiB(%q) = %d, %v; want %d", name, got, ok, want)
 		}
 	}
+	// A size is read from the name's own suffix, never from the model number
+	// running into it once the separators are gone.
+	for name, want := range map[string]int{"NVIDIA-A100-SXM4-40GB": 40, "NVIDIA-A100-PCIE-80GB": 80, "Custom_96GB": 96} {
+		if got, ok := AcceleratorMemoryGiB(name); !ok || got != want {
+			t.Fatalf("AcceleratorMemoryGiB(%q) = %d, %v; want %d", name, got, ok, want)
+		}
+	}
+	if got, ok := AcceleratorMemoryGiB("Custom48GB"); ok {
+		t.Fatalf("a size run into the model name was read: %d", got)
+	}
 	if _, ok := AcceleratorMemoryGiB("mystery"); ok {
 		t.Fatal("an unknown accelerator reported memory")
 	}

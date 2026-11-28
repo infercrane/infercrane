@@ -16,7 +16,10 @@ var acceleratorMemoryGiB = map[string]int{
 	"rtx4090": 24, "rtx5090": 32, "t4": 16, "v100": 16,
 }
 
-var memorySuffix = regexp.MustCompile(`([0-9]+)gb$`)
+// memorySuffix reads a trailing size ("-40GB", " 80GB") from a name that
+// still has its separators: read after they are stripped, the model number
+// runs into the size ("a100sxm440gb" read as 440).
+var memorySuffix = regexp.MustCompile(`(?:^|[-_ ])([0-9]+) ?gb$`)
 
 // acceleratorDriverMemoryMiB is the device memory the driver reports as
 // total, in MiB, keyed by normalized name: the total nvidia-smi prints, and
@@ -81,7 +84,7 @@ func AcceleratorMemoryGiB(gpu string) (int, bool) {
 	if memory, known := acceleratorMemoryGiB[name]; known {
 		return memory, true
 	}
-	if match := memorySuffix.FindStringSubmatch(name); match != nil {
+	if match := memorySuffix.FindStringSubmatch(strings.ToLower(strings.TrimSpace(gpu))); match != nil {
 		if parsed, err := strconv.Atoi(match[1]); err == nil && parsed > 0 {
 			return parsed, true
 		}
