@@ -73,7 +73,7 @@ offline() {
 
   go build -o "$binary" "$root/cmd/infercrane" || return
   "$binary" version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' || return
-  "$binary" --help | grep -q 'InferCrane operates durable' || return
+  "$binary" --help | grep -q 'Same model. Less compute. Proven on your own traffic.' || return
   for shell in bash zsh fish powershell; do
     "$binary" completion "$shell" >"$offline_dir/completion-$shell" || return
     [ -s "$offline_dir/completion-$shell" ] || return
