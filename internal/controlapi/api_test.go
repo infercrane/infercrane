@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,6 +84,14 @@ type fakeStore struct {
 	sandboxFleetErr            error
 	trainingRows               []domain.TrainingArtifactHandoff
 	operationSteps             []domain.OperationStep
+	// deleteCancelled is the operation a deletion cancelled first,
+	// deleteErr what the deletion returns instead, and deleteCancelKinds
+	// the kinds the API asked it to cancel.
+	deleteCancelled   *domain.Operation
+	deleteErr         error
+	deleteCancelKinds []string
+	auditMu           sync.Mutex
+	audited           []domain.AuditEvent
 }
 
 type fakeOptimizationCosts struct{}
@@ -2840,10 +2849,14 @@ func (f *fakeStore) SubmitCloudDeployment(_ context.Context, deployment domain.D
 	f.deployment = deployment
 	return deployment, operation, f.created, f.err
 }
-func (f *fakeStore) SubmitDeploymentDelete(_ context.Context, _, name, _ string, operation domain.Operation) (domain.Operation, bool, error) {
+func (f *fakeStore) SubmitDeploymentDeleteCancelling(_ context.Context, _, name, _ string, operation domain.Operation, cancelKinds []string) (store.DeploymentDeletion, error) {
+	f.deleteCancelKinds = cancelKinds
+	if err := errors.Join(f.err, f.deleteErr); err != nil {
+		return store.DeploymentDeletion{}, err
+	}
 	operation.ID, operation.Status, operation.ResourceName = "queued", "pending", name
 	f.operation = operation
-	return operation, f.created, f.err
+	return store.DeploymentDeletion{Operation: operation, Created: f.created, Cancelled: f.deleteCancelled}, nil
 }
 func (f *fakeStore) ResolveForTenant(context.Context, string, string) (domain.ResolvedDeployment, error) {
 	if f.err != nil {
@@ -2911,7 +2924,12 @@ func (f *fakeStore) DeploymentsForTenant(context.Context, string) ([]domain.Depl
 func (f *fakeStore) OrphanedTargetsForTenant(context.Context, string) ([]domain.Orphan, error) {
 	return nil, f.err
 }
-func (f *fakeStore) Audit(context.Context, domain.AuditEvent) error { return nil }
+func (f *fakeStore) Audit(_ context.Context, event domain.AuditEvent) error {
+	f.auditMu.Lock()
+	defer f.auditMu.Unlock()
+	f.audited = append(f.audited, event)
+	return nil
+}
 func (f *fakeStore) AuditEventsForTenant(_ context.Context, _ string, before domain.AuditCursor, limit int) ([]domain.AuditEvent, error) {
 	f.auditBefore, f.auditLimit = before, limit
 	if f.auditEvents != nil {

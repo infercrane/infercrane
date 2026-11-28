@@ -1279,7 +1279,10 @@ infercrane orphans
 ```
 
 `--plan` is side-effect-free. `--yes` is required for mutation, except in a terminal, where
-`delete` without `--yes` shows the plan and asks you to type the deployment name instead. After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
+`delete` without `--yes` shows the plan and asks you to type the deployment name instead. A deploy
+that never finished does not block `delete`: it cancels that deploy first and says so. Another
+unfinished operation, or a deploy a worker is running at that moment, refuses the delete and names
+the operation. See [lifecycle](/features/lifecycle#delete-a-deploy-that-never-finished). After a paid test, also verify the provider inventory reaches zero. Deletion also removes the endpoint InferCrane created for the deployment, unless another backend is bound to it. Once the operation finishes, the name can be deployed again.
 
 ## Tenant administration
 

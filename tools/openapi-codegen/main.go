@@ -167,6 +167,8 @@ func pythonResponseType(schema string) string {
 	switch schema {
 	case "Operation":
 		return "OperationData"
+	case "DeploymentDeleteEnvelope":
+		return "OperationEnvelope"
 	case "OperationEnvelope", "DeploymentOperationEnvelope", "DeploymentList", "DeploymentView", "IntentPlanEnvelope", "ObjectList", "QualityEvidenceList", "AuditEventList":
 		return schema
 	case "Empty":
@@ -178,6 +180,8 @@ func pythonResponseType(schema string) string {
 
 func typeScriptResponseType(schema string) string {
 	switch schema {
+	case "DeploymentDeleteEnvelope":
+		return "OperationEnvelope"
 	case "Operation", "OperationEnvelope", "DeploymentOperationEnvelope", "DeploymentList", "DeploymentView", "IntentPlanEnvelope", "ObjectList", "QualityEvidenceList", "AuditEventList":
 		return schema
 	case "Empty":

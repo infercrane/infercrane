@@ -2557,10 +2557,14 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		*idempotencyKey = fmt.Sprintf("cli-delete-%s-%d", name, time.Now().UnixNano())
 	}
 	var response struct {
-		Operation domain.Operation `json:"operation"`
+		Operation          domain.Operation  `json:"operation"`
+		CancelledOperation *domain.Operation `json:"cancelled_operation"`
 	}
 	if err := controlJSON(ctx, cfg, http.MethodDelete, "/api/v1/deployments/"+url.PathEscape(name), *idempotencyKey, nil, &response); err != nil {
 		return fmt.Errorf("%w; safe retry key: %s", err, *idempotencyKey)
+	}
+	if response.CancelledOperation != nil && *output == "human" {
+		fmt.Printf("Cancelled the unfinished deploy operation %s first; the deletion removes what it created.\n\n", response.CancelledOperation.ID)
 	}
 	if *wait {
 		if *output == "human" {
@@ -2573,7 +2577,11 @@ func deleteAPICommand(ctx context.Context, cfg config.Config, args []string) err
 		response.Operation = operation
 	}
 	if *output == "json" {
-		encoded, _ := json.MarshalIndent(map[string]any{"deployment": name, "idempotency_key": *idempotencyKey, "operation": response.Operation}, "", "  ")
+		document := map[string]any{"deployment": name, "idempotency_key": *idempotencyKey, "operation": response.Operation}
+		if response.CancelledOperation != nil {
+			document["cancelled_operation"] = response.CancelledOperation
+		}
+		encoded, _ := json.MarshalIndent(document, "", "  ")
 		fmt.Println(string(encoded))
 	} else if *output == "human" {
 		fmt.Printf("Deployment  %s\nOperation   %s\nStatus      %s\nRetry key   %s\n", name, response.Operation.ID, outputTheme(*output).badge(response.Operation.Status), *idempotencyKey)

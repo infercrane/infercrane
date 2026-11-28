@@ -94,7 +94,8 @@ curl https://YOUR-CONTROL-PLANE/v1/chat/completions -H "Authorization: Bearer $A
   -d '{"model":"qwen-kubernetes","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-If a deploy never becomes ready, `infercrane operation cancel OPERATION_ID` before you delete it.
+If a deploy never becomes ready, `infercrane delete qwen-kubernetes --yes` cancels it and removes
+what it started.
 
 ## Migrate an endpoint with a 5% canary
 

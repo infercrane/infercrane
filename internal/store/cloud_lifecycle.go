@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/infercrane/infercrane/internal/domain"
@@ -190,11 +191,47 @@ func reserveManagedDeploymentTx(ctx context.Context, tx *tx, tenant, name, stamp
 	return reservation, nil
 }
 
+// OpenOperationError refuses a deletion because the deployment has an
+// unfinished operation the deletion does not cancel by itself: one of
+// another kind, or one a worker holds the lease of right now.
+type OpenOperationError struct {
+	ID, Kind, Status string
+	// Running reports that a worker holds the operation's lease, so it may
+	// be calling the provider at this moment.
+	Running bool
+}
+
+func (e *OpenOperationError) Error() string {
+	return fmt.Sprintf("%v: deployment already has an unresolved lifecycle operation %s (%s, %s)", ErrConflict, e.ID, e.Kind, e.Status)
+}
+
+func (e *OpenOperationError) Unwrap() error { return ErrConflict }
+
+// DeploymentDeletion is a submitted deletion and, when it cancelled one
+// first, the deployment's unfinished operation.
+type DeploymentDeletion struct {
+	Operation domain.Operation
+	Created   bool
+	Cancelled *domain.Operation
+}
+
 // SubmitDeploymentDelete atomically withdraws desired routing state and queues
 // provider cleanup. A failed enqueue rolls back the state change.
 func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploymentID string, operation domain.Operation) (domain.Operation, bool, error) {
+	deletion, err := s.SubmitDeploymentDeleteCancelling(ctx, tenant, name, deploymentID, operation, nil)
+	return deletion.Operation, deletion.Created, err
+}
+
+// SubmitDeploymentDeleteCancelling is SubmitDeploymentDelete that first
+// cancels the deployment's unfinished operation when its kind is one of
+// cancelKinds and no worker holds its lease. The cancellation is recorded
+// as an operation cancel records one that no worker has to run, and the
+// queued deletion's cleanup then removes whatever the cancelled operation
+// created, in the same transaction. Any other unfinished operation refuses
+// the deletion with an *OpenOperationError and changes nothing.
+func (s *Store) SubmitDeploymentDeleteCancelling(ctx context.Context, tenant, name, deploymentID string, operation domain.Operation, cancelKinds []string) (DeploymentDeletion, error) {
 	if tenant == "" || name == "" || deploymentID == "" || operation.Kind == "" || operation.IdempotencyKey == "" {
-		return domain.Operation{}, false, errors.New("tenant, deployment identity, operation kind, and idempotency key are required")
+		return DeploymentDeletion{}, errors.New("tenant, deployment identity, operation kind, and idempotency key are required")
 	}
 	operation.TenantID, operation.ResourceType, operation.ResourceName = tenant, "deployment", name
 	if operation.RequestJSON == "" {
@@ -202,36 +239,40 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if existing, lookupErr := operationByKeyQuery(ctx, tx, tenant, operation.Kind, operation.IdempotencyKey); lookupErr == nil {
 		if !sameOperationIntent(existing, operation) {
-			return domain.Operation{}, false, fmt.Errorf("%w: idempotency key was already used for a different deletion intent", ErrConflict)
+			return DeploymentDeletion{}, fmt.Errorf("%w: idempotency key was already used for a different deletion intent", ErrConflict)
 		}
-		return existing, false, nil
+		return DeploymentDeletion{Operation: existing}, nil
 	} else if !errors.Is(lookupErr, ErrNotFound) {
-		return domain.Operation{}, false, lookupErr
+		return DeploymentDeletion{}, lookupErr
 	}
 	var currentID, desired string
 	if err = tx.QueryRowContext(ctx, `SELECT id,desired_state FROM deployments WHERE tenant_id=? AND name=? AND `+liveDeployment+` FOR UPDATE`, tenant, name).Scan(&currentID, &desired); errors.Is(err, sql.ErrNoRows) {
-		return domain.Operation{}, false, ErrNotFound
+		return DeploymentDeletion{}, ErrNotFound
 	} else if err != nil {
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
 	if currentID != deploymentID {
-		return domain.Operation{}, false, fmt.Errorf("%w: deployment identity changed", ErrConflict)
+		return DeploymentDeletion{}, fmt.Errorf("%w: deployment identity changed", ErrConflict)
 	}
 	if desired == "deleted" {
-		return domain.Operation{}, false, fmt.Errorf("%w: deployment deletion is already in progress", ErrConflict)
+		return DeploymentDeletion{}, fmt.Errorf("%w: deployment deletion is already in progress", ErrConflict)
+	}
+	cancelled, err := cancelOpenDeploymentOperationTx(ctx, s, tx, tenant, name, cancelKinds)
+	if err != nil {
+		return DeploymentDeletion{}, err
 	}
 	stamp := now()
 	if _, err = tx.ExecContext(ctx, `UPDATE deployments SET desired_state='deleted',observed_state='deleting',updated_at=? WHERE id=?`, stamp, deploymentID); err != nil {
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
 	operation.ID, err = newID()
 	if err != nil {
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
 	operation.Status = "pending"
 	if operation.MaxAttempts == 0 {
@@ -240,14 +281,57 @@ func (s *Store) SubmitDeploymentDelete(ctx context.Context, tenant, name, deploy
 	operation.CreatedAt, operation.UpdatedAt = parseTime(stamp), parseTime(stamp)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO operations(id,tenant_id,kind,resource_type,resource_name,idempotency_key,status,progress,message,request_json,result_json,attempt,max_attempts,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?::jsonb,'{}'::jsonb,?,?,NOW(),NOW(),NOW())`, operation.ID, tenant, operation.Kind, operation.ResourceType, operation.ResourceName, operation.IdempotencyKey, operation.Status, 0, "queued", operation.RequestJSON, 0, operation.MaxAttempts); err != nil {
 		if isUniqueViolation(err) {
-			return domain.Operation{}, false, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
+			return DeploymentDeletion{}, fmt.Errorf("%w: deployment already has an unresolved lifecycle operation", ErrConflict)
 		}
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
 	if err = tx.Commit(); err != nil {
-		return domain.Operation{}, false, err
+		return DeploymentDeletion{}, err
 	}
-	return operation, true, nil
+	return DeploymentDeletion{Operation: operation, Created: true, Cancelled: cancelled}, nil
+}
+
+// cancelOpenDeploymentOperationTx finds the deployment's unfinished
+// operation under the deployment row lock. It cancels one of cancelKinds
+// that no worker holds, and refuses any other. A deployment has at most one
+// (one_unresolved_deployment_operation).
+func cancelOpenDeploymentOperationTx(ctx context.Context, s *Store, tx *tx, tenant, name string, cancelKinds []string) (*domain.Operation, error) {
+	var id, kind, status string
+	var leased bool
+	err := tx.QueryRowContext(ctx, `SELECT id,kind,status,COALESCE(lease_expires_at>NOW(),FALSE) FROM operations WHERE tenant_id=? AND resource_type='deployment' AND resource_name=? AND status IN ('pending','leased','running','waiting','cancelling') FOR UPDATE`, tenant, name).Scan(&id, &kind, &status, &leased)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if refused := refuseOpenOperation(id, kind, status, leased, cancelKinds); refused != nil {
+		return nil, refused
+	}
+	message := "cancelled by deployment delete"
+	if status == "pending" {
+		message = "cancelled before execution"
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE operations SET cancel_requested=TRUE,status='cancelled',message=?,error_code=NULL,retryable=FALSE,waiting_reason=NULL,next_attempt_at=NULL,lease_owner=NULL,lease_expires_at=NULL,completed_at=NOW(),updated_at=NOW() WHERE id=?`, message, id); err != nil {
+		return nil, err
+	}
+	cancelled, err := s.scanOperation(tx.QueryRowContext(ctx, `SELECT `+operationColumns+` FROM operations WHERE id=?`, id))
+	if err != nil {
+		return nil, err
+	}
+	return &cancelled, nil
+}
+
+// refuseOpenOperation decides whether a deletion may cancel an unfinished
+// operation. It may when the kind is one of cancelKinds and no worker runs
+// it: a pending or waiting operation holds no lease, and an expired lease is
+// one any worker may claim. leased reports an unexpired lease.
+func refuseOpenOperation(id, kind, status string, leased bool, cancelKinds []string) *OpenOperationError {
+	running := leased && status != "pending" && status != "waiting"
+	if running || !slices.Contains(cancelKinds, kind) {
+		return &OpenOperationError{ID: id, Kind: kind, Status: status, Running: running}
+	}
+	return nil
 }
 
 func sameDeploymentSubmission(existing, requested domain.Deployment) bool {

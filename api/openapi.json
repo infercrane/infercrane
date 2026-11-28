@@ -3558,6 +3558,26 @@
         ],
         "type": "object"
       },
+      "DeploymentDeleteEnvelope": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/OperationEnvelope"
+          },
+          {
+            "properties": {
+              "cancelled_operation": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Operation"
+                  }
+                ],
+                "description": "The deployment's unfinished deploy, cancelled in the same transaction that queued the deletion. Absent when there was none. Another unfinished operation, or a deploy a worker is running right now, refuses the deletion with unresolved_operation (HTTP 409)."
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
       "DeploymentList": {
         "properties": {
           "data": {
@@ -20513,7 +20533,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationEnvelope"
+                  "$ref": "#/components/schemas/DeploymentDeleteEnvelope"
                 }
               }
             },

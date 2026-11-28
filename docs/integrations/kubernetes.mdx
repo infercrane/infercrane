@@ -289,12 +289,11 @@ infercrane deploy Qwen/Qwen3-8B \
 A [DeploymentSpec](/deployment-spec) sets the same bound with `runtime.args: ["--max-model-len",
 "8192"]`.
 
-A deploy that never becomes ready keeps its operation open, and `infercrane delete` is refused
-("unresolved lifecycle operation") until you cancel it:
+A deploy that never becomes ready keeps its deploy operation open. `infercrane delete` cancels that
+operation and removes what it started, so no separate `operation cancel` is needed:
 
 ```bash
-infercrane operation list
-infercrane operation cancel OPERATION_ID
+infercrane delete qwen-kubernetes --yes --wait
 ```
 
 Provisioning uses strict server-side dry-run followed by server-side apply with the

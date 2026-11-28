@@ -127,6 +127,23 @@ second. For a paid or real-cluster operation, independently inspect the provider
 Provider deletion is not proven solely by a missing database row. Never erase PostgreSQL or use
 `--keep-resources` while cleanup is unresolved unless you intentionally accept external ownership.
 
+### Delete a deploy that never finished
+
+A delete does not wait for an unfinished deploy, such as one whose server never becomes ready. It
+cancels the deploy operation in the same transaction that queues the deletion, and the deletion's
+cleanup removes what the deploy started. The cancellation is recorded as `operation cancel` records
+it: the operation ends `cancelled`, and the audit log has an `operation.cancel` entry. The delete
+response names it in `cancelled_operation`.
+
+A delete is still refused, with nothing changed, in two cases. The error (`unresolved_operation`,
+HTTP 409) names the operation:
+
+- A worker is running the deploy at that moment. Deleting then could race the provider calls it is
+  making. Delete again when it waits between attempts, usually within a minute.
+- The unfinished operation is not a deploy, for example a scale or a rollout. It changes a
+  deployment that may be serving traffic, so InferCrane leaves it to you: wait for it, or cancel it
+  with `infercrane operation cancel ID`, then delete.
+
 ## Deploy a deleted name again
 
 Once a delete, or the cleanup after a cancelled first deploy, has finished, the same name can be
