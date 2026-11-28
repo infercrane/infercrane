@@ -153,8 +153,10 @@ proposal = json.load(open(sys.argv[1]))
 fraction, length, out = sys.argv[2], sys.argv[3], sys.argv[4]
 if not proposal.get("candidates"):
     sys.exit("the proposal has no setups; missing: %s" % ", ".join(proposal.get("missing") or ["nothing named"]))
-# Only setups for the plain Kubernetes adapter: the planner also proposes
-# kubernetes-dynamo setups, and this cluster runs no NVIDIA Dynamo (27 Nov).
+# Only setups for the plain Kubernetes adapter: this cluster runs no NVIDIA
+# Dynamo. Since fix/dynamo-only-when-installed the planner leaves kubernetes-dynamo
+# setups out unless Dynamo is configured or named; this filter still guards a
+# proposal from an older control plane, which offered them (27 Nov).
 kept = [c for c in proposal["candidates"] if (c.get("deployment") or {}).get("provider", {}).get("adapter") == "kubernetes"]
 dropped = len(proposal["candidates"]) - len(kept)
 if not kept:
