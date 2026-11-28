@@ -16,6 +16,7 @@ import (
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 	"github.com/infercrane/infercrane/internal/benchmark"
 	"github.com/infercrane/infercrane/internal/domain"
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/operations"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/performanceprofile"
@@ -51,6 +52,10 @@ const (
 	// (environment variables, kernel files, adapters, a private model's
 	// credential, serverless compute).
 	FailureAgentSetupUnsupported = "agent_setup_unsupported"
+	// FailureAgentSetupNotPlainServer stops a setup that is not a plain
+	// server, such as a Dynamo serving graph. An agent starts plain servers
+	// only, so it would measure, and label, another setup.
+	FailureAgentSetupNotPlainServer = "agent_setup_not_plain_server"
 	// FailureAgentReplayUnsupported stops a run bound to a replayed trace;
 	// agents measure the synthetic profile for now.
 	FailureAgentReplayUnsupported = "agent_replay_unsupported"
@@ -78,6 +83,11 @@ var permanentAgentFailures = map[string]bool{
 }
 
 var labelUnsafe = regexp.MustCompile(`[^A-Za-z0-9 ._:/+-]`)
+
+// errNotPlainServer marks a setup an agent cannot reproduce. An agent starts
+// plain servers only: one engine container from an image, with its arguments,
+// on its GPUs (agentprotocol.CandidateSetup holds nothing more).
+var errNotPlainServer = errors.New("an agent starts plain servers only")
 
 // AgentWindowsState is an agent-measured run's progress in its checkpoint.
 type AgentWindowsState struct {
@@ -159,9 +169,12 @@ type AgentDriver struct {
 	Signer ed25519.PrivateKey
 	// Costs prices a cost objective; nil leaves cost unknown, so a cost
 	// objective is never confirmed.
-	Costs   CostAuthority
-	Now     func() time.Time
-	Entropy io.Reader
+	Costs CostAuthority
+	// Providers are the control plane's provider profiles; AgentSetup reads
+	// a setup's adapter from them.
+	Providers []integration.ProviderProfile
+	Now       func() time.Time
+	Entropy   io.Reader
 }
 
 // AgentRun reports whether a campaign is measured by an agent.
@@ -185,8 +198,13 @@ func AgentSetupID(setup agentprotocol.CandidateSetup) string {
 }
 
 // AgentSetup turns a candidate's deployment draft into the setup an agent
-// starts, or says which part an agent cannot start yet.
-func AgentSetup(draft optimizer.DeploymentDraft) (agentprotocol.CandidateSetup, error) {
+// starts, or says which part an agent cannot start yet. providers are the
+// control plane's provider profiles; with the draft's serving graph they
+// decide whether the setup is a plain server (agentPlainServer).
+func AgentSetup(draft optimizer.DeploymentDraft, providers []integration.ProviderProfile) (agentprotocol.CandidateSetup, error) {
+	if err := agentPlainServer(draft, providers); err != nil {
+		return agentprotocol.CandidateSetup{}, err
+	}
 	unsupported := func(part string) error {
 		return fmt.Errorf("an agent cannot start a setup with %s yet", part)
 	}
@@ -213,6 +231,41 @@ func AgentSetup(draft optimizer.DeploymentDraft) (agentprotocol.CandidateSetup, 
 		return agentprotocol.CandidateSetup{}, err
 	}
 	return setup, nil
+}
+
+// agentPlainServer refuses a setup that is not a plain server, so an agent
+// never measures one setup under another's name. The data decide, never an
+// adapter's name: a serving graph in the draft, or an adapter whose provider
+// profile serves through software beside its cloud. An adapter without a
+// profile is refused too, because nothing says what it starts.
+func agentPlainServer(draft optimizer.DeploymentDraft, providers []integration.ProviderProfile) error {
+	adapter := draft.Provider.Adapter
+	var profile *integration.ProviderProfile
+	for index := range providers {
+		if providers[index].Adapter == adapter {
+			profile = &providers[index]
+		}
+	}
+	switch {
+	case !draft.Serving.Empty() && profile != nil && !profile.PlainServer():
+		return fmt.Errorf("%w; this setup needs a serving graph on %s", errNotPlainServer, profile.Prerequisite.Name)
+	case !draft.Serving.Empty():
+		return fmt.Errorf("%w; this setup needs a serving graph", errNotPlainServer)
+	case adapter != "" && profile == nil:
+		return fmt.Errorf("%w; this setup is on provider adapter %s, which this control plane has no profile for, so what it starts is unknown", errNotPlainServer, adapter)
+	case profile != nil && !profile.PlainServer():
+		return fmt.Errorf("%w; this setup runs through %s (provider adapter %s)", errNotPlainServer, profile.Prerequisite.Name, adapter)
+	}
+	return nil
+}
+
+// agentSetupRefused is the candidate failure for a setup AgentSetup refused:
+// its code says whether the setup is not a plain server at all.
+func agentSetupRefused(err error) error {
+	if errors.Is(err, errNotPlainServer) {
+		return operations.Permanent(FailureAgentSetupNotPlainServer, err)
+	}
+	return operations.Permanent(FailureAgentSetupUnsupported, err)
 }
 
 // agentCommand starts SGLang with its own entry point: an agent refuses an
@@ -268,9 +321,9 @@ func (d AgentDriver) Provision(ctx context.Context, candidateID string, candidat
 	if isControl(campaign, candidate) {
 		return ProvisionResult{DeploymentName: campaign.TargetEndpoint, RevisionID: AgentServerID(campaign.AgentID, campaign.TargetEndpoint)}, nil
 	}
-	setup, err := AgentSetup(draft)
+	setup, err := AgentSetup(draft, d.Providers)
 	if err != nil {
-		return ProvisionResult{}, operations.Permanent(FailureAgentSetupUnsupported, err)
+		return ProvisionResult{}, agentSetupRefused(err)
 	}
 	return ProvisionResult{DeploymentName: campaign.TargetEndpoint, RevisionID: AgentSetupID(setup)}, nil
 }
@@ -414,9 +467,9 @@ func (d AgentDriver) windowSpec(campaign domain.OptimizationCampaign, candidate 
 		}
 	}
 	if !isControl(campaign, candidate) {
-		setup, setupErr := AgentSetup(draft)
+		setup, setupErr := AgentSetup(draft, d.Providers)
 		if setupErr != nil {
-			return agentprotocol.WindowSpec{}, operations.Permanent(FailureAgentSetupUnsupported, setupErr)
+			return agentprotocol.WindowSpec{}, agentSetupRefused(setupErr)
 		}
 		if AgentSetupID(setup) != candidate.RevisionID {
 			return agentprotocol.WindowSpec{}, operations.Permanent("optimization_candidate_identity_mismatch", errors.New("the setup no longer matches the identity it was measured under"))

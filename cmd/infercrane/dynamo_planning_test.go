@@ -14,7 +14,8 @@ import (
 
 // The control plane's planner offers a kubernetes-dynamo setup for provider
 // kubernetes only for the runtimes it registers Dynamo backends for: those
-// with a complete Dynamo image and version pair.
+// with a complete Dynamo image and version pair. For every other runtime it
+// knows the setting names that would add one.
 func TestControlPlanePlansDynamoOnlyForItsConfiguredRuntimes(t *testing.T) {
 	digest := "nvcr.io/nvidia/ai-dynamo/vllm-runtime@sha256:" + strings.Repeat("b", 64)
 	request := optimizer.Request{ModelIdentity: "acme/novel-open-model", ModelRevision: strings.Repeat("a", 40), Provider: "kubernetes", GPU: "H100", Objective: "throughput", IncludeSimulated: true, MaxCandidates: 10}
@@ -53,6 +54,17 @@ func TestControlPlanePlansDynamoOnlyForItsConfiguredRuntimes(t *testing.T) {
 			slices.Sort(backends)
 			if !slices.Equal(backends, test.want) {
 				t.Fatalf("Dynamo backends would register for %v, want %v", backends, test.want)
+			}
+			// The settings are recorded also without Dynamo, so a setup that
+			// names the adapter is known not to deploy and says what to set.
+			profile, err := registry.Provider("kubernetes-dynamo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, runtimeName := range []string{"vllm", "sglang"} {
+				if !slices.Equal(profile.Prerequisite.Settings[runtimeName], config.DynamoRuntimeSettings(runtimeName)) || profile.PrerequisiteMissing(runtimeName) == slices.Contains(test.want, runtimeName) {
+					t.Fatalf("%s: prerequisite=%+v", runtimeName, profile.Prerequisite)
+				}
 			}
 		})
 	}

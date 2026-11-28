@@ -82,9 +82,9 @@ agent's health probe is skipped without a reason in the log.
 
 ## Deploy and serve
 
-On a 24 GB GPU, the engine needs a context length it can hold. InferCrane sets one when the control
-plane can read model metadata; otherwise pass `--max-model-len 8192`
-([details](/integrations/kubernetes#deploy)):
+On a 24 GB GPU, the engine needs a context length it can hold. InferCrane sets one for reviewed
+catalog models such as `Qwen/Qwen3-8B`, and for other models when the control plane can read model
+metadata. Otherwise pass `--max-model-len 8192` ([details](/integrations/kubernetes#deploy)):
 
 ```bash
 infercrane deploy Qwen/Qwen3-8B --name qwen-kubernetes --cloud kubernetes --gpu NVIDIA-A10G \

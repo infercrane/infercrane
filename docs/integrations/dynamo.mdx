@@ -130,10 +130,28 @@ Dynamo is there:
   setups for those runtimes after the plain Kubernetes ones.
 
 Otherwise a proposal for `provider kubernetes` holds plain Kubernetes setups only, and a warning
-names the Dynamo setups it left out. `infercrane optimize propose` without `--diagnosis-endpoint`
-plans on your machine and does not read the control plane's settings, so name the adapter there.
-`infercrane integrations --output json` lists the runtimes the control plane runs Dynamo with, under
-`prerequisite.configured_runtimes` of the `kubernetes-dynamo` provider.
+names the Dynamo setups it left out. When the control plane plans, the warning also names the
+settings that would add them.
+
+The control plane deploys a Dynamo setup only for a runtime it has a Dynamo image for. If a request
+names the adapter for another runtime, the control plane still proposes the setup, with a warning
+that it will fail to deploy until that runtime's pair is set, for example
+`INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST` and `INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION`. A run with
+such a setup, or `infercrane deploy` of one, is refused before anything starts. The error is
+`prerequisite_not_configured` and names the same settings.
+
+`infercrane optimize propose` without `--diagnosis-endpoint` plans on your machine and does not read
+the control plane's settings. Name the adapter there. That proposal cannot warn about a missing
+image, so the control plane refuses the run when you start it instead.
+
+`infercrane integrations --output json` shows what the control plane knows, under `prerequisite` of
+the `kubernetes-dynamo` provider: the runtimes it runs Dynamo with (`configured_runtimes`) and the
+settings for each runtime (`settings`).
+
+An endpoint an InferCrane agent serves cannot measure a Dynamo setup: the agent starts plain servers
+only. A proposal for such an endpoint, with its setup declared, leaves Dynamo setups out with a
+warning, and a run on it refuses one before any GPU starts
+([agent runs](/architecture/agent#optimization-runs-on-an-agent%E2%80%99s-endpoint)).
 
 ## Ownership matrix
 

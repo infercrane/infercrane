@@ -237,7 +237,9 @@ adapter plans from the wrong kind of server. A provider that names only a cloud 
 adapters, such as `--provider runpod`, names none of them; between adapters with equal
 qualification evidence and equal reusable artifacts the plan then starts from the first in name
 order (`runpod-pods`). Either way one request plans from the same kind of server for every
-`--profile`.
+`--profile`. A plan for an endpoint an InferCrane agent serves, with its setup declared, never holds
+a Dynamo setup, even when the request names the adapter: the agent starts plain servers only. The
+proposal warns which setups it left out.
 
 | Diagnosis | Tried, in order | vLLM flags (SGLang) |
 |---|---|---|
@@ -904,7 +906,10 @@ cluster. The control plane judges them by the same rules as above: interleaved r
 window on a new server for a gain, the answer check with the 1-point rule for setups that change
 answers, the ranking, and Release Guard. Rolling the winner out is a guarded rollout on the
 agent's data plane, with an automatic rollback window, when the agent serves the endpoint's
-traffic. What such a run can and cannot measure, and how the rollout works, is in
+traffic. The agent starts every setup as a plain server: one engine container from a pinned image,
+with its arguments, on its GPUs. A setup that is not one, such as a Dynamo serving graph, is
+refused before any GPU starts, with the reason, and never measured as something else. What such a
+run can and cannot measure, and how the rollout works, is in
 [the agent page](/architecture/agent#optimization-runs-on-an-agent%E2%80%99s-endpoint).
 
 Rolling out with `optimize activate` is itself a durable, idempotent operation. A new-endpoint run

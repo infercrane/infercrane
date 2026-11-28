@@ -35,7 +35,7 @@ var publicCommandSpecs = []commandSpec{
 	{use: "rollout ACTION [arguments]", short: "Roll out or roll back a revision", section: "deployments", suggestFor: []string{"rollback", "promote", "release"}},
 	{use: "delete DEPLOYMENT [flags]", short: "Preview and delete a deployment", section: "deployments", suggestFor: []string{"rm", "remove", "destroy", "down", "stop"}},
 
-	{use: "optimize ACTION [arguments]", short: "Find a cheaper, faster setup and prove it", section: "optimize", suggestFor: []string{"optimise", "tune"}},
+	{use: "optimize ACTION [arguments]", short: "Make a model faster, proven on your traffic", section: "optimize", suggestFor: []string{"optimise", "tune"}},
 	{use: "benchmark DEPLOYMENT [flags]", short: "Measure a deployment's speed", section: "optimize", suggestFor: []string{"bench", "perf"}},
 	{use: "profile ENDPOINT [flags]", short: "See where GPU time goes", section: "optimize", suggestFor: []string{"trace", "profiler"}},
 	{use: "recommend DEPLOYMENT [flags]", short: "Suggest a better setup from measured results", section: "legacy"},

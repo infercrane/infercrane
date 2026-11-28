@@ -34,5 +34,10 @@ Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain
   `HTTP 401` (a wrong key), or an error class such as `invalid Authorization header` (a token that
   ends in a newline) or `connection refused`. The line never shows the token. Fix the cause; the
   agent registers the server on its next pass and logs a `healthy` line.
+- **The agent did not find a server on a default port:** the agent logs nothing for a port where
+  nothing listens. If something listens but fails the probe, the agent logs one `unhealthy` line
+  for it. `closed without an HTTP reply` or `not an HTTP reply` usually means the server serves
+  HTTPS, which the port scan does not use: name it with `--server https://127.0.0.1:PORT`. Run
+  `infercrane agent detect` to see each server the scan found and its health detail.
 
 Never paste API keys, prompts, generated content, or unredacted provider responses into a public issue.

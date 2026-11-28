@@ -1041,6 +1041,21 @@ func (c Config) KubernetesEnabled() bool { return c.KubernetesContext != "" }
 func (c Config) DynamoEnabled() bool {
 	return c.DynamoRuntimeEnabled("vllm") || c.DynamoRuntimeEnabled("sglang")
 }
+
+// DynamoRuntimeSettings names the settings that give the control plane its
+// Dynamo image for runtime; DynamoRuntimeEnabled reports whether both are
+// set. It is empty for a runtime Dynamo graphs do not run.
+func DynamoRuntimeSettings(runtime string) []string {
+	switch runtime {
+	case "vllm":
+		return []string{"INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION"}
+	case "sglang":
+		return []string{"INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", "INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION"}
+	default:
+		return nil
+	}
+}
+
 func (c Config) DynamoRuntimeEnabled(runtime string) bool {
 	switch runtime {
 	case "vllm":

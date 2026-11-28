@@ -154,3 +154,29 @@ func TestContextLengthReadsEitherRuntimesFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestTensorParallelSizeReadsEachRuntimesFlag(t *testing.T) {
+	for _, test := range []struct {
+		runtime string
+		args    []string
+		size    int
+		ok      bool
+	}{
+		{"vllm", nil, 1, true},
+		{"vllm", []string{"--enable-prefix-caching", "--max-num-batched-tokens", "2048"}, 1, true},
+		{"vllm", []string{"--tensor-parallel-size", "2"}, 2, true},
+		{"vllm", []string{"-tp=4", "--enable-prefix-caching"}, 4, true},
+		{"vllm", []string{"-tp", "2", "--tensor-parallel-size", "4"}, 4, true},
+		{"vllm", []string{"--tp-size", "2"}, 1, true},
+		{" SGLang ", []string{"--tp-size", "2"}, 2, true},
+		{"sglang", []string{"--tp=8"}, 8, true},
+		{"vllm", []string{"--tensor-parallel-size"}, 0, false},
+		{"vllm", []string{"--tensor-parallel-size", "two"}, 0, false},
+		{"sglang", []string{"--tp-size", "0"}, 0, false},
+	} {
+		size, ok := TensorParallelSize(test.runtime, test.args)
+		if size != test.size || ok != test.ok {
+			t.Fatalf("%s %v: got (%d, %t), want (%d, %t)", test.runtime, test.args, size, ok, test.size, test.ok)
+		}
+	}
+}

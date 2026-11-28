@@ -151,11 +151,14 @@ func registerSkyPilotPlanningCandidates(registry *integration.Registry, manifest
 	return nil
 }
 
+// dynamoRuntimes are the runtimes a Dynamo graph can run.
+var dynamoRuntimes = []string{"vllm", "sglang"}
+
 // configuredDynamoRuntimes are the runtimes this control plane runs Dynamo
 // graphs with: each one with a complete image digest and version pair.
 func configuredDynamoRuntimes(cfg config.Config) []string {
 	var runtimes []string
-	for _, runtimeName := range []string{"vllm", "sglang"} {
+	for _, runtimeName := range dynamoRuntimes {
 		if cfg.DynamoRuntimeEnabled(runtimeName) {
 			runtimes = append(runtimes, runtimeName)
 		}
@@ -163,16 +166,19 @@ func configuredDynamoRuntimes(cfg config.Config) []string {
 	return runtimes
 }
 
-// configureDynamoPlanning tells the planner which runtimes this control plane
-// runs Dynamo graphs with, the same ones it registers Dynamo backends for. A
+// configureDynamoPlanning tells the planner and the control API which
+// runtimes this control plane runs Dynamo graphs with, the same ones it
+// registers Dynamo backends for, and the settings that configure each. A
 // proposal for provider kubernetes then offers a kubernetes-dynamo setup only
-// where one can run.
+// where one can run. It records them also when none is configured, so a
+// request that names kubernetes-dynamo for a runtime without an image is
+// warned in its proposal and refused before it deploys.
 func configureDynamoPlanning(registry *integration.Registry, cfg config.Config) error {
-	runtimes := configuredDynamoRuntimes(cfg)
-	if len(runtimes) == 0 {
-		return nil
+	settings := make(map[string][]string, len(dynamoRuntimes))
+	for _, runtimeName := range dynamoRuntimes {
+		settings[runtimeName] = config.DynamoRuntimeSettings(runtimeName)
 	}
-	if err := registry.ConfigurePrerequisite("kubernetes-dynamo", runtimes...); err != nil {
+	if err := registry.ConfigurePrerequisite("kubernetes-dynamo", settings, configuredDynamoRuntimes(cfg)...); err != nil {
 		return fmt.Errorf("configure Dynamo planning: %w", err)
 	}
 	return nil
@@ -5131,7 +5137,8 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	composite := optimizationcampaign.CompositeDriver{Store: s, Costs: optimizationCosts, Benchmark: candidateBenchmark, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Quality: qualityCheck, Migration: migrationCheck, Replays: s, PromptCorpus: promptCorpus}
 	// A run on an agent's endpoint is measured by its agent in the customer's
 	// cluster; the control plane only judges the numbers it reports.
-	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner}
+	providerProfiles := integrationRegistry.Snapshot().Providers
+	agentDriver := optimizationcampaign.AgentDriver{Store: s, Windows: agentrelay.CampaignWindows{Service: agentService}, Ranker: optimizationcampaign.PersistedRanker{Store: s}, Signer: qualitySigner, Providers: providerProfiles}
 	driver := optimizationcampaign.SiteDriver{Repository: s, Control: composite, Agent: agentDriver}
 	for kind, handler := range optimizationcampaign.Handlers(optimizationcampaign.Coordinator{Repository: s, Driver: driver}) {
 		handlers[kind] = handler
@@ -5139,7 +5146,7 @@ func serve(parent context.Context, cfg config.Config, s *store.Store) error {
 	// The winner of a run on an agent's endpoint is rolled out there: the
 	// agent starts it, the endpoint switches on Release Guard's PASS, and a
 	// watch window promotes it or rolls it back.
-	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}}
+	agentRollout := &optimizationcampaign.AgentRollout{Store: s, Commands: agentrelay.CampaignWindows{Service: agentService}, Providers: providerProfiles}
 	for kind, handler := range optimizationcampaign.ActivationHandlersWith(s, rec.RefreshEndpoints, nil, agentRollout) {
 		handlers[kind] = handler
 	}
@@ -5527,20 +5534,52 @@ func runModelAPIUsageReconciliation(ctx context.Context, reconciler reconcile.Mo
 	}
 }
 
-func queueManagedDeploymentCleanup(ctx context.Context, s *store.Store, rows []domain.ManagedSpendReservation, keyPrefix string, logger *slog.Logger) {
+// managedCleanupStore is what the managed deployment cleanup reads and writes.
+type managedCleanupStore interface {
+	ResolveForTenant(ctx context.Context, tenant, name string) (domain.ResolvedDeployment, error)
+	ActiveOperationForResource(ctx context.Context, tenant, resourceType, name string) (domain.Operation, error)
+	SubmitDeploymentDeleteCancelling(ctx context.Context, tenant, name, deploymentID string, operation domain.Operation, cancelKinds []string) (store.DeploymentDeletion, error)
+	Audit(ctx context.Context, event domain.AuditEvent) error
+}
+
+// managedCleanupActor is who the cleanup records as acting.
+const managedCleanupActor = "managed-budget-guard"
+
+// queueManagedDeploymentCleanup deletes managed deployments whose prepaid
+// reservation expired or whose deploy failed. Like the delete API, it first
+// cancels a deploy that never finished when no worker holds it, so a
+// deployment stuck between deploy attempts is cleaned up too. A deploy a
+// worker is running, or any other unfinished operation, refuses the delete
+// and changes nothing; the next pass tries again.
+func queueManagedDeploymentCleanup(ctx context.Context, s managedCleanupStore, rows []domain.ManagedSpendReservation, keyPrefix string, logger *slog.Logger) {
 	for _, reservation := range rows {
 		resolved, resolveErr := s.ResolveForTenant(ctx, reservation.TenantID, reservation.ResourceName)
 		if resolveErr != nil {
 			logger.Error("managed deployment cleanup could not resolve deployment", "deployment", reservation.ResourceName, "error", resolveErr)
 			continue
 		}
-		request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: reservation.ResourceName, Actor: "managed-budget-guard", TenantID: reservation.TenantID})
+		request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: reservation.ResourceName, Actor: managedCleanupActor, TenantID: reservation.TenantID})
 		kind := workflows.DeleteKind
 		if resolved.Deployment.ComputeMode == "serverless" {
 			kind = workflows.ServerlessDeleteKind
 		}
-		if _, _, submitErr := s.SubmitDeploymentDelete(ctx, reservation.TenantID, reservation.ResourceName, resolved.Deployment.ID, domain.Operation{TenantID: reservation.TenantID, Kind: kind, IdempotencyKey: keyPrefix + reservation.ID, RequestJSON: string(request)}); submitErr != nil && !errors.Is(submitErr, domain.ErrConflict) {
-			logger.Error("managed deployment cleanup could not be queued", "deployment", reservation.ResourceName, "error", submitErr)
+		// A serverless deploy cancelled before its endpoint registered a
+		// target still needs the serverless cleanup.
+		if open, openErr := s.ActiveOperationForResource(ctx, reservation.TenantID, "deployment", reservation.ResourceName); openErr == nil && open.Kind == workflows.ServerlessConvergeKind {
+			kind = workflows.ServerlessDeleteKind
+		}
+		deletion, submitErr := s.SubmitDeploymentDeleteCancelling(ctx, reservation.TenantID, reservation.ResourceName, resolved.Deployment.ID, domain.Operation{TenantID: reservation.TenantID, Kind: kind, IdempotencyKey: keyPrefix + reservation.ID, RequestJSON: string(request)}, workflows.DeleteCancelsKinds())
+		if submitErr != nil {
+			if !errors.Is(submitErr, domain.ErrConflict) {
+				logger.Error("managed deployment cleanup could not be queued", "deployment", reservation.ResourceName, "error", submitErr)
+			}
+			continue
+		}
+		if cancelled := deletion.Cancelled; cancelled != nil {
+			// Recorded as operation cancel and the delete API record it.
+			if auditErr := s.Audit(context.WithoutCancel(ctx), domain.AuditEvent{TenantID: reservation.TenantID, Actor: managedCleanupActor, Action: "operation.cancel", ResourceType: "operation", ResourceName: cancelled.ID, Outcome: "accepted", Payload: `{"cancelled_by":"deployment.delete"}`}); auditErr != nil {
+				logger.Error("managed deployment cleanup could not audit the cancelled deploy", "deployment", reservation.ResourceName, "operation", cancelled.ID, "error", auditErr)
+			}
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/infercrane/infercrane/internal/integration"
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizer"
 	"github.com/infercrane/infercrane/internal/runtimecontract"
@@ -72,8 +73,12 @@ func TestAgentCampaignProposalIsValid(t *testing.T) {
 	if err = optimizer.ValidateMeasurable(proposal.Input); err != nil {
 		t.Fatal(err)
 	}
+	registry, err := integration.V1Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, candidate := range proposal.Candidates[1:] {
-		if _, setupErr := optimizationcampaign.AgentSetup(candidate.Deployment); setupErr != nil {
+		if _, setupErr := optimizationcampaign.AgentSetup(candidate.Deployment, registry.Snapshot().Providers); setupErr != nil {
 			t.Fatalf("%s: %v", candidate.ID, setupErr)
 		}
 	}

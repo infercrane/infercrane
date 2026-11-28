@@ -272,10 +272,11 @@ infercrane deploy Qwen/Qwen3-8B \
 ```
 
 On a 24 GB GPU (L4, A10G), `Qwen/Qwen3-8B`'s own 40960-token context does not fit next to its
-weights: vLLM 0.34.0 needs 5.62 GiB of KV cache for it, has 3.72 GiB free, and exits. When the
-control plane can read model metadata (`INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`), InferCrane
-sees this before it deploys and sets `--max-model-len 8192`. The deploy output names the length and
-why. Without metadata access, or to choose another length, pass it yourself:
+weights: vLLM 0.34.0 needs 5.62 GiB of KV cache for it, has 3.72 GiB free, and exits. InferCrane
+sees this before it deploys and sets `--max-model-len 8192`, from the numbers it records for reviewed
+catalog models. The deploy output names the length and why. A model outside the catalog needs model
+metadata access (`INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`) for this. Without it, or to choose
+another length, pass it yourself:
 
 ```bash
 infercrane deploy Qwen/Qwen3-8B \

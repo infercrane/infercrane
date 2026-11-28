@@ -73,7 +73,7 @@ offline() {
 
   go build -o "$binary" "$root/cmd/infercrane" || return
   "$binary" version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' || return
-  "$binary" --help | grep -q 'InferCrane operates durable' || return
+  "$binary" --help | grep -q 'Same model. Less compute. Proven on your own traffic.' || return
   for shell in bash zsh fish powershell; do
     "$binary" completion "$shell" >"$offline_dir/completion-$shell" || return
     [ -s "$offline_dir/completion-$shell" ] || return
@@ -286,15 +286,17 @@ PY
   cli optimize inspect "$campaign_id" --output json |
     jq -e --arg id "$campaign_id" '.campaign.id == $id and .campaign.state == "awaiting_approval"' >/dev/null || return
   # Local acceptance deliberately has no sourced execution-price authority.
-  # Approval must therefore fail before any provider mutation rather than
-  # silently treating a catalog estimate as permission to spend money.
+  # The stack runs the AIPerf worker, so approval reaches the price check and
+  # must fail there (optimization_cost_authority_rejected) before any provider
+  # mutation rather than silently treating a catalog estimate as permission to
+  # spend money.
   if cli optimize approve "$campaign_id" --max-cost-usd 1 --expires-in 10m --output json \
       >"$run_dir/optimization-approval-unavailable.out" \
       2>"$run_dir/optimization-approval-unavailable.err"; then
     echo "optimization execution was approved without sourced provider pricing" >&2
     return 1
   fi
-  grep -q 'optimization_execution_unavailable' "$run_dir/optimization-approval-unavailable.err" || return
+  grep -q 'optimization_cost_authority_rejected' "$run_dir/optimization-approval-unavailable.err" || return
   cli optimize inspect "$campaign_id" --output json |
     jq -e '.campaign.state == "awaiting_approval" and .campaign.approved_max_cost_usd == null' >/dev/null || return
   cli optimize cancel "$campaign_id" --output json |

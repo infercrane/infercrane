@@ -327,24 +327,47 @@ vLLM and SGLang refuse to start when one request at the model's own maximum cont
 the KV cache left beside the weights. `Qwen/Qwen3-8B` declares 40960 tokens; on a 24 GB GPU such as
 the L4 or A10G it does not start without a shorter bound.
 
-A deploy that sets no engine arguments gets one. InferCrane reads the model the same way the check
-does and uses the same estimate, for one request on the chosen GPU:
+A deploy whose engine arguments set no context length gets one; any other arguments, such as a
+reviewed profile's `--enable-prefix-caching`, stay as they are. InferCrane sizes the model the same
+way the check does and uses the same estimate, for one request on the chosen GPU, or on the GPUs that
+`--tensor-parallel-size` (`--tp-size` on SGLang) spreads it over:
 
 1. If one request at the model's own maximum fits, the runtime keeps it.
 2. If not, and one request at the check's default length (8192 tokens, capped at the model's
    maximum) fits, InferCrane adds `--max-model-len 8192` (`--context-length 8192` on SGLang).
 3. If even that does not fit, InferCrane adds nothing and says the runtime may not start.
 
+The estimate needs the model's declared context, its parameter count by dtype, and the attention
+shape its KV cache size per token comes from. When the control plane reads Hugging Face (see
+**Turning it on**), InferCrane reads them there. When it does not, which is the default, InferCrane
+uses the numbers the reviewed catalog records for each reviewed model, read from the model's
+`config.json` and safetensors summary at the catalog's pinned commit. A deploy with no
+`model_revision`, or with that commit, uses them. `meta-llama/Llama-3.1-8B-Instruct` and
+`google/gemma-3-4b-it` have no recorded numbers, because their `config.json` needs a token. A model
+outside the catalog still needs metadata access; without it, the response says so and names
+`--max-model-len`. Of the engine arguments, the estimate reads only tensor parallelism. It assumes the
+runtime's default memory share, a 16-bit KV cache, and the checkpoint's own precision, whatever
+`--gpu-memory-utilization`, `--kv-cache-dtype`, or `--quantization` say.
+
+The runtimes take their memory share from the total the GPU's driver reports, which is below the
+nominal size: ECC and the driver reserve keep some. So the estimate uses that total, from published
+`nvidia-smi` and ROCm readings: 22.5 GiB for the 24 GB A10G, 22.5 GiB for the L4, 45 GiB for the
+L40S, 79.6 GiB for the H100. InferCrane records it for the T4, L4, A10, A10G, RTX 4090, A40, L40S,
+A100, H100, H200, B200, and MI300X. On any other GPU it does not size the context, and the response
+names the flag to set.
+
 The response's `context_length` names the length, `set_by` (`request`, `infercrane`, or
 `runtime`), and the reason; `infercrane deploy` prints them, and the bound is recorded in the
 revision's `runtime_args`. For `Qwen/Qwen3-8B` on one `NVIDIA-A10G`, the estimate needs about
-22.9 GiB for one 40960-token request against 21.6 GiB usable, and about 18.4 GiB at 8192 tokens, so
-InferCrane sets `--max-model-len 8192`. On one L40S the full context fits and is kept.
+22.9 GiB for one 40960-token request against 20.2 GiB usable (90% of the 22.5 GiB the driver
+reports), and about 18.4 GiB at 8192 tokens, so InferCrane sets `--max-model-len 8192`. On one L40S
+the full context fits and is kept.
 
-Your own length always wins: pass `infercrane deploy MODEL --max-model-len N`, or set it in
-`runtime.args`. A deploy with any engine arguments, a custom OCI image, or a serving graph gets no
-bound from InferCrane. Neither does an embedding model, a model outside Hugging Face, or any deploy
-when the control plane cannot read metadata (see **Turning it on**); the response then says why. The
+Your own length always wins: pass `infercrane deploy MODEL --max-model-len N`, or set
+`--max-model-len` (vLLM) or `--context-length` (SGLang) in `runtime.args`, as `--flag N` or
+`--flag=N`. A custom OCI image or a serving graph gets no bound from InferCrane. Neither does an
+embedding model, a model outside Hugging Face, or a model InferCrane cannot size: one outside the
+reviewed catalog without metadata access, or one whose read failed. The response then says why. The
 bound comes from an estimate, not a measurement.
 
 **Gated and private models.** Save a Hugging Face token as a sealed workspace secret under
@@ -357,11 +380,11 @@ through the provider's own secret store; see
 [model artifacts](/features/model-artifacts#private-and-gated-models).
 
 **Turning it on.** The control plane reads Hugging Face for checks, and for the context length of a
-deploy without engine arguments, only when the operator sets
+deploy, only when the operator sets
 `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`. It is off by default; planning then says that
 models outside the reviewed catalog cannot be checked, the check route returns
-`metadata_access_disabled` (HTTP 501), and a deploy keeps the model's own context. The reads never
-happen on the inference request path and never touch PostgreSQL.
+`metadata_access_disabled` (HTTP 501), and a deploy of a model outside the reviewed catalog keeps the
+model's own context. The reads never happen on the inference request path and never touch PostgreSQL.
 
 **Limits.** Each check waits at most 8 seconds for Hugging Face, sends at most 8 requests at once, and
 follows redirects only on the same host. Results are cached in memory by commit, up to 512 per

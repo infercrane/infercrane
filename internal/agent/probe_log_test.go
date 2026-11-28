@@ -1,13 +1,20 @@
 package agent
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/infercrane/infercrane/internal/agentprotocol"
 )
@@ -177,5 +184,209 @@ func TestProbeErrorsNameTheirClass(t *testing.T) {
 	}
 	if !validHeaderValue("Bearer a\tb") || validHeaderValue("Bearer a\r") || validHeaderValue("Bearer \x7f") {
 		t.Fatal("header value check")
+	}
+}
+
+// rawServer listens on a loopback port and hands each connection to handle,
+// for servers that do not speak HTTP. Connections still open are closed at
+// cleanup.
+func rawServer(t *testing.T, handle func(net.Conn)) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var open []net.Conn
+	var handlers sync.WaitGroup
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			mu.Lock()
+			open = append(open, conn)
+			mu.Unlock()
+			handlers.Add(1)
+			go func() {
+				defer handlers.Done()
+				handle(conn)
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		mu.Lock()
+		for _, conn := range open {
+			_ = conn.Close()
+		}
+		mu.Unlock()
+		handlers.Wait()
+	})
+	return "http://" + listener.Addr().String()
+}
+
+// readRequest reads the probe's request line and headers.
+func readRequest(conn net.Conn) {
+	_, _ = http.ReadRequest(bufio.NewReader(conn))
+}
+
+// onDefaultPort makes the agent's port scan probe only base's port.
+func onDefaultPort(t *testing.T, base string) {
+	t.Helper()
+	parsed, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := DefaultPorts
+	DefaultPorts = []int{port}
+	t.Cleanup(func() { DefaultPorts = previous })
+}
+
+// shortTimeout is a probe client that gives up quickly, for a server that
+// accepts the connection and never answers.
+func shortTimeout() Detector {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return Detector{HTTP: &http.Client{Timeout: 200 * time.Millisecond, Transport: transport}}
+}
+
+// A process on a default port that accepted the connection but gave no usable
+// reply was dropped like an empty port, so the agent neither reported nor
+// logged it. It is now an unhealthy server, logged once like any other.
+func TestADefaultPortThatAnswersButFailsTheProbeIsReportedAndLogged(t *testing.T) {
+	ctx := context.Background()
+	certificate := httptest.NewTLSServer(http.NotFoundHandler())
+	pair := certificate.TLS.Certificates[0]
+	certificate.Close()
+	for name, test := range map[string]struct {
+		handle   func(net.Conn)
+		detector Detector
+		reason   string
+		hint     bool
+	}{
+		"not HTTP": {handle: func(conn net.Conn) {
+			readRequest(conn)
+			_, _ = conn.Write([]byte("SSH-2.0-OpenSSH_9.6\r\n"))
+			_ = conn.Close()
+		}, reason: "not an HTTP reply", hint: true},
+		"closed": {handle: func(conn net.Conn) {
+			readRequest(conn)
+			_ = conn.Close()
+		}, reason: "closed without an HTTP reply", hint: true},
+		// A server that serves HTTPS cannot read a plain HTTP request.
+		"serves HTTPS": {handle: func(conn net.Conn) {
+			secure := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{pair}})
+			_ = secure.Handshake()
+			_ = secure.Close()
+		}, reason: "closed without an HTTP reply", hint: true},
+		"no reply": {handle: func(conn net.Conn) {
+			readRequest(conn)
+			_, _ = io.Copy(io.Discard, conn)
+		}, detector: shortTimeout(), reason: "timeout"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			base := rawServer(t, test.handle)
+			detected, found := test.detector.Probe(ctx, ServerConfig{URL: base}, false)
+			if !found || detected.Health != agentprotocol.HealthUnhealthy || detected.Failure != (ProbeFailure{Path: "/v1/models", Reason: test.reason}) || detected.Server.Validate() != nil {
+				t.Fatalf("probe: found=%v %+v", found, detected)
+			}
+			if hint := "name it with --server https://" + strings.TrimPrefix(base, "http://"); strings.Contains(detected.HealthDetail, hint) != test.hint {
+				t.Fatalf("health detail %q, HTTPS hint wanted=%v", detected.HealthDetail, test.hint)
+			}
+
+			onDefaultPort(t, base)
+			log := &eventLog{}
+			a := New(Config{AutoDetect: true, Detector: test.detector, Events: log.record})
+			a.Probe(ctx)
+			events := log.take()
+			if len(events) != 1 || events[0].Kind != "server_probe_failed" || !strings.Contains(events[0].Message, "health probe GET /v1/models failed ("+test.reason+"); the server is not registered until the probe passes") {
+				t.Fatalf("events: %+v", events)
+			}
+			if status := a.Status().Servers; len(status) != 1 || status[0].Health != agentprotocol.HealthUnhealthy {
+				t.Fatalf("reported servers: %+v", status)
+			}
+			a.Probe(ctx)
+			if events = log.take(); len(events) != 0 {
+				t.Fatalf("the same failure was logged again: %+v", events)
+			}
+		})
+	}
+}
+
+// Most default ports are empty. A scan that finds nothing listening reports
+// and logs nothing, pass after pass.
+func TestAnEmptyDefaultPortIsNeitherReportedNorLogged(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	base := closed.URL
+	closed.Close()
+	onDefaultPort(t, base)
+	var events []Event
+	var mu sync.Mutex
+	a := New(Config{AutoDetect: true, Events: func(event Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+	}})
+	for range 2 {
+		a.Probe(context.Background())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 0 || len(a.Status().Servers) != 0 {
+		t.Fatalf("an empty port was reported: events=%+v servers=%+v", events, a.Status().Servers)
+	}
+}
+
+// A server found on a default port that goes away was forgotten without a
+// word. Its last line now says it stopped answering, once.
+func TestADefaultPortServerThatGoesAwayIsLoggedOnce(t *testing.T) {
+	for _, mode := range []string{"ok", "500"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			var state atomic.Value
+			state.Store(mode)
+			server := switchableServer(t, &state, &atomic.Int64{})
+			key := ServerKey(server.URL)
+			onDefaultPort(t, server.URL)
+			log := &eventLog{}
+			a := New(Config{AutoDetect: true, Events: log.record})
+			a.Probe(ctx)
+			_ = log.take()
+			server.Close()
+			a.Probe(ctx)
+			events := log.take()
+			if len(events) != 1 || events[0].Kind != "server_probe_failed" || events[0].Server == nil || events[0].Server.Key != key {
+				t.Fatalf("events: %+v", events)
+			}
+			if want := "server " + key + ": health probe GET /v1/models failed (stopped answering); the agent stops reporting it until a server answers on " + server.URL + " again"; events[0].Message != want {
+				t.Fatalf("line %q, want %q", events[0].Message, want)
+			}
+			if servers := a.Status().Servers; len(servers) != 0 {
+				t.Fatalf("a server that went away is still reported: %+v", servers)
+			}
+			a.Probe(ctx)
+			if events = log.take(); len(events) != 0 {
+				t.Fatalf("an empty port was logged: %+v", events)
+			}
+		})
+	}
+}
+
+// An https server that answers in plain HTTP fails the TLS handshake. The
+// probe names that, instead of "could not reach".
+func TestAnHTTPSProbeOfAPlainServerNamesTheTLSHandshake(t *testing.T) {
+	var mode atomic.Value
+	mode.Store("ok")
+	server := switchableServer(t, &mode, &atomic.Int64{})
+	secure := "https://" + strings.TrimPrefix(server.URL, "http://")
+	detected, found := Detector{}.Probe(context.Background(), ServerConfig{URL: secure}, true)
+	if !found || detected.Failure.Reason != "TLS handshake failed" || !strings.Contains(detected.HealthDetail, "name it with --server "+server.URL) {
+		t.Fatalf("probe: %+v", detected)
 	}
 }

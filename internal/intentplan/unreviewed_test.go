@@ -199,3 +199,16 @@ func missing(plan Plan, field string) MissingChoice {
 	}
 	return MissingChoice{}
 }
+
+// The checked profile bounds the context with each runtime's own flag.
+func TestCheckedProfileUsesEachRuntimesContextFlag(t *testing.T) {
+	report := modelcheck.Report{Memory: modelcheck.MemoryFit{ContextTokens: 8192, Concurrency: 8}}
+	for runtime, want := range map[string][]string{
+		"vllm":   {"--max-model-len", "8192", "--tensor-parallel-size", "2"},
+		"sglang": {"--context-length", "8192", "--tp-size", "2"},
+	} {
+		if profile := checkedProfile(report, runtime, "1", "L4", 2, nil); !slices.Equal(profile.RuntimeArgs, want) {
+			t.Fatalf("%s: runtime args %v, want %v", runtime, profile.RuntimeArgs, want)
+		}
+	}
+}

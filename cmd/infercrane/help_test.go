@@ -29,7 +29,7 @@ func TestRootHelpShowsEverydaySectionsAndHidesOperatorTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Usage: infercrane [OPTIONS] COMMAND [ARGS]...",
-		"Run open models in your own cloud",
+		"Same model. Less compute. Proven on your own traffic.",
 		"Not signed in. Run infercrane login to start.",
 		"Get started:", "Deployments:", "Optimize:", "Observe:", "Configuration:", "Options:",
 		"  deploy ", "  optimize ", "  login ",

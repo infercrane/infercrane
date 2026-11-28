@@ -94,11 +94,11 @@ receives the deployment or an optimization proposal, and when a deployment is pr
 or rolled out. An InferCrane agent refuses the same arguments in a candidate it runs. Both forms
 `--flag value` and `--flag=value` are read; a value such as `-1` is a value, not a flag.
 
-When `runtime.args` is empty on vLLM or SGLang, InferCrane may add one argument itself: a context
-length, when one request at the model's own maximum would not fit the GPU next to the weights. The
+When `runtime.args` sets no context length on vLLM or SGLang, InferCrane may add one after your
+arguments, when one request at the model's own maximum would not fit the GPU next to the weights. The
 deploy response says which length and why; see
-[Context length at deploy](/features/model-catalog#context-length-at-deploy). Any argument you set
-turns this off.
+[Context length at deploy](/features/model-catalog#context-length-at-deploy). Setting
+`--max-model-len` (vLLM) or `--context-length` (SGLang) yourself, in either form, turns this off.
 
 Not in the set: arguments InferCrane sets itself (host, port, model, revision, API key, LoRA
 adapters, configuration files) and arguments that load code or files named in their value (plugins,

@@ -49,10 +49,14 @@ const (
 
 var tensorParallelSizes = []int{1, 2, 4, 8}
 
-// GPU is one accelerator alias the memory fit may choose.
+// GPU is one accelerator alias the memory fit may choose. MemoryGiB is its
+// nominal size. UsableMiB, when set, is the memory its driver reports as
+// total, which the runtimes take their share from; the fit then sizes
+// against it instead.
 type GPU struct {
 	Name      string
 	MemoryGiB int
+	UsableMiB int
 }
 
 // EvaluateOptions sizes the memory fit. GPUs come from current price observations;
@@ -522,7 +526,11 @@ func memoryFit(model Model, task string, options EvaluateOptions) MemoryFit {
 	}
 	mla := model.Config != nil && model.Config.KVLoRARank > 0
 	for _, gpu := range options.GPUs {
-		usable := int64(float64(int64(gpu.MemoryGiB)<<30) * GPUMemoryUtilization)
+		capacity := int64(gpu.MemoryGiB) << 30
+		if gpu.UsableMiB > 0 {
+			capacity = int64(gpu.UsableMiB) << 20
+		}
+		usable := int64(float64(capacity) * GPUMemoryUtilization)
 		for _, size := range tensorParallelSizes {
 			if size > 1 && heads > 0 && heads%size != 0 {
 				continue

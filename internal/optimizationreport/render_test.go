@@ -196,3 +196,15 @@ func TestRenderersSayRunBaselineAndRollOut(t *testing.T) {
 		t.Fatalf("a rejected setup lost its verdict:\n%s", text)
 	}
 }
+
+// A setup an agent refused says why in words, not as a code.
+func TestASetupAnAgentRefusedSaysWhy(t *testing.T) {
+	for code, want := range map[string]string{
+		optimizationcampaign.FailureAgentSetupNotPlainServer: "failed · the agent starts plain servers only, and this setup is another kind of server",
+		optimizationcampaign.FailureAgentSetupUnsupported:    "failed · the agent cannot start this setup yet",
+	} {
+		if words := statusWords(optimizationcampaign.CandidateFailed, code); words != want {
+			t.Fatalf("%s: %q", code, words)
+		}
+	}
+}

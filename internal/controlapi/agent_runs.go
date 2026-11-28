@@ -53,7 +53,7 @@ func (a API) agentRunTarget(ctx context.Context, tenant, endpoint string, propos
 		if candidate.ID == proposal.StartingPoint.CandidateID {
 			continue
 		}
-		if _, setupErr := optimizationcampaign.AgentSetup(candidate.Deployment); setupErr != nil {
+		if _, setupErr := optimizationcampaign.AgentSetup(candidate.Deployment, a.Integrations.Providers); setupErr != nil {
 			return "", "setup " + candidate.ID + ": " + setupErr.Error()
 		}
 	}

@@ -64,8 +64,8 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
 1. A planning request (`POST /api/v1/planning/intents`), a check (`GET
    /api/v1/catalog/hugging-face/check`), or an optimization proposal names a Hugging Face repository
    that is not a reviewed model; or a deployment (`POST /api/v1/deployments`) of any Hugging Face
-   repository on a built-in runtime sets no engine arguments, and InferCrane sizes its context
-   length.
+   repository on a built-in runtime sets no context length in its engine arguments, and InferCrane
+   sizes it.
 2. When a `model_secret_reference_id` is named, the control API loads that tenant's secret reference
    and resolves the token through the configured secret resolver.
 3. `internal/modelcheck` pins the revision to a commit with one model-info request, then reads
@@ -76,7 +76,9 @@ Only when the operator set `INFERCRANE_HUGGING_FACE_METADATA_ENABLED=true`:
    from the price catalog already in memory, and returns. For a deployment it sizes one request on
    the chosen GPU instead and, when the model's own maximum context does not fit, adds a context
    length to the deployment's engine arguments before the deployment is persisted. A failed read
-   never fails the deployment; it keeps the model's own context and says why. For a proposal
+   never fails the deployment; it keeps the model's own context and says why. With metadata access
+   off, a deployment of a reviewed catalog model is sized from the numbers `internal/modelcheck`
+   records for its pinned commit, with no network read. For a proposal
    planned from an endpoint diagnosis, it also adds the served weights' bytes and the KV cache bytes
    per token to that diagnosis, from which the planner predicts the cache room of precision changes.
    The planner itself never reads the network.

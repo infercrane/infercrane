@@ -1484,6 +1484,14 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment, or target_endpoint for an endpoint an agent serves")
 		return
 	}
+	// The control plane deploys every setup of a run but an agent's, which
+	// the agent starts in its own cluster.
+	if request.TargetEndpoint == "" {
+		if refused := a.proposalPrerequisiteRefusal(request.Proposal); refused != "" {
+			writeError(w, http.StatusUnprocessableEntity, "prerequisite_not_configured", refused)
+			return
+		}
+	}
 	agentID := ""
 	if request.TargetEndpoint != "" {
 		var refused string
@@ -5631,7 +5639,7 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	if open, openErr := a.Store.ActiveOperationForResource(r.Context(), principal.TenantID, "deployment", resolved.Deployment.Name); openErr == nil && open.Kind == workflows.ServerlessConvergeKind {
 		deleteKind = workflows.ServerlessDeleteKind
 	}
-	deletion, err := a.Store.SubmitDeploymentDeleteCancelling(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)}, deleteCancelsKinds)
+	deletion, err := a.Store.SubmitDeploymentDeleteCancelling(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)}, workflows.DeleteCancelsKinds())
 	var open *store.OpenOperationError
 	if errors.As(err, &open) {
 		writeError(w, http.StatusConflict, "unresolved_operation", unresolvedOperationMessage(open))
@@ -5654,11 +5662,6 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/v1/operations/"+deletion.Operation.ID)
 	writeJSON(w, http.StatusAccepted, response)
 }
-
-// deleteCancelsKinds are the unfinished operations a deployment delete
-// cancels by itself: a deploy, whose own cancellation runs the same cleanup
-// the delete does. Any other unfinished operation refuses the delete.
-var deleteCancelsKinds = []string{workflows.ConvergeKind, workflows.ServerlessConvergeKind}
 
 // unresolvedOperationMessage says why a delete left the deployment's
 // unfinished operation alone, and what to do instead.
@@ -5741,6 +5744,10 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
 			return
 		}
+	}
+	if refused := a.prerequisiteRefusal(request.ProviderAdapter, request.Runtime); refused != "" {
+		writeError(w, http.StatusUnprocessableEntity, "prerequisite_not_configured", refused)
+		return
 	}
 	if failure := a.validateModelImports(r.Context(), principal.TenantID, request.Model, request.ModelRevision, request.ModelAdapters); failure != nil {
 		writeError(w, failure.Status, failure.Code, failure.Message)

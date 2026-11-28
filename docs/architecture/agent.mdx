@@ -78,9 +78,20 @@ reported unhealthy with the reason in its health detail, and is registered only 
 passes. The agent logs one `unhealthy` line when the probe starts failing or fails for another
 reason, and one `healthy` line when it passes again, not one per pass. The line names the server
 key, the probe path, and an HTTP status (`HTTP 401`) or an error class (`timeout`,
-`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `not a model list`,
+`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `TLS handshake failed`,
+`closed without an HTTP reply`, `not an HTTP reply`, `not a model list`,
 `invalid Authorization header`), never a header or token. A token that ends in a newline is not a
 valid header value, so the agent sends nothing and says `invalid Authorization header`.
+
+The default ports follow the same rules, with one difference: most of them are empty. A port where
+nothing listens, or whose server has no `GET /v1/models`, is not a server, and the agent says nothing
+about it. A port where something accepts the connection but fails the probe is reported unhealthy
+and logged like a named server. Examples are a server that serves HTTPS, which closes a plain HTTP
+request without a reply, or one that answers with something other than HTTP or a model list. The
+agent probes default ports over plain HTTP, so name an HTTPS server with
+`--server https://127.0.0.1:PORT`. When a server found on a default port goes away, the agent logs
+one `unhealthy` line saying it stopped answering. A registered server stays on its endpoint as
+unhealthy; an unregistered one is no longer reported until a server answers on that port again.
 
 ### The agent key
 
@@ -334,7 +345,8 @@ A candidate run names the endpoint whose server is the current setup, the candid
 image (pinned by digest), argv and extra engine arguments, accelerator and count, the AIPerf load
 (requests, concurrency, input and output tokens, streaming), the eval set for the answer check, and
 a timeout. It can never carry a shell: an entry point that is a shell or an interpreter is refused,
-and arguments with substitutions are refused.
+and arguments with substitutions are refused. It has no place for a serving graph: an agent starts
+plain servers only, one engine container from that image, with those arguments, on those GPUs.
 
 The agent then, in its own namespace:
 
@@ -426,6 +438,23 @@ is all the control plane knows of it. A run the agent cannot measure is refused 
 (`invalid_agent_run`): customer-signed evidence, a replayed trace (the agent measures the synthetic
 profile for now), and setups with environment variables, tuned kernel files, LoRA adapters, or a
 private model's credential. An old agent refuses `measure_window` (`unsupported_command`).
+
+An agent starts every setup as a plain server, so a setup that is not one is refused, never started
+as something else. Started as a plain server, it would be measured and labelled as a setup it is
+not. This covers a setup with a serving graph, such as an NVIDIA Dynamo graph, and a setup on a
+provider adapter that serves through software beside its cloud, which the adapter's profile names
+as its prerequisite. The data decide, not the adapter's name. A setup on an adapter the control
+plane has no profile for is refused too, because nothing says what it starts.
+
+- **When the run is created**, it is refused (`invalid_agent_run`). The reason names the setup, for
+  example `setup 3f2a…: an agent starts plain servers only; this setup needs a serving graph on
+  NVIDIA Dynamo`.
+- **In a run stored before this check**, the setup fails before its next window, so no GPU
+  starts. Its failure code is `agent_setup_not_plain_server`, and reports and `optimize watch` say
+  why in words. A winner measured that way is never rolled out.
+- **When the run is planned**, the proposal leaves such setups out if the endpoint's setup was
+  declared (`declared_setup`), with a warning that names them. Without a declaration the planner
+  cannot tell the endpoint is an agent's, so the refusal at creation is what stops them.
 
 ### The winner's guarded rollout
 
@@ -543,5 +572,7 @@ performance.
   more. Each replica leases quota on its own.
 - Candidate runs need Kubernetes; the single-machine `--launch` mode is designed, not implemented.
   Their results are not yet ranked or promoted by optimization runs.
+- An agent starts plain servers only. A setup with a serving graph, such as an NVIDIA Dynamo graph,
+  cannot be measured on an agent's endpoint.
 - AWS self-serve connections are the next slice of this plan: they reach private-network workers
   through this agent.

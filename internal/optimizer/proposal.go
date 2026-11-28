@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -511,7 +512,11 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 			return proposal, err
 		}
 	}
-	return applyUnruledTechniques(proposal)
+	if proposal, err = applyUnruledTechniques(proposal); err != nil {
+		return proposal, err
+	}
+	proposal.Warnings = append(proposal.Warnings, undeployableWarnings(s.Integrations, proposal.Candidates)...)
+	return proposal, nil
 }
 
 const (
@@ -1229,11 +1234,7 @@ func buildGenericCandidate(model, revision string, compatible integration.Runtim
 func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Request) []string {
 	args := []string{}
 	sglang := compatible.Runtime == "sglang"
-	if request.MaxModelLen > 0 {
-		flag := "--max-model-len"
-		if sglang {
-			flag = "--context-length"
-		}
+	if flag := optimizationcapability.ContextLengthFlag(compatible.Runtime); request.MaxModelLen > 0 && flag != "" {
 		args = append(args, flag, strconv.Itoa(request.MaxModelLen))
 	}
 	if request.GPUCount > 1 && compatible.Adapter != "kubernetes-dynamo" {
@@ -1249,15 +1250,18 @@ func genericRuntimeArgs(compatible integration.RuntimeCompatibility, request Req
 // matchingCompatibility returns the entries a proposal may use: the request's
 // provider and runtimes, a qualified state (simulated only when asked), for an
 // entry narrowed to one qualified tuple the request's GPU and the runtime's
-// pinned version, and an adapter whose prerequisite is known to be there
-// (prerequisiteKnown). One entry per runtime, adapter, and mode remains.
+// pinned version, an adapter whose prerequisite is known to be there
+// (prerequisiteKnown), and for an agent's endpoint an adapter whose setups are
+// plain servers (agentEndpoint). One entry per runtime, adapter, and mode
+// remains.
 func matchingCompatibility(integrations integration.Snapshot, request Request) []integration.RuntimeCompatibility {
 	offered, _ := filterCompatibility(integrations, request)
 	return offered
 }
 
 // filterCompatibility also returns the entries that matched the request but
-// were withheld because their adapter's prerequisite is not known to be there.
+// were withheld: their adapter's prerequisite is not known to be there, or the
+// plan is for an agent's endpoint and their setups are not plain servers.
 func filterCompatibility(integrations integration.Snapshot, request Request) (offered, withheld []integration.RuntimeCompatibility) {
 	allowedRuntime := func(value string) bool {
 		if len(request.Runtimes) == 0 {
@@ -1284,7 +1288,7 @@ func filterCompatibility(integrations integration.Snapshot, request Request) (of
 		if !entry.Applies(request.GPU, runtimeVersion(integrations.Runtimes, entry.Runtime)) {
 			continue
 		}
-		if !prerequisiteKnown(integrations.Providers, entry, request) {
+		if !prerequisiteKnown(integrations.Providers, entry, request) || agentEndpoint(request) && !plainServerAdapter(integrations.Providers, entry.Adapter) {
 			withheld = append(withheld, entry)
 			continue
 		}
@@ -1303,17 +1307,34 @@ func prerequisiteKnown(providers []integration.ProviderProfile, entry integratio
 	if request.Provider == entry.Adapter || request.ProviderAdapter == entry.Adapter {
 		return true
 	}
+	return providerProfile(providers, entry.Adapter).PrerequisiteConfigured(entry.Runtime)
+}
+
+// agentEndpoint reports whether the plan is for an endpoint an InferCrane
+// agent serves: the control API recorded its starting setup as declared for
+// that endpoint. The agent measures every setup there and starts plain servers
+// only, so a setup it would start as something else is never offered.
+func agentEndpoint(request Request) bool {
+	return request.StartingSetup != nil && request.StartingSetup.Endpoint != ""
+}
+
+// plainServerAdapter reports, from the adapter's provider profile, whether a
+// setup on it is a plain server. An adapter without a profile is not known to
+// be one.
+func plainServerAdapter(providers []integration.ProviderProfile, adapter string) bool {
 	for _, profile := range providers {
-		if profile.Adapter == entry.Adapter {
-			return profile.PrerequisiteConfigured(entry.Runtime)
+		if profile.Adapter == adapter {
+			return profile.PlainServer()
 		}
 	}
-	return true
+	return false
 }
 
 // prerequisiteWarnings says, once per adapter, which setups the planner left
-// out because their adapter's prerequisite is not known to be there, and how
-// to plan them.
+// out and why: their adapter's prerequisite is not known to be there, and how
+// to plan them (a control plane that knows its own configuration names the
+// settings; the catalog can only say to name the adapter), or, for an agent's
+// endpoint, they are not plain servers.
 func prerequisiteWarnings(integrations integration.Snapshot, request Request) []string {
 	_, withheld := filterCompatibility(integrations, request)
 	runtimes := map[string][]string{}
@@ -1322,23 +1343,65 @@ func prerequisiteWarnings(integrations integration.Snapshot, request Request) []
 			runtimes[entry.Adapter] = append(runtimes[entry.Adapter], entry.Runtime)
 		}
 	}
-	adapters := make([]string, 0, len(runtimes))
-	for adapter := range runtimes {
-		adapters = append(adapters, adapter)
-	}
-	slices.Sort(adapters)
-	warnings := make([]string, 0, len(adapters))
-	for _, adapter := range adapters {
-		var name string
-		for _, profile := range integrations.Providers {
-			if profile.Adapter == adapter {
-				name = profile.Prerequisite.Name
-			}
-		}
+	warnings := []string{}
+	for _, adapter := range slices.Sorted(maps.Keys(runtimes)) {
+		profile := providerProfile(integrations.Providers, adapter)
 		slices.Sort(runtimes[adapter])
-		warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) were left out: they need %s, and InferCrane does not know it runs there. Name provider %s if it does.", adapter, strings.Join(runtimes[adapter], ", "), name, adapter))
+		if agentEndpoint(request) {
+			warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) were left out: the endpoint's InferCrane agent starts plain servers only, and they need %s.", adapter, strings.Join(runtimes[adapter], ", "), profile.Prerequisite.Name))
+			continue
+		}
+		leftOut := fmt.Sprintf("Setups on %s (%s) were left out: they need %s", adapter, strings.Join(runtimes[adapter], ", "), profile.Prerequisite.Name)
+		if gap := profile.PrerequisiteGap(runtimes[adapter]...); gap != "" {
+			warnings = append(warnings, fmt.Sprintf("%s, and %s.", leftOut, gap))
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("%s, and InferCrane does not know it runs there. Name provider %s if it does.", leftOut, adapter))
 	}
 	return warnings
+}
+
+// undeployableWarnings says, once per adapter, which proposed setups this
+// control plane cannot deploy because it is known not to run their runtime
+// through the adapter's prerequisite, and which settings would let it. Such a
+// setup is still proposed when the request names its adapter: the operator
+// may be about to set them. Planning from the catalog alone, which cannot
+// know, says nothing.
+func undeployableWarnings(integrations integration.Snapshot, candidates []Candidate) []string {
+	runtimes := map[string][]string{}
+	for _, candidate := range candidates {
+		adapter, runtime := candidate.Deployment.Provider.Adapter, candidate.Deployment.Runtime.Engine
+		if !slices.Contains(runtimes[adapter], runtime) {
+			runtimes[adapter] = append(runtimes[adapter], runtime)
+		}
+	}
+	warnings := []string{}
+	for _, adapter := range slices.Sorted(maps.Keys(runtimes)) {
+		profile := providerProfile(integrations.Providers, adapter)
+		var missing []string
+		for _, runtime := range runtimes[adapter] {
+			if profile.PrerequisiteMissing(runtime) {
+				missing = append(missing, runtime)
+			}
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		slices.Sort(missing)
+		warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) will fail to deploy: %s.", adapter, strings.Join(missing, ", "), profile.PrerequisiteGap(missing...)))
+	}
+	return warnings
+}
+
+// providerProfile is the adapter's profile, or the zero profile, which needs
+// nothing beside its cloud, for an adapter the snapshot does not list.
+func providerProfile(providers []integration.ProviderProfile, adapter string) integration.ProviderProfile {
+	for _, profile := range providers {
+		if profile.Adapter == adapter {
+			return profile
+		}
+	}
+	return integration.ProviderProfile{}
 }
 
 func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) []curatedrecipe.ServingProfile {
