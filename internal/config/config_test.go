@@ -721,6 +721,34 @@ func TestDynamoConfigurationIsOptionalCompleteAndImmutable(t *testing.T) {
 	}
 }
 
+// A setup refused for a missing Dynamo runtime names these settings, so they
+// must be the ones that configure that runtime and no other.
+func TestDynamoRuntimeSettingsAreTheOnesThatConfigureTheRuntime(t *testing.T) {
+	t.Setenv("INFERCRANE_API_KEY", "secret")
+	t.Setenv("INFERCRANE_KUBERNETES_ENGINE_INGRESS", "none")
+	t.Setenv("INFERCRANE_KUBERNETES_CONTEXT", "production")
+	t.Setenv("INFERCRANE_KUBERNETES_IMAGE_DIGEST", "ghcr.io/infercrane/runtime@sha256:"+strings.Repeat("a", 64))
+	for _, runtime := range []string{"vllm", "sglang"} {
+		settings := DynamoRuntimeSettings(runtime)
+		if len(settings) != 2 {
+			t.Fatalf("%s settings=%v", runtime, settings)
+		}
+		before, err := Load()
+		if err != nil || before.DynamoRuntimeEnabled(runtime) {
+			t.Fatalf("%s enabled before its settings: err=%v", runtime, err)
+		}
+		t.Setenv(settings[0], "nvcr.io/nvidia/ai-dynamo/"+runtime+"-runtime@sha256:"+strings.Repeat("b", 64))
+		t.Setenv(settings[1], "1.4.0")
+		cfg, err := Load()
+		if err != nil || !cfg.DynamoRuntimeEnabled(runtime) {
+			t.Fatalf("%s settings %v do not configure it: err=%v", runtime, settings, err)
+		}
+	}
+	if settings := DynamoRuntimeSettings("custom-oci"); settings != nil {
+		t.Fatalf("custom-oci has Dynamo settings %v", settings)
+	}
+}
+
 func TestGCPBYOCConfigurationIsAllOrNothingAndImmutable(t *testing.T) {
 	t.Setenv("INFERCRANE_API_KEY", "secret")
 	t.Setenv("INFERCRANE_GCP_PROJECT", "acme-prod")

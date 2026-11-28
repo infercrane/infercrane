@@ -1484,6 +1484,14 @@ func (a API) createOptimizationCampaign(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnprocessableEntity, "invalid_optimization_intent", "new_endpoint cannot name a target; evolve_endpoint requires target_deployment, or target_endpoint for an endpoint an agent serves")
 		return
 	}
+	// The control plane deploys every setup of a run but an agent's, which
+	// the agent starts in its own cluster.
+	if request.TargetEndpoint == "" {
+		if refused := a.proposalPrerequisiteRefusal(request.Proposal); refused != "" {
+			writeError(w, http.StatusUnprocessableEntity, "prerequisite_not_configured", refused)
+			return
+		}
+	}
 	agentID := ""
 	if request.TargetEndpoint != "" {
 		var refused string
@@ -5741,6 +5749,10 @@ func (a API) createCloudDeployment(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "compute_connection_required", "this control plane has no ready compute connection for "+request.Cloud)
 			return
 		}
+	}
+	if refused := a.prerequisiteRefusal(request.ProviderAdapter, request.Runtime); refused != "" {
+		writeError(w, http.StatusUnprocessableEntity, "prerequisite_not_configured", refused)
+		return
 	}
 	if failure := a.validateModelImports(r.Context(), principal.TenantID, request.Model, request.ModelRevision, request.ModelAdapters); failure != nil {
 		writeError(w, failure.Status, failure.Code, failure.Message)

@@ -151,11 +151,14 @@ func registerSkyPilotPlanningCandidates(registry *integration.Registry, manifest
 	return nil
 }
 
+// dynamoRuntimes are the runtimes a Dynamo graph can run.
+var dynamoRuntimes = []string{"vllm", "sglang"}
+
 // configuredDynamoRuntimes are the runtimes this control plane runs Dynamo
 // graphs with: each one with a complete image digest and version pair.
 func configuredDynamoRuntimes(cfg config.Config) []string {
 	var runtimes []string
-	for _, runtimeName := range []string{"vllm", "sglang"} {
+	for _, runtimeName := range dynamoRuntimes {
 		if cfg.DynamoRuntimeEnabled(runtimeName) {
 			runtimes = append(runtimes, runtimeName)
 		}
@@ -163,16 +166,19 @@ func configuredDynamoRuntimes(cfg config.Config) []string {
 	return runtimes
 }
 
-// configureDynamoPlanning tells the planner which runtimes this control plane
-// runs Dynamo graphs with, the same ones it registers Dynamo backends for. A
+// configureDynamoPlanning tells the planner and the control API which
+// runtimes this control plane runs Dynamo graphs with, the same ones it
+// registers Dynamo backends for, and the settings that configure each. A
 // proposal for provider kubernetes then offers a kubernetes-dynamo setup only
-// where one can run.
+// where one can run. It records them also when none is configured, so a
+// request that names kubernetes-dynamo for a runtime without an image is
+// warned in its proposal and refused before it deploys.
 func configureDynamoPlanning(registry *integration.Registry, cfg config.Config) error {
-	runtimes := configuredDynamoRuntimes(cfg)
-	if len(runtimes) == 0 {
-		return nil
+	settings := make(map[string][]string, len(dynamoRuntimes))
+	for _, runtimeName := range dynamoRuntimes {
+		settings[runtimeName] = config.DynamoRuntimeSettings(runtimeName)
 	}
-	if err := registry.ConfigurePrerequisite("kubernetes-dynamo", runtimes...); err != nil {
+	if err := registry.ConfigurePrerequisite("kubernetes-dynamo", settings, configuredDynamoRuntimes(cfg)...); err != nil {
 		return fmt.Errorf("configure Dynamo planning: %w", err)
 	}
 	return nil

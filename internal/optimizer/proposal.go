@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -511,7 +512,11 @@ func (s CatalogSource) Propose(_ context.Context, request Request) (Proposal, er
 			return proposal, err
 		}
 	}
-	return applyUnruledTechniques(proposal)
+	if proposal, err = applyUnruledTechniques(proposal); err != nil {
+		return proposal, err
+	}
+	proposal.Warnings = append(proposal.Warnings, undeployableWarnings(s.Integrations, proposal.Candidates)...)
+	return proposal, nil
 }
 
 const (
@@ -1303,17 +1308,13 @@ func prerequisiteKnown(providers []integration.ProviderProfile, entry integratio
 	if request.Provider == entry.Adapter || request.ProviderAdapter == entry.Adapter {
 		return true
 	}
-	for _, profile := range providers {
-		if profile.Adapter == entry.Adapter {
-			return profile.PrerequisiteConfigured(entry.Runtime)
-		}
-	}
-	return true
+	return providerProfile(providers, entry.Adapter).PrerequisiteConfigured(entry.Runtime)
 }
 
 // prerequisiteWarnings says, once per adapter, which setups the planner left
 // out because their adapter's prerequisite is not known to be there, and how
-// to plan them.
+// to plan them. A control plane that knows its own configuration names the
+// settings; the catalog can only say to name the adapter.
 func prerequisiteWarnings(integrations integration.Snapshot, request Request) []string {
 	_, withheld := filterCompatibility(integrations, request)
 	runtimes := map[string][]string{}
@@ -1322,23 +1323,61 @@ func prerequisiteWarnings(integrations integration.Snapshot, request Request) []
 			runtimes[entry.Adapter] = append(runtimes[entry.Adapter], entry.Runtime)
 		}
 	}
-	adapters := make([]string, 0, len(runtimes))
-	for adapter := range runtimes {
-		adapters = append(adapters, adapter)
-	}
-	slices.Sort(adapters)
-	warnings := make([]string, 0, len(adapters))
-	for _, adapter := range adapters {
-		var name string
-		for _, profile := range integrations.Providers {
-			if profile.Adapter == adapter {
-				name = profile.Prerequisite.Name
-			}
-		}
+	warnings := []string{}
+	for _, adapter := range slices.Sorted(maps.Keys(runtimes)) {
+		profile := providerProfile(integrations.Providers, adapter)
 		slices.Sort(runtimes[adapter])
-		warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) were left out: they need %s, and InferCrane does not know it runs there. Name provider %s if it does.", adapter, strings.Join(runtimes[adapter], ", "), name, adapter))
+		leftOut := fmt.Sprintf("Setups on %s (%s) were left out: they need %s", adapter, strings.Join(runtimes[adapter], ", "), profile.Prerequisite.Name)
+		if gap := profile.PrerequisiteGap(runtimes[adapter]...); gap != "" {
+			warnings = append(warnings, fmt.Sprintf("%s, and %s.", leftOut, gap))
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("%s, and InferCrane does not know it runs there. Name provider %s if it does.", leftOut, adapter))
 	}
 	return warnings
+}
+
+// undeployableWarnings says, once per adapter, which proposed setups this
+// control plane cannot deploy because it is known not to run their runtime
+// through the adapter's prerequisite, and which settings would let it. Such a
+// setup is still proposed when the request names its adapter: the operator
+// may be about to set them. Planning from the catalog alone, which cannot
+// know, says nothing.
+func undeployableWarnings(integrations integration.Snapshot, candidates []Candidate) []string {
+	runtimes := map[string][]string{}
+	for _, candidate := range candidates {
+		adapter, runtime := candidate.Deployment.Provider.Adapter, candidate.Deployment.Runtime.Engine
+		if !slices.Contains(runtimes[adapter], runtime) {
+			runtimes[adapter] = append(runtimes[adapter], runtime)
+		}
+	}
+	warnings := []string{}
+	for _, adapter := range slices.Sorted(maps.Keys(runtimes)) {
+		profile := providerProfile(integrations.Providers, adapter)
+		var missing []string
+		for _, runtime := range runtimes[adapter] {
+			if profile.PrerequisiteMissing(runtime) {
+				missing = append(missing, runtime)
+			}
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		slices.Sort(missing)
+		warnings = append(warnings, fmt.Sprintf("Setups on %s (%s) will fail to deploy: %s.", adapter, strings.Join(missing, ", "), profile.PrerequisiteGap(missing...)))
+	}
+	return warnings
+}
+
+// providerProfile is the adapter's profile, or the zero profile, which needs
+// nothing beside its cloud, for an adapter the snapshot does not list.
+func providerProfile(providers []integration.ProviderProfile, adapter string) integration.ProviderProfile {
+	for _, profile := range providers {
+		if profile.Adapter == adapter {
+			return profile
+		}
+	}
+	return integration.ProviderProfile{}
 }
 
 func matchingProfiles(entries []curatedrecipe.ServingProfile, request Request) []curatedrecipe.ServingProfile {

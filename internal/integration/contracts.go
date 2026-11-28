@@ -106,19 +106,76 @@ type ProviderProfile struct {
 // Prerequisite names software an operator installs beside a cloud before an
 // adapter can serve anything there, such as NVIDIA Dynamo in a Kubernetes
 // cluster. The catalog declares the name only, because it cannot know what a
-// cluster runs. ConfiguredRuntimes lists the runtimes the control plane is
-// configured to run through it (Registry.ConfigurePrerequisite). It is
-// operator configuration, not qualification evidence.
+// cluster runs. The control plane runs a runtime through it with an image the
+// operator configures: ConfiguredRuntimes lists the runtimes it has one for,
+// and Settings names, for each runtime it could run, the settings that
+// configure that image (Registry.ConfigurePrerequisite). It is operator
+// configuration, not qualification evidence.
 type Prerequisite struct {
-	Name               string   `json:"name"`
-	ConfiguredRuntimes []string `json:"configured_runtimes,omitempty"`
+	Name               string              `json:"name"`
+	ConfiguredRuntimes []string            `json:"configured_runtimes,omitempty"`
+	Settings           map[string][]string `json:"settings,omitempty"`
 }
+
+// Known reports whether the prerequisite carries a control plane's own
+// configuration, so a runtime outside ConfiguredRuntimes is known not to run
+// through it there. Only composition records settings; the catalog's
+// declaration alone is not known.
+func (p Prerequisite) Known() bool { return len(p.Settings) > 0 }
 
 // PrerequisiteConfigured reports whether the control plane runs the runtime
 // through the adapter's prerequisite. An adapter without one needs nothing
 // more than its cloud.
 func (p ProviderProfile) PrerequisiteConfigured(runtime string) bool {
 	return p.Prerequisite.Name == "" || slices.Contains(p.Prerequisite.ConfiguredRuntimes, runtime)
+}
+
+// PrerequisiteMissing reports whether this control plane is known not to run
+// the runtime through the adapter's prerequisite, so a setup on the adapter
+// with that runtime cannot deploy here. A catalog profile never reports one
+// missing: the catalog cannot know.
+func (p ProviderProfile) PrerequisiteMissing(runtime string) bool {
+	return p.Prerequisite.Known() && !p.PrerequisiteConfigured(runtime)
+}
+
+// PrerequisiteGap says what this control plane lacks to run these runtimes
+// through the adapter's prerequisite and which settings supply it, such as
+// "this control plane has no NVIDIA Dynamo image configured for sglang (set
+// A and B)". It covers the runtimes known to be missing and is empty when
+// none is.
+func (p ProviderProfile) PrerequisiteGap(runtimes ...string) string {
+	var missing []string
+	for _, runtime := range runtimes {
+		if p.PrerequisiteMissing(runtime) && !slices.Contains(missing, runtime) {
+			missing = append(missing, runtime)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	slices.Sort(missing)
+	var settings []string
+	for _, runtime := range missing {
+		settings = append(settings, p.Prerequisite.Settings[runtime]...)
+	}
+	gap := fmt.Sprintf("this control plane has no %s image configured for %s", p.Prerequisite.Name, strings.Join(missing, " or "))
+	if len(settings) > 0 {
+		gap += " (set " + joinAnd(settings) + ")"
+	}
+	return gap
+}
+
+// joinAnd lists items in a sentence: "a", "a and b", "a, b, and c".
+func joinAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	}
+	return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
 }
 
 type RuntimeProfile struct {
@@ -498,7 +555,7 @@ func (r *Registry) RegisterProvider(profile ProviderProfile) error {
 	if err := profile.Validate(); err != nil {
 		return err
 	}
-	if len(profile.Prerequisite.ConfiguredRuntimes) > 0 {
+	if len(profile.Prerequisite.ConfiguredRuntimes) > 0 || len(profile.Prerequisite.Settings) > 0 {
 		return fmt.Errorf("provider %q is registered with a configured prerequisite; only composition configures one", profile.Adapter)
 	}
 	if _, exists := r.providers[profile.Adapter]; exists {
@@ -538,10 +595,13 @@ func (r *Registry) RegisterComposition(profile CompositionProfile) error {
 	return nil
 }
 
-// ConfigurePrerequisite records that the control plane is configured to run
-// these runtimes through an adapter's declared prerequisite. Composition calls
-// it from operator settings; the catalog never does.
-func (r *Registry) ConfigurePrerequisite(adapter string, runtimes ...string) error {
+// ConfigurePrerequisite records the control plane's own configuration of an
+// adapter's declared prerequisite: for each runtime it could run through it,
+// the operator settings that configure that runtime's image, and the runtimes
+// those settings configure. Composition calls it from operator settings, also
+// when none is configured, so a setup on the adapter is then known not to
+// deploy; the catalog never does.
+func (r *Registry) ConfigurePrerequisite(adapter string, settings map[string][]string, configured ...string) error {
 	profile, err := r.Provider(adapter)
 	if err != nil {
 		return err
@@ -549,17 +609,33 @@ func (r *Registry) ConfigurePrerequisite(adapter string, runtimes ...string) err
 	if profile.Prerequisite.Name == "" {
 		return fmt.Errorf("provider adapter %q declares no prerequisite", adapter)
 	}
-	configured := slices.Clone(profile.Prerequisite.ConfiguredRuntimes)
-	for _, runtime := range runtimes {
+	if len(settings) == 0 {
+		return fmt.Errorf("provider adapter %q: a prerequisite's configuration names the settings for each runtime", adapter)
+	}
+	merged := make(map[string][]string, len(profile.Prerequisite.Settings)+len(settings))
+	for runtime, names := range profile.Prerequisite.Settings {
+		merged[runtime] = names
+	}
+	for runtime, names := range settings {
 		if _, err = r.Runtime(runtime); err != nil {
 			return err
 		}
-		if !slices.Contains(configured, runtime) {
-			configured = append(configured, runtime)
+		if len(names) == 0 {
+			return fmt.Errorf("provider adapter %q: runtime %q names no settings for its prerequisite", adapter, runtime)
+		}
+		merged[runtime] = slices.Clone(names)
+	}
+	runtimes := slices.Clone(profile.Prerequisite.ConfiguredRuntimes)
+	for _, runtime := range configured {
+		if _, named := merged[runtime]; !named {
+			return fmt.Errorf("provider adapter %q: configured runtime %q names no settings for its prerequisite", adapter, runtime)
+		}
+		if !slices.Contains(runtimes, runtime) {
+			runtimes = append(runtimes, runtime)
 		}
 	}
-	slices.Sort(configured)
-	profile.Prerequisite.ConfiguredRuntimes = configured
+	slices.Sort(runtimes)
+	profile.Prerequisite.ConfiguredRuntimes, profile.Prerequisite.Settings = runtimes, merged
 	r.providers[adapter] = profile
 	return nil
 }
@@ -642,8 +718,13 @@ func (p ProviderProfile) Validate() error {
 		}
 		seen[mode] = struct{}{}
 	}
-	if p.Prerequisite.Name == "" && len(p.Prerequisite.ConfiguredRuntimes) > 0 {
+	if p.Prerequisite.Name == "" && (len(p.Prerequisite.ConfiguredRuntimes) > 0 || len(p.Prerequisite.Settings) > 0) {
 		return fmt.Errorf("provider %q configures runtimes for an unnamed prerequisite", p.Adapter)
+	}
+	for _, runtime := range p.Prerequisite.ConfiguredRuntimes {
+		if len(p.Prerequisite.Settings[runtime]) == 0 {
+			return fmt.Errorf("provider %q configures runtime %q for its prerequisite without naming its settings", p.Adapter, runtime)
+		}
 	}
 	return validateEvidence(p.Adapter, p.Capabilities, p.Qualification)
 }

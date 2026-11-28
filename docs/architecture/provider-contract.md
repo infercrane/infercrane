@@ -50,11 +50,22 @@ the adapter can serve anything, such as NVIDIA Dynamo for `kubernetes-dynamo`. T
 the name only, because it cannot know what a cluster runs. Composition records the runtimes the
 control plane is configured to run through it (`configured_runtimes`); for Dynamo these are the
 runtimes with a complete image and version pair, the same ones it registers Dynamo backends for.
-This is operator configuration, not qualification evidence.
+It also records, for each runtime, the settings that configure it (`settings`), even when no
+runtime is configured. A profile with settings is the control plane's own configuration, so a
+runtime it does not list is known to be missing. The catalog has no settings and never knows. This
+is operator configuration, not qualification evidence.
 
 The planner offers a setup on such an adapter only when the request names the adapter, or the
 setup's runtime is configured. A request that names only the cloud does not say the software runs
-there, so the planner leaves those setups out and records a proposal warning that names them.
+there, so the planner leaves those setups out and records a proposal warning that names them, and
+the settings that would add them when the configuration is known. A request that names the adapter
+keeps its setups; where a setup's runtime is known to be missing, a warning says it will fail to
+deploy and names the settings.
+
+The control API refuses a deployment, and a run whose setups it deploys, on an adapter whose
+prerequisite is known to be missing for the setup's runtime (`prerequisite_not_configured`). The
+check reads the provider profile, not the adapter's name. A run on an agent's endpoint is not
+checked: the agent starts its setups in its own cluster.
 
 ## Prohibited coupling
 

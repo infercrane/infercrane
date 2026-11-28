@@ -2,6 +2,7 @@ package optimizer
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,15 +10,22 @@ import (
 	"github.com/infercrane/infercrane/internal/integration"
 )
 
+// dynamoSettings are the settings a control plane names for its Dynamo
+// images, as composition records them.
+var dynamoSettings = map[string][]string{
+	"vllm":   {"INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST", "INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION"},
+	"sglang": {"INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST", "INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION"},
+}
+
 // dynamoCatalogSource plans like a control plane configured to run Dynamo
-// graphs with the given runtimes.
+// graphs with the given runtimes, none for a control plane without Dynamo.
 func dynamoCatalogSource(t *testing.T, runtimes ...string) CatalogSource {
 	t.Helper()
 	registry, err := integration.V1Catalog()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", runtimes...); err != nil {
+	if err = registry.ConfigurePrerequisite("kubernetes-dynamo", dynamoSettings, runtimes...); err != nil {
 		t.Fatal(err)
 	}
 	return NewCatalogSource(curatedrecipe.All(), registry.Snapshot())
@@ -33,12 +41,17 @@ func adaptersOf(proposal Proposal) map[string][]string {
 }
 
 func dynamoWarning(proposal Proposal) string {
+	return strings.Join(dynamoWarnings(proposal), " ")
+}
+
+func dynamoWarnings(proposal Proposal) []string {
+	var out []string
 	for _, warning := range proposal.Warnings {
 		if strings.Contains(warning, "kubernetes-dynamo") {
-			return warning
+			out = append(out, warning)
 		}
 	}
-	return ""
+	return out
 }
 
 // On 27 Nov 2026 `optimize propose --provider kubernetes --include-simulated`
@@ -139,5 +152,55 @@ func TestAConfiguredControlPlaneOffersDynamoOnlyForItsRuntimes(t *testing.T) {
 	}
 	if warning := dynamoWarning(proposal); warning != "" {
 		t.Fatalf("nothing was left out, got %q", warning)
+	}
+}
+
+// A control plane without a Dynamo image for a runtime knows a named
+// kubernetes-dynamo setup for it cannot deploy there. It still proposes the
+// setup, since the request names the adapter, and says which settings to set.
+func TestANamedDynamoAdapterOnAControlPlaneWithoutItsImageSaysItCannotDeploy(t *testing.T) {
+	request := Request{ModelIdentity: "Qwen/Qwen3-8B", Provider: "kubernetes-dynamo", GPU: "NVIDIA-L40S", Objective: "interactive", IncludeSimulated: true, MaxCandidates: 10}
+	for name, test := range map[string]struct {
+		configured []string
+		want       []string
+	}{
+		"no Dynamo": {want: []string{"Setups on kubernetes-dynamo (sglang, vllm) will fail to deploy: this control plane has no NVIDIA Dynamo image configured for sglang or vllm (set INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST, INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION, INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST, and INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION)."}},
+		"vLLM only": {configured: []string{"vllm"}, want: []string{"Setups on kubernetes-dynamo (sglang) will fail to deploy: this control plane has no NVIDIA Dynamo image configured for sglang (set INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST and INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION)."}},
+		"both":      {configured: []string{"vllm", "sglang"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			proposal, err := dynamoCatalogSource(t, test.configured...).Propose(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapters := adaptersOf(proposal)
+			if len(adapters["kubernetes-dynamo"]) == 0 {
+				t.Fatalf("the named adapter has no setup: %v", adapters)
+			}
+			if got := dynamoWarnings(proposal); !slices.Equal(got, test.want) {
+				t.Fatalf("warnings=%q want %q", got, test.want)
+			}
+			if err = ValidateProposal(proposal); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// For provider kubernetes the control plane leaves out the Dynamo setups it
+// cannot deploy and names the settings that would add them, instead of
+// telling the caller to name an adapter it would refuse.
+func TestAControlPlaneWithoutDynamoNamesTheSettingsForTheSetupsItLeftOut(t *testing.T) {
+	request := Request{ModelIdentity: "acme/novel-open-model", ModelRevision: strings.Repeat("a", 40), Provider: "kubernetes", GPU: "H100", Objective: "throughput", IncludeSimulated: true, MaxCandidates: 10}
+	proposal, err := dynamoCatalogSource(t).Propose(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapters := adaptersOf(proposal); len(adapters["kubernetes-dynamo"]) != 0 || len(adapters["kubernetes"]) == 0 {
+		t.Fatalf("want plain Kubernetes setups only, got %v", adapters)
+	}
+	want := []string{"Setups on kubernetes-dynamo (sglang, vllm) were left out: they need NVIDIA Dynamo, and this control plane has no NVIDIA Dynamo image configured for sglang or vllm (set INFERCRANE_DYNAMO_SGLANG_IMAGE_DIGEST, INFERCRANE_DYNAMO_SGLANG_RUNTIME_VERSION, INFERCRANE_DYNAMO_VLLM_IMAGE_DIGEST, and INFERCRANE_DYNAMO_VLLM_RUNTIME_VERSION)."}
+	if got := dynamoWarnings(proposal); !slices.Equal(got, want) {
+		t.Fatalf("warnings=%q want %q", got, want)
 	}
 }
