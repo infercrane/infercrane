@@ -74,8 +74,12 @@ The background expiry worker finds:
 - activated reservations past their time limit; and
 - terminal failed or cancelled launches that never activated and have no live replica.
 
-It queues the ordinary durable delete workflow rather than mutating wallet state directly. Provider
-uncertainty remains visible and credit stays reserved until cleanup is proven.
+It queues the ordinary durable delete workflow rather than mutating wallet state directly. Like
+`infercrane delete`, it first cancels a deploy that never finished, such as a redeploy waiting between
+attempts, when no worker holds it, and records an `operation.cancel` audit entry. A deploy a worker
+is running, or another unfinished operation such as a scale, blocks the delete; the worker tries
+again on its next pass, once a minute by default. Provider uncertainty remains visible and credit
+stays reserved until cleanup is proven.
 
 ## Operator enablement
 

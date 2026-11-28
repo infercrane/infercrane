@@ -144,6 +144,10 @@ HTTP 409) names the operation:
   deployment that may be serving traffic, so InferCrane leaves it to you: wait for it, or cancel it
   with `infercrane operation cancel ID`, then delete.
 
+The cleanup of an InferCrane Cloud deployment at the end of its prepaid runtime follows the same rule:
+it cancels an unfinished deploy no worker holds and deletes the deployment, and otherwise tries again
+on its next pass. See [managed deployments](/architecture/managed-deployments).
+
 ## Deploy a deleted name again
 
 Once a delete, or the cleanup after a cancelled first deploy, has finished, the same name can be

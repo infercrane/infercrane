@@ -5533,20 +5533,52 @@ func runModelAPIUsageReconciliation(ctx context.Context, reconciler reconcile.Mo
 	}
 }
 
-func queueManagedDeploymentCleanup(ctx context.Context, s *store.Store, rows []domain.ManagedSpendReservation, keyPrefix string, logger *slog.Logger) {
+// managedCleanupStore is what the managed deployment cleanup reads and writes.
+type managedCleanupStore interface {
+	ResolveForTenant(ctx context.Context, tenant, name string) (domain.ResolvedDeployment, error)
+	ActiveOperationForResource(ctx context.Context, tenant, resourceType, name string) (domain.Operation, error)
+	SubmitDeploymentDeleteCancelling(ctx context.Context, tenant, name, deploymentID string, operation domain.Operation, cancelKinds []string) (store.DeploymentDeletion, error)
+	Audit(ctx context.Context, event domain.AuditEvent) error
+}
+
+// managedCleanupActor is who the cleanup records as acting.
+const managedCleanupActor = "managed-budget-guard"
+
+// queueManagedDeploymentCleanup deletes managed deployments whose prepaid
+// reservation expired or whose deploy failed. Like the delete API, it first
+// cancels a deploy that never finished when no worker holds it, so a
+// deployment stuck between deploy attempts is cleaned up too. A deploy a
+// worker is running, or any other unfinished operation, refuses the delete
+// and changes nothing; the next pass tries again.
+func queueManagedDeploymentCleanup(ctx context.Context, s managedCleanupStore, rows []domain.ManagedSpendReservation, keyPrefix string, logger *slog.Logger) {
 	for _, reservation := range rows {
 		resolved, resolveErr := s.ResolveForTenant(ctx, reservation.TenantID, reservation.ResourceName)
 		if resolveErr != nil {
 			logger.Error("managed deployment cleanup could not resolve deployment", "deployment", reservation.ResourceName, "error", resolveErr)
 			continue
 		}
-		request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: reservation.ResourceName, Actor: "managed-budget-guard", TenantID: reservation.TenantID})
+		request, _ := json.Marshal(workflows.DeleteRequest{DeploymentID: resolved.Deployment.ID, Name: reservation.ResourceName, Actor: managedCleanupActor, TenantID: reservation.TenantID})
 		kind := workflows.DeleteKind
 		if resolved.Deployment.ComputeMode == "serverless" {
 			kind = workflows.ServerlessDeleteKind
 		}
-		if _, _, submitErr := s.SubmitDeploymentDelete(ctx, reservation.TenantID, reservation.ResourceName, resolved.Deployment.ID, domain.Operation{TenantID: reservation.TenantID, Kind: kind, IdempotencyKey: keyPrefix + reservation.ID, RequestJSON: string(request)}); submitErr != nil && !errors.Is(submitErr, domain.ErrConflict) {
-			logger.Error("managed deployment cleanup could not be queued", "deployment", reservation.ResourceName, "error", submitErr)
+		// A serverless deploy cancelled before its endpoint registered a
+		// target still needs the serverless cleanup.
+		if open, openErr := s.ActiveOperationForResource(ctx, reservation.TenantID, "deployment", reservation.ResourceName); openErr == nil && open.Kind == workflows.ServerlessConvergeKind {
+			kind = workflows.ServerlessDeleteKind
+		}
+		deletion, submitErr := s.SubmitDeploymentDeleteCancelling(ctx, reservation.TenantID, reservation.ResourceName, resolved.Deployment.ID, domain.Operation{TenantID: reservation.TenantID, Kind: kind, IdempotencyKey: keyPrefix + reservation.ID, RequestJSON: string(request)}, workflows.DeleteCancelsKinds())
+		if submitErr != nil {
+			if !errors.Is(submitErr, domain.ErrConflict) {
+				logger.Error("managed deployment cleanup could not be queued", "deployment", reservation.ResourceName, "error", submitErr)
+			}
+			continue
+		}
+		if cancelled := deletion.Cancelled; cancelled != nil {
+			// Recorded as operation cancel and the delete API record it.
+			if auditErr := s.Audit(context.WithoutCancel(ctx), domain.AuditEvent{TenantID: reservation.TenantID, Actor: managedCleanupActor, Action: "operation.cancel", ResourceType: "operation", ResourceName: cancelled.ID, Outcome: "accepted", Payload: `{"cancelled_by":"deployment.delete"}`}); auditErr != nil {
+				logger.Error("managed deployment cleanup could not audit the cancelled deploy", "deployment", reservation.ResourceName, "operation", cancelled.ID, "error", auditErr)
+			}
 		}
 	}
 }

@@ -5639,7 +5639,7 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	if open, openErr := a.Store.ActiveOperationForResource(r.Context(), principal.TenantID, "deployment", resolved.Deployment.Name); openErr == nil && open.Kind == workflows.ServerlessConvergeKind {
 		deleteKind = workflows.ServerlessDeleteKind
 	}
-	deletion, err := a.Store.SubmitDeploymentDeleteCancelling(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)}, deleteCancelsKinds)
+	deletion, err := a.Store.SubmitDeploymentDeleteCancelling(r.Context(), principal.TenantID, resolved.Deployment.Name, resolved.Deployment.ID, domain.Operation{Kind: deleteKind, IdempotencyKey: key, RequestJSON: string(encoded)}, workflows.DeleteCancelsKinds())
 	var open *store.OpenOperationError
 	if errors.As(err, &open) {
 		writeError(w, http.StatusConflict, "unresolved_operation", unresolvedOperationMessage(open))
@@ -5662,11 +5662,6 @@ func (a API) deleteDeployment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/v1/operations/"+deletion.Operation.ID)
 	writeJSON(w, http.StatusAccepted, response)
 }
-
-// deleteCancelsKinds are the unfinished operations a deployment delete
-// cancels by itself: a deploy, whose own cancellation runs the same cleanup
-// the delete does. Any other unfinished operation refuses the delete.
-var deleteCancelsKinds = []string{workflows.ConvergeKind, workflows.ServerlessConvergeKind}
 
 // unresolvedOperationMessage says why a delete left the deployment's
 // unfinished operation alone, and what to do instead.

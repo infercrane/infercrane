@@ -22,6 +22,12 @@ import (
 	"github.com/infercrane/infercrane/internal/support"
 )
 
+// DeleteCancelsKinds returns the unfinished operations a deployment delete
+// cancels by itself, when no worker holds them: a deploy, whose own
+// cancellation runs the same cleanup the delete does. Any other unfinished
+// operation refuses the delete.
+func DeleteCancelsKinds() []string { return []string{ConvergeKind, ServerlessConvergeKind} }
+
 const (
 	ConvergeKind           = "deployment.converge"
 	DeleteKind             = "deployment.delete"
