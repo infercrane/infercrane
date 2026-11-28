@@ -53,7 +53,7 @@ footer p{margin:0 0 6px}
 <dt>Verified saving a month</dt><dd>unknown: no workload has a verified saving with a recorded price and your traffic volume</dd>
 <dt>Output per GPU, verified workloads</dt><dd>at least &#43;10.0%</dd>
 </dl></section>
-<section class="panel" aria-label="How to read this report"><p><strong>How to read this report.</strong> A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup&#39;s task score. Anything less is &#34;not shown&#34;. A number marked unknown was not measured or not comparable; nothing is estimated.</p></section>
+<section class="panel" aria-label="How to read this report"><p><strong>How to read this report.</strong> A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup&#39;s task score. A technique&#39;s claim also carries every disclosure its technique requires, word for word. Anything less is &#34;not shown&#34;. A number marked unknown was not measured or not comparable; nothing is estimated.</p></section>
 <section class="workload" aria-label="Workload 1: Qwen/Qwen3-8B · chat">
 <h2>Workload 1: Qwen/Qwen3-8B · chat</h2>
 <p>Saving verified at 16 at once, 64 at once; not at 128 at once, so no saving is stated for the workload.</p>
@@ -126,7 +126,8 @@ infercrane optimize report NEW_RUN --output json &gt; new-run.json
 </tbody></table></div>
 <div class="panel">
 <p><strong>Answer quality.</strong> Pass · score 81.0% → 80.8% (-0.2 points) · on support-tasks@3 (1,000 prompts) · checked by lm-eval. No Release Guard watch band applies to this campaign; the verdict is the signed eval&#39;s pass or fail.</p>
-<p><span class="pill good">Claim shown · output token throughput &#43;18.0% against ±3.0% noise, the smaller of both windows.</span></p>
+<p><span class="pill good">Claim shown · technique adaptive-speculation-one-engine@0.1.0 · output token throughput &#43;18.0% against ±3.0% noise, the smaller of both windows.</span></p>
+<p><strong>Disclosed with this claim.</strong></p><ul class="disclosures"><li>All output, not only output within one second of first token, was not shown to improve against the best fixed setup in the H100 lab runs.</li><li>At 128 requests at once it served less output within one second of first token than the plain vLLM command on the same H100; the cause is not read.</li><li>It runs a patched vLLM 0.34.0 image with prefix caching off, and is refused for traffic that takes more than 2% of its input from the prefix cache.</li><li>The H100 lab runs used patch v2 and vLLM&#39;s Rust front end; the product runs patch v4 and vLLM&#39;s Python front end.</li></ul>
 <p><span class="pill good">Saving verified: output per GPU &#43;20.0%, so the same traffic needs 16.7% fewer GPU hours; cost per 1M output tokens 16.7% lower; $97.33 a month at your captured traffic ($584 → $487); $1,168 a year at that rate (projection); 730 → 608 GPU hours a month. Basis: measured cost per output token times your replayed output-token volume; assumes servers stay busy, so idle capacity is not included.</span></p>
 
 </div>
@@ -219,7 +220,7 @@ infercrane optimize report NEW_RUN --output json &gt; new-run.json
 <div class="panel"><ul><li>Every number was measured on the hardware, engine version and traffic named beside it. It says nothing about other GPUs, engines, versions, models or traffic.</li><li>Prompts and answers were not stored: traffic is replayed by its shape, and answers are compared by their check&#39;s score.</li><li>Qwen/Qwen3-8B · chat: answer quality was checked on support-tasks@3 (1,000 prompts) only; other tasks are not measured.</li><li>Qwen/Qwen3-8B · chat was measured at 16, 64, 128 requests at once; other loads are not covered.</li><li>zai-org/GLM-5 · chat: answer quality was checked on support-tasks@3 (1,000 prompts) only; other tasks are not measured.</li><li>zai-org/GLM-5 · chat was measured at 16 requests at once; other loads are not covered.</li><li>Cost uses the hourly price recorded with each measurement, which is your compute&#39;s price; where none was recorded, cost is unknown, never estimated.</li><li>Monthly figures are cost per output token times your captured output-token volume. They assume servers stay busy, so idle capacity is not included.</li><li>A year is twelve months at the captured rate; growth and seasonality are not included.</li></ul></div>
 <h2>Unknown, never estimated</h2>
 <div class="panel"><ul><li>zai-org/GLM-5 · chat at 16 at once: Cost per 1M output tokens: baseline: no sourced hourly price</li><li>zai-org/GLM-5 · chat at 16 at once: monthly saving: cost per output token is unknown: baseline: no sourced hourly price</li></ul></div>
-<footer><p>Report digest <span class="mono">sha256:f6f9cb3fe5bb7d70dd330b4b929ac77c0509caa0fa108ed63b1d6cf9a3f24527</span>. Every number comes from the runs' persisted measurements.</p>
+<footer><p>Report digest <span class="mono">sha256:2b937bae90250eb70a9afe1689b3457d4b4488a1c820f6cf7a434534f6362598</span>. Every number comes from the runs' persisted measurements.</p>
 <p>Signed by key sha256:3ab86a91c1e46782. Verify with infercrane report proof verify FILE, where FILE is this report saved with --output json.</p></footer>
 </main>
 </body>

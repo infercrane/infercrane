@@ -3,6 +3,7 @@ package proofreport
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/infercrane/infercrane/internal/optimizationcampaign"
 	"github.com/infercrane/infercrane/internal/optimizationreport"
 	"github.com/infercrane/infercrane/internal/optimizer"
+	"github.com/infercrane/infercrane/internal/technique"
 )
 
 // The fixtures below are made-up records, shaped like a finished proof run.
@@ -173,6 +175,29 @@ func (f runFixture) evidence(t *testing.T) RunEvidence {
 		}
 	}
 	return out
+}
+
+// asTechnique is the run's chosen setup as the one-engine adaptive speculation
+// technique's, the way optimizationreport.SetupResult returns it once the
+// technique's own evidence held (that path is tested in optimizationreport):
+// the manifest's id, version and evidence, carrying the given disclosures, and
+// judged by the manifest (Manifest.ClaimOf).
+func asTechnique(t *testing.T, evidence RunEvidence, disclosures []string) RunEvidence {
+	t.Helper()
+	manifest, known := optimizer.TechniqueManifest(optimizer.TechniqueAdaptiveSpeculationOneEngine)
+	if !known || len(manifest.Disclosures) == 0 || evidence.Result == nil {
+		t.Fatalf("manifest %v %+v, result %v", known, manifest, evidence.Result)
+	}
+	result := *evidence.Result
+	result.Technique, result.TechniqueVersion = manifest.ID, manifest.Version
+	result.RequiredEvidence = append(slices.Clone(result.RequiredEvidence), manifest.Evidence...)
+	result.Evidence = slices.Clone(result.Evidence)
+	for _, name := range manifest.Evidence {
+		result.Evidence = append(result.Evidence, technique.EvidenceItem{Name: name, Digest: "sha256:" + strings.Repeat("e", 64)})
+	}
+	result.Disclosures = slices.Clone(disclosures)
+	evidence.Result, evidence.Claim = &result, manifest.ClaimOf(result)
+	return evidence
 }
 
 func assemble(t *testing.T, fixtures ...runFixture) Report {

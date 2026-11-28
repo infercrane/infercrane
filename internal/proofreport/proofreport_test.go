@@ -361,6 +361,8 @@ func TestRenderings(t *testing.T) {
 	for _, f := range []runFixture{goodRun("run-a", 16, 0.30), goodRun("run-b", 64, 0.20), unpriced, unconfirmed} {
 		in.Runs = append(in.Runs, f.evidence(t))
 	}
+	// run-b's setup is a technique's, so the files show its disclosures.
+	in.Runs[1] = asTechnique(t, in.Runs[1], oneEngineManifest(t).Disclosures)
 	document, err := Sign(Assemble(in), ed25519.NewKeyFromSeed(seed[:]))
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +374,7 @@ func TestRenderings(t *testing.T) {
 	}
 	golden(t, "proof-report.md", markdown)
 	golden(t, "proof-report.html", page)
-	for _, want := range []string{"Saving verified on", "Verdict per load", "Measure it again", "Unknown, never estimated", "Signed by key"} {
+	for _, want := range []string{"Saving verified on", "Verdict per load", "Measure it again", "Unknown, never estimated", "Signed by key", "Disclosed with this claim"} {
 		if !strings.Contains(string(markdown), want) {
 			t.Errorf("markdown lacks %q", want)
 		}

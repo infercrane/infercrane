@@ -37,8 +37,10 @@ import (
 )
 
 const (
-	SchemaVersion    = "infercrane.dev/proof-report/v1"
-	AlgorithmVersion = "proof-report-v1"
+	SchemaVersion = "infercrane.dev/proof-report/v1"
+	// AlgorithmVersion v2: a technique's claim carries its disclosures, and
+	// one without every disclosure its technique requires is "not shown".
+	AlgorithmVersion = "proof-report-v2"
 
 	// MaxRuns bounds one report: a proof engagement measures a few workloads
 	// at a few loads each.
@@ -77,7 +79,7 @@ const (
 var ErrInvalidRequest = errors.New("invalid proof report request")
 
 // ClaimRule is the shared rule, in the words every rendering prints.
-const ClaimRule = "A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup's task score. Anything less is \"not shown\"."
+const ClaimRule = "A gain counts only when it cleared the measured noise against your current setup on the same servers, a fresh machine measured it again, and the answers held: a setup that can change answers must hold within 1 point of your current setup's task score. A technique's claim also carries every disclosure its technique requires, word for word. Anything less is \"not shown\"."
 
 // Report is the Proof Report. Every pointer is null when its input is
 // missing; Unknown says what is missing and why.
@@ -274,13 +276,17 @@ type Quality struct {
 
 // Claim is the chosen setup's claim under the shared rule (ClaimRule), the
 // technique that made it when one did, and what a "shown" claim still lacks.
+// Disclosures are the sentences the technique's claim carries, copied word for
+// word from its measured result; they are part of the signed report, and every
+// rendering prints them with the claim. Empty for a setup no technique made.
 type Claim struct {
-	Claim     string   `json:"claim"`
-	Technique string   `json:"technique,omitempty"`
-	Metric    string   `json:"metric,omitempty"`
-	Change    *float64 `json:"change_percent"`
-	Noise     *float64 `json:"noise_floor_percent"`
-	Missing   []string `json:"missing"`
+	Claim       string   `json:"claim"`
+	Technique   string   `json:"technique,omitempty"`
+	Metric      string   `json:"metric,omitempty"`
+	Change      *float64 `json:"change_percent"`
+	Noise       *float64 `json:"noise_floor_percent"`
+	Missing     []string `json:"missing"`
+	Disclosures []string `json:"disclosures"`
 }
 
 // Saving is what the change saves at this load, stated only when verified.
@@ -658,7 +664,7 @@ func words(field string) string {
 }
 
 func claim(evidence RunEvidence) Claim {
-	out := Claim{Claim: technique.ClaimNotShown, Missing: []string{}}
+	out := Claim{Claim: technique.ClaimNotShown, Missing: []string{}, Disclosures: []string{}}
 	result := evidence.Result
 	if result == nil {
 		if evidence.Report.Outcome.Kind == optimizationreport.OutcomeWinnerSelected {
@@ -671,6 +677,7 @@ func claim(evidence RunEvidence) Claim {
 	}
 	if result.Technique != "" {
 		out.Technique = result.Technique + "@" + result.TechniqueVersion
+		out.Disclosures = append(out.Disclosures, result.Disclosures...)
 	}
 	out.Metric = result.Measured.Metric
 	if result.Measured.Decision != technique.DecisionUnknown {
@@ -696,7 +703,33 @@ func claim(evidence RunEvidence) Claim {
 	if !seen[words("evidence."+technique.EvidenceFreshMachineConfirmation)] && (result.Measured.Decision != technique.DecisionImproved || result.Measured.NoiseFloor <= 0 || result.Measured.Change <= result.Measured.NoiseFloor) {
 		add("a gain beyond the measured noise in both windows")
 	}
+	// A technique's claim is shown only with every disclosure its manifest
+	// requires, word for word, whatever the claim it was read with said.
+	if missing := techniqueLacks(*result); missing != "" {
+		out.Claim = technique.ClaimNotShown
+		add(missing)
+	}
 	return out
+}
+
+// techniqueLacks says what a technique's result lacks against the technique's
+// manifest in this build: the manifest itself, at the version that ran, or one
+// of the disclosures it requires. Empty for a setup no technique made, or a
+// result that carries every disclosure.
+func techniqueLacks(result technique.Result) string {
+	if result.Technique == "" {
+		return ""
+	}
+	manifest, known := optimizer.TechniqueManifest(result.Technique)
+	if !known || manifest.Version != result.TechniqueVersion {
+		return "the technique's contract at the version that ran"
+	}
+	for _, sentence := range manifest.Disclosures {
+		if !slices.Contains(result.Disclosures, sentence) {
+			return "every disclosure its technique requires, word for word"
+		}
+	}
+	return ""
 }
 
 // saving decides whether the run's saving is verified, and states it only
