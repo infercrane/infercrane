@@ -126,6 +126,21 @@ func TestAgentDetectSendsNothingAndExplainsWhatItFound(t *testing.T) {
 	}
 }
 
+// A health probe that starts failing or passes again prints one line each.
+func TestAgentPrintsHealthProbeChanges(t *testing.T) {
+	previousOutput := agentOutput
+	var buffer bytes.Buffer
+	agentOutput = &buffer
+	t.Cleanup(func() { agentOutput = previousOutput })
+	printEvent := agentEventPrinter(true)
+	printEvent(agent.Event{Kind: "server_probe_failed", Message: "server qwen3-models-svc-8000: health probe GET /v1/models failed (HTTP 401); the server is not registered until the probe passes"})
+	printEvent(agent.Event{Kind: "server_probe_recovered", Message: "server qwen3-models-svc-8000: health probe GET /v1/models passes again"})
+	lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], " unhealthy server qwen3-models-svc-8000: health probe GET /v1/models failed (HTTP 401)") || !strings.Contains(lines[1], " healthy   server qwen3-models-svc-8000") {
+		t.Fatalf("output:\n%s", buffer.String())
+	}
+}
+
 func TestAgentRunOnceRefusesPlainHTTPToARemoteControlPlane(t *testing.T) {
 	t.Setenv("INFERCRANE_URL", "http://control.example.test")
 	t.Setenv("INFERCRANE_AGENT_KEY", "ic_key")

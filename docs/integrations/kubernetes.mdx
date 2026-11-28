@@ -375,8 +375,9 @@ say which Dynamo setups were left out. See [Migration](/features/migration) for 
   profiles, so it gets generic setups only.
 - There is no Helm chart for the control plane yet.
 - The engines' `NetworkPolicy` does nothing without a network plugin that enforces it.
-- The agent does not say why it leaves a server it found unregistered; a server that fails its
-  health probe (for example a wrong token) shows only "server is not registered with this agent".
+
+A server the agent found but did not register failed its health probe. The agent pod's log says
+why in one `unhealthy` line; see [Troubleshooting](/troubleshooting).
 
 ## Local conformance
 

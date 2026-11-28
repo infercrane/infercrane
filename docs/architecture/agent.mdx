@@ -73,6 +73,15 @@ model, its health, metrics, and traffic are refused for the old endpoint, which 
 with the reason, instead of landing on the wrong endpoint. If an agent's endpoint is deleted, the
 running agent registers the server again on its next pass.
 
+The agent's health probe is `GET /v1/models`, every 30 seconds. A server whose probe fails is
+reported unhealthy with the reason in its health detail, and is registered only once the probe
+passes. The agent logs one `unhealthy` line when the probe starts failing or fails for another
+reason, and one `healthy` line when it passes again, not one per pass. The line names the server
+key, the probe path, and an HTTP status (`HTTP 401`) or an error class (`timeout`,
+`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `not a model list`,
+`invalid Authorization header`), never a header or token. A token that ends in a newline is not a
+valid header value, so the agent sends nothing and says `invalid Authorization header`.
+
 ### The agent key
 
 An agent key is a principal of kind `agent`. It is minted in one of two ways and shown once:

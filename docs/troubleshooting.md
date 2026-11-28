@@ -28,5 +28,11 @@ Start with `infercrane doctor`, then `status`, `events`, `inspect`, and `explain
 - **External fallback returns 429:** the in-memory lease or persisted hard budget is exhausted.
   Inspect the policy before deliberately increasing its ceilings; InferCrane does not fabricate or
   refund provider cost.
+- **An agent's server "is not registered with this agent":** the agent found the server but its
+  health probe fails, so it never registered it. The agent's log has one `unhealthy` line for it
+  with the server key, the probe (`GET /v1/models`), and the reason: an HTTP status such as
+  `HTTP 401` (a wrong key), or an error class such as `invalid Authorization header` (a token that
+  ends in a newline) or `connection refused`. The line never shows the token. Fix the cause; the
+  agent registers the server on its next pass and logs a `healthy` line.
 
 Never paste API keys, prompts, generated content, or unredacted provider responses into a public issue.
