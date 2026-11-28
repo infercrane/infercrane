@@ -78,9 +78,20 @@ reported unhealthy with the reason in its health detail, and is registered only 
 passes. The agent logs one `unhealthy` line when the probe starts failing or fails for another
 reason, and one `healthy` line when it passes again, not one per pass. The line names the server
 key, the probe path, and an HTTP status (`HTTP 401`) or an error class (`timeout`,
-`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `not a model list`,
+`connection refused`, `DNS lookup failed`, `TLS certificate not trusted`, `TLS handshake failed`,
+`closed without an HTTP reply`, `not an HTTP reply`, `not a model list`,
 `invalid Authorization header`), never a header or token. A token that ends in a newline is not a
 valid header value, so the agent sends nothing and says `invalid Authorization header`.
+
+The default ports follow the same rules, with one difference: most of them are empty. A port where
+nothing listens, or whose server has no `GET /v1/models`, is not a server, and the agent says nothing
+about it. A port where something accepts the connection but fails the probe is reported unhealthy
+and logged like a named server. Examples are a server that serves HTTPS, which closes a plain HTTP
+request without a reply, or one that answers with something other than HTTP or a model list. The
+agent probes default ports over plain HTTP, so name an HTTPS server with
+`--server https://127.0.0.1:PORT`. When a server found on a default port goes away, the agent logs
+one `unhealthy` line saying it stopped answering. A registered server stays on its endpoint as
+unhealthy; an unregistered one is no longer reported until a server answers on that port again.
 
 ### The agent key
 

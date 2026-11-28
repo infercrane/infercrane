@@ -16,9 +16,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -71,10 +73,21 @@ type ProbeFailure struct {
 
 // probeError is a probe request that got no usable answer. reason is a short
 // class for the agent's log; Error is the detail reported as the server's
-// health. Neither carries a header value.
-type probeError struct{ reason, detail string }
+// health. Neither carries a header value. listening is true when something
+// accepted the connection, so a server is there even though it failed.
+type probeError struct {
+	reason, detail string
+	listening      bool
+}
 
 func (e *probeError) Error() string { return e.detail }
+
+// somethingListens reports whether a failed probe reached a process that
+// accepted the connection, as opposed to a port where nothing listens.
+func somethingListens(err error) bool {
+	var probe *probeError
+	return errors.As(err, &probe) && probe.listening
+}
 
 // probeReason is the class of a probe error, for the agent's log.
 func probeReason(err error) string {
@@ -175,8 +188,10 @@ func ServerKey(baseURL string) string {
 	return strings.TrimLeft(key, "-.")
 }
 
-// Probe reads one server. found is false when nothing answers on a default
-// port; an explicit server that does not answer is reported unhealthy.
+// Probe reads one server. found is false when nothing listens on a default
+// port, or what listens there serves no /v1/models; a default port that
+// accepted the connection but gave no usable reply is reported unhealthy, as
+// is an explicit server that does not answer.
 func (d Detector) Probe(ctx context.Context, config ServerConfig, explicit bool) (Detected, bool) {
 	base := config.URL
 	out := Detected{BaseURL: base, authHeader: config.AuthHeader}
@@ -187,12 +202,16 @@ func (d Detector) Probe(ctx context.Context, config ServerConfig, explicit bool)
 	out.Authenticated = config.AuthHeader != ""
 	models, status, err := d.models(ctx, base, config.AuthHeader)
 	if err != nil && status == 0 {
-		if !explicit {
+		if !explicit && !somethingListens(err) {
+			// Most default ports are empty; an empty one is not a server.
 			return Detected{}, false
 		}
 		out.Health, out.HealthDetail = agentprotocol.HealthUnhealthy, boundedDetail(err.Error())
 		out.Failure = ProbeFailure{Path: healthPath, Reason: probeReason(err)}
 		out.MetricsDetail = "the server did not answer"
+		if somethingListens(err) {
+			out.MetricsDetail = "the server gave no usable reply"
+		}
 		return out, true
 	}
 	switch {
@@ -224,6 +243,21 @@ func (d Detector) Probe(ctx context.Context, config ServerConfig, explicit bool)
 func (d Detector) get(ctx context.Context, base, path, auth string) (int, []byte, http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
+	// connected is a TCP connection the server accepted; ready is one ready
+	// for the request, after TLS for https. A trace hook may run after Do
+	// returns, so both are atomic.
+	var connected, ready atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		ConnectDone: func(_, _ string, err error) {
+			if err == nil {
+				connected.Store(true)
+			}
+		},
+		GotConn: func(httptrace.GotConnInfo) {
+			connected.Store(true)
+			ready.Store(true)
+		},
+	})
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return 0, nil, nil, err
@@ -238,7 +272,7 @@ func (d Detector) get(ctx context.Context, base, path, auth string) (int, []byte
 	}
 	response, err := d.client().Do(request)
 	if err != nil {
-		return 0, nil, nil, requestError(base, err)
+		return 0, nil, nil, requestError(base, err, connected.Load(), ready.Load())
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeBytes+1))
@@ -251,24 +285,43 @@ func (d Detector) get(ctx context.Context, base, path, auth string) (int, []byte
 	return response.StatusCode, body, response.Header, nil
 }
 
-// requestError names the class of a request that got no answer.
-func requestError(base string, err error) error {
+// requestError names the class of a request that got no answer, and whether
+// something accepted its connection: connected once TCP connected, ready once
+// the connection could carry the request, which for https is after TLS.
+func requestError(base string, err error, connected, ready bool) error {
 	var netErr net.Error
 	var dnsErr *net.DNSError
 	var certErr *tls.CertificateVerificationError
 	switch {
+	case errors.Is(err, context.Canceled):
+		// A pass cut short says nothing about what listens there.
+		return &probeError{reason: "cancelled", detail: "the probe of " + base + " was cancelled"}
 	case errors.As(err, &netErr) && netErr.Timeout():
-		return &probeError{reason: "timeout", detail: fmt.Sprintf("%s did not answer within %s", base, probeTimeout)}
+		return &probeError{reason: "timeout", detail: fmt.Sprintf("%s did not answer within %s", base, probeTimeout), listening: connected}
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return &probeError{reason: "connection refused", detail: "could not reach " + base + ": connection refused"}
 	case errors.As(err, &dnsErr):
 		return &probeError{reason: "DNS lookup failed", detail: "could not reach " + base + ": its host name did not resolve"}
 	case errors.As(err, &certErr):
-		return &probeError{reason: "TLS certificate not trusted", detail: "could not reach " + base + ": its TLS certificate is not trusted"}
-	case errors.Is(err, context.Canceled):
-		return &probeError{reason: "cancelled", detail: "the probe of " + base + " was cancelled"}
+		return &probeError{reason: "TLS certificate not trusted", detail: "could not reach " + base + ": its TLS certificate is not trusted", listening: true}
+	case connected && !ready && strings.HasPrefix(base, "https://"):
+		return &probeError{reason: "TLS handshake failed", detail: base + " accepted the connection but the TLS handshake failed" + otherScheme(base), listening: true}
+	case connected && (errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET)):
+		return &probeError{reason: "closed without an HTTP reply", detail: base + " accepted the connection but closed it without an HTTP reply" + otherScheme(base), listening: true}
+	case connected:
+		return &probeError{reason: "not an HTTP reply", detail: base + " answered with something other than HTTP" + otherScheme(base), listening: true}
 	}
 	return &probeError{reason: "connection failed", detail: "could not reach " + base}
+}
+
+// otherScheme suggests the other scheme for a server that accepted the
+// connection but did not speak the one the agent used. A server that serves
+// HTTPS on a default port is not found over plain HTTP.
+func otherScheme(base string) string {
+	if rest, plain := strings.CutPrefix(base, "http://"); plain {
+		return "; if it serves HTTPS, name it with --server https://" + rest
+	}
+	return "; if it serves plain HTTP, name it with --server http://" + strings.TrimPrefix(base, "https://")
 }
 
 // validHeaderValue reports whether HTTP accepts value as a header value: no

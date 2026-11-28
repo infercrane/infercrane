@@ -401,8 +401,22 @@ func (a *Agent) Probe(ctx context.Context) {
 		if _, still := found[key]; still {
 			continue
 		}
+		previous.Health, previous.HealthDetail = agentprotocol.HealthUnhealthy, "the server stopped answering on "+previous.Address
+		stopped := ProbeFailure{Path: healthPath, Reason: "stopped answering"}
 		status := a.status[key]
 		if status == nil || !status.Registered {
+			// A server found on a default port that went away is
+			// forgotten until something answers there again. The log
+			// says so once; an empty port is never logged.
+			gone := ServerStatus{}
+			if status != nil {
+				gone = *status
+			}
+			gone.Server = previous.Server
+			if event, changed := probeChange(key, previous.Failure, stopped, "the agent stops reporting it until a server answers on "+previous.Address+" again"); changed {
+				event.Server = &gone
+				events = append(events, event)
+			}
 			delete(a.detected, key)
 			delete(a.status, key)
 			a.windows.Forget(key)
@@ -410,8 +424,7 @@ func (a *Agent) Probe(ctx context.Context) {
 		}
 		// A registered server that stopped answering is reported, not
 		// forgotten, so its endpoint shows it as unhealthy.
-		previous.Health, previous.HealthDetail = agentprotocol.HealthUnhealthy, "the server stopped answering on "+previous.Address
-		previous.Failure = ProbeFailure{Path: healthPath, Reason: "stopped answering"}
+		previous.Failure = stopped
 		previous.MetricsAvailable, previous.Exposition = false, ""
 		found[key] = previous
 	}
@@ -428,7 +441,11 @@ func (a *Agent) Probe(ctx context.Context) {
 		if !known {
 			events = append(events, Event{Kind: "server_found", Server: &copy})
 		}
-		if event, changed := probeChange(key, previous.Failure, server.Failure, status.Registered); changed {
+		consequence := "the server is not registered until the probe passes"
+		if status.Registered {
+			consequence = "its endpoint shows it as unhealthy"
+		}
+		if event, changed := probeChange(key, previous.Failure, server.Failure, consequence); changed {
 			event.Server = &copy
 			events = append(events, event)
 		}
@@ -440,20 +457,17 @@ func (a *Agent) Probe(ctx context.Context) {
 }
 
 // probeChange is the log line for a change in a server's health probe: it
-// starts failing, fails for another reason, or passes again. A probe that
-// keeps failing the same way is logged once, and a server first seen healthy
-// needs no line of its own. The line names the server key, the probe path,
-// and the reason, never a header or token.
-func probeChange(key string, before, after ProbeFailure, registered bool) (Event, bool) {
+// starts failing, fails for another reason, or passes again; consequence says
+// what that means for the server. A probe that keeps failing the same way is
+// logged once, and a server first seen healthy needs no line of its own. The
+// line names the server key, the probe path, and the reason, never a header
+// or token.
+func probeChange(key string, before, after ProbeFailure, consequence string) (Event, bool) {
 	switch {
 	case before == after:
 		return Event{}, false
 	case after.Reason == "":
 		return Event{Kind: "server_probe_recovered", Message: fmt.Sprintf("server %s: health probe GET %s passes again", key, before.Path)}, true
-	}
-	consequence := "the server is not registered until the probe passes"
-	if registered {
-		consequence = "its endpoint shows it as unhealthy"
 	}
 	return Event{Kind: "server_probe_failed", Message: fmt.Sprintf("server %s: health probe GET %s failed (%s); %s", key, after.Path, after.Reason, consequence)}, true
 }
