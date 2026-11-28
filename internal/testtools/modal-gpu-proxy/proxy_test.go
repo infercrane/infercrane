@@ -26,6 +26,8 @@ type fakeBroker struct {
 	heartbeats atomic.Int64
 	released   atomic.Int64
 	refuse     atomic.Int64 // refuse this many creates first
+	// renewed, when set, is signalled without blocking on every heartbeat.
+	renewed chan struct{}
 }
 
 func (b *fakeBroker) handler(t *testing.T) http.Handler {
@@ -63,6 +65,12 @@ func (b *fakeBroker) handler(t *testing.T) http.Handler {
 	mux.HandleFunc("GET /v1/leases/{id}", auth(func(w http.ResponseWriter, _ *http.Request) { _ = json.NewEncoder(w).Encode(lease()) }))
 	mux.HandleFunc("POST /v1/leases/{id}/heartbeat", auth(func(w http.ResponseWriter, _ *http.Request) {
 		b.heartbeats.Add(1)
+		if b.renewed != nil {
+			select {
+			case b.renewed <- struct{}{}:
+			default:
+			}
+		}
 		_ = json.NewEncoder(w).Encode(lease())
 	}))
 	mux.HandleFunc("DELETE /v1/leases/{id}", auth(func(w http.ResponseWriter, _ *http.Request) {
@@ -253,16 +261,25 @@ func TestAcquireStopsOnAFailedServer(t *testing.T) {
 }
 
 func TestAcquireReleasesWhenThePodStopsWhileStarting(t *testing.T) {
-	fake := &fakeBroker{state: LeaseStarting}
+	fake := &fakeBroker{state: LeaseStarting, renewed: make(chan struct{}, 1)}
 	server := httptest.NewServer(fake.handler(t))
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The pod stops once the broker has granted the lease and the pod has
+	// renewed it while the server starts. A fixed delay could instead stop it
+	// while the grant is still in flight, when there is no lease to release.
+	// The timer only keeps a regression from hanging the test; the heartbeat
+	// check below then fails.
 	go func() {
-		time.Sleep(30 * time.Millisecond)
+		select {
+		case <-fake.renewed:
+		case <-time.After(10 * time.Second):
+		}
 		cancel()
 	}()
-	if _, err := acquire(ctx, Broker{BaseURL: server.URL, Token: workerKey}, "pod-a", "m", nil, time.Millisecond); err == nil {
-		t.Fatal("acquire succeeded after cancellation")
+	if _, err := acquire(ctx, Broker{BaseURL: server.URL, Token: workerKey}, "pod-a", "m", nil, time.Millisecond); !errors.Is(err, context.Canceled) {
+		t.Fatalf("acquire error = %v, want context.Canceled once the pod stopped", err)
 	}
 	if fake.released.Load() != 1 {
 		t.Fatalf("releases = %d, want the starting lease released", fake.released.Load())
